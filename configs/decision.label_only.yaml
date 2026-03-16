@@ -1,4 +1,0 @@
-decision_engine:
-  mode: label_only
-  confidence_threshold: 0.2
-

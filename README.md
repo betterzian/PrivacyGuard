@@ -7,7 +7,7 @@ PrivacyGuard 是一个面向「上传前脱敏（API_1）+ 云端返回后还原
 
 ## 2. 核心能力
 
-- 统一门面：`PrivacyGuardFacade.sanitize()` 与 `PrivacyGuardFacade.restore()`
+- 统一入口：`PrivacyGuard.sanitize()` 与 `PrivacyGuard.restore()`
 - 配置装配：通过 `bootstrap/factories.py` + `registry.py` 按模式切换实现
 - 检测链路：支持 `rule_based` 与 `rule_ner_based`（GLiNER 不可用时自动降级）
 - 决策链路：支持 `label_only`、`label_persona_mixed`、`de_model`（规则占位版）
@@ -23,7 +23,7 @@ PrivacyGuard 是一个面向「上传前脱敏（API_1）+ 云端返回后还原
 ### Decision Engine
 - `label_only`
 - `label_persona_mixed`
-- `de_model`（`de_model_engine` 同义别名）
+- `de_model`
 
 ### Mapping Store
 - `in_memory`
@@ -36,22 +36,20 @@ PrivacyGuard 是一个面向「上传前脱敏（API_1）+ 云端返回后还原
 
 ```text
 PrivacyGuard/
-├─ configs/
-│  ├─ default.yaml
-│  ├─ detector.rule_based.yaml
-│  ├─ detector.rule_ner_based.yaml
-│  └─ decision.label_only.yaml
 ├─ data/
 │  ├─ personas.sample.json
 │  └─ pii_dictionary.sample.json
+├─ docs/
+│  └─ REQUEST_FLOW.md          # 请求全流程说明（初始化与 sanitize/restore 调用链）
 ├─ examples/
 │  └─ minimal_demo.py
-├─ src/privacyguard/
+├─ privacyguard/
 │  ├─ api/
+│  ├─ app/                    # 顶层入口、流水线封装、请求/响应模型
 │  ├─ application/
 │  │  ├─ pipelines/
 │  │  └─ services/
-│  ├─ bootstrap/
+│  ├─ bootstrap/              # 注册表、默认组件注册、模式归一化
 │  ├─ domain/
 │  │  ├─ interfaces/
 │  │  ├─ models/
@@ -87,28 +85,28 @@ python examples/minimal_demo.py
 ## 7. sanitize -> restore 调用示例
 
 ```python
-from privacyguard.api import SanitizeRequest, RestoreRequest
-from privacyguard.api.facade import PrivacyGuardFacade
+from privacyguard import PrivacyGuard
 
-facade = PrivacyGuardFacade.from_config_file("configs/default.yaml")
-
-sanitize_resp = facade.sanitize(
-    SanitizeRequest(
-        session_id="demo",
-        turn_id=1,
-        prompt_text="我叫张三，电话是13800138000",
-        screenshot=None,
-        detector_mode="rule_ner_based",
-        decision_mode="label_persona_mixed",
-    )
+guard = PrivacyGuard(
+    detector_mode="rule_ner_based",
+    decision_mode="de_model",
 )
 
-restore_resp = facade.restore(
-    RestoreRequest(
-        session_id="demo",
-        turn_id=1,
-        cloud_text=sanitize_resp.sanitized_prompt_text,
-    )
+sanitize_resp = guard.sanitize(
+    {
+        "session_id": "demo",
+        "turn_id": 1,
+        "prompt": "我叫张三，电话是13800138000",
+        "image": None,
+    }
+)
+
+restore_resp = guard.restore(
+    {
+        "session_id": "demo",
+        "turn_id": 1,
+        "agent_text": sanitize_resp["masked_prompt"],
+    }
 )
 ```
 
@@ -118,8 +116,7 @@ restore_resp = facade.restore(
 - OCR 默认走适配器回退后端；未接入真实模型时不会输出真实 OCR 结果。
 - `rule_ner_based` 在 GLiNER 依赖缺失时会自动退化到 `rule_based`。
 - 截图重绘是最小可行实现（白底覆盖+文本重绘），不追求最终视觉效果。
-- 支持请求级动态切换：可在 `SanitizeRequest` 里通过 `detector_mode/decision_mode` 覆盖默认配置。
-- 动态切换仅作用于当前 `sanitize` 调用，`restore` 仍基于会话映射恢复。
+- 检测/决策模式在构造 `PrivacyGuard` 时指定，单次请求不可覆盖。
 
 ## 9. 后续扩展方向
 
@@ -127,3 +124,9 @@ restore_resp = facade.restore(
 - 增强 NER 标签映射与多语言规则体系
 - 强化 `de_model` 特征工程并替换为真实端侧模型
 - 完善还原歧义消解策略与可观测性日志
+
+## 10. 代码注释约定
+
+- `privacyguard/app` 下的核心类与函数均已补充中文 docstring。
+- 顶层入口 `PrivacyGuard`、两条流水线（`SanitizePipeline` / `RestorePipeline`）以及请求/响应模型均提供中文职责说明。
+- 新增或修改函数时，建议同步补充中文 docstring，优先描述职责、输入输出与关键行为。

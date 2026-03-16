@@ -1,7 +1,0 @@
-ocr:
-  provider: ppocr_v5
-
-pii_detector:
-  mode: rule_based
-  dictionary_path: data/pii_dictionary.sample.json
-
