@@ -234,6 +234,11 @@ def create_facade(config: dict[str, Any], registry: ComponentRegistry | None = N
         decision_engine=decision_engine,
         rendering_engine=rendering_engine,
         restoration_module=restoration_module,
+        registry=work_registry,
+        detector_mode=detector_mode,
+        decision_mode=decision_mode,
+        detector_config=detector_config,
+        decision_config=decision_config,
     )
 
 

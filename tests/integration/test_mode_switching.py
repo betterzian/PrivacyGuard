@@ -1,5 +1,6 @@
 """模式切换装配集成测试。"""
 
+from privacyguard.api.dto import SanitizeRequest
 from privacyguard.api.facade import PrivacyGuardFacade
 from privacyguard.bootstrap.factories import create_facade
 
@@ -42,3 +43,19 @@ def test_mode_switching_detector_and_decision_can_be_assembled() -> None:
     assert isinstance(facade_ner, PrivacyGuardFacade)
     assert isinstance(facade_de, PrivacyGuardFacade)
 
+
+def test_mode_switching_can_use_request_modes_dynamically() -> None:
+    """验证可通过请求体动态切换 detector_mode 与 decision_mode。"""
+    facade = PrivacyGuardFacade.from_config_file("configs/default.yaml")
+    request = SanitizeRequest(
+        session_id="s-dynamic-mode",
+        turn_id=1,
+        prompt_text="我叫张三",
+        screenshot=None,
+        detector_mode="rule_ner_based",
+        decision_mode="label_persona_mixed",
+    )
+
+    response = facade.sanitize(request)
+
+    assert response.metadata.get("mode") == "label_persona_mixed"

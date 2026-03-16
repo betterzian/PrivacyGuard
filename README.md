@@ -98,6 +98,8 @@ sanitize_resp = facade.sanitize(
         turn_id=1,
         prompt_text="我叫张三，电话是13800138000",
         screenshot=None,
+        detector_mode="rule_ner_based",
+        decision_mode="label_persona_mixed",
     )
 )
 
@@ -116,7 +118,8 @@ restore_resp = facade.restore(
 - OCR 默认走适配器回退后端；未接入真实模型时不会输出真实 OCR 结果。
 - `rule_ner_based` 在 GLiNER 依赖缺失时会自动退化到 `rule_based`。
 - 截图重绘是最小可行实现（白底覆盖+文本重绘），不追求最终视觉效果。
-- 模式切换在配置层完成；请求体中的 `detector_mode/decision_mode` 当前不作为动态切换入口。
+- 支持请求级动态切换：可在 `SanitizeRequest` 里通过 `detector_mode/decision_mode` 覆盖默认配置。
+- 动态切换仅作用于当前 `sanitize` 调用，`restore` 仍基于会话映射恢复。
 
 ## 9. 后续扩展方向
 
