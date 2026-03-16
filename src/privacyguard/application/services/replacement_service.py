@@ -1,0 +1,43 @@
+"""决策动作到映射记录的拼装服务。"""
+
+from privacyguard.domain.enums import ActionType
+from privacyguard.domain.models.decision import DecisionAction
+from privacyguard.domain.models.mapping import ReplacementRecord
+from privacyguard.domain.models.pii import PIICandidate
+
+
+class ReplacementService:
+    """将 DecisionAction 与候选实体转换为 ReplacementRecord。"""
+
+    def build_records(
+        self,
+        session_id: str,
+        turn_id: int,
+        actions: list[DecisionAction],
+        candidates: list[PIICandidate],
+    ) -> list[ReplacementRecord]:
+        """生成可写入 mapping store 的替换记录列表。"""
+        candidate_map = {candidate.entity_id: candidate for candidate in candidates}
+        records: list[ReplacementRecord] = []
+        for action in actions:
+            if action.action_type == ActionType.KEEP:
+                continue
+            candidate = candidate_map.get(action.candidate_id)
+            if candidate is None:
+                continue
+            records.append(
+                ReplacementRecord(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    candidate_id=action.candidate_id,
+                    source_text=action.source_text or candidate.text,
+                    replacement_text=action.replacement_text or "",
+                    attr_type=action.attr_type,
+                    action_type=action.action_type,
+                    bbox=action.bbox or candidate.bbox,
+                    persona_id=action.persona_id,
+                    source=candidate.source,
+                    metadata={"reason": action.reason},
+                )
+            )
+        return records

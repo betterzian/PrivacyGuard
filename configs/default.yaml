@@ -1,0 +1,21 @@
+ocr:
+  provider: ppocr_v5
+
+pii_detector:
+  mode: rule_based
+
+decision_engine:
+  mode: label_only
+
+mapping_store:
+  type: in_memory
+
+persona_repository:
+  type: json
+  path: data/personas.sample.json
+
+rendering_engine:
+  mode: prompt_renderer
+
+restoration_module:
+  mode: action_restorer

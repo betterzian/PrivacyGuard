@@ -1,0 +1,31 @@
+[
+  {
+    "persona_id": "zhangsan",
+    "profile": {
+      "name": "张三",
+      "phone": "13900001111",
+      "address": "上海市浦东新区世纪大道100号",
+      "email": "zhangsan@example.com"
+    },
+    "stats": {
+      "exposure_count": 0,
+      "last_exposed_session_id": null,
+      "last_exposed_turn_id": null
+    }
+  },
+  {
+    "persona_id": "lisi",
+    "profile": {
+      "name": "李四",
+      "phone": "13600002222",
+      "address": "北京市海淀区知春路88号",
+      "email": "lisi@example.com"
+    },
+    "stats": {
+      "exposure_count": 2,
+      "last_exposed_session_id": "session-2",
+      "last_exposed_turn_id": 3
+    }
+  }
+]
+
