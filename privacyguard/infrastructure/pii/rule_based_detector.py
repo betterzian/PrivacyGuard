@@ -31,15 +31,17 @@ class RuleBasedPIIDetector:
         return self.resolver.resolve_candidates(candidates)
 
     def _resolve_dictionary_path(self, dictionary_path: str | Path | None) -> Path:
-        """解析字典路径并应用默认路径。"""
+        """解析字典路径并应用默认路径。PrivacyGuard 包根目录为 __file__ 上 3 级，其下 data/ 为词典目录。"""
         if dictionary_path is not None:
             return Path(dictionary_path)
-        project_root = Path(__file__).resolve().parents[4]
-        return project_root / "data" / "pii_dictionary.sample.json"
+        # __file__ = .../PrivacyGuard/privacyguard/infrastructure/pii/rule_based_detector.py -> parents[3] = PrivacyGuard
+        privacyguard_root = Path(__file__).resolve().parents[3]
+        return privacyguard_root / "data" / "pii_dictionary.sample.json"
 
     def _load_dictionary(self, dictionary_path: Path) -> dict[PIIAttributeType, set[str]]:
         """读取 JSON 字典并映射到属性类型。"""
         if not dictionary_path.exists():
+            print(f"[PrivacyGuard] rule_based 词典未找到，将仅使用正则: {dictionary_path}")
             return {}
         content = json.loads(dictionary_path.read_text(encoding="utf-8"))
         mapped: dict[PIIAttributeType, set[str]] = {}

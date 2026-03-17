@@ -7,6 +7,7 @@ from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.interfaces.pii_detector import PIIDetector
 from privacyguard.domain.interfaces.rendering_engine import RenderingEngine
 from privacyguard.domain.interfaces.restoration_module import RestorationModule
+from privacyguard.domain.interfaces.screenshot_fill_strategy import ScreenshotFillStrategy
 
 __all__ = [
     "OCREngine",
@@ -16,5 +17,6 @@ __all__ = [
     "DecisionEngine",
     "RenderingEngine",
     "RestorationModule",
+    "ScreenshotFillStrategy",
 ]
 

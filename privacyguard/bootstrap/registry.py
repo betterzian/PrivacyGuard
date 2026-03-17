@@ -10,6 +10,7 @@ from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.interfaces.pii_detector import PIIDetector
 from privacyguard.domain.interfaces.rendering_engine import RenderingEngine
 from privacyguard.domain.interfaces.restoration_module import RestorationModule
+from privacyguard.domain.interfaces.screenshot_fill_strategy import ScreenshotFillStrategy
 
 T = TypeVar("T")
 
@@ -25,6 +26,7 @@ class ComponentRegistry:
     persona_repository_types: dict[str, type[PersonaRepository]] = field(default_factory=dict)
     rendering_modes: dict[str, type[RenderingEngine]] = field(default_factory=dict)
     restoration_modes: dict[str, type[RestorationModule]] = field(default_factory=dict)
+    screenshot_fill_modes: dict[str, type[ScreenshotFillStrategy]] = field(default_factory=dict)
 
     def register_ocr_provider(self, name: str, impl: type[OCREngine]) -> None:
         """注册 OCR provider 实现类。"""
@@ -53,6 +55,10 @@ class ComponentRegistry:
     def register_restoration_mode(self, name: str, impl: type[RestorationModule]) -> None:
         """注册 restoration 模式实现类。"""
         self.restoration_modes[name] = impl
+
+    def register_screenshot_fill_mode(self, name: str, impl: type[ScreenshotFillStrategy]) -> None:
+        """注册截图填充策略实现类。"""
+        self.screenshot_fill_modes[name] = impl
 
 
 def create_default_registry() -> ComponentRegistry:

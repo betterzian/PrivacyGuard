@@ -15,9 +15,11 @@ from privacyguard.app.factories import (
     DEFAULT_DETECTOR_MODE,
     build_decision,
     build_detector,
+    build_screenshot_fill_strategy,
     get_or_create_registry,
     normalize_decision_mode,
     normalize_detector_mode,
+    normalize_fill_mode,
 )
 from privacyguard.app.pipelines import RestorePipeline, SanitizePipeline
 from privacyguard.app.schemas import RestoreRequestModel, SanitizeRequestModel
@@ -39,8 +41,9 @@ class PrivacyGuard:
         persona_repo: PersonaRepository | None = None,
         mapping_table: MappingStore | None = None,
         registry: ComponentRegistry | None = None,
+        screenshot_fill_mode: str | None = None,
     ) -> None:
-        """初始化核心依赖并构建 sanitize/restore 两条流水线。"""
+        """初始化核心依赖并构建 sanitize/restore 两条流水线。screenshot_fill_mode: ring（环带色）、cv（OpenCV inpaint）、mix（主色占比自动选 cv/ring）。"""
         self.registry = get_or_create_registry(registry)
         self.detector_mode = normalize_detector_mode(detector_mode)
         self.decision_mode = normalize_decision_mode(decision_mode)
@@ -56,7 +59,16 @@ class PrivacyGuard:
             "mapping store",
         )
         self.ocr = ocr or _build_component(self.registry.ocr_providers, "ppocr_v5", "ocr provider")
-        self.renderer = renderer or _build_component(self.registry.rendering_modes, "prompt_renderer", "rendering mode")
+        if renderer is not None:
+            self.renderer = renderer
+        elif screenshot_fill_mode and str(screenshot_fill_mode).strip():
+            from privacyguard.infrastructure.rendering.prompt_renderer import PromptRenderer
+            from privacyguard.infrastructure.rendering.screenshot_renderer import ScreenshotRenderer
+            fill_mode = normalize_fill_mode(str(screenshot_fill_mode).strip())
+            fill_strategy = build_screenshot_fill_strategy(fill_mode, self.registry)
+            self.renderer = PromptRenderer(screenshot_renderer=ScreenshotRenderer(fill_strategy=fill_strategy))
+        else:
+            self.renderer = _build_component(self.registry.rendering_modes, "prompt_renderer", "rendering mode")
         self.restoration = restoration or _build_component(
             self.registry.restoration_modes,
             "action_restorer",

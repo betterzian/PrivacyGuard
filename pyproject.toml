@@ -17,6 +17,10 @@ dependencies = [
 dev = [
     "pytest>=8.0,<9.0",
 ]
+# PP-OCRv5 真实推理（需安装 paddleocr 与 PaddlePaddle）
+ocr = [
+    "paddleocr>=3.0.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

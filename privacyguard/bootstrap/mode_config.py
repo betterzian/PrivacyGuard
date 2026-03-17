@@ -18,6 +18,13 @@ DECISION_MODE_ALIASES = {
     "label_persona_mixed": "label_persona_mixed",
 }
 
+DEFAULT_FILL_MODE = "ring"
+FILL_MODE_ALIASES = {
+    "ring": "ring",
+    "cv": "cv",
+    "mix": "mix",
+}
+
 
 def normalize_detector_mode(detector_mode: str) -> str:
     """将 detector 模式名归一化为内部标准键。"""
@@ -33,3 +40,11 @@ def normalize_decision_mode(decision_mode: str) -> str:
     if normalized not in DECISION_MODE_ALIASES:
         raise InvalidConfigurationError(f"不支持的 decision_mode: {decision_mode}")
     return DECISION_MODE_ALIASES[normalized]
+
+
+def normalize_fill_mode(fill_mode: str) -> str:
+    """将截图填充模式名归一化为内部标准键。"""
+    normalized = fill_mode.strip().lower()
+    if normalized not in FILL_MODE_ALIASES:
+        raise InvalidConfigurationError(f"不支持的 fill_mode: {fill_mode}")
+    return FILL_MODE_ALIASES[normalized]

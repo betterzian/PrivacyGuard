@@ -14,10 +14,11 @@ class CandidateResolverService:
         return md5(raw.encode("utf-8")).hexdigest()
 
     def resolve_candidates(self, candidates: list[PIICandidate]) -> list[PIICandidate]:
-        """按来源与属性去重，保留高置信度候选。"""
-        deduped: dict[tuple[str, str, str], PIICandidate] = {}
+        """按来源、属性与位置去重；同文不同 bbox 保留为多个候选（屏幕多处同一 PII 都会打码）。"""
+        deduped: dict[tuple, PIICandidate] = {}
         for candidate in candidates:
-            key = (candidate.source.value, candidate.normalized_text, candidate.attr_type.value)
+            bbox_key = self._bbox_dedup_key(candidate.bbox)
+            key = (candidate.source.value, candidate.normalized_text, candidate.attr_type.value, bbox_key)
             previous = deduped.get(key)
             if previous is None:
                 deduped[key] = candidate
@@ -29,6 +30,12 @@ class CandidateResolverService:
             else:
                 previous.metadata = self._merge_metadata(previous, candidate)
         return list(deduped.values())
+
+    def _bbox_dedup_key(self, bbox) -> tuple:
+        """生成用于去重的 bbox 键：同位置视为同一候选，不同位置保留多个。"""
+        if bbox is None:
+            return (None,)
+        return (bbox.x, bbox.y, bbox.width, bbox.height)
 
     def _merge_metadata(self, left: PIICandidate, right: PIICandidate) -> dict[str, list[str]]:
         """合并候选元信息并记录命中来源。"""

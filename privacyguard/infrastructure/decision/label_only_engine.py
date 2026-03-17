@@ -27,6 +27,7 @@ class LabelOnlyDecisionEngine:
     ) -> DecisionPlan:
         """生成 label_only 决策计划。"""
         actions: list[DecisionAction] = []
+        attr_counts: dict[PIIAttributeType, int] = {}
         for candidate in candidates:
             if candidate.confidence < self.confidence_threshold:
                 actions.append(
@@ -40,12 +41,14 @@ class LabelOnlyDecisionEngine:
                     )
                 )
                 continue
+            attr_type = candidate.attr_type
+            attr_counts[attr_type] = attr_counts.get(attr_type, 0) + 1
             actions.append(
                 DecisionAction(
                     candidate_id=candidate.entity_id,
                     action_type=ActionType.GENERICIZE,
-                    attr_type=candidate.attr_type,
-                    replacement_text=self._label_for_attr(candidate.attr_type),
+                    attr_type=attr_type,
+                    replacement_text=self._label_for_attr(attr_type, attr_counts[attr_type]),
                     source_text=candidate.text,
                     bbox=candidate.bbox,
                     reason="label_only 统一使用标准标签。",
@@ -61,15 +64,16 @@ class LabelOnlyDecisionEngine:
             metadata={"mode": "label_only"},
         )
 
-    def _label_for_attr(self, attr_type: PIIAttributeType) -> str:
-        """将属性类型映射为固定标签。"""
+    def _label_for_attr(self, attr_type: PIIAttributeType, index: int = 1) -> str:
+        """将属性类型映射为中文标签，格式为 @姓名1、@手机号1 等（无尖括号）。"""
         mapping = {
-            PIIAttributeType.NAME: "<NAME>",
-            PIIAttributeType.PHONE: "<PHONE>",
-            PIIAttributeType.EMAIL: "<EMAIL>",
-            PIIAttributeType.ADDRESS: "<ADDRESS>",
-            PIIAttributeType.ID_NUMBER: "<ID_NUMBER>",
-            PIIAttributeType.ORGANIZATION: "<ORGANIZATION>",
-            PIIAttributeType.OTHER: "<PII>",
+            PIIAttributeType.NAME: "姓名",
+            PIIAttributeType.PHONE: "手机号",
+            PIIAttributeType.EMAIL: "邮箱",
+            PIIAttributeType.ADDRESS: "地址",
+            PIIAttributeType.ID_NUMBER: "身份证号",
+            PIIAttributeType.ORGANIZATION: "机构",
+            PIIAttributeType.OTHER: "敏感信息",
         }
-        return mapping.get(attr_type, "<PII>")
+        name = mapping.get(attr_type, "敏感信息")
+        return f"@{name}{index}"

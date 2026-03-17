@@ -4,11 +4,14 @@ from privacyguard.bootstrap.factories import _build_component, register_default_
 from privacyguard.bootstrap.mode_config import (
     DEFAULT_DECISION_MODE,
     DEFAULT_DETECTOR_MODE,
+    DEFAULT_FILL_MODE,
     normalize_decision_mode,
     normalize_detector_mode,
+    normalize_fill_mode,
 )
 from privacyguard.bootstrap.registry import ComponentRegistry, create_default_registry
 from privacyguard.domain.interfaces.decision_engine import DecisionEngine
+from privacyguard.domain.interfaces.screenshot_fill_strategy import ScreenshotFillStrategy
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.interfaces.pii_detector import PIIDetector
@@ -17,11 +20,14 @@ from privacyguard.domain.interfaces.pii_detector import PIIDetector
 __all__ = [
     "build_detector",
     "build_decision",
+    "build_screenshot_fill_strategy",
     "get_or_create_registry",
     "normalize_detector_mode",
     "normalize_decision_mode",
+    "normalize_fill_mode",
     "DEFAULT_DETECTOR_MODE",
     "DEFAULT_DECISION_MODE",
+    "DEFAULT_FILL_MODE",
 ]
 
 
@@ -58,4 +64,19 @@ def build_decision(
         "decision mode",
         decision_config,
         injected_dependencies={"persona_repository": persona_repo, "mapping_store": mapping_table},
+    )
+
+
+def build_screenshot_fill_strategy(
+    fill_mode: str,
+    registry: ComponentRegistry,
+    fill_config: dict[str, Any] | None = None,
+) -> ScreenshotFillStrategy:
+    """根据 fill_mode 构建截图填充策略（与 decision 一致：注册表 + 工厂）。"""
+    normalized_mode = normalize_fill_mode(fill_mode)
+    return _build_component(
+        registry.screenshot_fill_modes,
+        normalized_mode,
+        "screenshot fill mode",
+        fill_config,
     )
