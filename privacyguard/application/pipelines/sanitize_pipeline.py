@@ -1,6 +1,7 @@
 """脱敏流程编排。"""
 
 from privacyguard.api.dto import SanitizeRequest, SanitizeResponse
+from privacyguard.application.services.decision_context_builder import DecisionContextBuilder
 from privacyguard.application.services.session_service import SessionService
 from privacyguard.domain.interfaces.decision_engine import DecisionEngine
 from privacyguard.domain.interfaces.mapping_store import MappingStore
@@ -56,12 +57,25 @@ def run_sanitize_pipeline(
     _trace_detector_output(request.session_id, request.turn_id, candidates)
     session_service = SessionService(mapping_store=mapping_store, persona_repository=persona_repository)
     session_binding = session_service.get_or_create_binding(request.session_id)
-    plan = decision_engine.plan(
-        session_id=request.session_id,
-        turn_id=request.turn_id,
-        candidates=candidates,
-        session_binding=session_binding,
-    )
+    plan_with_context = getattr(decision_engine, "plan_with_context", None)
+    if callable(plan_with_context):
+        context_builder = DecisionContextBuilder(mapping_store=mapping_store, persona_repository=persona_repository)
+        decision_context = context_builder.build(
+            session_id=request.session_id,
+            turn_id=request.turn_id,
+            prompt_text=request.prompt_text,
+            ocr_blocks=ocr_blocks,
+            candidates=candidates,
+            session_binding=session_binding,
+        )
+        plan = plan_with_context(decision_context)
+    else:
+        plan = decision_engine.plan(
+            session_id=request.session_id,
+            turn_id=request.turn_id,
+            candidates=candidates,
+            session_binding=session_binding,
+        )
     sanitized_prompt_text, applied_records = rendering_engine.render_text(request.prompt_text, plan)
     sanitized_screenshot = (
         rendering_engine.render_image(request.screenshot, plan, ocr_blocks=ocr_blocks)

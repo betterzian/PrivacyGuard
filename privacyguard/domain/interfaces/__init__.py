@@ -1,6 +1,6 @@
 """领域接口聚合导出。"""
 
-from privacyguard.domain.interfaces.decision_engine import DecisionEngine
+from privacyguard.domain.interfaces.decision_engine import ContextAwareDecisionEngine, DecisionEngine
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.interfaces.ocr_engine import OCREngine
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
@@ -15,8 +15,8 @@ __all__ = [
     "PersonaRepository",
     "MappingStore",
     "DecisionEngine",
+    "ContextAwareDecisionEngine",
     "RenderingEngine",
     "RestorationModule",
     "ScreenshotFillStrategy",
 ]
-
