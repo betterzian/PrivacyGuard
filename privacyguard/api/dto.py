@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from privacyguard.domain.enums import ProtectionLevel
 from privacyguard.domain.models.action import RestoredSlot
 from privacyguard.domain.models.mapping import ReplacementRecord
 
@@ -17,6 +18,7 @@ class SanitizeRequest(BaseModel):
     turn_id: int = Field(ge=0)
     prompt_text: str
     screenshot: ImageLike | None = None
+    protection_level: ProtectionLevel = ProtectionLevel.BALANCED
 
 
 class SanitizeResponse(BaseModel):
@@ -43,4 +45,3 @@ class RestoreResponse(BaseModel):
     restored_text: str
     restored_slots: list[RestoredSlot] = Field(default_factory=list)
     metadata: dict[str, str] = Field(default_factory=dict)
-

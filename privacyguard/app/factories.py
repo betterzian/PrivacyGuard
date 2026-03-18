@@ -42,11 +42,18 @@ def get_or_create_registry(registry: ComponentRegistry | None = None) -> Compone
 def build_detector(
     detector_mode: str,
     registry: ComponentRegistry,
+    mapping_table: MappingStore | None = None,
     detector_config: dict[str, Any] | None = None,
 ) -> PIIDetector:
     """根据 detector_mode 构建检测器实例。"""
     normalized_mode = normalize_detector_mode(detector_mode)
-    return _build_component(registry.detector_modes, normalized_mode, "detector mode", detector_config)
+    return _build_component(
+        registry.detector_modes,
+        normalized_mode,
+        "detector mode",
+        detector_config,
+        injected_dependencies={"mapping_store": mapping_table},
+    )
 
 
 def build_decision(

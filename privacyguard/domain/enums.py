@@ -18,6 +18,14 @@ class PIISourceType(str, Enum):
     OCR = "ocr"
 
 
+class ProtectionLevel(str, Enum):
+    """定义规则检测的保护度。"""
+
+    STRONG = "strong"
+    BALANCED = "balanced"
+    WEAK = "weak"
+
+
 class PIIAttributeType(str, Enum):
     """定义常见 PII 属性类别。"""
 
@@ -28,4 +36,3 @@ class PIIAttributeType(str, Enum):
     ID_NUMBER = "id_number"
     ORGANIZATION = "organization"
     OTHER = "other"
-

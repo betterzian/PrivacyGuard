@@ -74,7 +74,11 @@ class PrivacyGuard:
             "action_restorer",
             "restoration mode",
         )
-        self.detector = detector or build_detector(self.detector_mode, self.registry)
+        self.detector = detector or build_detector(
+            self.detector_mode,
+            self.registry,
+            mapping_table=self.mapping_table,
+        )
         self.decision_engine = decision_engine or build_decision(
             self.decision_mode,
             self.registry,

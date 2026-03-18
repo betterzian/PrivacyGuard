@@ -12,6 +12,14 @@ from privacyguard.utils.text import normalize_text
 _DIRECT_CONTROLLED = {"北京市", "上海市", "天津市", "重庆市"}
 _ADDRESS_ROAD_SUFFIXES = ("路", "街", "大道", "道", "巷", "弄", "胡同")
 _MIN_ADDRESS_LOCAL_ALIAS_LEN = 4
+_ADDRESS_DETAIL_EXPLICIT_SUFFIX_PATTERN = re.compile(r"(?:路|街|大道|道|巷|弄|胡同|号院|号楼|栋|幢|座|单元|室|层|号)$")
+_ADDRESS_DETAIL_SIGNAL_PATTERN = re.compile(
+    r"(?:\d|路|街|大道|道|巷|弄|胡同|社区|小区|公寓|大厦|广场|花园|家园|苑|庭|府|湾|园区|校区|宿舍|号院|号楼|栋|幢|座|单元|室|层|号)"
+)
+_ROAD_STEM_BLOCKLIST_PATTERN = re.compile(
+    r"(?:一期|二期|三期|四期|五期|六期|七期|八期|九期|十期|小区|花园|公寓|大厦|园区|宿舍|家园|楼|栋|单元|室|城)$"
+)
+_LIKELY_ROAD_STEM_PATTERN = re.compile(r"[一-龥A-Za-z]{2,8}(?:东|西|南|北|中)$")
 _PROVINCE_ALIASES = {
     "北京市": "北京市",
     "北京": "北京市",
@@ -257,12 +265,21 @@ def parse_address_components(value: str) -> AddressComponents:
             components.city_text = city_match.group("city")
             components.city_key = components.city_text
             remaining = remaining[city_match.end():]
+        else:
+            remaining, inferred_city, inferred_district = _infer_suffixless_city_district(remaining)
+            if inferred_city is not None:
+                components.city_text = inferred_city
+                components.city_key = inferred_city
+            if inferred_district is not None:
+                components.district_text = inferred_district
+                components.district_key = inferred_district
 
-    district_match = _DISTRICT_PATTERN.match(remaining)
-    if district_match is not None:
-        components.district_text = district_match.group("district")
-        components.district_key = components.district_text
-        remaining = remaining[district_match.end():]
+    if components.district_text is None:
+        district_match = _DISTRICT_PATTERN.match(remaining)
+        if district_match is not None:
+            components.district_text = district_match.group("district")
+            components.district_key = components.district_text
+            remaining = remaining[district_match.end():]
 
     remaining = remaining.strip()
     if remaining:
@@ -304,10 +321,9 @@ def _add_match_variant(target: set[str], attr_type: PIIAttributeType, value: str
 
 def _address_detail_aliases(raw_value: str, components: AddressComponents) -> set[str]:
     alias_texts: set[str] = set()
-    detail_sources = {
-        components.detail_text or "",
-        _extract_detail_like_tail(raw_value),
-    }
+    detail_sources = {components.detail_text or ""}
+    if not components.detail_text:
+        detail_sources.add(_extract_detail_like_tail(raw_value))
     district_prefixes = {components.district_text or ""}
     for detail in detail_sources:
         compact_detail = _compact_text(detail)
@@ -316,7 +332,7 @@ def _address_detail_aliases(raw_value: str, components: AddressComponents) -> se
         for road_alias in _detail_road_aliases(compact_detail):
             alias_texts.add(road_alias)
             for district in district_prefixes:
-                if district:
+                if district and not road_alias.startswith(district):
                     alias_texts.add(f"{district}{road_alias}")
     return {item for item in alias_texts if item}
 
@@ -344,7 +360,7 @@ def _detail_road_aliases(detail_text: str) -> set[str]:
     if not stem:
         stem = detail_text
     stem = stem[-6:]
-    if len(stem) >= 3:
+    if len(stem) >= 3 and _is_likely_road_stem(stem):
         aliases.add(stem[-3:])
     expanded = set()
     for alias in aliases:
@@ -353,6 +369,48 @@ def _detail_road_aliases(detail_text: str) -> set[str]:
             if len(candidate) >= _MIN_ADDRESS_LOCAL_ALIAS_LEN:
                 expanded.add(candidate)
     return expanded
+
+
+def _infer_suffixless_city_district(remaining: str) -> tuple[str, str | None, str | None]:
+    """对“广东广州天河体育西102”这类省后无后缀写法做保守拆分。"""
+    compact = _compact_text(remaining)
+    if not compact:
+        return remaining, None, None
+    for city_len in range(2, 5):
+        for district_len in range(2, 5):
+            if city_len + district_len >= len(compact):
+                continue
+            city = compact[:city_len]
+            district = compact[city_len:city_len + district_len]
+            detail = compact[city_len + district_len:]
+            if _looks_like_detail_signal(detail):
+                return detail, city, district
+    for city_len in range(2, 5):
+        if city_len >= len(compact):
+            continue
+        city = compact[:city_len]
+        detail = compact[city_len:]
+        if _looks_like_detail_signal(detail):
+            return detail, city, None
+    return remaining, None, None
+
+
+def _looks_like_detail_signal(detail: str) -> bool:
+    compact = _compact_text(detail)
+    if len(compact) < 2:
+        return False
+    return bool(_ADDRESS_DETAIL_SIGNAL_PATTERN.search(compact))
+
+
+def _is_likely_road_stem(stem: str) -> bool:
+    compact = _compact_text(stem)
+    if len(compact) < 3:
+        return False
+    if _ADDRESS_DETAIL_EXPLICIT_SUFFIX_PATTERN.search(compact):
+        return True
+    if _ROAD_STEM_BLOCKLIST_PATTERN.search(compact):
+        return False
+    return bool(_LIKELY_ROAD_STEM_PATTERN.fullmatch(compact))
 
 
 def _is_ignorable_match_char(attr_type: PIIAttributeType, char: str) -> bool:

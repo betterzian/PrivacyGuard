@@ -1,5 +1,6 @@
 """脱敏流程编排。"""
 
+import inspect
 import logging
 
 from privacyguard.api.dto import SanitizeRequest, SanitizeResponse
@@ -50,6 +51,23 @@ def _trace_detector_input(session_id: str, turn_id: int, prompt_text: str, ocr_b
     )
 
 
+def _detect_candidates(request: SanitizeRequest, pii_detector: PIIDetector, ocr_blocks: list) -> list:
+    """向后兼容地调用 detector；支持带会话上下文与保护度的实现。"""
+    detect_method = pii_detector.detect
+    parameters = inspect.signature(detect_method).parameters
+    kwargs = {
+        "prompt_text": request.prompt_text,
+        "ocr_blocks": ocr_blocks,
+    }
+    if "session_id" in parameters:
+        kwargs["session_id"] = request.session_id
+    if "turn_id" in parameters:
+        kwargs["turn_id"] = request.turn_id
+    if "protection_level" in parameters:
+        kwargs["protection_level"] = request.protection_level
+    return detect_method(**kwargs)
+
+
 def _trace_detector_output(session_id: str, turn_id: int, candidates: list) -> None:
     """追踪 Detector 输出：默认仅在 debug 打印非明文摘要。"""
     if not LOGGER.isEnabledFor(logging.DEBUG):
@@ -89,7 +107,7 @@ def run_sanitize_pipeline(
     ocr_blocks = ocr_engine.extract(request.screenshot) if request.screenshot is not None else []
     _trace_ocr_blocks(request.session_id, request.turn_id, ocr_blocks)
     _trace_detector_input(request.session_id, request.turn_id, request.prompt_text, ocr_blocks)
-    candidates = pii_detector.detect(prompt_text=request.prompt_text, ocr_blocks=ocr_blocks)
+    candidates = _detect_candidates(request=request, pii_detector=pii_detector, ocr_blocks=ocr_blocks)
     _trace_detector_output(request.session_id, request.turn_id, candidates)
     session_service = SessionService(mapping_store=mapping_store, persona_repository=persona_repository)
     session_binding = session_service.get_or_create_binding(request.session_id)
@@ -129,6 +147,7 @@ def run_sanitize_pipeline(
         replacements=applied_records,
         metadata={
             "mode": plan.metadata.get("mode", ""),
+            "protection_level": request.protection_level.value,
             "candidate_count": str(len(candidates)),
             "applied_count": str(len(applied_records)),
         },

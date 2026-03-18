@@ -4,6 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from privacyguard.api.dto import RestoreRequest, RestoreResponse, SanitizeRequest, SanitizeResponse
+from privacyguard.domain.enums import ProtectionLevel
 
 
 class SanitizePayloadModel(BaseModel):
@@ -15,6 +16,7 @@ class SanitizePayloadModel(BaseModel):
     turn_id: int = Field(default=0, ge=0)
     prompt: str
     image: Any | None = None
+    protection_level: ProtectionLevel = ProtectionLevel.BALANCED
 
 
 class RestorePayloadModel(BaseModel):
@@ -35,6 +37,7 @@ class SanitizeRequestModel:
     turn_id: int
     prompt: str
     image: Any | None = None
+    protection_level: ProtectionLevel = ProtectionLevel.BALANCED
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "SanitizeRequestModel":
@@ -45,6 +48,7 @@ class SanitizeRequestModel:
             turn_id=dto.turn_id,
             prompt=dto.prompt,
             image=dto.image,
+            protection_level=dto.protection_level,
         )
 
     def to_dto(self) -> SanitizeRequest:
@@ -54,6 +58,7 @@ class SanitizeRequestModel:
             turn_id=self.turn_id,
             prompt_text=self.prompt,
             screenshot=self.image,
+            protection_level=self.protection_level,
         )
 
 

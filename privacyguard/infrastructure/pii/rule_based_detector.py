@@ -1,6 +1,6 @@
 """基于规则与字典的 PII 检测器。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import logging
 import re
@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Callable
 
 from privacyguard.application.services.resolver_service import CandidateResolverService
-from privacyguard.domain.enums import PIIAttributeType, PIISourceType
+from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
+from privacyguard.domain.interfaces.mapping_store import MappingStore
+from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.utils.pii_value import build_match_text, canonicalize_pii_value, dictionary_match_variants
@@ -455,6 +457,7 @@ _LEADING_ORGANIZATION_NOISE_PATTERN = re.compile(
 _ORGANIZATION_FIELD_PREFIX_PATTERN = re.compile(
     r"^(?:机构|组织|单位|公司|企业|工作单位|所在单位|任职单位|就职公司|学校|医院|银行|毕业院校|就读学校)\s*(?:[:：=]|是|为)?\s*"
 )
+_FIELD_LABEL_CONNECTOR_PATTERN = re.compile(r"^\s*(?:[:：=]|是|为)")
 
 
 @dataclass(slots=True)
@@ -465,6 +468,9 @@ class _DictionaryMatch:
     source_term: str
     binding_key: str
     local_entity_ids: tuple[str, ...] = ()
+    matched_by: str = "dictionary_local"
+    confidence: float = 0.95
+    metadata: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -474,20 +480,77 @@ class _LocalDictionaryEntry:
     binding_key: str
     aliases: tuple[str, ...] = ()
     local_entity_ids: tuple[str, ...] = ()
+    matched_by: str = "dictionary_local"
+    confidence: float = 0.95
+    metadata: dict[str, list[str]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class _RuleStrengthProfile:
+    level: ProtectionLevel
+    enable_self_name_patterns: bool
+    enable_honorific_name_pattern: bool
+    enable_full_text_address: bool
+    address_min_confidence: float
+    allow_weak_org_suffix: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _OCRScanDocument:
+    line_index: int
+    blocks: tuple[OCRTextBlock, ...]
+    text: str
+    char_refs: tuple[tuple[int, int] | None, ...]
+
+
+_RULE_PROFILES = {
+    ProtectionLevel.STRONG: _RuleStrengthProfile(
+        level=ProtectionLevel.STRONG,
+        enable_self_name_patterns=True,
+        enable_honorific_name_pattern=True,
+        enable_full_text_address=True,
+        address_min_confidence=0.35,
+        allow_weak_org_suffix=True,
+    ),
+    ProtectionLevel.BALANCED: _RuleStrengthProfile(
+        level=ProtectionLevel.BALANCED,
+        enable_self_name_patterns=True,
+        enable_honorific_name_pattern=True,
+        enable_full_text_address=True,
+        address_min_confidence=0.45,
+        allow_weak_org_suffix=True,
+    ),
+    ProtectionLevel.WEAK: _RuleStrengthProfile(
+        level=ProtectionLevel.WEAK,
+        enable_self_name_patterns=False,
+        enable_honorific_name_pattern=False,
+        enable_full_text_address=False,
+        address_min_confidence=0.6,
+        allow_weak_org_suffix=False,
+    ),
+}
 
 
 class RuleBasedPIIDetector:
     """同时处理 prompt 与 OCR 文本的规则检测器。"""
 
-    def __init__(self, dictionary_path: str | Path | None = None, detector_mode: str = "rule_based") -> None:
+    def __init__(
+        self,
+        dictionary_path: str | Path | None = None,
+        detector_mode: str = "rule_based",
+        mapping_store: MappingStore | None = None,
+    ) -> None:
         """初始化规则、词典与候选解析服务。"""
         self.detector_mode = detector_mode
         self.dictionary_path = self._resolve_dictionary_path(dictionary_path)
         self.dictionary = self._load_dictionary(self.dictionary_path)
+        self.mapping_store = mapping_store
         self.resolver = CandidateResolverService()
         self.patterns = self._build_patterns()
         self.context_rules = self._build_context_rules()
         self.self_name_patterns = self._build_self_name_patterns()
+        self.field_label_pattern = self._build_field_label_pattern()
+        self.trailing_field_label_pattern = self._build_trailing_field_label_pattern()
         compound_surname_pattern = "|".join(
             sorted((re.escape(item) for item in _COMMON_COMPOUND_SURNAMES), key=len, reverse=True)
         )
@@ -497,13 +560,39 @@ class RuleBasedPIIDetector:
             rf"(?:{'|'.join(map(re.escape, _NAME_HONORIFICS))}))"
         )
 
-    def detect(self, prompt_text: str, ocr_blocks: list[OCRTextBlock]) -> list[PIICandidate]:
+    def detect(
+        self,
+        prompt_text: str,
+        ocr_blocks: list[OCRTextBlock],
+        *,
+        session_id: str | None = None,
+        turn_id: int | None = None,
+        protection_level: ProtectionLevel | str = ProtectionLevel.BALANCED,
+    ) -> list[PIICandidate]:
         """对 prompt 与 OCR 两路输入执行候选识别。"""
+        session_entries = self._session_dictionary_entries(session_id=session_id, turn_id=turn_id)
+        local_entries = self.dictionary
+        rule_profile = self._rule_profile(protection_level)
         candidates: list[PIICandidate] = []
-        candidates.extend(self._scan_text(prompt_text, PIISourceType.PROMPT, bbox=None, block_id=None))
-        for block in ocr_blocks:
-            candidates.extend(self._scan_text(block.text, PIISourceType.OCR, bbox=block.bbox, block_id=block.block_id))
-        candidates.extend(self._scan_cross_block_ocr_candidates(ocr_blocks))
+        candidates.extend(
+            self._scan_text(
+                prompt_text,
+                PIISourceType.PROMPT,
+                bbox=None,
+                block_id=None,
+                session_entries=session_entries,
+                local_entries=local_entries,
+                rule_profile=rule_profile,
+            )
+        )
+        candidates.extend(
+            self._scan_ocr_documents(
+                ocr_blocks,
+                session_entries=session_entries,
+                local_entries=local_entries,
+                rule_profile=rule_profile,
+            )
+        )
         return self.resolver.resolve_candidates(candidates)
 
     def _resolve_dictionary_path(self, dictionary_path: str | Path | None) -> Path | None:
@@ -596,8 +685,73 @@ class RuleBasedPIIDetector:
                     binding_key=binding_key,
                     aliases=aliases,
                     local_entity_ids=local_entity_ids,
+                    matched_by="dictionary_local",
+                    confidence=0.99 if entity_id else 0.98,
                 )
             )
+
+    def _effective_dictionary(
+        self,
+        *,
+        session_id: str | None,
+        turn_id: int | None,
+    ) -> dict[PIIAttributeType, list[_LocalDictionaryEntry]]:
+        """合并本地隐私库与 session 历史映射构造本轮优先匹配词典。"""
+        merged: dict[PIIAttributeType, list[_LocalDictionaryEntry]] = {
+            attr_type: list(entries)
+            for attr_type, entries in self.dictionary.items()
+        }
+        for attr_type, entries in self._session_dictionary_entries(session_id=session_id, turn_id=turn_id).items():
+            merged.setdefault(attr_type, []).extend(entries)
+        return merged
+
+    def _session_dictionary_entries(
+        self,
+        *,
+        session_id: str | None,
+        turn_id: int | None,
+    ) -> dict[PIIAttributeType, list[_LocalDictionaryEntry]]:
+        """把前序 turn 的 replacement source_text 转成会话级匹配词条。"""
+        if self.mapping_store is None or not session_id:
+            return {}
+        records = self.mapping_store.get_replacements(session_id=session_id)
+        if turn_id is not None:
+            records = [record for record in records if record.turn_id < turn_id]
+        aggregated: dict[tuple[PIIAttributeType, str], ReplacementRecord] = {}
+        turn_index: dict[tuple[PIIAttributeType, str], set[str]] = {}
+        for record in sorted(records, key=lambda item: (item.turn_id, len(item.source_text)), reverse=True):
+            if not record.source_text:
+                continue
+            canonical = canonicalize_pii_value(record.attr_type, record.source_text)
+            if not canonical:
+                continue
+            key = (record.attr_type, canonical)
+            aggregated.setdefault(key, record)
+            turn_index.setdefault(key, set()).add(str(record.turn_id))
+        session_entries: dict[PIIAttributeType, list[_LocalDictionaryEntry]] = {}
+        for (attr_type, canonical), record in aggregated.items():
+            metadata = {"session_turn_ids": sorted(turn_index.get((attr_type, canonical), set()))}
+            session_entries.setdefault(attr_type, []).append(
+                _LocalDictionaryEntry(
+                    value=record.source_text,
+                    source_term=canonical,
+                    binding_key=f"session:{attr_type.value}:{canonical}",
+                    matched_by="dictionary_session",
+                    confidence=0.97,
+                    metadata=metadata,
+                )
+            )
+        return session_entries
+
+    def _rule_profile(self, protection_level: ProtectionLevel | str) -> _RuleStrengthProfile:
+        """把入参保护度归一到内部规则强度配置。"""
+        if isinstance(protection_level, ProtectionLevel):
+            return _RULE_PROFILES[protection_level]
+        normalized = str(protection_level or ProtectionLevel.BALANCED.value).strip().lower()
+        try:
+            return _RULE_PROFILES[ProtectionLevel(normalized)]
+        except ValueError:
+            return _RULE_PROFILES[ProtectionLevel.BALANCED]
 
     def _parse_dictionary_item(self, item, default_aliases=None) -> tuple[str, tuple[str, ...]]:
         """把词库 JSON 中的一项解析成 (value, aliases)。"""
@@ -635,6 +789,11 @@ class RuleBasedPIIDetector:
             ],
             PIIAttributeType.EMAIL: [
                 (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "regex_email", 0.85),
+                (
+                    re.compile(r"[A-Za-z0-9._%+\-]+\s*@\s*[A-Za-z0-9.\-]+\s*\.\s*[A-Za-z]{2,}"),
+                    "regex_email_spaced",
+                    0.82,
+                ),
             ],
             PIIAttributeType.ID_NUMBER: [
                 (
@@ -642,7 +801,23 @@ class RuleBasedPIIDetector:
                     "regex_cn_id_18",
                     0.92,
                 ),
+                (
+                    re.compile(
+                        r"(?<![\dXx])[1-9]\d{5}(?:[\s\-]?(?:18|19|20)\d{2})(?:[\s\-]?(?:0[1-9]|1[0-2]))"
+                        r"(?:[\s\-]?(?:0[1-9]|[12]\d|3[01]))(?:[\s\-]?\d{3})(?:[\s\-]?[\dXx])(?![\dXx])"
+                    ),
+                    "regex_cn_id_18_spaced",
+                    0.9,
+                ),
                 (re.compile(r"(?<!\d)[1-9]\d{7}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}(?!\d)"), "regex_cn_id_15", 0.82),
+                (
+                    re.compile(
+                        r"(?<!\d)[1-9]\d{7}(?:[\s\-]?(?:0[1-9]|1[0-2]))(?:[\s\-]?(?:0[1-9]|[12]\d|3[01]))"
+                        r"(?:[\s\-]?\d{3})(?!\d)"
+                    ),
+                    "regex_cn_id_15_spaced",
+                    0.8,
+                ),
                 (re.compile(r"(?<![\dXx])[1-9]\d{5}[*＊]{8,10}[\dXx]{2,4}(?![\dXx])"), "regex_cn_id_masked", 0.86),
             ],
         }
@@ -677,7 +852,7 @@ class RuleBasedPIIDetector:
             self._build_context_rule(
                 keywords=_EMAIL_FIELD_KEYWORDS,
                 attr_type=PIIAttributeType.EMAIL,
-                value_pattern=r"[A-Za-z0-9._%+\-@]{5,80}",
+                value_pattern=r"[A-Za-z0-9._%+\-@\s]{5,80}",
                 confidence=0.90,
                 matched_by="context_email_field",
                 validator=self._is_email_candidate,
@@ -685,7 +860,7 @@ class RuleBasedPIIDetector:
             self._build_context_rule(
                 keywords=_ID_FIELD_KEYWORDS,
                 attr_type=PIIAttributeType.ID_NUMBER,
-                value_pattern=r"[0-9Xx*＊]{6,24}",
+                value_pattern=r"[0-9Xx*＊\s\-]{6,32}",
                 confidence=0.90,
                 matched_by="context_id_field",
                 validator=self._is_id_candidate,
@@ -740,47 +915,173 @@ class RuleBasedPIIDetector:
         )
         return (attr_type, pattern, matched_by, confidence, validator)
 
-    def _scan_text(self, text: str, source: PIISourceType, bbox: object, block_id: str | None) -> list[PIICandidate]:
-        """对单段文本执行字典、上下文与正则识别。"""
+    def _build_field_label_pattern(self) -> re.Pattern[str]:
+        """构建用于识别字段标签边界的通用模式。"""
+        keyword_pattern = "|".join(sorted((re.escape(item) for item in self._all_field_keywords()), key=len, reverse=True))
+        return re.compile(
+            rf"(?:^|[\s{{\[\(（【<「『\"',，;；])(?P<label>{keyword_pattern})\s*(?:[:：=]|是|为)",
+            re.IGNORECASE,
+        )
+
+    def _build_trailing_field_label_pattern(self) -> re.Pattern[str]:
+        """构建用于截断“值 + 下一个字段标签”串联的尾部模式。"""
+        keyword_pattern = "|".join(sorted((re.escape(item) for item in self._all_field_keywords()), key=len, reverse=True))
+        return re.compile(
+            rf"(?P<body>.*?)(?:[\s,，;；/|]*)?(?P<label>{keyword_pattern})$",
+            re.IGNORECASE,
+        )
+
+    def _all_field_keywords(self) -> tuple[str, ...]:
+        """汇总所有字段标签关键词，供边界识别复用。"""
+        return tuple(
+            dict.fromkeys(
+                (
+                    *_NAME_FIELD_KEYWORDS,
+                    *_ADDRESS_FIELD_KEYWORDS,
+                    *_PHONE_FIELD_KEYWORDS,
+                    *_EMAIL_FIELD_KEYWORDS,
+                    *_ID_FIELD_KEYWORDS,
+                    *_OTHER_FIELD_KEYWORDS,
+                    *_ORGANIZATION_FIELD_KEYWORDS,
+                )
+            )
+        )
+
+    def _scan_text(
+        self,
+        text: str,
+        source: PIISourceType,
+        bbox: object,
+        block_id: str | None,
+        *,
+        session_entries: dict[PIIAttributeType, list[_LocalDictionaryEntry]],
+        local_entries: dict[PIIAttributeType, list[_LocalDictionaryEntry]],
+        rule_profile: _RuleStrengthProfile,
+    ) -> list[PIICandidate]:
+        """对单段文本执行 session、本地词库与规则识别。"""
         collected: dict[tuple[str, str, int | None, int | None], PIICandidate] = {}
-        self._collect_dictionary_hits(collected, text, source, bbox, block_id)
-        self._collect_context_hits(collected, text, source, bbox, block_id)
-        self._collect_regex_hits(collected, text, source, bbox, block_id)
-        self._collect_name_hits(collected, text, source, bbox, block_id)
-        self._collect_organization_hits(collected, text, source, bbox, block_id)
-        self._collect_address_hits(collected, text, source, bbox, block_id)
+        self._collect_dictionary_hits(
+            collected,
+            text,
+            source,
+            bbox,
+            block_id,
+            dictionary_entries=session_entries,
+        )
+        protected_spans = self._protected_spans_from_dictionary_hits(collected)
+        self._collect_dictionary_hits(
+            collected,
+            text,
+            source,
+            bbox,
+            block_id,
+            dictionary_entries=local_entries,
+            skip_spans=protected_spans,
+        )
+        protected_spans = self._protected_spans_from_dictionary_hits(collected)
+        self._collect_context_hits(collected, text, source, bbox, block_id, skip_spans=protected_spans)
+        self._collect_regex_hits(collected, text, source, bbox, block_id, skip_spans=protected_spans)
+        self._collect_name_hits(collected, text, source, bbox, block_id, skip_spans=protected_spans, rule_profile=rule_profile)
+        self._collect_organization_hits(
+            collected,
+            text,
+            source,
+            bbox,
+            block_id,
+            skip_spans=protected_spans,
+            rule_profile=rule_profile,
+        )
+        self._collect_address_hits(
+            collected,
+            text,
+            source,
+            bbox,
+            block_id,
+            skip_spans=protected_spans,
+            rule_profile=rule_profile,
+        )
         return list(collected.values())
 
-    def _scan_cross_block_ocr_candidates(self, ocr_blocks: list[OCRTextBlock]) -> list[PIICandidate]:
-        """对同一行相邻 OCR block 的拼接窗口做补充检测。"""
-        merged_candidates: list[PIICandidate] = []
-        for line_index, blocks in enumerate(self._group_blocks_by_visual_line(ocr_blocks)):
-            if len(blocks) < 2:
+    def _scan_ocr_documents(
+        self,
+        ocr_blocks: list[OCRTextBlock],
+        *,
+        session_entries: dict[PIIAttributeType, list[_LocalDictionaryEntry]],
+        local_entries: dict[PIIAttributeType, list[_LocalDictionaryEntry]],
+        rule_profile: _RuleStrengthProfile,
+    ) -> list[PIICandidate]:
+        """按视觉行聚合 OCR 文本后统一扫描，再映射回原始 block。"""
+        remapped_candidates: list[PIICandidate] = []
+        for document in self._build_ocr_scan_documents(ocr_blocks):
+            document_candidates = self._scan_text(
+                document.text,
+                PIISourceType.OCR,
+                bbox=None,
+                block_id=None,
+                session_entries=session_entries,
+                local_entries=local_entries,
+                rule_profile=rule_profile,
+            )
+            for candidate in document_candidates:
+                remapped = self._remap_ocr_document_candidate(candidate, document)
+                if remapped is not None:
+                    remapped_candidates.append(remapped)
+                remapped_candidates.extend(self._derive_address_fragment_candidates(candidate, document))
+        return remapped_candidates
+
+    def _build_ocr_scan_documents(self, ocr_blocks: list[OCRTextBlock]) -> list[_OCRScanDocument]:
+        """把整页 OCR block 聚合成单个扫描文档，减少重复扫描成本。"""
+        if not ocr_blocks:
+            return []
+        merged_chars: list[str] = []
+        char_refs: list[tuple[int, int] | None] = []
+        ordered_blocks: list[OCRTextBlock] = []
+        lines = self._group_blocks_by_visual_line(ocr_blocks)
+        assigned_blocks = {id(block) for line in lines for block in line if block.text.strip()}
+        line_count = 0
+        for line_blocks in lines:
+            visible_blocks = [block for block in line_blocks if block.text.strip()]
+            if not visible_blocks:
                 continue
-            max_window = min(4, len(blocks))
-            for window_size in range(2, max_window + 1):
-                for start in range(0, len(blocks) - window_size + 1):
-                    window_blocks = blocks[start:start + window_size]
-                    merged_text, char_refs = self._merge_block_window_text(window_blocks)
-                    if not merged_text:
-                        continue
-                    window_candidates = self._scan_text(
-                        merged_text,
-                        PIISourceType.OCR,
-                        bbox=None,
-                        block_id=None,
-                    )
-                    for candidate in window_candidates:
-                        remapped = self._remap_cross_block_candidate(
-                            candidate=candidate,
-                            window_blocks=window_blocks,
-                            char_refs=char_refs,
-                            line_index=line_index,
-                            window_start=start,
-                        )
-                        if remapped is not None:
-                            merged_candidates.append(remapped)
-        return merged_candidates
+            if line_count > 0:
+                merged_chars.append("\n")
+                char_refs.append(None)
+            for block in visible_blocks:
+                if ordered_blocks:
+                    prev_block = ordered_blocks[-1]
+                    if prev_block in visible_blocks:
+                        separator = self._cross_block_separator(prev_block, block)
+                        if separator:
+                            merged_chars.append(separator)
+                            char_refs.append(None)
+                block_index = len(ordered_blocks)
+                ordered_blocks.append(block)
+                for char_index, char in enumerate(block.text):
+                    merged_chars.append(char)
+                    char_refs.append((block_index, char_index))
+            line_count += 1
+        for block in ocr_blocks:
+            if id(block) in assigned_blocks or not block.text.strip():
+                continue
+            if line_count > 0:
+                merged_chars.append("\n")
+                char_refs.append(None)
+            block_index = len(ordered_blocks)
+            ordered_blocks.append(block)
+            for char_index, char in enumerate(block.text):
+                merged_chars.append(char)
+                char_refs.append((block_index, char_index))
+            line_count += 1
+        if not ordered_blocks:
+            return []
+        return [
+            _OCRScanDocument(
+                line_index=0,
+                blocks=tuple(ordered_blocks),
+                text="".join(merged_chars),
+                char_refs=tuple(char_refs),
+            )
+        ]
 
     def _group_blocks_by_visual_line(self, ocr_blocks: list[OCRTextBlock]) -> list[list[OCRTextBlock]]:
         """按 bbox 的垂直重叠关系将 OCR block 近似聚成视觉行。"""
@@ -852,41 +1153,33 @@ class RuleBasedPIIDetector:
             return " "
         return ""
 
-    def _remap_cross_block_candidate(
+    def _remap_ocr_document_candidate(
         self,
         candidate: PIICandidate,
-        window_blocks: list[OCRTextBlock],
-        char_refs: list[tuple[int, int] | None],
-        line_index: int,
-        window_start: int,
+        document: _OCRScanDocument,
     ) -> PIICandidate | None:
-        """将拼接窗口上的候选映射回单 block 或多 block 联合候选。"""
+        """将聚合 OCR 文档上的候选映射回单 block 或多 block 联合候选。"""
         if candidate.span_start is None or candidate.span_end is None:
             return None
         covered: dict[int, list[int]] = {}
         covered_block_ids: list[str] = []
-        for ref in char_refs[candidate.span_start:candidate.span_end]:
+        for ref in document.char_refs[candidate.span_start:candidate.span_end]:
             if ref is None:
                 continue
             block_index, char_index = ref
             covered.setdefault(block_index, []).append(char_index)
-            block_id = window_blocks[block_index].block_id
+            block_id = document.blocks[block_index].block_id
             if block_id and block_id not in covered_block_ids:
                 covered_block_ids.append(block_id)
         if not covered:
             return None
-        remapped_metadata = self._merge_candidate_metadata(
-            candidate.metadata,
-            {
-                "matched_by": ["cross_block_window"],
-                "ocr_block_ids": covered_block_ids,
-            },
-        )
+        extra_metadata = {"ocr_block_ids": covered_block_ids}
+        if len(document.blocks) > 1:
+            extra_metadata["matched_by"] = ["cross_block_window"]
+        remapped_metadata = self._merge_candidate_metadata(candidate.metadata, extra_metadata)
         if len(covered) == 1:
             block_index, positions = next(iter(covered.items()))
-            block = window_blocks[block_index]
-            if block.bbox is None:
-                return None
+            block = document.blocks[block_index]
             local_start = min(positions)
             local_end = max(positions) + 1
             local_text = block.text[local_start:local_end]
@@ -916,14 +1209,12 @@ class RuleBasedPIIDetector:
         covered_indices = set(covered)
         combined_bbox = self._combine_bboxes(
             block.bbox
-            for index, block in enumerate(window_blocks)
+            for index, block in enumerate(document.blocks)
             if index in covered_indices and block.bbox is not None
         )
-        if combined_bbox is None:
-            return None
         merge_block_id = "ocr-merge-" + "-".join(
-            item.block_id or f"{line_index}-{window_start + index}"
-            for index, item in enumerate(window_blocks)
+            item.block_id or f"{document.line_index}-{index}"
+            for index, item in enumerate(document.blocks)
             if index in covered
         )
         entity_id = self.resolver.build_candidate_id(
@@ -968,6 +1259,69 @@ class RuleBasedPIIDetector:
     def _bbox_center_y(self, bbox) -> float:
         return bbox.y + bbox.height / 2
 
+    def _derive_address_fragment_candidates(
+        self,
+        candidate: PIICandidate,
+        document: _OCRScanDocument,
+    ) -> list[PIICandidate]:
+        """对跨 block 地址命中补充派生单 block 地址碎片，避免丢失原始块级信息。"""
+        if candidate.attr_type != PIIAttributeType.ADDRESS:
+            return []
+        if candidate.span_start is None or candidate.span_end is None:
+            return []
+        if len(document.blocks) <= 1:
+            return []
+        covered_positions: dict[int, list[int]] = {}
+        for ref in document.char_refs[candidate.span_start:candidate.span_end]:
+            if ref is None:
+                continue
+            block_index, char_index = ref
+            covered_positions.setdefault(block_index, []).append(char_index)
+        if len(covered_positions) <= 1:
+            return []
+        fragments: list[PIICandidate] = []
+        for block_index, positions in covered_positions.items():
+            block = document.blocks[block_index]
+            if not positions:
+                continue
+            local_start = min(positions)
+            local_end = max(positions) + 1
+            local_text = block.text[local_start:local_end]
+            if not self._looks_like_address_candidate(local_text):
+                continue
+            normalized = canonicalize_pii_value(PIIAttributeType.ADDRESS, local_text)
+            entity_id = self.resolver.build_candidate_id(
+                self.detector_mode,
+                PIISourceType.OCR.value,
+                normalized,
+                PIIAttributeType.ADDRESS.value,
+                block_id=block.block_id,
+                span_start=local_start,
+                span_end=local_end,
+            )
+            fragments.append(
+                PIICandidate(
+                    entity_id=entity_id,
+                    text=local_text,
+                    normalized_text=normalized,
+                    attr_type=PIIAttributeType.ADDRESS,
+                    source=PIISourceType.OCR,
+                    bbox=block.bbox,
+                    block_id=block.block_id,
+                    span_start=local_start,
+                    span_end=local_end,
+                    confidence=max(0.4, candidate.confidence - 0.08),
+                    metadata=self._merge_candidate_metadata(
+                        candidate.metadata,
+                        {
+                            "matched_by": ["cross_block_fragment"],
+                            "ocr_block_ids": [block.block_id] if block.block_id else [],
+                        },
+                    ),
+                )
+            )
+        return fragments
+
     def _collect_dictionary_hits(
         self,
         collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
@@ -975,9 +1329,12 @@ class RuleBasedPIIDetector:
         source: PIISourceType,
         bbox: object,
         block_id: str | None,
+        *,
+        dictionary_entries: dict[PIIAttributeType, list[_LocalDictionaryEntry]],
+        skip_spans: list[tuple[int, int]] | None = None,
     ) -> None:
         """收集本地字典命中。"""
-        for attr_type, entries in self.dictionary.items():
+        for attr_type, entries in dictionary_entries.items():
             pending_matches: list[_DictionaryMatch] = []
             for entry in entries:
                 for matched_text, span_start, span_end in self._find_dictionary_matches(raw_text, attr_type, entry):
@@ -989,6 +1346,9 @@ class RuleBasedPIIDetector:
                             source_term=entry.source_term,
                             binding_key=entry.binding_key,
                             local_entity_ids=entry.local_entity_ids,
+                            matched_by=entry.matched_by,
+                            confidence=entry.confidence,
+                            metadata=dict(entry.metadata),
                         )
                     )
             for match in self._select_dictionary_matches(pending_matches):
@@ -1002,9 +1362,10 @@ class RuleBasedPIIDetector:
                     block_id=block_id,
                     span_start=match.span_start,
                     span_end=match.span_end,
-                    confidence=0.95,
-                    matched_by="dictionary_local",
+                    confidence=match.confidence,
+                    matched_by=match.matched_by,
                     metadata=self._dictionary_match_metadata(match),
+                    skip_spans=skip_spans,
                 )
 
     def _collect_context_hits(
@@ -1014,6 +1375,8 @@ class RuleBasedPIIDetector:
         source: PIISourceType,
         bbox: object,
         block_id: str | None,
+        *,
+        skip_spans: list[tuple[int, int]],
     ) -> None:
         """收集字段上下文命中。"""
         for attr_type, pattern, matched_by, confidence, validator in self.context_rules:
@@ -1022,6 +1385,10 @@ class RuleBasedPIIDetector:
                 if extracted is None:
                     continue
                 value, span_start, span_end = extracted
+                trimmed = self._trim_context_value(raw_text, value, span_start, span_end)
+                if trimmed is None:
+                    continue
+                value, span_start, span_end = trimmed
                 if not value or not validator(value):
                     continue
                 self._upsert_candidate(
@@ -1036,7 +1403,33 @@ class RuleBasedPIIDetector:
                     span_end=span_end,
                     confidence=confidence,
                     matched_by=matched_by,
+                    skip_spans=skip_spans,
                 )
+
+    def _trim_context_value(
+        self,
+        raw_text: str,
+        value: str,
+        span_start: int,
+        span_end: int,
+    ) -> tuple[str, int, int] | None:
+        """截断被贪婪 value_pattern 吞进去的后续字段标签。"""
+        current_value = value
+        current_end = span_end
+        while current_value and current_end < len(raw_text):
+            if _FIELD_LABEL_CONNECTOR_PATTERN.match(raw_text[current_end:]) is None:
+                break
+            match = self.trailing_field_label_pattern.fullmatch(current_value)
+            if match is None:
+                break
+            trimmed = match.group("body").rstrip()
+            if not trimmed or trimmed == current_value:
+                break
+            current_end = span_start + len(trimmed)
+            current_value = trimmed
+        if not current_value:
+            return None
+        return current_value, span_start, current_end
 
     def _collect_regex_hits(
         self,
@@ -1045,6 +1438,8 @@ class RuleBasedPIIDetector:
         source: PIISourceType,
         bbox: object,
         block_id: str | None,
+        *,
+        skip_spans: list[tuple[int, int]],
     ) -> None:
         """收集格式型正则规则命中。"""
         for attr_type, rule_items in self.patterns.items():
@@ -1066,6 +1461,7 @@ class RuleBasedPIIDetector:
                         span_end=span_end,
                         confidence=confidence,
                         matched_by=matched_by,
+                        skip_spans=skip_spans,
                     )
 
     def _collect_name_hits(
@@ -1075,15 +1471,41 @@ class RuleBasedPIIDetector:
         source: PIISourceType,
         bbox: object,
         block_id: str | None,
+        *,
+        skip_spans: list[tuple[int, int]],
+        rule_profile: _RuleStrengthProfile,
     ) -> None:
         """收集姓名相关的上下文与敬称规则。"""
-        for pattern, matched_by, confidence in self.self_name_patterns:
-            for match in pattern.finditer(raw_text):
+        if rule_profile.enable_self_name_patterns:
+            for pattern, matched_by, confidence in self.self_name_patterns:
+                for match in pattern.finditer(raw_text):
+                    extracted = self._extract_match(raw_text, *match.span("value"))
+                    if extracted is None:
+                        continue
+                    value, span_start, span_end = extracted
+                    if not self._is_name_candidate(value):
+                        continue
+                    self._upsert_candidate(
+                        collected=collected,
+                        text=raw_text,
+                        matched_text=value,
+                        attr_type=PIIAttributeType.NAME,
+                        source=source,
+                        bbox=bbox,
+                        block_id=block_id,
+                        span_start=span_start,
+                        span_end=span_end,
+                        confidence=confidence,
+                        matched_by=matched_by,
+                        skip_spans=skip_spans,
+                    )
+        if rule_profile.enable_honorific_name_pattern:
+            for match in self.name_title_pattern.finditer(raw_text):
                 extracted = self._extract_match(raw_text, *match.span("value"))
                 if extracted is None:
                     continue
                 value, span_start, span_end = extracted
-                if not self._is_name_candidate(value):
+                if not self._looks_like_name_with_title(value):
                     continue
                 self._upsert_candidate(
                     collected=collected,
@@ -1095,29 +1517,10 @@ class RuleBasedPIIDetector:
                     block_id=block_id,
                     span_start=span_start,
                     span_end=span_end,
-                    confidence=confidence,
-                    matched_by=matched_by,
+                    confidence=0.72,
+                    matched_by="regex_name_honorific",
+                    skip_spans=skip_spans,
                 )
-        for match in self.name_title_pattern.finditer(raw_text):
-            extracted = self._extract_match(raw_text, *match.span("value"))
-            if extracted is None:
-                continue
-            value, span_start, span_end = extracted
-            if not self._looks_like_name_with_title(value):
-                continue
-            self._upsert_candidate(
-                collected=collected,
-                text=raw_text,
-                matched_text=value,
-                attr_type=PIIAttributeType.NAME,
-                source=source,
-                bbox=bbox,
-                block_id=block_id,
-                span_start=span_start,
-                span_end=span_end,
-                confidence=0.72,
-                matched_by="regex_name_honorific",
-            )
 
     def _collect_address_hits(
         self,
@@ -1126,10 +1529,13 @@ class RuleBasedPIIDetector:
         source: PIISourceType,
         bbox: object,
         block_id: str | None,
+        *,
+        skip_spans: list[tuple[int, int]],
+        rule_profile: _RuleStrengthProfile,
     ) -> None:
         """收集地址整段与碎片命中。"""
         full_text_candidate = self._clean_address_candidate(raw_text)
-        if self._should_collect_full_text_address(raw_text, full_text_candidate):
+        if rule_profile.enable_full_text_address and self._should_collect_full_text_address(raw_text, full_text_candidate, rule_profile=rule_profile):
             extracted = self._extract_match(raw_text, 0, len(raw_text), cleaner=self._clean_address_candidate)
             if extracted is not None:
                 matched_text, span_start, span_end = extracted
@@ -1146,6 +1552,7 @@ class RuleBasedPIIDetector:
                     span_end=span_end,
                     confidence=confidence,
                     matched_by="heuristic_address_fragment",
+                    skip_spans=skip_spans,
                 )
         for pattern in _ADDRESS_SPAN_PATTERNS:
             for match in pattern.finditer(raw_text):
@@ -1153,7 +1560,7 @@ class RuleBasedPIIDetector:
                 if extracted is None:
                     continue
                 value, span_start, span_end = extracted
-                if not self._looks_like_address_candidate(value):
+                if not self._looks_like_address_candidate(value, min_confidence=rule_profile.address_min_confidence):
                     continue
                 self._upsert_candidate(
                     collected=collected,
@@ -1167,6 +1574,7 @@ class RuleBasedPIIDetector:
                     span_end=span_end,
                     confidence=self._address_confidence(value),
                     matched_by="regex_address_span",
+                    skip_spans=skip_spans,
                 )
 
     def _collect_organization_hits(
@@ -1176,6 +1584,9 @@ class RuleBasedPIIDetector:
         source: PIISourceType,
         bbox: object,
         block_id: str | None,
+        *,
+        skip_spans: list[tuple[int, int]],
+        rule_profile: _RuleStrengthProfile,
     ) -> None:
         """收集机构名后缀与就业/就读语境下的机构命中。"""
         for pattern in _ORGANIZATION_SPAN_PATTERNS:
@@ -1184,7 +1595,7 @@ class RuleBasedPIIDetector:
                 if extracted is None:
                     continue
                 value, span_start, span_end = extracted
-                if not self._is_organization_candidate(value):
+                if not self._is_organization_candidate(value, allow_weak_suffix=rule_profile.allow_weak_org_suffix):
                     continue
                 self._upsert_candidate(
                     collected=collected,
@@ -1196,8 +1607,9 @@ class RuleBasedPIIDetector:
                     block_id=block_id,
                     span_start=span_start,
                     span_end=span_end,
-                    confidence=self._organization_confidence(value),
+                    confidence=self._organization_confidence(value, allow_weak_suffix=rule_profile.allow_weak_org_suffix),
                     matched_by="regex_organization_suffix",
+                    skip_spans=skip_spans,
                 )
 
     def _extract_match(
@@ -1294,6 +1706,21 @@ class RuleBasedPIIDetector:
             covered_spans.append((item.span_start, item.span_end))
         return sorted(selected, key=lambda item: (item.span_start, item.span_end))
 
+    def _protected_spans_from_dictionary_hits(
+        self,
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
+    ) -> list[tuple[int, int]]:
+        """提取本地词库与 session 历史已命中的区间，供后续 rule 扫描避让。"""
+        protected: list[tuple[int, int]] = []
+        for candidate in collected.values():
+            matched_by = candidate.metadata.get("matched_by", [])
+            if not any(item.startswith("dictionary_") for item in matched_by):
+                continue
+            if candidate.span_start is None or candidate.span_end is None:
+                continue
+            protected.append((candidate.span_start, candidate.span_end))
+        return protected
+
     def _clean_extracted_value(self, value: str) -> str:
         """清理上下文提取值两侧的噪声字符。"""
         cleaned = value.strip()
@@ -1327,11 +1754,12 @@ class RuleBasedPIIDetector:
 
     def _is_email_candidate(self, value: str) -> bool:
         """判断是否为邮箱。"""
-        return bool(re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", value))
+        compact = re.sub(r"\s+", "", value)
+        return bool(re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", compact))
 
     def _is_id_candidate(self, value: str) -> bool:
         """判断是否为身份证号或脱敏后的身份证号。"""
-        compact = value.replace(" ", "")
+        compact = re.sub(r"[\s\-]+", "", value)
         return bool(
             re.fullmatch(r"[1-9]\d{16}[\dXx]", compact)
             or re.fullmatch(r"[1-9]\d{14}", compact)
@@ -1378,7 +1806,7 @@ class RuleBasedPIIDetector:
             return compact[0] in _COMMON_SINGLE_CHAR_SURNAMES and 2 <= len(compact) <= 4
         return False
 
-    def _is_organization_candidate(self, value: str) -> bool:
+    def _is_organization_candidate(self, value: str, *, allow_weak_suffix: bool = True) -> bool:
         """判断是否像机构名。"""
         cleaned = self._clean_organization_candidate(value)
         compact = re.sub(r"\s+", "", cleaned)
@@ -1395,6 +1823,8 @@ class RuleBasedPIIDetector:
         if _ORGANIZATION_STRONG_SUFFIX_PATTERN.search(compact):
             return len(compact) >= 3
         if _ORGANIZATION_WEAK_SUFFIX_PATTERN.search(compact):
+            if not allow_weak_suffix:
+                return False
             if any(token in compact for token in _ORGANIZATION_SENTENCE_NOISE_TOKENS):
                 return False
             return len(compact) >= 4
@@ -1415,20 +1845,28 @@ class RuleBasedPIIDetector:
             return core in _COMMON_SINGLE_CHAR_SURNAMES
         return self._is_name_candidate(core)
 
-    def _looks_like_address_candidate(self, value: str) -> bool:
+    def _looks_like_address_candidate(self, value: str, *, min_confidence: float = 0.45) -> bool:
         """判断是否像地址或地址碎片。"""
         cleaned = self._clean_address_candidate(value)
         if not cleaned or len(cleaned) > 80:
             return False
         if cleaned in _ADDRESS_FIELD_KEYWORDS:
             return False
-        return self._address_confidence(cleaned) >= 0.45
+        return self._address_confidence(cleaned) >= min_confidence
 
-    def _should_collect_full_text_address(self, raw_text: str, cleaned: str) -> bool:
+    def _should_collect_full_text_address(
+        self,
+        raw_text: str,
+        cleaned: str,
+        *,
+        rule_profile: _RuleStrengthProfile,
+    ) -> bool:
         """仅在整段文本本身已经像独立地址片段时才直接收整段。"""
-        if not self._looks_like_address_candidate(cleaned):
+        if not self._looks_like_address_candidate(cleaned, min_confidence=rule_profile.address_min_confidence):
             return False
         base_text = self._clean_extracted_value(raw_text)
+        if sum(1 for _ in self.field_label_pattern.finditer(base_text)) > 1:
+            return False
         if re.search(r"[，,。！？；;、]", base_text):
             return False
         return len(base_text) - len(cleaned) <= 6
@@ -1458,7 +1896,7 @@ class RuleBasedPIIDetector:
             score += 0.20
         return min(0.96, score)
 
-    def _organization_confidence(self, value: str) -> float:
+    def _organization_confidence(self, value: str, *, allow_weak_suffix: bool = True) -> float:
         """根据机构后缀与格式特征估算置信度。"""
         cleaned = self._clean_organization_candidate(value)
         compact = re.sub(r"\s+", "", cleaned)
@@ -1468,6 +1906,8 @@ class RuleBasedPIIDetector:
         if _ORGANIZATION_STRONG_SUFFIX_PATTERN.search(compact):
             score += 0.62
         elif _ORGANIZATION_WEAK_SUFFIX_PATTERN.search(compact):
+            if not allow_weak_suffix:
+                return 0.0
             score += 0.48
         if re.search(r"[A-Za-z]", cleaned):
             score += 0.08
@@ -1491,11 +1931,15 @@ class RuleBasedPIIDetector:
         confidence: float,
         matched_by: str,
         metadata: dict[str, list[str]] | None = None,
+        skip_spans: list[tuple[int, int]] | None = None,
     ) -> None:
         """插入候选，或更新已存在候选的置信度与元信息。"""
         cleaned_text = self._clean_extracted_value(matched_text)
         if not cleaned_text:
             return
+        if skip_spans and span_start is not None and span_end is not None:
+            if self._overlaps_any_span(span_start, span_end, skip_spans):
+                return
         normalized = canonicalize_pii_value(attr_type, cleaned_text)
         key = (normalized, attr_type.value, span_start, span_end)
         entity_id = self.resolver.build_candidate_id(
@@ -1536,6 +1980,18 @@ class RuleBasedPIIDetector:
         elif "heuristic_address_fragment" in merged_matched_by and "regex_address_span" in merged_matched_by:
             previous.confidence = min(1.0, max(previous.confidence, incoming.confidence) + 0.06)
 
+    def _overlaps_any_span(
+        self,
+        span_start: int,
+        span_end: int,
+        spans: list[tuple[int, int]],
+    ) -> bool:
+        """判断候选区间是否与已保护区间重叠。"""
+        for left, right in spans:
+            if not (span_end <= left or span_start >= right):
+                return True
+        return False
+
     def _dictionary_entry_variants(self, attr_type: PIIAttributeType, entry: _LocalDictionaryEntry) -> set[str]:
         """生成本地词条的匹配变体，包含显式 alias。"""
         variants = set(dictionary_match_variants(attr_type, entry.value))
@@ -1545,9 +2001,10 @@ class RuleBasedPIIDetector:
 
     def _dictionary_match_metadata(self, match: _DictionaryMatch) -> dict[str, list[str]] | None:
         """将本地词库命中携带的实体信息写入 metadata。"""
-        if not match.local_entity_ids:
-            return None
-        return {"local_entity_ids": list(match.local_entity_ids)}
+        merged = dict(match.metadata)
+        if match.local_entity_ids:
+            merged["local_entity_ids"] = list(match.local_entity_ids)
+        return merged or None
 
     def _candidate_metadata(self, matched_by: str, metadata: dict[str, list[str]] | None = None) -> dict[str, list[str]]:
         base = {"matched_by": [matched_by]}

@@ -2,7 +2,7 @@
 
 from privacyguard.api.dto import SanitizeRequest
 from privacyguard.application.pipelines.sanitize_pipeline import run_sanitize_pipeline
-from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType
+from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
@@ -40,6 +40,30 @@ class _Detector:
         self.candidates = candidates
 
     def detect(self, prompt_text: str, ocr_blocks: list[OCRTextBlock]) -> list[PIICandidate]:
+        return self.candidates
+
+
+class _ContextAwareDetector:
+    def __init__(self, candidates: list[PIICandidate]) -> None:
+        self.candidates = candidates
+        self.received = None
+
+    def detect(
+        self,
+        prompt_text: str,
+        ocr_blocks: list[OCRTextBlock],
+        *,
+        session_id: str | None = None,
+        turn_id: int | None = None,
+        protection_level: ProtectionLevel | None = None,
+    ) -> list[PIICandidate]:
+        self.received = {
+            "prompt_text": prompt_text,
+            "session_id": session_id,
+            "turn_id": turn_id,
+            "protection_level": protection_level,
+            "ocr_count": len(ocr_blocks),
+        }
         return self.candidates
 
 
@@ -94,6 +118,35 @@ class _PlainDecisionEngine:
             actions=[],
             metadata={"mode": "label_only"},
         )
+
+
+def test_sanitize_pipeline_passes_detector_context_when_supported() -> None:
+    detector = _ContextAwareDetector(candidates=[])
+
+    response = run_sanitize_pipeline(
+        request=SanitizeRequest(
+            session_id="session-detector-context",
+            turn_id=3,
+            prompt_text="张三",
+            screenshot=None,
+            protection_level=ProtectionLevel.STRONG,
+        ),
+        ocr_engine=_OCR([]),
+        pii_detector=detector,
+        persona_repository=_PersonaRepository([]),
+        mapping_store=InMemoryMappingStore(),
+        decision_engine=_PlainDecisionEngine(),
+        rendering_engine=_PassthroughRenderer(),
+    )
+
+    assert detector.received == {
+        "prompt_text": "张三",
+        "session_id": "session-detector-context",
+        "turn_id": 3,
+        "protection_level": ProtectionLevel.STRONG,
+        "ocr_count": 0,
+    }
+    assert response.metadata["protection_level"] == ProtectionLevel.STRONG.value
 
 
 def test_sanitize_pipeline_prefers_context_aware_decision_engine() -> None:

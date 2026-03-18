@@ -2,8 +2,10 @@
 
 import json
 
-from privacyguard.domain.enums import PIIAttributeType
+from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType, ProtectionLevel
+from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
+from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector
 
 
@@ -33,12 +35,132 @@ def test_rule_based_default_detector_does_not_load_sample_dictionary() -> None:
     assert candidates == []
 
 
+def test_rule_based_protection_level_weak_disables_secondary_name_rules(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    strong_candidates = detector.detect(
+        prompt_text="我叫王老师",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.STRONG,
+    )
+    weak_candidates = detector.detect(
+        prompt_text="我叫王老师",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.WEAK,
+    )
+
+    assert "王老师" in _candidate_texts(strong_candidates, PIIAttributeType.NAME)
+    assert _candidate_texts(weak_candidates, PIIAttributeType.NAME) == set()
+
+
+def test_rule_based_protection_level_weak_still_keeps_local_dictionary_priority(tmp_path) -> None:
+    dictionary_path = tmp_path / "pii_dictionary.json"
+    dictionary_path.write_text(json.dumps({"name": ["张三"]}, ensure_ascii=False), encoding="utf-8")
+    detector = RuleBasedPIIDetector(dictionary_path=dictionary_path)
+
+    candidates = detector.detect(
+        prompt_text="请联系张 三",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.WEAK,
+    )
+
+    assert any(
+        candidate.text == "张 三"
+        and candidate.attr_type == PIIAttributeType.NAME
+        and "dictionary_local" in candidate.metadata.get("matched_by", [])
+        for candidate in candidates
+    )
+
+
+def test_rule_based_uses_session_mapping_as_primary_dictionary_source(tmp_path) -> None:
+    mapping_store = InMemoryMappingStore()
+    mapping_store.save_replacements(
+        session_id="session-history",
+        turn_id=1,
+        records=[
+            ReplacementRecord(
+                session_id="session-history",
+                turn_id=1,
+                candidate_id="cand-1",
+                source_text="张三",
+                replacement_text="@姓名1",
+                attr_type=PIIAttributeType.NAME,
+                action_type=ActionType.GENERICIZE,
+                source=PIISourceType.PROMPT,
+            )
+        ],
+    )
+    detector = RuleBasedPIIDetector(mapping_store=mapping_store)
+
+    candidates = detector.detect(
+        prompt_text="请联系张 三",
+        ocr_blocks=[],
+        session_id="session-history",
+        turn_id=2,
+        protection_level=ProtectionLevel.WEAK,
+    )
+
+    assert any(
+        candidate.text == "张 三"
+        and candidate.attr_type == PIIAttributeType.NAME
+        and "dictionary_session" in candidate.metadata.get("matched_by", [])
+        for candidate in candidates
+    )
+
+
+def test_rule_based_prefers_session_history_over_duplicate_local_dictionary(tmp_path) -> None:
+    mapping_store = InMemoryMappingStore()
+    mapping_store.save_replacements(
+        session_id="session-priority",
+        turn_id=1,
+        records=[
+            ReplacementRecord(
+                session_id="session-priority",
+                turn_id=1,
+                candidate_id="cand-1",
+                source_text="张三",
+                replacement_text="@姓名1",
+                attr_type=PIIAttributeType.NAME,
+                action_type=ActionType.GENERICIZE,
+                source=PIISourceType.PROMPT,
+            )
+        ],
+    )
+    dictionary_path = tmp_path / "pii_dictionary.json"
+    dictionary_path.write_text(json.dumps({"name": ["张三"]}, ensure_ascii=False), encoding="utf-8")
+    detector = RuleBasedPIIDetector(dictionary_path=dictionary_path, mapping_store=mapping_store)
+
+    candidates = detector.detect(
+        prompt_text="请联系张 三",
+        ocr_blocks=[],
+        session_id="session-priority",
+        turn_id=2,
+        protection_level=ProtectionLevel.WEAK,
+    )
+
+    assert any(
+        candidate.text == "张 三"
+        and candidate.attr_type == PIIAttributeType.NAME
+        and candidate.metadata.get("matched_by", []) == ["dictionary_session"]
+        for candidate in candidates
+    )
+
+
 def test_rule_based_detects_name_fields_with_chinese_keywords(tmp_path) -> None:
     detector = _make_detector(tmp_path)
 
     candidates = detector.detect(prompt_text="患者姓名：李雷", ocr_blocks=[])
 
     assert "李雷" in _candidate_texts(candidates, PIIAttributeType.NAME)
+
+
+def test_rule_based_trims_following_field_label_from_name_context(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(prompt_text="姓名：张三 电话：13800138000", ocr_blocks=[])
+
+    assert "张三" in _candidate_texts(candidates, PIIAttributeType.NAME)
+    assert "张三 电话" not in _candidate_texts(candidates, PIIAttributeType.NAME)
 
 
 def test_rule_based_detects_self_introduced_name(tmp_path) -> None:
@@ -89,12 +211,30 @@ def test_rule_based_detects_address_from_context_field(tmp_path) -> None:
     assert "上海市浦东新区世纪大道100号" in _candidate_texts(candidates, PIIAttributeType.ADDRESS)
 
 
+def test_rule_based_trims_following_field_label_from_address_context(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(prompt_text="地址：广东省广州市天河区 电话：13800138000", ocr_blocks=[])
+
+    assert "广东省广州市天河区" in _candidate_texts(candidates, PIIAttributeType.ADDRESS)
+    assert "广东省广州市天河区 电话" not in _candidate_texts(candidates, PIIAttributeType.ADDRESS)
+
+
 def test_rule_based_detects_organization_from_context_field(tmp_path) -> None:
     detector = _make_detector(tmp_path)
 
     candidates = detector.detect(prompt_text="公司：腾讯科技", ocr_blocks=[])
 
     assert "腾讯科技" in _candidate_texts(candidates, PIIAttributeType.ORGANIZATION)
+
+
+def test_rule_based_trims_following_field_label_from_organization_context(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(prompt_text="公司：腾讯科技 地址：北京市海淀区", ocr_blocks=[])
+
+    assert "腾讯科技" in _candidate_texts(candidates, PIIAttributeType.ORGANIZATION)
+    assert "腾讯科技 地址" not in _candidate_texts(candidates, PIIAttributeType.ORGANIZATION)
 
 
 def test_rule_based_detects_organization_from_employment_phrase(tmp_path) -> None:
@@ -133,6 +273,14 @@ def test_rule_based_detects_short_ocr_address_fragments(tmp_path) -> None:
 
     assert "海淀区" in address_texts
     assert "知春路" in address_texts
+
+
+def test_rule_based_does_not_collect_full_sentence_as_address_when_multiple_fields_present(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(prompt_text="公司：腾讯科技 地址：北京市海淀区", ocr_blocks=[])
+
+    assert "公司：腾讯科技 地址：北京市海淀区" not in _candidate_texts(candidates, PIIAttributeType.ADDRESS)
 
 
 def test_rule_based_detects_phone_across_adjacent_ocr_blocks(tmp_path) -> None:
@@ -207,6 +355,16 @@ def test_rule_based_detects_masked_phone_and_id_from_context_fields(tmp_path) ->
 
     assert "138****8000" in _candidate_texts(candidates, PIIAttributeType.PHONE)
     assert "110101********1234" in _candidate_texts(candidates, PIIAttributeType.ID_NUMBER)
+
+
+def test_rule_based_detects_spaced_id_and_email_from_ocr_like_text(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    id_candidates = detector.detect(prompt_text="身份证：110101 19900101 1234", ocr_blocks=[])
+    email_candidates = detector.detect(prompt_text="邮箱：foo @ bar.com", ocr_blocks=[])
+
+    assert "110101 19900101 1234" in _candidate_texts(id_candidates, PIIAttributeType.ID_NUMBER)
+    assert "foo @ bar.com" in _candidate_texts(email_candidates, PIIAttributeType.EMAIL)
 
 
 def test_rule_based_detects_other_only_with_explicit_context(tmp_path) -> None:
