@@ -3,7 +3,11 @@
 import pytest
 
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock, PolygonPoint
-from privacyguard.infrastructure.ocr.ppocr_adapter import PPOCREngineAdapter, _parse_paddle_result
+from privacyguard.infrastructure.ocr.ppocr_adapter import (
+    MissingDependencyOCRBackend,
+    PPOCREngineAdapter,
+    _parse_paddle_result,
+)
 from privacyguard.utils.image import ensure_supported_image_input
 
 
@@ -133,3 +137,10 @@ def test_adapter_extract_maps_polygon_and_rotation() -> None:
     assert blocks[0].score == 0.96
     assert blocks[0].line_id == 1
     assert blocks[0].source == "screenshot"
+
+
+def test_missing_dependency_backend_fails_fast_with_install_hint() -> None:
+    adapter = PPOCREngineAdapter(backend=MissingDependencyOCRBackend())
+
+    with pytest.raises(RuntimeError, match="paddleocr"):
+        adapter.extract("https://example.com/demo.png")

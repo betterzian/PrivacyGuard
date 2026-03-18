@@ -16,12 +16,16 @@ class ActionRestorer:
         )
         restored_text = cloud_text
         restored_slots: list[RestoredSlot] = []
+        seen_placeholders: set[str] = set()
         for record in ordered:
             if not record.replacement_text:
+                continue
+            if record.replacement_text in seen_placeholders:
                 continue
             if record.replacement_text not in restored_text:
                 continue
             restored_text = restored_text.replace(record.replacement_text, record.source_text)
+            seen_placeholders.add(record.replacement_text)
             restored_slots.append(
                 RestoredSlot(
                     attr_type=record.attr_type.value,
@@ -30,4 +34,3 @@ class ActionRestorer:
                 )
             )
         return restored_text, restored_slots
-

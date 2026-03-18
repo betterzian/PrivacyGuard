@@ -12,8 +12,6 @@ def main() -> None:
             "turn_id": 1,
             "prompt": "我叫张三，电话是13800138000。",
             "image": None,
-            "detector_mode": "rule_based",
-            "decision_mode": "label_only",
         }
     )
     print("Sanitized:", sanitize_response["masked_prompt"])

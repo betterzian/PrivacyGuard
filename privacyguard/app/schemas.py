@@ -1,13 +1,15 @@
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from privacyguard.api.dto import RestoreRequest, RestoreResponse, SanitizeRequest, SanitizeResponse
 
 
 class SanitizePayloadModel(BaseModel):
     """sanitize 边界入参模型（dict 解析用）。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     session_id: str
     turn_id: int = Field(default=0, ge=0)
@@ -17,6 +19,8 @@ class SanitizePayloadModel(BaseModel):
 
 class RestorePayloadModel(BaseModel):
     """restore 边界入参模型（dict 解析用）。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     session_id: str
     turn_id: int = Field(default=0, ge=0)

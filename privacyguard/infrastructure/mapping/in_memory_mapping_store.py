@@ -17,12 +17,13 @@ class InMemoryMappingStore:
     def save_replacements(self, session_id: str, turn_id: int, records: list[ReplacementRecord]) -> None:
         """保存某会话某轮替换记录并执行一致性校验。"""
         self._validate_save_args(session_id=session_id, turn_id=turn_id)
-        target = self._records.setdefault((session_id, turn_id), {})
+        target: dict[str, ReplacementRecord] = {}
         for record in records:
             if record.action_type == ActionType.KEEP:
                 continue
             self._validate_record(record=record, session_id=session_id, turn_id=turn_id)
             target[record.candidate_id] = record
+        self._records[(session_id, turn_id)] = target
 
     def get_replacements(self, session_id: str, turn_id: int | None = None) -> list[ReplacementRecord]:
         """读取会话级或轮次级替换记录。"""
@@ -69,4 +70,3 @@ class InMemoryMappingStore:
             raise ValueError("record.turn_id 与入参 turn_id 不一致。")
         if record.action_type == ActionType.PERSONA_SLOT and not record.persona_id:
             raise ValueError("PERSONA_SLOT 动作必须携带 persona_id。")
-

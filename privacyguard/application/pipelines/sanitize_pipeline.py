@@ -2,6 +2,7 @@
 
 from privacyguard.api.dto import SanitizeRequest, SanitizeResponse
 from privacyguard.application.services.decision_context_builder import DecisionContextBuilder
+from privacyguard.application.services.placeholder_allocator import SessionPlaceholderAllocator
 from privacyguard.application.services.session_service import SessionService
 from privacyguard.domain.interfaces.decision_engine import DecisionEngine
 from privacyguard.domain.interfaces.mapping_store import MappingStore
@@ -76,6 +77,7 @@ def run_sanitize_pipeline(
             candidates=candidates,
             session_binding=session_binding,
         )
+    plan = SessionPlaceholderAllocator(mapping_store=mapping_store).assign(plan)
     sanitized_prompt_text, applied_records = rendering_engine.render_text(request.prompt_text, plan)
     sanitized_screenshot = (
         rendering_engine.render_image(request.screenshot, plan, ocr_blocks=ocr_blocks)

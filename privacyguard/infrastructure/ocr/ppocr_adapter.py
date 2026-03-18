@@ -181,6 +181,25 @@ class MockOCRBackend:
         return []
 
 
+class MissingDependencyOCRBackend:
+    """缺少 OCR 依赖时的显式失败后端。"""
+
+    def __init__(self, install_command: str = "python -m pip install -e '.[ocr]'") -> None:
+        self.install_command = install_command
+
+    def predict(self, input: Any) -> Any:
+        raise RuntimeError(self._message())
+
+    def infer(self, image: Any) -> list[dict[str, Any]]:
+        raise RuntimeError(self._message())
+
+    def _message(self) -> str:
+        return (
+            "未检测到 paddleocr，无法执行截图 OCR。"
+            f"请先安装真实 OCR 依赖：{self.install_command}"
+        )
+
+
 class PaddleOCRBackend:
     """基于 PaddleOCR PP-OCRv5 的真实推理后端。"""
 
@@ -326,11 +345,10 @@ def load_ppocr_backend(
     use_textline_orientation: bool = False,
     **kwargs: Any,
 ) -> OCRBackendProtocol:
-    """加载 OCR 后端：若已安装 paddleocr 则返回 PP-OCRv5 真实后端，否则返回回退后端。"""
+    """加载 OCR 后端：若已安装 paddleocr 则返回 PP-OCRv5 真实后端，否则返回显式失败后端。"""
     _ = model_name
     try:
         from paddleocr import PaddleOCR  # noqa: F401
-        print("[PrivacyGuard] OCR backend: PP-OCRv5 (from paddleocr import PaddleOCR)")
         return PaddleOCRBackend(
             use_doc_orientation_classify=use_doc_orientation_classify,
             use_doc_unwarping=use_doc_unwarping,
@@ -338,8 +356,7 @@ def load_ppocr_backend(
             **kwargs,
         )
     except ImportError:
-        print("[PrivacyGuard] OCR backend: Mock (paddleocr not installed, screenshot OCR disabled)")
-        return MockOCRBackend()
+        return MissingDependencyOCRBackend()
 
 
 def normalize_image_path(path: str | Path) -> Path:

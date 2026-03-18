@@ -215,18 +215,17 @@ guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_only")
 
 | 顺序 | 调用 | 位置 | 说明 |
 |------|------|------|------|
-| 7 | `mapping_store.get_replacements(session_id, turn_id)` | `application/pipelines/restore_pipeline.py` | 当前轮替换记录（本例即 sanitize 时写入的） |
-| 8 | `mapping_store.get_replacements(session_id)` | 同上 | 会话级所有轮记录 |
-| 9 | `_merge_records(current_turn_records, session_records)` | 同上 | 当前轮优先，按 turn_id 与 replacement_text 长度排序合并 |
-| 10 | `restoration_module.restore(request.cloud_text, combined_records)` | 同上 | 见 **4.4 节** |
-| 11 | 构造 `RestoreResponse(restored_text=..., restored_slots=..., metadata=...)` | 同上 | 返回 DTO |
+| 7 | `mapping_store.get_replacements(session_id, turn_id)` | `application/pipelines/restore_pipeline.py` | 只读取当前轮替换记录（本例即 sanitize 时写入的） |
+| 8 | `_merge_records(current_turn_records)` | 同上 | 对当前轮记录按 `replacement_text` 去重 |
+| 9 | `restoration_module.restore(request.cloud_text, combined_records)` | 同上 | 见 **4.4 节** |
+| 10 | 构造 `RestoreResponse(restored_text=..., restored_slots=..., metadata=...)` | 同上 | 返回 DTO |
 
 ### 4.4 还原执行：ActionRestorer.restore
 
 | 顺序 | 调用 | 位置 | 说明 |
 |------|------|------|------|
 | 1 | `restore(cloud_text, records)` | `infrastructure/restoration/action_restorer.py` | 按 (turn_id, len(replacement_text)) 倒序排序 |
-| 2 | 对每条 record：若 `replacement_text` 在 `restored_text` 中，则 `restored_text.replace(replacement_text, record.source_text)`，并追加 `RestoredSlot` | 同上 | 将脱敏占位符还原为原文 |
+| 2 | 对每条 record：若 `replacement_text` 在 `restored_text` 中，则替换一次对应占位符，并追加 `RestoredSlot` | 同上 | 将当前轮脱敏占位符还原为原文 |
 | 3 | 返回 `(restored_text, restored_slots)` | 同上 | 供 RestoreResponse 使用 |
 
 ### 4.5 响应回传至调用方

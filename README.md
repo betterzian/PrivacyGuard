@@ -12,7 +12,7 @@ PrivacyGuard 是一个面向「上传前脱敏（API_1）+ 云端返回后还原
 - 检测链路：支持 `rule_based`
 - 决策链路：支持 `label_only`、`label_persona_mixed`、`de_model`（规则占位版）
 - 渲染闭环：可将决策应用到 prompt 与截图，并写入映射
-- 还原闭环：可基于 turn/session 映射恢复云端返回文本
+- 还原闭环：基于当前 turn 映射恢复云端返回文本
 
 ## 3. 当前支持模式
 
@@ -73,6 +73,12 @@ PrivacyGuard/
 python -m pip install -e .[dev]
 ```
 
+如果需要真实截图 OCR：
+
+```bash
+python -m pip install -e '.[dev,ocr]'
+```
+
 ## 6. 最小运行示例
 
 可直接运行：
@@ -118,7 +124,7 @@ restore_resp = guard.restore(
 ## 8. 当前限制
 
 - `de_model` 当前为规则评分占位版，不是训练模型推理。
-- OCR 默认走适配器回退后端；未接入真实模型时不会输出真实 OCR 结果。
+- 截图请求若未安装 `paddleocr` 依赖，会直接报错提示安装；不会再静默降级为空 OCR。
 - 截图重绘是最小可行实现（白底覆盖+文本重绘），不追求最终视觉效果。
 - 检测/决策模式在构造 `PrivacyGuard` 时指定，单次请求不可覆盖。
 
