@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from privacyguard.domain.enums import ActionType, PIIAttributeType
+from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType
 from privacyguard.domain.models.ocr import BoundingBox
 
 
@@ -12,6 +12,7 @@ class DecisionAction(BaseModel):
     candidate_id: str
     action_type: ActionType
     attr_type: PIIAttributeType
+    source: PIISourceType = PIISourceType.PROMPT
     replacement_text: str | None = None
     source_text: str | None = None
     persona_id: str | None = None

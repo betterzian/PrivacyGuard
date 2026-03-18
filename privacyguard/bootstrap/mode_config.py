@@ -20,6 +20,7 @@ DECISION_MODE_ALIASES = {
 DEFAULT_FILL_MODE = "ring"
 FILL_MODE_ALIASES = {
     "ring": "ring",
+    "gradient": "gradient",
     "cv": "cv",
     "mix": "mix",
 }

@@ -18,7 +18,12 @@ from privacyguard.infrastructure.mapping.json_mapping_store import JsonMappingSt
 from privacyguard.infrastructure.ocr.ppocr_adapter import PPOCREngineAdapter
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector
-from privacyguard.infrastructure.rendering.fill_strategies import CVFillStrategy, MixFillStrategy, RingFillStrategy
+from privacyguard.infrastructure.rendering.fill_strategies import (
+    CVFillStrategy,
+    GradientFillStrategy,
+    MixFillStrategy,
+    RingFillStrategy,
+)
 from privacyguard.infrastructure.rendering.prompt_renderer import PromptRenderer
 from privacyguard.infrastructure.restoration.action_restorer import ActionRestorer
 
@@ -141,6 +146,7 @@ def register_default_components(registry: ComponentRegistry) -> None:
     registry.register_restoration_mode("placeholder", PlaceholderRestorationModule)
     registry.register_restoration_mode("action_restorer", ActionRestorer)
     registry.register_screenshot_fill_mode("ring", RingFillStrategy)
+    registry.register_screenshot_fill_mode("gradient", GradientFillStrategy)
     registry.register_screenshot_fill_mode("cv", CVFillStrategy)
     registry.register_screenshot_fill_mode("mix", MixFillStrategy)
 

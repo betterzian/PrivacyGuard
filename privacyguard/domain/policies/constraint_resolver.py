@@ -31,6 +31,7 @@ class ConstraintResolver:
                         candidate_id=action.candidate_id,
                         action_type=ActionType.KEEP,
                         attr_type=action.attr_type,
+                        source=action.source,
                         replacement_text=None,
                         persona_id=None,
                         bbox=action.bbox,

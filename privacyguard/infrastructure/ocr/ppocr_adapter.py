@@ -1,11 +1,12 @@
 """PP-OCR 适配层实现。"""
 
 import json
+import math
 import warnings
 from pathlib import Path
 from typing import Any, Protocol
 
-from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
+from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock, PolygonPoint
 from privacyguard.utils.image import ensure_supported_image_input
 
 
@@ -112,6 +113,31 @@ def _parse_paddle_result(res: Any) -> list[dict[str, Any]]:
             pass
         return {"x": 0, "y": 0, "width": 1, "height": 1}
 
+    def box_to_polygon(box: Any) -> list[dict[str, float]] | None:
+        if not isinstance(box, (list, tuple)) or len(box) < 2:
+            return None
+        if not isinstance(box[0], (list, tuple)):
+            return None
+        points: list[dict[str, float]] = []
+        for point in box:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            points.append({"x": float(point[0]), "y": float(point[1])})
+        return points or None
+
+    def polygon_rotation_degrees(polygon: list[dict[str, float]] | None) -> float:
+        if not polygon or len(polygon) < 2:
+            return 0.0
+        for index in range(len(polygon)):
+            p1 = polygon[index]
+            p2 = polygon[(index + 1) % len(polygon)]
+            dx = p2["x"] - p1["x"]
+            dy = p2["y"] - p1["y"]
+            if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+                continue
+            return math.degrees(math.atan2(dy, dx))
+        return 0.0
+
     out: list[dict[str, Any]] = []
     scores = rec_scores if isinstance(rec_scores, list) else ([float(rec_scores)] * n if rec_scores is not None else [1.0] * n)
     boxes = rec_boxes or rec_polys or dt_polys
@@ -124,8 +150,19 @@ def _parse_paddle_result(res: Any) -> list[dict[str, Any]]:
     for i in range(n):
         text = (rec_texts[i] if i < len(rec_texts) else "").strip() or ""
         score = float(scores[i]) if i < len(scores) else 1.0
-        bbox = box_to_xywh(boxes[i]) if i < len(boxes) else {"x": 0, "y": 0, "width": 1, "height": 1}
-        out.append({"text": text, "bbox": bbox, "score": score, "line_id": i})
+        raw_box = boxes[i] if i < len(boxes) else {"x": 0, "y": 0, "width": 1, "height": 1}
+        bbox = box_to_xywh(raw_box)
+        polygon = box_to_polygon(raw_box)
+        out.append(
+            {
+                "text": text,
+                "bbox": bbox,
+                "polygon": polygon,
+                "rotation_degrees": polygon_rotation_degrees(polygon),
+                "score": score,
+                "line_id": i,
+            }
+        )
     return out
 
 
@@ -224,20 +261,26 @@ class PPOCREngineAdapter:
             text = str(item.get("text", "")).strip()
             if not text:
                 continue
+            polygon = self._to_polygon(item.get("polygon"))
             bbox_data = item.get("bbox", {})
-            bbox = self._to_bbox(bbox_data)
+            bbox = None if polygon is not None else self._to_bbox(bbox_data)
             score = float(item.get("score", 1.0))
             line_id = int(item.get("line_id", index))
-            blocks.append(
-                OCRTextBlock(
-                    text=text,
-                    bbox=bbox,
-                    block_id=f"ocr-{line_id}-{index}-{bbox.x}-{bbox.y}-{bbox.width}-{bbox.height}",
-                    score=max(0.0, min(1.0, score)),
-                    line_id=max(0, line_id),
-                    source="screenshot",
-                )
+            block = OCRTextBlock(
+                text=text,
+                bbox=bbox,
+                polygon=polygon,
+                rotation_degrees=float(item.get("rotation_degrees", 0.0)),
+                score=max(0.0, min(1.0, score)),
+                line_id=max(0, line_id),
+                source="screenshot",
             )
+            if block.block_id is None and block.bbox is not None:
+                block.block_id = (
+                    f"ocr-{line_id}-{index}-{block.bbox.x}-{block.bbox.y}-"
+                    f"{block.bbox.width}-{block.bbox.height}"
+                )
+            blocks.append(block)
         return blocks
 
     def _to_bbox(self, bbox_data: Any) -> BoundingBox:
@@ -258,6 +301,22 @@ class PPOCREngineAdapter:
                 height=max(1, int(height)),
             )
         return BoundingBox(x=0, y=0, width=1, height=1)
+
+    def _to_polygon(self, polygon_data: Any) -> list[PolygonPoint] | None:
+        """将后端 polygon 数据转换为统一 PolygonPoint 列表。"""
+        if not isinstance(polygon_data, (list, tuple)):
+            return None
+        points: list[PolygonPoint] = []
+        for point in polygon_data:
+            if isinstance(point, dict):
+                x = point.get("x")
+                y = point.get("y")
+            elif isinstance(point, (list, tuple)) and len(point) >= 2:
+                x, y = point[0], point[1]
+            else:
+                continue
+            points.append(PolygonPoint(x=float(x), y=float(y)))
+        return points or None
 
 
 def load_ppocr_backend(

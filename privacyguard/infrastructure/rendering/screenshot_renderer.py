@@ -1,13 +1,14 @@
 """截图渲染器实现。填充逻辑由注入的 ScreenshotFillStrategy 提供（与 decision 一致：按模式注册、工厂构建）。"""
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Any
 
 from privacyguard.domain.enums import ActionType
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.interfaces.screenshot_fill_strategy import ScreenshotFillStrategy
-from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
+from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock, PolygonPoint
 from privacyguard.infrastructure.rendering.fill_strategies import RingFillStrategy
 
 # 常见系统字体路径
@@ -36,6 +37,31 @@ class _DrawItem:
 
     bbox: BoundingBox
     text: str
+    block_id: str | None = None
+    original_text: str | None = None
+    polygon: list[PolygonPoint] | None = None
+    rotation_degrees: float = 0.0
+
+
+@dataclass
+class _ResolvedAction:
+    """可安全应用到 OCR 原文的替换动作。"""
+
+    action: DecisionAction
+    start: int
+    end: int
+
+
+@dataclass
+class _TextLayout:
+    """文本布局结果。"""
+
+    mask: Any
+    rendered_text: str
+    font_size: int
+    char_spacing: float = 0.0
+    scale_x: float = 1.0
+    scale_y: float = 1.0
 
 
 class ScreenshotRenderer:
@@ -62,6 +88,7 @@ class ScreenshotRenderer:
             return None
         pil_image = self._to_pil_image(image)
         if pil_image is None:
+            print("[PrivacyGuard] screenshot rendering skipped: Pillow unavailable or image input unsupported.")
             return image
         draw_items = self._build_draw_items(plan, ocr_blocks=ocr_blocks or [])
         pil_image, skip_fill_flags = self._fill_strategy.apply(pil_image, plan, draw_items)
@@ -69,8 +96,7 @@ class ScreenshotRenderer:
         for i, item in enumerate(draw_items):
             self._draw_text_box(
                 draw=draw,
-                bbox=item.bbox,
-                text=item.text,
+                item=item,
                 image=pil_image,
                 skip_fill=skip_fill_flags[i],
             )
@@ -81,6 +107,7 @@ class ScreenshotRenderer:
         block_map = {block.block_id: block for block in ocr_blocks if block.block_id}
         grouped_actions: dict[str, list[DecisionAction]] = {}
         ordered_block_ids: list[str] = []
+        block_legacy_actions: dict[str, DecisionAction] = {}
         legacy_items: list[_DrawItem] = []
 
         for action in plan.actions:
@@ -88,62 +115,149 @@ class ScreenshotRenderer:
                 continue
             if not action.replacement_text or action.bbox is None:
                 continue
-            if (
-                action.block_id
-                and action.block_id in block_map
-                and action.span_start is not None
-                and action.span_end is not None
-            ):
-                if action.block_id not in grouped_actions:
-                    grouped_actions[action.block_id] = []
-                    ordered_block_ids.append(action.block_id)
-                grouped_actions[action.block_id].append(action)
+            if action.block_id and action.block_id in block_map:
+                if action.span_start is not None and action.span_end is not None:
+                    if action.block_id not in grouped_actions:
+                        grouped_actions[action.block_id] = []
+                        ordered_block_ids.append(action.block_id)
+                    grouped_actions[action.block_id].append(action)
+                else:
+                    block_legacy_actions.setdefault(action.block_id, action)
                 continue
             legacy_items.append(_DrawItem(bbox=action.bbox, text=action.replacement_text))
 
         draw_items: list[_DrawItem] = []
+        handled_block_ids = set()
         for block_id in ordered_block_ids:
             block = block_map.get(block_id)
             if block is None:
                 continue
             rebuilt_text = self._rebuild_block_text(block.text, grouped_actions.get(block_id, []))
-            draw_items.append(_DrawItem(bbox=block.bbox, text=rebuilt_text))
+            draw_items.append(
+                _DrawItem(
+                    bbox=block.bbox,
+                    text=rebuilt_text,
+                    block_id=block_id,
+                    original_text=block.text,
+                    polygon=block.polygon,
+                    rotation_degrees=block.rotation_degrees,
+                )
+            )
+            handled_block_ids.add(block_id)
+        for block_id, action in block_legacy_actions.items():
+            if block_id in handled_block_ids:
+                continue
+            block = block_map.get(block_id)
+            if block is None:
+                continue
+            draw_items.append(
+                _DrawItem(
+                    bbox=block.bbox,
+                    text=action.replacement_text or "",
+                    block_id=block_id,
+                    original_text=block.text,
+                    polygon=block.polygon,
+                    rotation_degrees=block.rotation_degrees,
+                )
+            )
         draw_items.extend(legacy_items)
         return draw_items
 
     def _rebuild_block_text(self, original_text: str, actions: list[DecisionAction]) -> str:
-        """按 span 在 OCR 原文上做局部替换，再生成整框重绘文本。"""
+        """按 span 在 OCR 原文上做局部替换；span 不可靠时尝试回退到原文查找。"""
         selected = self._select_non_overlapping_actions(original_text, actions)
         if not selected:
-            return actions[0].replacement_text or original_text
+            return self._fallback_rebuild_block_text(original_text, actions)
         rebuilt = original_text
-        for action in sorted(selected, key=lambda item: item.span_start or 0, reverse=True):
-            start = action.span_start or 0
-            end = action.span_end or start
-            rebuilt = rebuilt[:start] + (action.replacement_text or "") + rebuilt[end:]
+        for resolved in sorted(selected, key=lambda item: item.start, reverse=True):
+            rebuilt = rebuilt[:resolved.start] + (resolved.action.replacement_text or "") + rebuilt[resolved.end:]
         return rebuilt
 
     def _select_non_overlapping_actions(
         self,
         original_text: str,
         actions: list[DecisionAction],
-    ) -> list[DecisionAction]:
+    ) -> list[_ResolvedAction]:
         """优先保留更长的非重叠替换，避免同框 span 相互踩踏。"""
-        valid_actions = [action for action in actions if self._is_valid_span_action(original_text, action)]
         ranked = sorted(
-            valid_actions,
-            key=lambda item: (-(item.span_end - item.span_start), item.span_start),
+            actions,
+            key=lambda item: (
+                0 if self._is_valid_span_action(original_text, item) else 1,
+                -len(item.source_text or ""),
+                item.span_start if item.span_start is not None else 10**9,
+            ),
         )
-        selected: list[DecisionAction] = []
+        selected: list[_ResolvedAction] = []
         occupied: list[tuple[int, int]] = []
         for action in ranked:
-            start = action.span_start or 0
-            end = action.span_end or start
+            span = self._resolve_action_span(original_text, action, occupied)
+            if span is None:
+                continue
+            selected.append(_ResolvedAction(action=action, start=span[0], end=span[1]))
+            occupied.append(span)
+        return selected
+
+    def _resolve_action_span(
+        self,
+        original_text: str,
+        action: DecisionAction,
+        occupied: list[tuple[int, int]],
+    ) -> tuple[int, int] | None:
+        """优先使用显式 span，失败时退回到原文中的 source_text 定位。"""
+        for start, end in self._candidate_spans(original_text, action):
             if any(not (end <= used_start or start >= used_end) for used_start, used_end in occupied):
                 continue
-            selected.append(action)
-            occupied.append((start, end))
-        return selected
+            return (start, end)
+        return None
+
+    def _candidate_spans(self, original_text: str, action: DecisionAction) -> list[tuple[int, int]]:
+        """枚举 action 在原文中的候选 span。"""
+        spans: list[tuple[int, int]] = []
+        if self._is_valid_span_action(original_text, action):
+            spans.append((action.span_start, action.span_end))
+        source_text = action.source_text or ""
+        if not source_text:
+            return spans
+        literal_spans = self._find_literal_spans(original_text, source_text)
+        if action.span_start is not None:
+            literal_spans.sort(key=lambda item: (abs(item[0] - action.span_start), item[0]))
+        for span in literal_spans:
+            if span not in spans:
+                spans.append(span)
+        return spans
+
+    def _find_literal_spans(self, original_text: str, source_text: str) -> list[tuple[int, int]]:
+        """查找 source_text 在原文中的全部字面位置。"""
+        spans: list[tuple[int, int]] = []
+        if not source_text:
+            return spans
+        start = 0
+        while True:
+            index = original_text.find(source_text, start)
+            if index < 0:
+                return spans
+            spans.append((index, index + len(source_text)))
+            start = index + 1
+
+    def _fallback_rebuild_block_text(self, original_text: str, actions: list[DecisionAction]) -> str:
+        """显式 span 全部失效时，尽量基于 source_text 在原文中回退重建。"""
+        rebuilt = original_text
+        applied = False
+        for action in sorted(actions, key=lambda item: len(item.source_text or ""), reverse=True):
+            source_text = action.source_text or ""
+            replacement_text = action.replacement_text or ""
+            if not source_text or not replacement_text:
+                continue
+            index = rebuilt.find(source_text)
+            if index < 0:
+                continue
+            rebuilt = rebuilt[:index] + replacement_text + rebuilt[index + len(source_text):]
+            applied = True
+        if applied:
+            return rebuilt
+        if actions and actions[0].replacement_text:
+            return actions[0].replacement_text
+        return original_text
 
     def _is_valid_span_action(self, original_text: str, action: DecisionAction) -> bool:
         """校验 action 的 span 是否能安全应用到 OCR 原文。"""
@@ -234,14 +348,13 @@ class ScreenshotRenderer:
     def _draw_text_box(
         self,
         draw,
-        bbox: BoundingBox,
-        text: str,
+        item: _DrawItem,
         image: Any,
         skip_fill: bool = False,
     ) -> None:
-        """环带平均色填充（无边框）或跳过填充（cv 已 inpaint）；全文绘制，不够时缩小字号直至全部放入 box。"""
-        from PIL import ImageDraw, ImageFont
-
+        """按原文估计字号，优先横向适配，再将离屏文字蒙版居中贴回 box。"""
+        bbox = item.bbox
+        text = item.text
         left = bbox.x
         top = bbox.y
         right = bbox.x + bbox.width
@@ -252,45 +365,395 @@ class ScreenshotRenderer:
         if not text:
             return
         pad = 2
-        target_w = max(4, bbox.width - 2 * pad)
-        target_h = max(4, bbox.height - 2 * pad)
-        font_path = _get_font_path()
-        font_size = self._font_size_from_bbox_height(bbox)
-        min_font_size = 6
-        font = None
-        try:
-            if font_path is not None:
-                font = ImageFont.truetype(str(font_path), size=font_size)
-            else:
-                font = ImageFont.load_default()
-        except Exception:
-            font = ImageFont.load_default()
-        while font_path and font_size >= min_font_size:
-            try:
-                font = ImageFont.truetype(str(font_path), size=font_size)
-                bbox_xy = draw.textbbox((0, 0), text, font=font)
-                tw = bbox_xy[2] - bbox_xy[0]
-                th = bbox_xy[3] - bbox_xy[1]
-                if tw <= target_w and th <= target_h:
-                    break
-                font_size = max(min_font_size, font_size - 2)
-            except Exception:
-                break
-        if font is None:
-            try:
-                font = ImageFont.truetype(str(font_path), size=font_size) if font_path else ImageFont.load_default()
-            except Exception:
-                font = ImageFont.load_default()
-        try:
-            bbox_xy = draw.textbbox((0, 0), text, font=font)
-            tw = bbox_xy[2] - bbox_xy[0]
-            th = bbox_xy[3] - bbox_xy[1]
-            offset_y = bbox_xy[1]
-            tx = left + pad
-            ty = top + max(0, (bbox.height - th) // 2) - offset_y
-        except Exception:
-            tx, ty = left + pad, top + pad
+        center_x, center_y, target_w, target_h, rotation_degrees = self._text_region_geometry(item, pad=pad)
+        layout = self._resolve_text_layout(
+            draw=draw,
+            bbox=bbox,
+            text=text,
+            original_text=item.original_text or text,
+            target_w=target_w,
+            target_h=target_h,
+        )
+        if layout is None:
+            return
+        mask = layout.mask
+        if abs(rotation_degrees) >= 1.0:
+            mask = self._rotate_mask(mask, -rotation_degrees)
+        mask_w, mask_h = mask.size
+        tx = int(round(center_x - mask_w / 2))
+        ty = int(round(center_y - mask_h / 2))
         r, g, b = fill_rgb
         luminance = (r * 299 + g * 587 + b * 114) / 1000
         text_fill = (255, 255, 255) if luminance < 140 else (0, 0, 0)
-        draw.text((tx, ty), text, fill=text_fill, font=font)
+        image.paste(text_fill, (tx, ty), mask)
+
+    def _resolve_text_layout(
+        self,
+        draw,
+        bbox: BoundingBox,
+        text: str,
+        original_text: str,
+        *,
+        target_w: int | None = None,
+        target_h: int | None = None,
+    ) -> _TextLayout | None:
+        """先锁定接近原文的基准字号，再按宽度优先适配 replacement 文本。"""
+        from PIL import ImageFont
+
+        pad = 2
+        target_w = target_w if target_w is not None else max(4, bbox.width - 2 * pad)
+        target_h = target_h if target_h is not None else max(4, bbox.height - 2 * pad)
+        font_path = _get_font_path()
+        base_font_size = self._estimate_base_font_size(
+            draw=draw,
+            text=original_text or text,
+            font_path=font_path,
+            target_h=target_h,
+        )
+        min_font_size = 6
+        current_size = max(base_font_size, min_font_size)
+        while current_size >= min_font_size:
+            font = self._load_font(font_path, current_size, ImageFont)
+            original_single_line = self._build_text_mask(draw, original_text or text, font)
+            desired_width = min(target_w, original_single_line.size[0])
+            for single_line, char_spacing in self._single_line_masks(
+                draw=draw,
+                text=text,
+                font=font,
+                desired_width=desired_width,
+            ):
+                exact_layout = self._layout_from_mask(
+                    mask=single_line,
+                    rendered_text=text,
+                    font_size=current_size,
+                    target_w=target_w,
+                    target_h=target_h,
+                    allow_x_scale=False,
+                    allow_y_scale=False,
+                    char_spacing=char_spacing,
+                )
+                if exact_layout is not None:
+                    return exact_layout
+                compressed_single_line = self._layout_from_mask(
+                    mask=single_line,
+                    rendered_text=text,
+                    font_size=current_size,
+                    target_w=target_w,
+                    target_h=target_h,
+                    allow_x_scale=True,
+                    allow_y_scale=False,
+                    min_x_scale=0.72,
+                    char_spacing=char_spacing,
+                )
+                if compressed_single_line is not None:
+                    return compressed_single_line
+            wrapped_text = self._wrap_text_to_width(draw, text, font, target_w)
+            if wrapped_text != text:
+                wrapped_mask = self._build_text_mask(draw, wrapped_text, font)
+                wrapped_layout = self._layout_from_mask(
+                    mask=wrapped_mask,
+                    rendered_text=wrapped_text,
+                    font_size=current_size,
+                    target_w=target_w,
+                    target_h=target_h,
+                    allow_x_scale=False,
+                    allow_y_scale=False,
+                    char_spacing=0.0,
+                )
+                if wrapped_layout is not None:
+                    return wrapped_layout
+                compressed_wrapped_layout = self._layout_from_mask(
+                    mask=wrapped_mask,
+                    rendered_text=wrapped_text,
+                    font_size=current_size,
+                    target_w=target_w,
+                    target_h=target_h,
+                    allow_x_scale=True,
+                    allow_y_scale=False,
+                    min_x_scale=0.72,
+                    char_spacing=0.0,
+                )
+                if compressed_wrapped_layout is not None:
+                    return compressed_wrapped_layout
+            current_size = max(min_font_size, current_size - 2)
+            if current_size == min_font_size:
+                break
+
+        final_font = self._load_font(font_path, min_font_size, ImageFont)
+        final_text = self._wrap_text_to_width(draw, text, final_font, target_w) or text
+        final_mask = self._build_text_mask(draw, final_text, final_font)
+        return self._layout_from_mask(
+            mask=final_mask,
+            rendered_text=final_text,
+            font_size=min_font_size,
+            target_w=target_w,
+            target_h=target_h,
+            allow_x_scale=True,
+            allow_y_scale=True,
+            min_x_scale=0.0,
+            min_y_scale=0.0,
+            char_spacing=0.0,
+        )
+
+    def _estimate_base_font_size(
+        self,
+        draw,
+        text: str,
+        font_path: Path | None,
+        target_h: int,
+    ) -> int:
+        """根据原 OCR 文本的视觉高度反推一个接近原图的基准字号。"""
+        from PIL import ImageFont
+
+        sample_text = text or "Hg"
+        low = 6
+        high = max(12, target_h * 3)
+        best = low
+        while low <= high:
+            mid = (low + high) // 2
+            font = self._load_font(font_path, mid, ImageFont)
+            bbox_xy = self._measure_multiline_text(draw, sample_text, font)
+            text_h = bbox_xy[3] - bbox_xy[1]
+            if text_h <= target_h:
+                best = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+        return max(best, 6)
+
+    def _load_font(self, font_path: Path | None, font_size: int, image_font_module):
+        """加载指定字号字体，失败时回退到默认字体。"""
+        try:
+            if font_path is not None:
+                return image_font_module.truetype(str(font_path), size=font_size)
+        except Exception:
+            pass
+        return image_font_module.load_default()
+
+    def _single_line_masks(
+        self,
+        draw,
+        text: str,
+        font,
+        desired_width: int,
+    ) -> list[tuple[Any, float]]:
+        """生成单行文本的自然字距与自适应字距候选。"""
+        candidates: list[tuple[Any, float]] = []
+        natural_mask = self._build_text_mask(draw, text, font)
+        candidates.append((natural_mask, 0.0))
+        char_spacing = self._estimate_char_spacing(text, natural_mask.size[0], desired_width)
+        if abs(char_spacing) < 0.5:
+            return candidates
+        candidates.append((self._build_text_mask(draw, text, font, char_spacing=char_spacing), char_spacing))
+        return sorted(candidates, key=lambda item: abs(item[0].size[0] - desired_width))
+
+    def _estimate_char_spacing(self, text: str, natural_width: int, desired_width: int) -> float:
+        """估计单行文本的字符间距，使其更接近原文占宽。"""
+        if len(text) <= 1:
+            return 0.0
+        gap_count = len(text) - 1
+        average_char_width = max(1.0, natural_width / len(text))
+        target_spacing = (desired_width - natural_width) / gap_count
+        min_spacing = -average_char_width * 0.35
+        max_spacing = average_char_width * 0.9
+        return max(min_spacing, min(max_spacing, target_spacing))
+
+    def _build_text_mask(self, draw, text: str, font, char_spacing: float = 0.0) -> Any:
+        """将文本离屏渲染成蒙版，用真实像素 bbox 参与布局与居中。"""
+        if "\n" not in text and abs(char_spacing) >= 0.01:
+            return self._build_spaced_single_line_mask(draw, text, font, char_spacing)
+        return self._build_default_text_mask(draw, text, font)
+
+    def _build_default_text_mask(self, draw, text: str, font) -> Any:
+        """默认文本蒙版生成。"""
+        from PIL import Image, ImageDraw
+
+        bbox_xy = self._measure_multiline_text(draw, text, font)
+        width = max(1, bbox_xy[2] - bbox_xy[0])
+        height = max(1, bbox_xy[3] - bbox_xy[1])
+        mask = Image.new("L", (width, height), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.multiline_text(
+            (-bbox_xy[0], -bbox_xy[1]),
+            text,
+            fill=255,
+            font=font,
+            spacing=0,
+            align="left",
+        )
+        return mask
+
+    def _build_spaced_single_line_mask(self, draw, text: str, font, char_spacing: float) -> Any:
+        """按字符间距逐字离屏渲染单行文本。"""
+        from PIL import Image, ImageDraw
+
+        line_bbox = draw.textbbox((0, 0), text, font=font)
+        line_top = line_bbox[1]
+        line_bottom = line_bbox[3]
+        glyph_boxes: list[tuple[tuple[int, int, int, int], float]] = []
+        cursor_x = 0.0
+        min_left = 0.0
+        max_right = 0.0
+        for index, char in enumerate(text):
+            bbox_xy = draw.textbbox((0, 0), char, font=font)
+            glyph_boxes.append((bbox_xy, cursor_x))
+            min_left = min(min_left, cursor_x + bbox_xy[0])
+            max_right = max(max_right, cursor_x + bbox_xy[2])
+            advance = bbox_xy[2] - bbox_xy[0]
+            cursor_x += advance
+            if index < len(text) - 1:
+                cursor_x += char_spacing
+        width = max(1, int(math.ceil(max_right - min_left)))
+        height = max(1, int(math.ceil(line_bottom - line_top)))
+        mask = Image.new("L", (width, height), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        for index, char in enumerate(text):
+            bbox_xy, glyph_x = glyph_boxes[index]
+            mask_draw.text(
+                (glyph_x - min_left - bbox_xy[0], -line_top),
+                char,
+                fill=255,
+                font=font,
+            )
+        return mask
+
+    def _layout_from_mask(
+        self,
+        mask: Any,
+        rendered_text: str,
+        font_size: int,
+        target_w: int,
+        target_h: int,
+        *,
+        allow_x_scale: bool,
+        allow_y_scale: bool,
+        min_x_scale: float = 1.0,
+        min_y_scale: float = 1.0,
+        char_spacing: float = 0.0,
+    ) -> _TextLayout | None:
+        """把离屏蒙版适配到目标框内。"""
+        from PIL import Image
+
+        mask_w, mask_h = mask.size
+        if mask_w <= 0 or mask_h <= 0:
+            return None
+        scale_x = 1.0
+        scale_y = 1.0
+        if mask_w > target_w:
+            if not allow_x_scale:
+                return None
+            scale_x = target_w / mask_w
+            if scale_x < min_x_scale:
+                return None
+        if mask_h > target_h:
+            if not allow_y_scale:
+                return None
+            scale_y = target_h / mask_h
+            if scale_y < min_y_scale:
+                return None
+        if scale_x == 1.0 and scale_y == 1.0:
+            return _TextLayout(
+                mask=mask,
+                rendered_text=rendered_text,
+                font_size=font_size,
+                char_spacing=char_spacing,
+            )
+        resampling = getattr(Image, "Resampling", Image).LANCZOS
+        resized = mask.resize(
+            (
+                max(1, int(round(mask_w * scale_x))),
+                max(1, int(round(mask_h * scale_y))),
+            ),
+            resample=resampling,
+        )
+        return _TextLayout(
+            mask=resized,
+            rendered_text=rendered_text,
+            font_size=font_size,
+            char_spacing=char_spacing,
+            scale_x=scale_x,
+            scale_y=scale_y,
+        )
+
+    def _text_region_geometry(
+        self,
+        item: _DrawItem,
+        *,
+        pad: int = 2,
+    ) -> tuple[float, float, int, int, float]:
+        """返回绘制中心点、文本区域宽高与旋转角度。"""
+        bbox = item.bbox
+        if item.polygon and len(item.polygon) >= 4:
+            points = [(point.x, point.y) for point in item.polygon]
+            center_x = sum(point[0] for point in points) / len(points)
+            center_y = sum(point[1] for point in points) / len(points)
+            top_width = self._distance(points[0], points[1])
+            bottom_width = self._distance(points[2], points[3])
+            left_height = self._distance(points[0], points[3])
+            right_height = self._distance(points[1], points[2])
+            target_w = max(4, int(round(max(1.0, (top_width + bottom_width) / 2 - 2 * pad))))
+            target_h = max(4, int(round(max(1.0, (left_height + right_height) / 2 - 2 * pad))))
+            rotation_degrees = item.rotation_degrees or self._polygon_rotation(item.polygon)
+            return center_x, center_y, target_w, target_h, rotation_degrees
+        center_x = bbox.x + bbox.width / 2
+        center_y = bbox.y + bbox.height / 2
+        target_w = max(4, bbox.width - 2 * pad)
+        target_h = max(4, bbox.height - 2 * pad)
+        return center_x, center_y, target_w, target_h, 0.0
+
+    def _polygon_rotation(self, polygon: list[PolygonPoint]) -> float:
+        """根据 polygon 的顶部边估计视觉旋转角度。"""
+        if len(polygon) < 2:
+            return 0.0
+        for index in range(len(polygon)):
+            point_1 = polygon[index]
+            point_2 = polygon[(index + 1) % len(polygon)]
+            dx = point_2.x - point_1.x
+            dy = point_2.y - point_1.y
+            if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+                continue
+            return math.degrees(math.atan2(dy, dx))
+        return 0.0
+
+    def _rotate_mask(self, mask: Any, angle_degrees: float) -> Any:
+        """旋转文本蒙版，使其与 OCR 多边形方向一致。"""
+        from PIL import Image
+
+        resampling = getattr(Image, "Resampling", Image).BICUBIC
+        return mask.rotate(angle_degrees, resample=resampling, expand=True)
+
+    def _distance(self, point_1: tuple[float, float], point_2: tuple[float, float]) -> float:
+        """计算两点间距离。"""
+        return math.hypot(point_2[0] - point_1[0], point_2[1] - point_1[1])
+
+    def _wrap_text_to_width(self, draw, text: str, font, target_w: int) -> str:
+        """按宽度将文本折成多行，优先保证不横向溢出。"""
+        paragraphs = text.splitlines() or [text]
+        wrapped_lines: list[str] = []
+        for paragraph in paragraphs:
+            if not paragraph:
+                wrapped_lines.append("")
+                continue
+            current = ""
+            for char in paragraph:
+                candidate = current + char
+                if current and self._text_width(draw, candidate, font) > target_w:
+                    wrapped_lines.append(current)
+                    current = char
+                    continue
+                current = candidate
+            if current:
+                wrapped_lines.append(current)
+        return "\n".join(wrapped_lines)
+
+    def _measure_multiline_text(self, draw, text: str, font) -> tuple[int, int, int, int]:
+        """测量多行文本的 bbox。"""
+        try:
+            return draw.multiline_textbbox((0, 0), text, font=font, spacing=0, align="left")
+        except Exception:
+            return draw.textbbox((0, 0), text, font=font)
+
+    def _text_width(self, draw, text: str, font) -> int:
+        """测量单行文本宽度。"""
+        bbox_xy = draw.textbbox((0, 0), text, font=font)
+        return bbox_xy[2] - bbox_xy[0]

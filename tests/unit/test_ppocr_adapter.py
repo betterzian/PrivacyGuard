@@ -1,6 +1,8 @@
 """PP-OCRv5 适配层测试。"""
 
-from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
+import pytest
+
+from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock, PolygonPoint
 from privacyguard.infrastructure.ocr.ppocr_adapter import PPOCREngineAdapter, _parse_paddle_result
 from privacyguard.utils.image import ensure_supported_image_input
 
@@ -83,7 +85,51 @@ def test_parse_paddle_result_supports_json_method_payload() -> None:
         {
             "text": "海淀区",
             "bbox": {"x": 0, "y": 0, "width": 10, "height": 10},
+            "polygon": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 10.0},
+                {"x": 0.0, "y": 10.0},
+            ],
+            "rotation_degrees": 0.0,
             "score": 0.9,
             "line_id": 0,
         }
     ]
+
+
+def test_adapter_extract_maps_polygon_and_rotation() -> None:
+    backend = _FakeBackend(
+        infer_result=[
+            {
+                "text": "张三",
+                "polygon": [
+                    {"x": 10.0, "y": 10.0},
+                    {"x": 50.0, "y": 20.0},
+                    {"x": 48.0, "y": 32.0},
+                    {"x": 8.0, "y": 22.0},
+                ],
+                "rotation_degrees": 14.036243467926479,
+                "score": 0.96,
+                "line_id": 1,
+            }
+        ]
+    )
+    adapter = PPOCREngineAdapter(backend=backend)
+
+    blocks = adapter.extract("https://example.com/rotated.png")
+
+    assert len(blocks) == 1
+    assert blocks[0].text == "张三"
+    assert blocks[0].bbox == BoundingBox(x=8, y=10, width=42, height=22)
+    assert blocks[0].block_id == "ocr-1-0-8-10-42-22"
+    assert blocks[0].polygon == [
+        PolygonPoint(x=10.0, y=10.0),
+        PolygonPoint(x=50.0, y=20.0),
+        PolygonPoint(x=48.0, y=32.0),
+        PolygonPoint(x=8.0, y=22.0),
+    ]
+    assert blocks[0].rotation_degrees == pytest.approx(14.036243467926479)
+    assert blocks[0].score == 0.96
+    assert blocks[0].line_id == 1
+    assert blocks[0].source == "screenshot"

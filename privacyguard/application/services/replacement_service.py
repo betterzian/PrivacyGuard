@@ -39,7 +39,7 @@ class ReplacementService:
                     span_start=action.span_start if action.span_start is not None else candidate.span_start,
                     span_end=action.span_end if action.span_end is not None else candidate.span_end,
                     persona_id=action.persona_id,
-                    source=candidate.source,
+                    source=action.source,
                     metadata={"reason": action.reason},
                 )
             )

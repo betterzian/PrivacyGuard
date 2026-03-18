@@ -12,13 +12,13 @@ class ScreenshotFillStrategy(Protocol):
         self,
         image: Any,
         plan: DecisionPlan,
-        actions_list: list[Any],
+        draw_items: list[Any],
     ) -> tuple[Any, list[bool]]:
         """
         对图像应用填充逻辑。
         :param image: 原始截图（PIL 或可转为 PIL 的输入）
         :param plan: 决策计划
-        :param actions_list: 本帧要绘制的 action 列表（与 plan.actions 子集、顺序一致）
-        :return: (填充后的图像, skip_fill_per_action)，skip_fill[i]=True 表示第 i 格已由策略填充，无需再画矩形
+        :param draw_items: 本帧要绘制的渲染单元列表（与实际绘制顺序一致）
+        :return: (填充后的图像, skip_fill_per_item)，skip_fill[i]=True 表示第 i 格已由策略填充，无需再画矩形
         """
         ...
