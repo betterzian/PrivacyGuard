@@ -232,3 +232,81 @@ def test_screenshot_renderer_uses_polygon_geometry_for_rotated_blocks() -> None:
     assert target_w == 37
     assert target_h == 8
     assert rotation_degrees == pytest.approx(14.036243467926479)
+
+
+def test_screenshot_renderer_genericize_cross_block_writes_placeholder_once() -> None:
+    renderer = ScreenshotRenderer()
+    ocr_blocks = [
+        OCRTextBlock(
+            text="海淀区",
+            bbox=BoundingBox(x=10, y=10, width=48, height=20),
+            block_id="ocr-a",
+        ),
+        OCRTextBlock(
+            text="知春路",
+            bbox=BoundingBox(x=60, y=10, width=48, height=20),
+            block_id="ocr-b",
+        ),
+    ]
+    plan = DecisionPlan(
+        session_id="demo",
+        turn_id=1,
+        actions=[
+            DecisionAction(
+                candidate_id="cand-cross-generic",
+                action_type=ActionType.GENERICIZE,
+                attr_type=PIIAttributeType.ADDRESS,
+                source_text="海淀区知春路",
+                replacement_text="@地址1",
+                bbox=BoundingBox(x=10, y=10, width=98, height=20),
+                block_id="ocr-merge-a-b",
+                reason="cross-generic",
+                metadata={"ocr_block_ids": ["ocr-a", "ocr-b"]},
+            )
+        ],
+    )
+
+    draw_items = renderer._build_draw_items(plan, ocr_blocks=ocr_blocks)
+
+    assert len(draw_items) == 2
+    assert [item.block_id for item in draw_items] == ["ocr-a", "ocr-b"]
+    assert [item.text for item in draw_items] == ["@地址1", ""]
+
+
+def test_screenshot_renderer_persona_address_cross_block_splits_by_semantic_components() -> None:
+    renderer = ScreenshotRenderer()
+    ocr_blocks = [
+        OCRTextBlock(
+            text="广东省广",
+            bbox=BoundingBox(x=10, y=10, width=56, height=20),
+            block_id="ocr-c",
+        ),
+        OCRTextBlock(
+            text="州市天河区",
+            bbox=BoundingBox(x=68, y=10, width=70, height=20),
+            block_id="ocr-d",
+        ),
+    ]
+    plan = DecisionPlan(
+        session_id="demo",
+        turn_id=1,
+        actions=[
+            DecisionAction(
+                candidate_id="cand-cross-persona",
+                action_type=ActionType.PERSONA_SLOT,
+                attr_type=PIIAttributeType.ADDRESS,
+                source_text="广东省广州市天河区",
+                replacement_text="四川省成都市武侯区",
+                bbox=BoundingBox(x=10, y=10, width=128, height=20),
+                block_id="ocr-merge-c-d",
+                reason="cross-persona",
+                metadata={"ocr_block_ids": ["ocr-c", "ocr-d"]},
+            )
+        ],
+    )
+
+    draw_items = renderer._build_draw_items(plan, ocr_blocks=ocr_blocks)
+
+    assert len(draw_items) == 2
+    assert [item.block_id for item in draw_items] == ["ocr-c", "ocr-d"]
+    assert [item.text for item in draw_items] == ["四川省", "成都市武侯区"]

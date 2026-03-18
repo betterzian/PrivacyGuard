@@ -6,6 +6,13 @@ from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceTyp
 from privacyguard.domain.models.ocr import BoundingBox
 
 
+def clone_action_metadata(metadata: dict[str, list[str]] | None) -> dict[str, list[str]]:
+    """复制 action/candidate metadata，避免共享可变 list。"""
+    if not metadata:
+        return {}
+    return {key: list(values) for key, values in metadata.items()}
+
+
 class DecisionAction(BaseModel):
     """表示对单个候选实体的决策动作。"""
 
@@ -21,6 +28,7 @@ class DecisionAction(BaseModel):
     span_start: int | None = None
     span_end: int | None = None
     reason: str = ""
+    metadata: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class DecisionPlan(BaseModel):

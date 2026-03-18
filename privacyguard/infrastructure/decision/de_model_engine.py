@@ -4,7 +4,7 @@ from privacyguard.application.services.decision_context_builder import DecisionC
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
-from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
+from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, clone_action_metadata
 from privacyguard.domain.models.decision_context import DecisionModelContext
 from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.models.pii import PIICandidate
@@ -123,6 +123,7 @@ class DEModelEngine:
                         span_start=candidate.span_start,
                         span_end=candidate.span_end,
                         reason=item.reason,
+                        metadata=clone_action_metadata(candidate.metadata),
                     )
                 )
                 continue
@@ -141,6 +142,7 @@ class DEModelEngine:
                         span_start=candidate.span_start,
                         span_end=candidate.span_end,
                         reason=item.reason,
+                        metadata=clone_action_metadata(candidate.metadata),
                     )
                 )
                 continue
@@ -158,6 +160,7 @@ class DEModelEngine:
                     span_start=candidate.span_start,
                     span_end=candidate.span_end,
                     reason=item.reason,
+                    metadata=clone_action_metadata(candidate.metadata),
                 )
             )
         return actions

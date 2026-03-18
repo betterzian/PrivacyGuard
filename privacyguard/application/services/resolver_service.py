@@ -49,7 +49,8 @@ class CandidateResolverService:
 
     def _merge_metadata(self, left: PIICandidate, right: PIICandidate) -> dict[str, list[str]]:
         """合并候选元信息并记录命中来源。"""
-        left_keys = left.metadata.get("matched_by", [])
-        right_keys = right.metadata.get("matched_by", [])
-        merged = sorted(set(left_keys) | set(right_keys))
-        return {"matched_by": merged}
+        merged: dict[str, list[str]] = {}
+        for source in (left.metadata, right.metadata):
+            for key, values in source.items():
+                merged[key] = sorted(set(merged.get(key, [])) | set(values))
+        return merged

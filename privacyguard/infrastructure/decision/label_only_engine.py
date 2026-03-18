@@ -2,7 +2,7 @@
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
-from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
+from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, clone_action_metadata
 from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
@@ -42,6 +42,7 @@ class LabelOnlyDecisionEngine:
                         span_start=candidate.span_start,
                         span_end=candidate.span_end,
                         reason="置信度低于阈值，保持原文。",
+                        metadata=clone_action_metadata(candidate.metadata),
                     )
                 )
                 continue
@@ -60,6 +61,7 @@ class LabelOnlyDecisionEngine:
                     span_start=candidate.span_start,
                     span_end=candidate.span_end,
                     reason="label_only 统一使用标准标签。",
+                    metadata=clone_action_metadata(candidate.metadata),
                 )
             )
         resolved = self.constraint_resolver.resolve(actions=actions, candidates=candidates, session_binding=session_binding)

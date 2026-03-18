@@ -8,6 +8,7 @@ from privacyguard.application.pipelines.restore_pipeline import run_restore_pipe
 from privacyguard.application.pipelines.sanitize_pipeline import run_sanitize_pipeline
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType
 from privacyguard.domain.models.mapping import ReplacementRecord
+from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.decision.label_only_engine import LabelOnlyDecisionEngine
 from privacyguard.infrastructure.decision.label_persona_mixed_engine import LabelPersonaMixedDecisionEngine
@@ -46,6 +47,19 @@ def _name_candidate(entity_id: str, text: str, start: int, end: int) -> PIICandi
         text=text,
         normalized_text=text,
         attr_type=PIIAttributeType.NAME,
+        source=PIISourceType.PROMPT,
+        span_start=start,
+        span_end=end,
+        confidence=0.95,
+    )
+
+
+def _address_candidate(entity_id: str, text: str, start: int, end: int) -> PIICandidate:
+    return PIICandidate(
+        entity_id=entity_id,
+        text=text,
+        normalized_text=text,
+        attr_type=PIIAttributeType.ADDRESS,
         source=PIISourceType.PROMPT,
         span_start=start,
         span_end=end,
@@ -140,6 +154,73 @@ def test_restore_only_uses_current_turn_records() -> None:
     )
 
     assert restored.restored_text == "上一轮@姓名1，这一轮李四"
+
+
+def test_sanitize_pipeline_reuses_placeholder_for_canonicalized_addresses() -> None:
+    mapping_store = InMemoryMappingStore()
+    persona_repo = _EmptyPersonaRepo()
+    renderer = PromptRenderer()
+    engine = LabelOnlyDecisionEngine(persona_repository=persona_repo)
+
+    turn1 = run_sanitize_pipeline(
+        request=SanitizeRequest(session_id="session-addr", turn_id=1, prompt_text="四川省成都市", screenshot=None),
+        ocr_engine=_OCR(),
+        pii_detector=_Detector([_address_candidate("cand-1", "四川省成都市", 0, 6)]),
+        persona_repository=persona_repo,
+        mapping_store=mapping_store,
+        decision_engine=engine,
+        rendering_engine=renderer,
+    )
+    turn2 = run_sanitize_pipeline(
+        request=SanitizeRequest(session_id="session-addr", turn_id=2, prompt_text="四川成都市", screenshot=None),
+        ocr_engine=_OCR(),
+        pii_detector=_Detector([_address_candidate("cand-2", "四川成都市", 0, 5)]),
+        persona_repository=persona_repo,
+        mapping_store=mapping_store,
+        decision_engine=engine,
+        rendering_engine=renderer,
+    )
+
+    assert turn1.sanitized_prompt_text == "@地址1"
+    assert turn2.sanitized_prompt_text == "@地址1"
+
+
+def test_label_persona_mixed_replaces_address_by_source_granularity() -> None:
+    class _AddressPersonaRepo:
+        def get_persona(self, persona_id):
+            return PersonaProfile(
+                persona_id="persona-1",
+                display_name="persona-1",
+                slots={PIIAttributeType.ADDRESS: "广东省广州市天河区体育西路100号"},
+                stats={},
+            )
+
+        def list_personas(self):
+            return [self.get_persona("persona-1")]
+
+        def get_slot_value(self, persona_id, attr_type):
+            if attr_type == PIIAttributeType.ADDRESS:
+                return "广东省广州市天河区体育西路100号"
+            return None
+
+    mapping_store = InMemoryMappingStore()
+
+    response = run_sanitize_pipeline(
+        request=SanitizeRequest(
+            session_id="session-persona-addr",
+            turn_id=1,
+            prompt_text="收货地址：四川省成都市",
+            screenshot=None,
+        ),
+        ocr_engine=_OCR(),
+        pii_detector=_Detector([_address_candidate("cand-addr", "四川省成都市", 5, 11)]),
+        persona_repository=_AddressPersonaRepo(),
+        mapping_store=mapping_store,
+        decision_engine=LabelPersonaMixedDecisionEngine(persona_repository=_AddressPersonaRepo()),
+        rendering_engine=PromptRenderer(),
+    )
+
+    assert response.sanitized_prompt_text == "收货地址：广东省广州市"
 
 
 def test_label_persona_mixed_downgrade_still_produces_unique_placeholders() -> None:

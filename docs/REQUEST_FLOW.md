@@ -74,7 +74,7 @@ guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_only")
 | 顺序 | 调用 | 位置 | 说明 |
 |------|------|------|------|
 | 4.1 | `build_detector("rule_based", self.registry)` | `app/factories.py` | 再次 `normalize_detector_mode` 后调用 `_build_component(registry.detector_modes, "rule_based", "detector mode")` |
-| 4.2 | `RuleBasedPIIDetector.__init__(...)` | `infrastructure/pii/rule_based_detector.py` | 解析词典路径、`_load_dictionary()`、`_build_patterns()`、创建 `CandidateResolverService()` |
+| 4.2 | `RuleBasedPIIDetector.__init__(...)` | `infrastructure/pii/rule_based_detector.py` | 解析词典路径（未提供时为空词库）、`_load_dictionary()`、`_build_patterns()`、创建 `CandidateResolverService()` |
 
 ### 步骤 5：构建决策引擎（注入 persona_repo、mapping_table）
 
@@ -147,12 +147,13 @@ guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_only")
 | 顺序 | 调用 | 位置 | 说明 |
 |------|------|------|------|
 | - | `detect(prompt_text="我叫张三，电话是13800138000。", ocr_blocks=[])` | `infrastructure/pii/rule_based_detector.py` | 只处理 prompt，OCR 为空 |
-| 1 | `_scan_text(prompt_text, PIISourceType.PROMPT, bbox=None)` | 同上 | 对整段 prompt 做字典+正则扫描 |
-| 2 | `_collect_dictionary_hits(...)` | 同上 | 若词典有「张三」等，会产出 NAME 候选 |
-| 3 | `_collect_regex_hits(...)` | 同上 | 手机号正则命中 `13800138000` → PHONE 候选 |
-| 4 | `_upsert_candidate(...)` | 同上 | 构建 `PIICandidate`（entity_id 由 `CandidateResolverService.build_candidate_id` 生成） |
-| 5 | `self.resolver.resolve_candidates(candidates)` | 同上 | `CandidateResolverService.resolve_candidates` 去重、合并置信度 |
-| 6 | 返回 | 同上 | `list[PIICandidate]` 供决策使用 |
+| 1 | `_scan_text(prompt_text, PIISourceType.PROMPT, bbox=None)` | 同上 | 对整段 prompt 依次做字典、上下文、正则、姓名、地址扫描 |
+| 2 | `_collect_dictionary_hits(...)` | 同上 | 若本地词库命中，会先做 OCR 容错匹配与最长片段裁剪 |
+| 3 | `_collect_context_hits(...)` | 同上 | 对 `姓名/地址/电话/邮箱/身份证/编号类` 字段做关键词提取 |
+| 4 | `_collect_regex_hits(...)` | 同上 | 手机号、邮箱、身份证等格式规则命中 |
+| 5 | `_upsert_candidate(...)` | 同上 | 构建 `PIICandidate`（entity_id 由 `CandidateResolverService.build_candidate_id` 生成） |
+| 6 | `self.resolver.resolve_candidates(candidates)` | 同上 | `CandidateResolverService.resolve_candidates` 去重、合并 metadata |
+| 7 | 返回 | 同上 | `list[PIICandidate]` 供决策使用 |
 
 ### 3.5 会话绑定：SessionService.get_or_create_binding
 

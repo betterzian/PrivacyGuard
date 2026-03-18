@@ -78,6 +78,24 @@ class _Renderer:
         return image
 
 
+class _PassthroughRenderer:
+    def render_text(self, prompt_text: str, plan: DecisionPlan):
+        return (prompt_text, [])
+
+    def render_image(self, image, plan: DecisionPlan, ocr_blocks=None):
+        return image
+
+
+class _PlainDecisionEngine:
+    def plan(self, session_id: str, turn_id: int, candidates, session_binding):
+        return DecisionPlan(
+            session_id=session_id,
+            turn_id=turn_id,
+            actions=[],
+            metadata={"mode": "label_only"},
+        )
+
+
 def test_sanitize_pipeline_prefers_context_aware_decision_engine() -> None:
     blocks = [
         OCRTextBlock(
@@ -136,3 +154,28 @@ def test_sanitize_pipeline_prefers_context_aware_decision_engine() -> None:
     assert response.sanitized_prompt_text == "@姓名1去吃饭"
     assert response.active_persona_id == "persona-1"
     assert mapping_store.get_session_binding("session-pipeline").active_persona_id == "persona-1"
+
+
+def test_sanitize_pipeline_does_not_print_sensitive_trace_by_default(capsys) -> None:
+    mapping_store = InMemoryMappingStore()
+
+    response = run_sanitize_pipeline(
+        request=SanitizeRequest(
+            session_id="session-no-trace",
+            turn_id=1,
+            prompt_text="张三去吃饭",
+            screenshot=None,
+        ),
+        ocr_engine=_OCR([]),
+        pii_detector=_Detector([]),
+        persona_repository=_PersonaRepository([]),
+        mapping_store=mapping_store,
+        decision_engine=_PlainDecisionEngine(),
+        rendering_engine=_PassthroughRenderer(),
+    )
+
+    captured = capsys.readouterr()
+
+    assert response.sanitized_prompt_text == "张三去吃饭"
+    assert captured.out == ""
+    assert captured.err == ""

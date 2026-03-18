@@ -1,5 +1,7 @@
 """脱敏流程编排。"""
 
+import logging
+
 from privacyguard.api.dto import SanitizeRequest, SanitizeResponse
 from privacyguard.application.services.decision_context_builder import DecisionContextBuilder
 from privacyguard.application.services.placeholder_allocator import SessionPlaceholderAllocator
@@ -11,34 +13,67 @@ from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.interfaces.pii_detector import PIIDetector
 from privacyguard.domain.interfaces.rendering_engine import RenderingEngine
 
+LOGGER = logging.getLogger(__name__)
+
 
 def _trace_ocr_blocks(session_id: str, turn_id: int, ocr_blocks: list) -> None:
-    """追踪 PP-OCRv5 输出：块数量与样本。"""
+    """追踪 PP-OCRv5 输出：默认仅在 debug 打印非明文摘要。"""
+    if not LOGGER.isEnabledFor(logging.DEBUG):
+        return
     n = len(ocr_blocks)
     sample = []
     for i, b in enumerate(ocr_blocks[:5]):
-        text = getattr(b, "text", str(b))[:30]
+        text = getattr(b, "text", str(b))
         bbox = getattr(b, "bbox", None)
-        sample.append({"text": text, "bbox": str(bbox) if bbox else None})
-    print(f"[PrivacyGuard] PP-OCRv5 output (session={session_id[:8]}, turn={turn_id}): blocks={n}, sample={sample}")
+        sample.append({"text_len": len(text), "bbox": str(bbox) if bbox else None, "index": i})
+    LOGGER.debug(
+        "PP-OCRv5 output session=%s turn=%s blocks=%s sample=%s",
+        session_id[:8],
+        turn_id,
+        n,
+        sample,
+    )
 
 
 def _trace_detector_input(session_id: str, turn_id: int, prompt_text: str, ocr_blocks: list) -> None:
-    """追踪 Detector 输入：prompt 与 ocr_blocks。"""
-    prompt_preview = (prompt_text[:60] + "…") if len(prompt_text) > 60 else prompt_text
-    ocr_sample = [getattr(b, "text", str(b))[:20] for b in ocr_blocks[:3]]
-    print(f"[PrivacyGuard] Detector input (session={session_id[:8]}, turn={turn_id}): prompt_len={len(prompt_text)}, prompt_preview={prompt_preview!r}, ocr_blocks={len(ocr_blocks)}, ocr_sample={ocr_sample}")
+    """追踪 Detector 输入：默认仅在 debug 打印长度级摘要。"""
+    if not LOGGER.isEnabledFor(logging.DEBUG):
+        return
+    ocr_lengths = [len(getattr(b, "text", str(b))) for b in ocr_blocks[:3]]
+    LOGGER.debug(
+        "Detector input session=%s turn=%s prompt_len=%s ocr_blocks=%s ocr_text_lens=%s",
+        session_id[:8],
+        turn_id,
+        len(prompt_text),
+        len(ocr_blocks),
+        ocr_lengths,
+    )
 
 
 def _trace_detector_output(session_id: str, turn_id: int, candidates: list) -> None:
-    """追踪 Detector 输出：candidates。"""
+    """追踪 Detector 输出：默认仅在 debug 打印非明文摘要。"""
+    if not LOGGER.isEnabledFor(logging.DEBUG):
+        return
     cand_sample = []
     for c in candidates[:5]:
-        text = getattr(c, "text", str(c))[:20]
         attr = getattr(c, "attr_type", None)
         src = getattr(c, "source", None)
-        cand_sample.append({"text": text, "attr_type": str(attr), "source": str(src)})
-    print(f"[PrivacyGuard] Detector output (session={session_id[:8]}, turn={turn_id}): candidates={len(candidates)}, sample={cand_sample}")
+        text = getattr(c, "text", str(c))
+        cand_sample.append(
+            {
+                "text_len": len(text),
+                "attr_type": str(attr),
+                "source": str(src),
+                "confidence": getattr(c, "confidence", None),
+            }
+        )
+    LOGGER.debug(
+        "Detector output session=%s turn=%s candidates=%s sample=%s",
+        session_id[:8],
+        turn_id,
+        len(candidates),
+        cand_sample,
+    )
 
 
 def run_sanitize_pipeline(

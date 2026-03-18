@@ -9,6 +9,7 @@ from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.mapping import ReplacementRecord
+from privacyguard.utils.pii_value import canonicalize_pii_value
 
 _PLACEHOLDER_PREFIX = {
     PIIAttributeType.NAME: "姓名",
@@ -79,7 +80,7 @@ class SessionPlaceholderAllocator:
         return defaultdict(lambda: 1, {attr_type: index + 1 for attr_type, index in max_indices.items()})
 
     def _source_key(self, attr_type: PIIAttributeType, source_text: str) -> tuple[PIIAttributeType, str]:
-        return (attr_type, source_text)
+        return (attr_type, canonicalize_pii_value(attr_type, source_text))
 
     def _label_for_attr(self, attr_type: PIIAttributeType, index: int) -> str:
         return f"@{_PLACEHOLDER_PREFIX.get(attr_type, '敏感信息')}{index}"

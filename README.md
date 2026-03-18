@@ -123,6 +123,8 @@ restore_resp = guard.restore(
 
 ## 8. 当前限制
 
+- `rule_based` 检测器在未显式传入 `dictionary_path` 时默认使用空词库；`data/pii_dictionary.sample.json` 仅作为示例，不会自动加载。
+- 本地隐私库现同时支持旧格式 `{"name": ["张三"]}` 与实体格式 `{"entities": [{"entity_id": "friend_1", "name": ["张三"], "address": [{"value": "广东广州天河体育西102", "aliases": ["体育西路"]}]}]}`。
 - `de_model` 当前为规则评分占位版，不是训练模型推理。
 - 截图请求若未安装 `paddleocr` 依赖，会直接报错提示安装；不会再静默降级为空 OCR。
 - 截图重绘是最小可行实现（白底覆盖+文本重绘），不追求最终视觉效果。

@@ -2,9 +2,10 @@
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
-from privacyguard.domain.models.decision import DecisionAction
+from privacyguard.domain.models.decision import DecisionAction, clone_action_metadata
 from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.utils.pii_value import persona_slot_replacement
 
 
 class ConstraintResolver:
@@ -39,6 +40,8 @@ class ConstraintResolver:
                         span_start=action.span_start,
                         span_end=action.span_end,
                         reason="候选不存在，动作降级为 KEEP。",
+                        source_text=action.source_text,
+                        metadata=clone_action_metadata(action.metadata),
                     )
                 )
                 continue
@@ -83,7 +86,7 @@ class ConstraintResolver:
                 action.reason = "persona 缺少槽位值，已降级为 GENERICIZE。"
                 return action
             action.persona_id = persona_id
-            action.replacement_text = slot_value
+            action.replacement_text = persona_slot_replacement(candidate.attr_type, candidate.text, slot_value)
             action.reason = action.reason or "使用 persona 槽位值替换。"
             return action
 

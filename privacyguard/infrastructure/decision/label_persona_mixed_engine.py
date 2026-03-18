@@ -2,7 +2,7 @@
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
-from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
+from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, clone_action_metadata
 from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
@@ -52,6 +52,7 @@ class LabelPersonaMixedDecisionEngine:
                         span_start=candidate.span_start,
                         span_end=candidate.span_end,
                         reason="置信度较低，按策略 KEEP。",
+                        metadata=clone_action_metadata(candidate.metadata),
                     )
                 )
                 continue
@@ -70,6 +71,7 @@ class LabelPersonaMixedDecisionEngine:
                         span_start=candidate.span_start,
                         span_end=candidate.span_end,
                         reason="高风险字段优先使用 persona 槽位。",
+                        metadata=clone_action_metadata(candidate.metadata),
                     )
                 )
                 continue
@@ -86,6 +88,7 @@ class LabelPersonaMixedDecisionEngine:
                     span_start=candidate.span_start,
                     span_end=candidate.span_end,
                     reason="非 persona 优先字段使用通用标签。",
+                    metadata=clone_action_metadata(candidate.metadata),
                 )
             )
         binding = session_binding or SessionBinding(session_id=session_id, active_persona_id=active_persona_id)
