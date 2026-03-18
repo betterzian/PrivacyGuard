@@ -1,5 +1,7 @@
 """PP-OCR 适配层实现。"""
 
+import json
+import warnings
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -8,7 +10,7 @@ from privacyguard.utils.image import ensure_supported_image_input
 
 
 def _image_to_predict_input(image: Any) -> Any:
-    """将领域支持的图像输入转换为 PaddleOCR predict 可接受的输入。PaddleX 检测器期望 RGB 三通道，RGBA 会触发 Normalize 的 IndexError。"""
+    """将领域支持的图像输入转换为 PaddleOCR predict 可接受的输入。"""
     if isinstance(image, Path):
         return str(image)
     try:
@@ -22,24 +24,64 @@ def _image_to_predict_input(image: Any) -> Any:
     return image
 
 
-def _parse_paddle_result(res: Any) -> list[dict[str, Any]]:
-    """将 PaddleOCR 单条 predict 结果（Result 对象或 dict）解析为适配层中间格式。兼容 rec_* 与 dt_polys 等格式。"""
-    raw = getattr(res, "json", res)
-    if callable(raw):
-        raw = raw()
-    if isinstance(raw, str):
-        import json
-        raw = json.loads(raw)
-    if not isinstance(raw, dict):
+def _iter_result_items(result: Any) -> list[Any]:
+    """将 PaddleOCR predict 的返回值归一化为可遍历结果列表。"""
+    if result is None:
         return []
-    data = raw.get("res", raw)
+    if isinstance(result, dict):
+        return [result]
+    if isinstance(result, (list, tuple)):
+        return list(result)
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+        except json.JSONDecodeError:
+            return [result]
+        return _iter_result_items(parsed)
+    if hasattr(result, "__iter__") and not isinstance(result, (bytes, bytearray)):
+        try:
+            return list(result)
+        except TypeError:
+            return [result]
+    return [result]
+
+
+def _extract_result_payload(res: Any) -> dict[str, Any]:
+    """从 Result 对象、dict 或 JSON 字符串中提取统一 payload。"""
+    if isinstance(res, dict):
+        return res
+    for attr_name in ("json", "to_json", "to_dict", "dict"):
+        payload = getattr(res, attr_name, None)
+        if payload is None:
+            continue
+        if callable(payload):
+            try:
+                payload = payload()
+            except Exception:
+                continue
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _parse_paddle_result(res: Any) -> list[dict[str, Any]]:
+    """将 PaddleOCR 单条 predict 结果解析为适配层中间格式。"""
+    raw = _extract_result_payload(res)
+    if not raw:
+        return []
+    data = raw.get("res", raw) if isinstance(raw, dict) else raw
     if not isinstance(data, dict):
-        data = raw
+        return []
     rec_texts = data.get("rec_texts") or []
     rec_scores = data.get("rec_scores")
     rec_boxes = data.get("rec_boxes")
     rec_polys = data.get("rec_polys")
-    dt_polys = data.get("dt_polys")  # PaddleX / 新 PP-OCR 可能使用 dt_polys
+    dt_polys = data.get("dt_polys")
     if rec_scores is not None and hasattr(rec_scores, "tolist"):
         rec_scores = rec_scores.tolist()
     if rec_boxes is not None and hasattr(rec_boxes, "tolist"):
@@ -120,20 +162,19 @@ class PaddleOCRBackend:
             **kwargs,
         )
 
+    def predict(self, input: Any) -> Any:
+        """直接调用官方 PaddleOCR.predict。"""
+        predict_input = _image_to_predict_input(input)
+        return self._ocr.predict(input=predict_input)
+
     def infer(self, image: Any) -> list[dict[str, Any]]:
         """执行 PP-OCRv5 推理，返回适配层中间结果。"""
-        predict_input = _image_to_predict_input(image)
-        result = self._ocr.predict(input=predict_input)
+        result = self.predict(image)
         items: list[dict[str, Any]] = []
-        if result is None:
-            return items
-        if isinstance(result, dict):
-            result = [result]
-        for res in result:
+        for res in _iter_result_items(result):
             try:
                 items.extend(_parse_paddle_result(res))
             except (IndexError, TypeError, KeyError, ValueError) as e:
-                import warnings
                 warnings.warn(f"PP-OCR result parse skip one item: {e}", UserWarning)
         return items
 
@@ -141,13 +182,38 @@ class PaddleOCRBackend:
 class PPOCREngineAdapter:
     """统一 OCR 接口适配器，兼容真实与回退后端。"""
 
-    def __init__(self, backend: OCRBackendProtocol | None = None) -> None:
+    def __init__(
+        self,
+        backend: OCRBackendProtocol | None = None,
+        *,
+        use_doc_orientation_classify: bool = False,
+        use_doc_unwarping: bool = False,
+        use_textline_orientation: bool = False,
+        backend_kwargs: dict[str, Any] | None = None,
+        allow_remote_url: bool = True,
+    ) -> None:
         """初始化适配器并注入后端实现；未注入时自动尝试加载 PP-OCRv5 后端。"""
-        self.backend = backend if backend is not None else load_ppocr_backend()
+        self.allow_remote_url = allow_remote_url
+        self.backend = (
+            backend
+            if backend is not None
+            else load_ppocr_backend(
+                use_doc_orientation_classify=use_doc_orientation_classify,
+                use_doc_unwarping=use_doc_unwarping,
+                use_textline_orientation=use_textline_orientation,
+                **(backend_kwargs or {}),
+            )
+        )
+
+    def predict(self, input: Any) -> Any:
+        """暴露底层 PaddleOCR 的原始 predict 结果。"""
+        if hasattr(self.backend, "predict"):
+            return self.backend.predict(input=input)
+        raise AttributeError("当前 OCR backend 不支持 predict。")
 
     def extract(self, image: Any) -> list[OCRTextBlock]:
         """将输入图像转换为标准 OCRTextBlock 列表。"""
-        normalized_image = ensure_supported_image_input(image)
+        normalized_image = ensure_supported_image_input(image, allow_remote_url=self.allow_remote_url)
         backend_output = self.backend.infer(normalized_image)
         return self._to_ocr_blocks(backend_output)
 
@@ -204,7 +270,7 @@ def load_ppocr_backend(
     _ = model_name
     try:
         from paddleocr import PaddleOCR  # noqa: F401
-        print("[PrivacyGuard] OCR backend: PP-OCRv5 (paddleocr loaded, screenshot PII masking enabled)")
+        print("[PrivacyGuard] OCR backend: PP-OCRv5 (from paddleocr import PaddleOCR)")
         return PaddleOCRBackend(
             use_doc_orientation_classify=use_doc_orientation_classify,
             use_doc_unwarping=use_doc_unwarping,
@@ -212,11 +278,10 @@ def load_ppocr_backend(
             **kwargs,
         )
     except ImportError:
-        print("[PrivacyGuard] OCR backend: Mock (paddleocr not installed, screenshot PII masking disabled)")
+        print("[PrivacyGuard] OCR backend: Mock (paddleocr not installed, screenshot OCR disabled)")
         return MockOCRBackend()
 
 
 def normalize_image_path(path: str | Path) -> Path:
     """将路径标准化为绝对路径。"""
     return Path(path).resolve()
-

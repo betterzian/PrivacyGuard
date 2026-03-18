@@ -65,7 +65,7 @@ guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_only")
 |------|------|------|----------------|------|
 | 3.1 | persona_repo | `_build_component(registry.persona_repository_types, "json", ...)` | `JsonPersonaRepository()` | 默认 path 为 `data/personas.sample.json`，内部 `_load_personas()` |
 | 3.2 | mapping_table | `_build_component(registry.mapping_store_types, "in_memory", ...)` | `InMemoryMappingStore()` | 空 `_records` / `_bindings` |
-| 3.3 | ocr | `_build_component(registry.ocr_providers, "ppocr_v5", ...)` | `PPOCREngineAdapter()` | 未传 config 时用默认构造 |
+| 3.3 | ocr | `_build_component(registry.ocr_providers, "ppocr_v5", ...)` | `PPOCREngineAdapter()` | 内部通过 `from paddleocr import PaddleOCR` 初始化，并调用 `predict(input=...)` |
 | 3.4 | renderer | `_build_component(registry.rendering_modes, "prompt_renderer", ...)` | `PromptRenderer()` | 内部可选 `ScreenshotRenderer()` |
 | 3.5 | restoration | `_build_component(registry.restoration_modes, "action_restorer", ...)` | `ActionRestorer()` | 无状态 |
 
@@ -99,6 +99,10 @@ guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_only")
 5. `RuleBasedPIIDetector`（内部 `CandidateResolverService`）  
 6. `LabelOnlyDecisionEngine`（内部 `ConstraintResolver`）  
 7. `SanitizePipeline`、`RestorePipeline`  
+
+补充说明：
+- `PPOCREngineAdapter` 兼容 `PIL.Image.Image`、`numpy.ndarray`、本地文件路径以及 `http(s)` 图片 URL。
+- 官方 PaddleOCR 的 `predict` 返回值会被适配成项目内部的 `OCRTextBlock`，同时保留底层 `predict` 入口，便于后续直接使用 `res.print()`、`res.save_to_json()` 等官方能力。
 
 ---
 

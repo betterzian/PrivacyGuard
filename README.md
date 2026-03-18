@@ -81,6 +81,12 @@ python -m pip install -e .[dev]
 python examples/minimal_demo.py
 ```
 
+如果想单独验证 PP-OCRv5 的官方 `import` 调用方式：
+
+```bash
+python examples/paddleocr_import_demo.py
+```
+
 ## 7. sanitize -> restore 调用示例
 
 ```python
