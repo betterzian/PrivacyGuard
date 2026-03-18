@@ -9,7 +9,7 @@ PrivacyGuard 是一个面向「上传前脱敏（API_1）+ 云端返回后还原
 
 - 统一入口：`PrivacyGuard.sanitize()` 与 `PrivacyGuard.restore()`
 - 配置装配：通过 `bootstrap/factories.py` + `registry.py` 按模式切换实现
-- 检测链路：支持 `rule_based` 与 `rule_ner_based`（GLiNER 不可用时自动降级）
+- 检测链路：支持 `rule_based`
 - 决策链路：支持 `label_only`、`label_persona_mixed`、`de_model`（规则占位版）
 - 渲染闭环：可将决策应用到 prompt 与截图，并写入映射
 - 还原闭环：可基于 turn/session 映射恢复云端返回文本
@@ -18,7 +18,6 @@ PrivacyGuard 是一个面向「上传前脱敏（API_1）+ 云端返回后还原
 
 ### PII Detector
 - `rule_based`
-- `rule_ner_based`
 
 ### Decision Engine
 - `label_only`
@@ -88,7 +87,7 @@ python examples/minimal_demo.py
 from privacyguard import PrivacyGuard
 
 guard = PrivacyGuard(
-    detector_mode="rule_ner_based",
+    detector_mode="rule_based",
     decision_mode="de_model",
 )
 
@@ -114,7 +113,6 @@ restore_resp = guard.restore(
 
 - `de_model` 当前为规则评分占位版，不是训练模型推理。
 - OCR 默认走适配器回退后端；未接入真实模型时不会输出真实 OCR 结果。
-- `rule_ner_based` 在 GLiNER 依赖缺失时会自动退化到 `rule_based`。
 - 截图重绘是最小可行实现（白底覆盖+文本重绘），不追求最终视觉效果。
 - 检测/决策模式在构造 `PrivacyGuard` 时指定，单次请求不可覆盖。
 

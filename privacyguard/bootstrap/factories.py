@@ -18,7 +18,6 @@ from privacyguard.infrastructure.mapping.json_mapping_store import JsonMappingSt
 from privacyguard.infrastructure.ocr.ppocr_adapter import PPOCREngineAdapter
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector
-from privacyguard.infrastructure.pii.rule_ner_based_detector import RuleNerBasedPIIDetector
 from privacyguard.infrastructure.rendering.fill_strategies import CVFillStrategy, MixFillStrategy, RingFillStrategy
 from privacyguard.infrastructure.rendering.prompt_renderer import PromptRenderer
 from privacyguard.infrastructure.restoration.action_restorer import ActionRestorer
@@ -127,7 +126,6 @@ def register_default_components(registry: ComponentRegistry) -> None:
     registry.register_ocr_provider("ppocr_v5", PPOCREngineAdapter)
     registry.register_detector_mode("placeholder", PlaceholderPIIDetector)
     registry.register_detector_mode("rule_based", RuleBasedPIIDetector)
-    registry.register_detector_mode("rule_ner_based", RuleNerBasedPIIDetector)
     registry.register_decision_mode("placeholder", PlaceholderDecisionEngine)
     registry.register_decision_mode("label_only", LabelOnlyDecisionEngine)
     registry.register_decision_mode("label_persona_mixed", LabelPersonaMixedDecisionEngine)

@@ -3,12 +3,11 @@
 from privacyguard.api.errors import InvalidConfigurationError
 
 # 默认模式（PrivacyGuard 及各处统一引用）
-DEFAULT_DETECTOR_MODE = "rule_ner_based"
+DEFAULT_DETECTOR_MODE = "rule_based"
 DEFAULT_DECISION_MODE = "de_model"
 
 # 规范模式名（与 bootstrap/factories 注册键一致，无别名）
 DETECTOR_MODE_ALIASES = {
-    "rule_ner_based": "rule_ner_based",
     "rule_based": "rule_based",
 }
 
