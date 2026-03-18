@@ -232,6 +232,7 @@ class PPOCREngineAdapter:
                 OCRTextBlock(
                     text=text,
                     bbox=bbox,
+                    block_id=f"ocr-{line_id}-{index}-{bbox.x}-{bbox.y}-{bbox.width}-{bbox.height}",
                     score=max(0.0, min(1.0, score)),
                     line_id=max(0, line_id),
                     source="screenshot",

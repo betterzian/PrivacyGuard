@@ -47,6 +47,9 @@ class LabelPersonaMixedDecisionEngine:
                         attr_type=candidate.attr_type,
                         source_text=candidate.text,
                         bbox=candidate.bbox,
+                        block_id=candidate.block_id,
+                        span_start=candidate.span_start,
+                        span_end=candidate.span_end,
                         reason="置信度较低，按策略 KEEP。",
                     )
                 )
@@ -61,6 +64,9 @@ class LabelPersonaMixedDecisionEngine:
                         replacement_text=None,
                         source_text=candidate.text,
                         bbox=candidate.bbox,
+                        block_id=candidate.block_id,
+                        span_start=candidate.span_start,
+                        span_end=candidate.span_end,
                         reason="高风险字段优先使用 persona 槽位。",
                     )
                 )
@@ -73,6 +79,9 @@ class LabelPersonaMixedDecisionEngine:
                     replacement_text=self._label_for_attr(candidate.attr_type),
                     source_text=candidate.text,
                     bbox=candidate.bbox,
+                    block_id=candidate.block_id,
+                    span_start=candidate.span_start,
+                    span_end=candidate.span_end,
                     reason="非 persona 优先字段使用通用标签。",
                 )
             )

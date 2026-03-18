@@ -8,9 +8,18 @@ from privacyguard.domain.models.pii import PIICandidate
 class CandidateResolverService:
     """负责候选实体去重、冲突合并与稳定 ID 生成。"""
 
-    def build_candidate_id(self, detector_mode: str, source: str, normalized_text: str, attr_type: str) -> str:
+    def build_candidate_id(
+        self,
+        detector_mode: str,
+        source: str,
+        normalized_text: str,
+        attr_type: str,
+        block_id: str | None = None,
+        span_start: int | None = None,
+        span_end: int | None = None,
+    ) -> str:
         """根据关键字段生成稳定候选 ID。"""
-        raw = f"{detector_mode}|{source}|{normalized_text}|{attr_type}"
+        raw = f"{detector_mode}|{source}|{normalized_text}|{attr_type}|{block_id or ''}|{span_start}|{span_end}"
         return md5(raw.encode("utf-8")).hexdigest()
 
     def resolve_candidates(self, candidates: list[PIICandidate]) -> list[PIICandidate]:
@@ -18,7 +27,8 @@ class CandidateResolverService:
         deduped: dict[tuple, PIICandidate] = {}
         for candidate in candidates:
             bbox_key = self._bbox_dedup_key(candidate.bbox)
-            key = (candidate.source.value, candidate.normalized_text, candidate.attr_type.value, bbox_key)
+            span_key = (candidate.block_id, candidate.span_start, candidate.span_end)
+            key = (candidate.source.value, candidate.normalized_text, candidate.attr_type.value, bbox_key, span_key)
             previous = deduped.get(key)
             if previous is None:
                 deduped[key] = candidate
@@ -43,4 +53,3 @@ class CandidateResolverService:
         right_keys = right.metadata.get("matched_by", [])
         merged = sorted(set(left_keys) | set(right_keys))
         return {"matched_by": merged}
-

@@ -4,7 +4,7 @@ from typing import Protocol
 
 from privacyguard.domain.models.decision import DecisionPlan
 from privacyguard.domain.models.mapping import ReplacementRecord
-from privacyguard.domain.models.ocr import ImageLike
+from privacyguard.domain.models.ocr import ImageLike, OCRTextBlock
 
 
 class RenderingEngine(Protocol):
@@ -13,5 +13,10 @@ class RenderingEngine(Protocol):
     def render_text(self, prompt_text: str, plan: DecisionPlan) -> tuple[str, list[ReplacementRecord]]:
         """根据决策计划渲染脱敏文本。"""
 
-    def render_image(self, image: ImageLike, plan: DecisionPlan) -> ImageLike:
+    def render_image(
+        self,
+        image: ImageLike,
+        plan: DecisionPlan,
+        ocr_blocks: list[OCRTextBlock] | None = None,
+    ) -> ImageLike:
         """根据决策计划渲染脱敏截图。"""

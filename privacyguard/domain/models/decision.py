@@ -16,6 +16,9 @@ class DecisionAction(BaseModel):
     source_text: str | None = None
     persona_id: str | None = None
     bbox: BoundingBox | None = None
+    block_id: str | None = None
+    span_start: int | None = None
+    span_end: int | None = None
     reason: str = ""
 
 

@@ -1,12 +1,13 @@
 """截图渲染器实现。填充逻辑由注入的 ScreenshotFillStrategy 提供（与 decision 一致：按模式注册、工厂构建）。"""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from privacyguard.domain.enums import ActionType
+from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.interfaces.screenshot_fill_strategy import ScreenshotFillStrategy
-from privacyguard.domain.models.decision import DecisionPlan
-from privacyguard.domain.models.ocr import BoundingBox
+from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.rendering.fill_strategies import RingFillStrategy
 
 # 常见系统字体路径
@@ -29,6 +30,14 @@ def _get_font_path() -> Path | None:
     return None
 
 
+@dataclass
+class _DrawItem:
+    """截图渲染阶段的实际绘制单元。"""
+
+    bbox: BoundingBox
+    text: str
+
+
 class ScreenshotRenderer:
     """截图上对 PII 区域填充并绘制替代文本；填充策略由注入的 ScreenshotFillStrategy 提供（与 decision 一致）。"""
 
@@ -42,34 +51,112 @@ class ScreenshotRenderer:
         self._fallback_bg = background_color or "white"
         self.text_color = text_color
 
-    def render(self, image: Any, plan: DecisionPlan) -> Any:
+    def render(
+        self,
+        image: Any,
+        plan: DecisionPlan,
+        ocr_blocks: list[OCRTextBlock] | None = None,
+    ) -> Any:
         """将决策计划应用到截图并返回新图像。"""
         if image is None:
             return None
         pil_image = self._to_pil_image(image)
         if pil_image is None:
             return image
-        actions_list = list(self._iter_draw_actions(plan))
-        pil_image, skip_fill_flags = self._fill_strategy.apply(pil_image, plan, actions_list)
+        draw_items = self._build_draw_items(plan, ocr_blocks=ocr_blocks or [])
+        pil_image, skip_fill_flags = self._fill_strategy.apply(pil_image, plan, draw_items)
         draw = self._create_draw(pil_image)
-        for i, action in enumerate(actions_list):
+        for i, item in enumerate(draw_items):
             self._draw_text_box(
                 draw=draw,
-                bbox=action.bbox,
-                text=action.replacement_text,
+                bbox=item.bbox,
+                text=item.text,
                 image=pil_image,
                 skip_fill=skip_fill_flags[i],
             )
         return pil_image
 
-    def _iter_draw_actions(self, plan: DecisionPlan):
-        """可绘制动作迭代（KEEP 且无 bbox/replacement 的已过滤）。"""
+    def _build_draw_items(self, plan: DecisionPlan, ocr_blocks: list[OCRTextBlock]) -> list[_DrawItem]:
+        """根据 plan 与 OCR 原始块构建最终绘制单元。"""
+        block_map = {block.block_id: block for block in ocr_blocks if block.block_id}
+        grouped_actions: dict[str, list[DecisionAction]] = {}
+        ordered_block_ids: list[str] = []
+        legacy_items: list[_DrawItem] = []
+
         for action in plan.actions:
             if action.action_type == ActionType.KEEP:
                 continue
             if not action.replacement_text or action.bbox is None:
                 continue
-            yield action
+            if (
+                action.block_id
+                and action.block_id in block_map
+                and action.span_start is not None
+                and action.span_end is not None
+            ):
+                if action.block_id not in grouped_actions:
+                    grouped_actions[action.block_id] = []
+                    ordered_block_ids.append(action.block_id)
+                grouped_actions[action.block_id].append(action)
+                continue
+            legacy_items.append(_DrawItem(bbox=action.bbox, text=action.replacement_text))
+
+        draw_items: list[_DrawItem] = []
+        for block_id in ordered_block_ids:
+            block = block_map.get(block_id)
+            if block is None:
+                continue
+            rebuilt_text = self._rebuild_block_text(block.text, grouped_actions.get(block_id, []))
+            draw_items.append(_DrawItem(bbox=block.bbox, text=rebuilt_text))
+        draw_items.extend(legacy_items)
+        return draw_items
+
+    def _rebuild_block_text(self, original_text: str, actions: list[DecisionAction]) -> str:
+        """按 span 在 OCR 原文上做局部替换，再生成整框重绘文本。"""
+        selected = self._select_non_overlapping_actions(original_text, actions)
+        if not selected:
+            return actions[0].replacement_text or original_text
+        rebuilt = original_text
+        for action in sorted(selected, key=lambda item: item.span_start or 0, reverse=True):
+            start = action.span_start or 0
+            end = action.span_end or start
+            rebuilt = rebuilt[:start] + (action.replacement_text or "") + rebuilt[end:]
+        return rebuilt
+
+    def _select_non_overlapping_actions(
+        self,
+        original_text: str,
+        actions: list[DecisionAction],
+    ) -> list[DecisionAction]:
+        """优先保留更长的非重叠替换，避免同框 span 相互踩踏。"""
+        valid_actions = [action for action in actions if self._is_valid_span_action(original_text, action)]
+        ranked = sorted(
+            valid_actions,
+            key=lambda item: (-(item.span_end - item.span_start), item.span_start),
+        )
+        selected: list[DecisionAction] = []
+        occupied: list[tuple[int, int]] = []
+        for action in ranked:
+            start = action.span_start or 0
+            end = action.span_end or start
+            if any(not (end <= used_start or start >= used_end) for used_start, used_end in occupied):
+                continue
+            selected.append(action)
+            occupied.append((start, end))
+        return selected
+
+    def _is_valid_span_action(self, original_text: str, action: DecisionAction) -> bool:
+        """校验 action 的 span 是否能安全应用到 OCR 原文。"""
+        if action.span_start is None or action.span_end is None:
+            return False
+        start = action.span_start
+        end = action.span_end
+        if start < 0 or end <= start or end > len(original_text):
+            return False
+        if not action.replacement_text:
+            return False
+        source_text = action.source_text or ""
+        return not source_text or original_text[start:end] == source_text
 
     def _to_pil_image(self, image: Any):
         """将输入统一转换为 PIL Image。"""

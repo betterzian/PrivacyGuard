@@ -66,7 +66,7 @@ def test_rule_based_detects_short_ocr_address_fragments(tmp_path) -> None:
 def test_rule_based_detects_room_and_building_address_fragments(tmp_path) -> None:
     detector = _make_detector(tmp_path)
     ocr_blocks = [
-        OCRTextBlock(text="3栋2单元1202室", bbox=BoundingBox(x=0, y=0, width=90, height=20)),
+        OCRTextBlock(text="3栋2单元1202室", bbox=BoundingBox(x=0, y=0, width=90, height=20), block_id="ocr-box-1"),
     ]
 
     candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks)
@@ -82,3 +82,25 @@ def test_rule_based_detects_masked_phone_and_id_from_context_fields(tmp_path) ->
 
     assert "138****8000" in _candidate_texts(candidates, PIIAttributeType.PHONE)
     assert "110101********1234" in _candidate_texts(candidates, PIIAttributeType.ID_NUMBER)
+
+
+def test_rule_based_records_block_id_and_span_for_partial_ocr_hits(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="请联系13800138000谢谢",
+            bbox=BoundingBox(x=1, y=1, width=50, height=10),
+            block_id="ocr-box-2",
+        )
+    ]
+
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks)
+    phone_candidates = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.PHONE]
+
+    assert any(
+        candidate.text == "13800138000"
+        and candidate.block_id == "ocr-box-2"
+        and candidate.span_start == 3
+        and candidate.span_end == 14
+        for candidate in phone_candidates
+    )

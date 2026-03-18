@@ -107,7 +107,7 @@ class PlaceholderRenderingEngine:
         """占位渲染文本。"""
         raise NotImplementedError("第 1 轮不实现文本渲染逻辑。")
 
-    def render_image(self, image: Any, plan: DecisionPlan) -> Any:
+    def render_image(self, image: Any, plan: DecisionPlan, ocr_blocks: list[OCRTextBlock] | None = None) -> Any:
         """占位渲染图片。"""
         raise NotImplementedError("第 1 轮不实现图像渲染逻辑。")
 

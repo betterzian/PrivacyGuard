@@ -91,6 +91,9 @@ class DEModelEngine:
                 attr_type=candidate.attr_type,
                 source_text=candidate.text,
                 bbox=candidate.bbox,
+                block_id=candidate.block_id,
+                span_start=candidate.span_start,
+                span_end=candidate.span_end,
                 reason="规则评分选择 KEEP。",
             )
         if action_type == ActionType.PERSONA_SLOT:
@@ -102,6 +105,9 @@ class DEModelEngine:
                 replacement_text=None,
                 source_text=candidate.text,
                 bbox=candidate.bbox,
+                block_id=candidate.block_id,
+                span_start=candidate.span_start,
+                span_end=candidate.span_end,
                 reason="规则评分选择 PERSONA_SLOT。",
             )
         return DecisionAction(
@@ -111,6 +117,9 @@ class DEModelEngine:
             replacement_text=self._label_for_attr(candidate.attr_type),
             source_text=candidate.text,
             bbox=candidate.bbox,
+            block_id=candidate.block_id,
+            span_start=candidate.span_start,
+            span_end=candidate.span_end,
             reason="规则评分选择 GENERICIZE。",
         )
 

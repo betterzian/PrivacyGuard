@@ -21,7 +21,7 @@ class OCRTextBlock(BaseModel):
 
     text: str
     bbox: BoundingBox
+    block_id: str | None = None
     score: float = Field(ge=0.0, le=1.0, default=1.0)
     line_id: int = Field(ge=0, default=0)
     source: str = "screenshot"
-

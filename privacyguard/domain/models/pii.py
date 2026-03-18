@@ -15,5 +15,8 @@ class PIICandidate(BaseModel):
     attr_type: PIIAttributeType
     source: PIISourceType
     bbox: BoundingBox | None = None
+    block_id: str | None = None
+    span_start: int | None = None
+    span_end: int | None = None
     confidence: float = Field(ge=0.0, le=1.0, default=0.0)
     metadata: dict[str, list[str]] = Field(default_factory=dict)

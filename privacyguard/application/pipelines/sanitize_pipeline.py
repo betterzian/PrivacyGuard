@@ -63,7 +63,11 @@ def run_sanitize_pipeline(
         session_binding=session_binding,
     )
     sanitized_prompt_text, applied_records = rendering_engine.render_text(request.prompt_text, plan)
-    sanitized_screenshot = rendering_engine.render_image(request.screenshot, plan) if request.screenshot is not None else None
+    sanitized_screenshot = (
+        rendering_engine.render_image(request.screenshot, plan, ocr_blocks=ocr_blocks)
+        if request.screenshot is not None
+        else None
+    )
     session_service.append_turn_replacements(request.session_id, request.turn_id, applied_records)
     if plan.active_persona_id:
         session_service.bind_active_persona(request.session_id, plan.active_persona_id, request.turn_id)
@@ -78,4 +82,3 @@ def run_sanitize_pipeline(
             "applied_count": str(len(applied_records)),
         },
     )
-

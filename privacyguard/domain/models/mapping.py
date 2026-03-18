@@ -21,6 +21,9 @@ class ReplacementRecord(BaseModel):
     attr_type: PIIAttributeType
     action_type: ActionType
     bbox: BoundingBox | None = None
+    block_id: str | None = None
+    span_start: int | None = None
+    span_end: int | None = None
     persona_id: str | None = None
     source: PIISourceType = PIISourceType.PROMPT
     metadata: dict[str, str] = Field(default_factory=dict)

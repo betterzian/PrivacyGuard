@@ -60,6 +60,7 @@ def test_adapter_extract_keeps_predict_input_and_maps_blocks() -> None:
         OCRTextBlock(
             text="张三",
             bbox=BoundingBox(x=10, y=20, width=30, height=40),
+            block_id="ocr-3-0-10-20-30-40",
             score=0.98,
             line_id=3,
             source="screenshot",

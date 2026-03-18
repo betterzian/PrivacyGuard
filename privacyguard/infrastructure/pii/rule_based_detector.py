@@ -9,7 +9,7 @@ from privacyguard.application.services.resolver_service import CandidateResolver
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.domain.models.ocr import OCRTextBlock
 from privacyguard.domain.models.pii import PIICandidate
-from privacyguard.utils.text import find_all_matches, normalize_text
+from privacyguard.utils.text import normalize_text
 
 _COMMON_SINGLE_CHAR_SURNAMES = set(
     "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜"
@@ -319,9 +319,9 @@ class RuleBasedPIIDetector:
     def detect(self, prompt_text: str, ocr_blocks: list[OCRTextBlock]) -> list[PIICandidate]:
         """对 prompt 与 OCR 两路输入执行候选识别。"""
         candidates: list[PIICandidate] = []
-        candidates.extend(self._scan_text(prompt_text, PIISourceType.PROMPT, bbox=None))
+        candidates.extend(self._scan_text(prompt_text, PIISourceType.PROMPT, bbox=None, block_id=None))
         for block in ocr_blocks:
-            candidates.extend(self._scan_text(block.text, PIISourceType.OCR, bbox=block.bbox))
+            candidates.extend(self._scan_text(block.text, PIISourceType.OCR, bbox=block.bbox, block_id=block.block_id))
         return self.resolver.resolve_candidates(candidates)
 
     def _resolve_dictionary_path(self, dictionary_path: str | Path | None) -> Path:
@@ -448,52 +448,61 @@ class RuleBasedPIIDetector:
         )
         return (attr_type, pattern, matched_by, confidence, validator)
 
-    def _scan_text(self, text: str, source: PIISourceType, bbox: object) -> list[PIICandidate]:
+    def _scan_text(self, text: str, source: PIISourceType, bbox: object, block_id: str | None) -> list[PIICandidate]:
         """对单段文本执行字典、上下文与正则识别。"""
         normalized_text = normalize_text(text)
-        collected: dict[tuple[str, str], PIICandidate] = {}
-        self._collect_dictionary_hits(collected, text, normalized_text, source, bbox)
-        self._collect_context_hits(collected, text, source, bbox)
-        self._collect_regex_hits(collected, text, source, bbox)
-        self._collect_name_hits(collected, text, source, bbox)
-        self._collect_address_hits(collected, text, source, bbox)
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate] = {}
+        self._collect_dictionary_hits(collected, text, normalized_text, source, bbox, block_id)
+        self._collect_context_hits(collected, text, source, bbox, block_id)
+        self._collect_regex_hits(collected, text, source, bbox, block_id)
+        self._collect_name_hits(collected, text, source, bbox, block_id)
+        self._collect_address_hits(collected, text, source, bbox, block_id)
         return list(collected.values())
 
     def _collect_dictionary_hits(
         self,
-        collected: dict[tuple[str, str], PIICandidate],
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
         raw_text: str,
         normalized_text: str,
         source: PIISourceType,
         bbox: object,
+        block_id: str | None,
     ) -> None:
         """收集本地字典命中。"""
         for attr_type, terms in self.dictionary.items():
             for term in terms:
                 if not term or term not in normalized_text:
                     continue
-                self._upsert_candidate(
-                    collected=collected,
-                    text=raw_text,
-                    matched_text=term,
-                    attr_type=attr_type,
-                    source=source,
-                    bbox=bbox,
-                    confidence=0.85,
-                    matched_by="dictionary_exact",
-                )
+                for matched_text, span_start, span_end in self._find_literal_matches(raw_text, term):
+                    self._upsert_candidate(
+                        collected=collected,
+                        text=raw_text,
+                        matched_text=matched_text,
+                        attr_type=attr_type,
+                        source=source,
+                        bbox=bbox,
+                        block_id=block_id,
+                        span_start=span_start,
+                        span_end=span_end,
+                        confidence=0.85,
+                        matched_by="dictionary_exact",
+                    )
 
     def _collect_context_hits(
         self,
-        collected: dict[tuple[str, str], PIICandidate],
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
         raw_text: str,
         source: PIISourceType,
         bbox: object,
+        block_id: str | None,
     ) -> None:
         """收集字段上下文命中。"""
         for attr_type, pattern, matched_by, confidence, validator in self.context_rules:
             for match in pattern.finditer(raw_text):
-                value = self._clean_extracted_value(match.group("value"))
+                extracted = self._extract_match(raw_text, *match.span("value"))
+                if extracted is None:
+                    continue
+                value, span_start, span_end = extracted
                 if not value or not validator(value):
                     continue
                 self._upsert_candidate(
@@ -503,43 +512,58 @@ class RuleBasedPIIDetector:
                     attr_type=attr_type,
                     source=source,
                     bbox=bbox,
+                    block_id=block_id,
+                    span_start=span_start,
+                    span_end=span_end,
                     confidence=confidence,
                     matched_by=matched_by,
                 )
 
     def _collect_regex_hits(
         self,
-        collected: dict[tuple[str, str], PIICandidate],
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
         raw_text: str,
         source: PIISourceType,
         bbox: object,
+        block_id: str | None,
     ) -> None:
         """收集格式型正则规则命中。"""
         for attr_type, rule_items in self.patterns.items():
             for pattern, matched_by, confidence in rule_items:
-                for matched_text in find_all_matches(pattern, raw_text):
+                for match in pattern.finditer(raw_text):
+                    extracted = self._extract_match(raw_text, *match.span(0))
+                    if extracted is None:
+                        continue
+                    matched_text, span_start, span_end = extracted
                     self._upsert_candidate(
                         collected=collected,
                         text=raw_text,
-                        matched_text=self._clean_extracted_value(matched_text),
+                        matched_text=matched_text,
                         attr_type=attr_type,
                         source=source,
                         bbox=bbox,
+                        block_id=block_id,
+                        span_start=span_start,
+                        span_end=span_end,
                         confidence=confidence,
                         matched_by=matched_by,
                     )
 
     def _collect_name_hits(
         self,
-        collected: dict[tuple[str, str], PIICandidate],
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
         raw_text: str,
         source: PIISourceType,
         bbox: object,
+        block_id: str | None,
     ) -> None:
         """收集姓名相关的上下文与敬称规则。"""
         for pattern, matched_by, confidence in self.self_name_patterns:
             for match in pattern.finditer(raw_text):
-                value = self._clean_extracted_value(match.group("value"))
+                extracted = self._extract_match(raw_text, *match.span("value"))
+                if extracted is None:
+                    continue
+                value, span_start, span_end = extracted
                 if not self._is_name_candidate(value):
                     continue
                 self._upsert_candidate(
@@ -549,11 +573,17 @@ class RuleBasedPIIDetector:
                     attr_type=PIIAttributeType.NAME,
                     source=source,
                     bbox=bbox,
+                    block_id=block_id,
+                    span_start=span_start,
+                    span_end=span_end,
                     confidence=confidence,
                     matched_by=matched_by,
                 )
         for match in self.name_title_pattern.finditer(raw_text):
-            value = self._clean_extracted_value(match.group("value"))
+            extracted = self._extract_match(raw_text, *match.span("value"))
+            if extracted is None:
+                continue
+            value, span_start, span_end = extracted
             if not self._looks_like_name_with_title(value):
                 continue
             self._upsert_candidate(
@@ -563,34 +593,47 @@ class RuleBasedPIIDetector:
                 attr_type=PIIAttributeType.NAME,
                 source=source,
                 bbox=bbox,
+                block_id=block_id,
+                span_start=span_start,
+                span_end=span_end,
                 confidence=0.72,
                 matched_by="regex_name_honorific",
             )
 
     def _collect_address_hits(
         self,
-        collected: dict[tuple[str, str], PIICandidate],
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
         raw_text: str,
         source: PIISourceType,
         bbox: object,
+        block_id: str | None,
     ) -> None:
         """收集地址整段与碎片命中。"""
         full_text_candidate = self._clean_address_candidate(raw_text)
         if self._should_collect_full_text_address(raw_text, full_text_candidate):
-            confidence = self._address_confidence(full_text_candidate)
-            self._upsert_candidate(
-                collected=collected,
-                text=raw_text,
-                matched_text=full_text_candidate,
-                attr_type=PIIAttributeType.ADDRESS,
-                source=source,
-                bbox=bbox,
-                confidence=confidence,
-                matched_by="heuristic_address_fragment",
-            )
+            extracted = self._extract_match(raw_text, 0, len(raw_text), cleaner=self._clean_address_candidate)
+            if extracted is not None:
+                matched_text, span_start, span_end = extracted
+                confidence = self._address_confidence(full_text_candidate)
+                self._upsert_candidate(
+                    collected=collected,
+                    text=raw_text,
+                    matched_text=matched_text,
+                    attr_type=PIIAttributeType.ADDRESS,
+                    source=source,
+                    bbox=bbox,
+                    block_id=block_id,
+                    span_start=span_start,
+                    span_end=span_end,
+                    confidence=confidence,
+                    matched_by="heuristic_address_fragment",
+                )
         for pattern in _ADDRESS_SPAN_PATTERNS:
             for match in pattern.finditer(raw_text):
-                value = self._clean_address_candidate(match.group(0))
+                extracted = self._extract_match(raw_text, *match.span(0), cleaner=self._clean_address_candidate)
+                if extracted is None:
+                    continue
+                value, span_start, span_end = extracted
                 if not self._looks_like_address_candidate(value):
                     continue
                 self._upsert_candidate(
@@ -600,9 +643,42 @@ class RuleBasedPIIDetector:
                     attr_type=PIIAttributeType.ADDRESS,
                     source=source,
                     bbox=bbox,
+                    block_id=block_id,
+                    span_start=span_start,
+                    span_end=span_end,
                     confidence=self._address_confidence(value),
                     matched_by="regex_address_span",
                 )
+
+    def _extract_match(
+        self,
+        raw_text: str,
+        start: int,
+        end: int,
+        cleaner: Callable[[str], str] | None = None,
+    ) -> tuple[str, int, int] | None:
+        """提取命中文本，并返回清洗后的内容及其在原文中的 span。"""
+        snippet = raw_text[start:end]
+        cleaned = cleaner(snippet) if cleaner is not None else self._clean_extracted_value(snippet)
+        if not cleaned:
+            return None
+        relative_start = snippet.find(cleaned)
+        if relative_start < 0:
+            relative_start = snippet.lower().find(cleaned.lower())
+        if relative_start < 0:
+            return None
+        absolute_start = start + relative_start
+        absolute_end = absolute_start + len(cleaned)
+        return cleaned, absolute_start, absolute_end
+
+    def _find_literal_matches(self, raw_text: str, needle: str) -> list[tuple[str, int, int]]:
+        """在原文中查找字典项对应的全部匹配，并返回原文片段与 span。"""
+        matches: list[tuple[str, int, int]] = []
+        escaped = re.escape(needle)
+        for match in re.finditer(escaped, raw_text, re.IGNORECASE):
+            matched_text = raw_text[match.start():match.end()]
+            matches.append((matched_text, match.start(), match.end()))
+        return matches
 
     def _clean_extracted_value(self, value: str) -> str:
         """清理上下文提取值两侧的噪声字符。"""
@@ -720,12 +796,15 @@ class RuleBasedPIIDetector:
 
     def _upsert_candidate(
         self,
-        collected: dict[tuple[str, str], PIICandidate],
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
         text: str,
         matched_text: str,
         attr_type: PIIAttributeType,
         source: PIISourceType,
         bbox: object,
+        block_id: str | None,
+        span_start: int | None,
+        span_end: int | None,
         confidence: float,
         matched_by: str,
     ) -> None:
@@ -734,8 +813,16 @@ class RuleBasedPIIDetector:
         if not cleaned_text:
             return
         normalized = normalize_text(cleaned_text)
-        key = (normalized, attr_type.value)
-        entity_id = self.resolver.build_candidate_id(self.detector_mode, source.value, normalized, attr_type.value)
+        key = (normalized, attr_type.value, span_start, span_end)
+        entity_id = self.resolver.build_candidate_id(
+            self.detector_mode,
+            source.value,
+            normalized,
+            attr_type.value,
+            block_id=block_id,
+            span_start=span_start,
+            span_end=span_end,
+        )
         incoming = PIICandidate(
             entity_id=entity_id,
             text=cleaned_text,
@@ -743,6 +830,9 @@ class RuleBasedPIIDetector:
             attr_type=attr_type,
             source=source,
             bbox=bbox,
+            block_id=block_id,
+            span_start=span_start,
+            span_end=span_end,
             confidence=confidence,
             metadata={"matched_by": [matched_by]},
         )

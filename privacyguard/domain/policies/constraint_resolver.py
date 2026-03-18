@@ -33,6 +33,10 @@ class ConstraintResolver:
                         attr_type=action.attr_type,
                         replacement_text=None,
                         persona_id=None,
+                        bbox=action.bbox,
+                        block_id=action.block_id,
+                        span_start=action.span_start,
+                        span_end=action.span_end,
                         reason="候选不存在，动作降级为 KEEP。",
                     )
                 )
@@ -108,4 +112,3 @@ class ConstraintResolver:
         }
         name = mapping.get(attr_type, "敏感信息")
         return f"@{name}{index}"
-

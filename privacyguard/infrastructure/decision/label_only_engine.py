@@ -37,6 +37,9 @@ class LabelOnlyDecisionEngine:
                         attr_type=candidate.attr_type,
                         source_text=candidate.text,
                         bbox=candidate.bbox,
+                        block_id=candidate.block_id,
+                        span_start=candidate.span_start,
+                        span_end=candidate.span_end,
                         reason="置信度低于阈值，保持原文。",
                     )
                 )
@@ -51,6 +54,9 @@ class LabelOnlyDecisionEngine:
                     replacement_text=self._label_for_attr(attr_type, attr_counts[attr_type]),
                     source_text=candidate.text,
                     bbox=candidate.bbox,
+                    block_id=candidate.block_id,
+                    span_start=candidate.span_start,
+                    span_end=candidate.span_end,
                     reason="label_only 统一使用标准标签。",
                 )
             )

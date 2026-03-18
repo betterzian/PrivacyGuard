@@ -5,7 +5,7 @@ import re
 from privacyguard.domain.enums import ActionType, PIISourceType
 from privacyguard.domain.models.decision import DecisionPlan
 from privacyguard.domain.models.mapping import ReplacementRecord
-from privacyguard.domain.models.ocr import ImageLike
+from privacyguard.domain.models.ocr import ImageLike, OCRTextBlock
 from privacyguard.infrastructure.rendering.screenshot_renderer import ScreenshotRenderer
 
 
@@ -30,9 +30,14 @@ class PromptRenderer:
             sanitized = re.sub(pattern, record.replacement_text, sanitized)
         return sanitized, applied_records
 
-    def render_image(self, image: ImageLike, plan: DecisionPlan) -> ImageLike:
+    def render_image(
+        self,
+        image: ImageLike,
+        plan: DecisionPlan,
+        ocr_blocks: list[OCRTextBlock] | None = None,
+    ) -> ImageLike:
         """按决策计划渲染截图。"""
-        return self.screenshot_renderer.render(image=image, plan=plan)
+        return self.screenshot_renderer.render(image=image, plan=plan, ocr_blocks=ocr_blocks)
 
     def _build_records_from_plan(self, plan: DecisionPlan) -> list[ReplacementRecord]:
         """把决策动作转换为共享替换记录。"""
@@ -54,6 +59,9 @@ class PromptRenderer:
                     attr_type=action.attr_type,
                     action_type=action.action_type,
                     bbox=action.bbox,
+                    block_id=action.block_id,
+                    span_start=action.span_start,
+                    span_end=action.span_end,
                     persona_id=action.persona_id,
                     source=PIISourceType.PROMPT,
                     metadata={"reason": action.reason},
@@ -67,4 +75,3 @@ class PromptRenderer:
         if source_text.isascii() and source_text.replace("_", "").isalnum():
             return rf"(?<![A-Za-z0-9_]){escaped}(?![A-Za-z0-9_])"
         return escaped
-
