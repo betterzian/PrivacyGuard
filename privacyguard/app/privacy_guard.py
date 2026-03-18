@@ -43,7 +43,7 @@ class PrivacyGuard:
         registry: ComponentRegistry | None = None,
         screenshot_fill_mode: str | None = None,
     ) -> None:
-        """初始化核心依赖并构建 sanitize/restore 两条流水线。screenshot_fill_mode: ring（环带色）、cv（OpenCV inpaint）、mix（主色占比自动选 cv/ring）。"""
+        """初始化核心依赖并构建 sanitize/restore 两条流水线。screenshot_fill_mode: ring（纯色）、gradient（渐变）、cv（OpenCV inpaint）、mix（三段式自动选择，默认）。"""
         self.registry = get_or_create_registry(registry)
         self.detector_mode = normalize_detector_mode(detector_mode)
         self.decision_mode = normalize_decision_mode(decision_mode)

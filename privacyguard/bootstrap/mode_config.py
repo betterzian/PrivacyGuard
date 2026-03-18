@@ -17,7 +17,7 @@ DECISION_MODE_ALIASES = {
     "label_persona_mixed": "label_persona_mixed",
 }
 
-DEFAULT_FILL_MODE = "ring"
+DEFAULT_FILL_MODE = "mix"
 FILL_MODE_ALIASES = {
     "ring": "ring",
     "gradient": "gradient",

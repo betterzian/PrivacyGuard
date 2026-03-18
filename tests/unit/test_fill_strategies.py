@@ -4,11 +4,14 @@ from types import SimpleNamespace
 
 from PIL import Image
 
+from privacyguard.app.factories import DEFAULT_FILL_MODE, build_screenshot_fill_strategy, get_or_create_registry
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.ocr import BoundingBox
 from privacyguard.infrastructure.rendering import fill_strategies
 from privacyguard.infrastructure.rendering.fill_strategies import CVFillStrategy, MixFillStrategy
+from privacyguard.infrastructure.rendering.prompt_renderer import PromptRenderer
+from privacyguard.infrastructure.rendering.screenshot_renderer import ScreenshotRenderer
 
 
 def _demo_plan() -> DecisionPlan:
@@ -26,6 +29,17 @@ def _demo_plan() -> DecisionPlan:
             )
         ],
     )
+
+
+def test_default_fill_mode_uses_mix_everywhere() -> None:
+    registry = get_or_create_registry()
+
+    strategy = build_screenshot_fill_strategy(DEFAULT_FILL_MODE, registry)
+
+    assert DEFAULT_FILL_MODE == "mix"
+    assert isinstance(strategy, MixFillStrategy)
+    assert isinstance(ScreenshotRenderer()._fill_strategy, MixFillStrategy)
+    assert isinstance(PromptRenderer().screenshot_renderer._fill_strategy, MixFillStrategy)
 
 
 def test_cv_fill_strategy_uses_draw_items_instead_of_plan_actions(monkeypatch) -> None:

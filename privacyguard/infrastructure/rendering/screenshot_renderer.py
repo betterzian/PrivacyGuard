@@ -9,7 +9,7 @@ from privacyguard.domain.enums import ActionType
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.interfaces.screenshot_fill_strategy import ScreenshotFillStrategy
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock, PolygonPoint
-from privacyguard.infrastructure.rendering.fill_strategies import RingFillStrategy
+from privacyguard.infrastructure.rendering.fill_strategies import MixFillStrategy
 
 # 常见系统字体路径
 _DEFAULT_FONT_PATHS = [
@@ -73,7 +73,7 @@ class ScreenshotRenderer:
         background_color: str | None = None,
         text_color: str = "black",
     ) -> None:
-        self._fill_strategy = fill_strategy or RingFillStrategy()
+        self._fill_strategy = fill_strategy or MixFillStrategy()
         self._fallback_bg = background_color or "white"
         self.text_color = text_color
 
