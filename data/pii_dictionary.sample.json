@@ -1,8 +1,12 @@
 {
   "name": ["李恩慧", "李四"],
   "phone": ["13800138000"],
+  "card_number": ["6222021001112223334"],
+  "bank_account": ["6217000012345678901"],
+  "passport_number": ["E12345678"],
+  "driver_license": ["110101199001011234"],
   "email": ["demo@example.com"],
-  "address": ["北京市海淀区XX路"],
-  "id_number": ["110101199001011234"]
+  "address": ["北京市海淀区知春路88号"],
+  "id_number": ["110101199001011234"],
+  "organization": ["星海数据科技有限公司"]
 }
-

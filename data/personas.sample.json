@@ -4,8 +4,14 @@
     "profile": {
       "name": "张三",
       "phone": "13900001111",
+      "card_number": "4111111111111111",
+      "bank_account": "6222020202020202020",
+      "passport_number": "E12345678",
+      "driver_license": "310101199001011234",
       "address": "上海市浦东新区世纪大道100号",
-      "email": "zhangsan@example.com"
+      "email": "zhangsan@example.com",
+      "id_number": "310101199001011234",
+      "organization": "星海数科有限公司"
     },
     "stats": {
       "exposure_count": 0,
@@ -18,8 +24,14 @@
     "profile": {
       "name": "李四",
       "phone": "13600002222",
+      "card_number": "5555555555554444",
+      "bank_account": "6212260202020202020",
+      "passport_number": "K76543210",
+      "driver_license": "110101198812123456",
       "address": "北京市海淀区知春路88号",
-      "email": "lisi@example.com"
+      "email": "lisi@example.com",
+      "id_number": "110101198812123456",
+      "organization": "北辰教育科技集团"
     },
     "stats": {
       "exposure_count": 2,
@@ -28,4 +40,3 @@
     }
   }
 ]
-

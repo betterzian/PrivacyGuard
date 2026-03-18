@@ -22,6 +22,7 @@ class DecisionAction(BaseModel):
     source: PIISourceType = PIISourceType.PROMPT
     replacement_text: str | None = None
     source_text: str | None = None
+    canonical_source_text: str | None = None
     persona_id: str | None = None
     bbox: BoundingBox | None = None
     block_id: str | None = None

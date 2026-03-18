@@ -92,12 +92,45 @@ _PROVINCE_ALIASES = {
 }
 _CITY_PATTERN = re.compile(r"^(?P<city>[^0-9]{1,16}?(?:自治州|地区|盟|市))")
 _DISTRICT_PATTERN = re.compile(r"^(?P<district>[^0-9]{1,16}?(?:新区|自治县|自治旗|区|县|旗|市))")
-_NAME_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000·•・")
-_PHONE_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—()（）")
-_ID_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—")
+_NAME_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000·•・0123456789０１２３４５６７８９")
+_PHONE_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：+＋")
+_CARD_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
+_BANK_ACCOUNT_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
+_PASSPORT_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
+_DRIVER_LICENSE_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
+_ID_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
 _EMAIL_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000")
+_OTHER_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•/\\|:：")
 _ADDRESS_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000,，;；:：、()（）")
 _ORG_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000")
+_EMAIL_AT_EQUIVALENTS = {"＠", "﹫"}
+_EMAIL_DOT_EQUIVALENTS = {".", "．", "。", "｡", ",", "，", "、", "﹒", "·", "•", "・"}
+_MASK_EQUIVALENTS_COMMON = {
+    "＊",
+    "●",
+    "○",
+    "◦",
+    "◯",
+    "⚫",
+    "⚪",
+    "■",
+    "□",
+    "▪",
+    "▫",
+    "█",
+    "▇",
+    "▉",
+    "◆",
+    "◇",
+    "★",
+    "☆",
+    "※",
+    "×",
+    "✕",
+    "✖",
+    "╳",
+}
+_MASK_EQUIVALENTS_WITH_X = _MASK_EQUIVALENTS_COMMON | {"x", "X"}
 
 
 @dataclass(slots=True)
@@ -137,14 +170,114 @@ def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
     if attr_type == PIIAttributeType.ORGANIZATION:
         return re.sub(r"\s+", "", cleaned)
     if attr_type == PIIAttributeType.PHONE:
-        return re.sub(r"[\s\-()]+", "", cleaned)
+        return compact_phone_value(cleaned)
+    if attr_type == PIIAttributeType.CARD_NUMBER:
+        return compact_card_number_value(cleaned)
+    if attr_type == PIIAttributeType.BANK_ACCOUNT:
+        return compact_bank_account_value(cleaned)
+    if attr_type == PIIAttributeType.PASSPORT_NUMBER:
+        return compact_passport_value(cleaned)
+    if attr_type == PIIAttributeType.DRIVER_LICENSE:
+        return compact_driver_license_value(cleaned)
     if attr_type == PIIAttributeType.ID_NUMBER:
-        return re.sub(r"\s+", "", cleaned).upper()
+        return compact_id_value(cleaned)
     if attr_type == PIIAttributeType.EMAIL:
-        return cleaned.replace(" ", "")
+        return compact_email_value(cleaned)
     if attr_type == PIIAttributeType.ADDRESS:
         return canonicalize_address_text(cleaned)
+    if attr_type == PIIAttributeType.OTHER:
+        return compact_other_code_value(cleaned)
     return normalize_text(value)
+
+
+def compact_phone_value(value: str) -> str:
+    """压缩手机号/电话文本，忽略常见 OCR 分隔噪声。"""
+    compact = _compact_text(value)
+    chars: list[str] = []
+    for char in compact:
+        char = _normalize_mask_char(PIIAttributeType.PHONE, char)
+        if char in _PHONE_MATCH_IGNORABLE:
+            continue
+        chars.append(char)
+    return "".join(chars)
+
+
+def compact_id_value(value: str) -> str:
+    """压缩身份证文本，忽略常见 OCR 分隔噪声。"""
+    compact = _compact_text(value)
+    chars: list[str] = []
+    for char in compact:
+        char = _normalize_mask_char(PIIAttributeType.ID_NUMBER, char)
+        if char in _ID_MATCH_IGNORABLE:
+            continue
+        chars.append(char)
+    return "".join(chars).upper()
+
+
+def compact_card_number_value(value: str) -> str:
+    """压缩卡号文本，忽略常见 OCR 分隔噪声。"""
+    compact = _compact_text(value)
+    chars: list[str] = []
+    for char in compact:
+        char = _normalize_mask_char(PIIAttributeType.CARD_NUMBER, char)
+        if char in _CARD_MATCH_IGNORABLE:
+            continue
+        chars.append(char)
+    return "".join(chars)
+
+
+def compact_bank_account_value(value: str) -> str:
+    """压缩银行账号文本，忽略常见 OCR 分隔噪声。"""
+    compact = _compact_text(value)
+    chars: list[str] = []
+    for char in compact:
+        char = _normalize_mask_char(PIIAttributeType.BANK_ACCOUNT, char)
+        if char in _BANK_ACCOUNT_MATCH_IGNORABLE:
+            continue
+        chars.append(char)
+    return "".join(chars)
+
+
+def compact_passport_value(value: str) -> str:
+    """压缩护照号文本，忽略常见 OCR 分隔噪声。"""
+    compact = _compact_text(value)
+    chars: list[str] = []
+    for char in compact:
+        char = _normalize_mask_char(PIIAttributeType.PASSPORT_NUMBER, char)
+        if char in _PASSPORT_MATCH_IGNORABLE:
+            continue
+        chars.append(char)
+    return "".join(chars).upper()
+
+
+def compact_driver_license_value(value: str) -> str:
+    """压缩驾驶证号文本，忽略常见 OCR 分隔噪声。"""
+    compact = _compact_text(value)
+    chars: list[str] = []
+    for char in compact:
+        char = _normalize_mask_char(PIIAttributeType.DRIVER_LICENSE, char)
+        if char in _DRIVER_LICENSE_MATCH_IGNORABLE:
+            continue
+        chars.append(char)
+    return "".join(chars).upper()
+
+
+def compact_email_value(value: str) -> str:
+    """压缩邮箱文本，并把常见 OCR 误读的 at/dot 归一。"""
+    compact = _compact_text(value)
+    chars: list[str] = []
+    for char in compact:
+        char = _normalize_mask_char(PIIAttributeType.EMAIL, char)
+        if char in _EMAIL_MATCH_IGNORABLE:
+            continue
+        chars.append(_normalize_email_char(char))
+    return "".join(chars)
+
+
+def compact_other_code_value(value: str) -> str:
+    """压缩编号/卡号类文本，忽略常见 OCR 分隔噪声。"""
+    compact = _compact_text(value)
+    return "".join(char for char in compact if char not in _OTHER_MATCH_IGNORABLE).upper()
 
 
 def canonicalize_address_text(value: str) -> str:
@@ -178,6 +311,7 @@ def build_match_text(attr_type: PIIAttributeType, value: str) -> tuple[str, list
     for index, char in enumerate(str(value)):
         normalized = unicodedata.normalize("NFKC", char)
         for normalized_char in normalized:
+            normalized_char = _normalize_match_char(attr_type, normalized_char)
             if _is_ignorable_match_char(attr_type, normalized_char):
                 continue
             match_chars.append(normalized_char.lower() if normalized_char.isascii() else normalized_char)
@@ -191,6 +325,8 @@ def dictionary_match_variants(attr_type: PIIAttributeType, value: str) -> set[st
     variants: set[str] = set()
     _add_match_variant(variants, attr_type, raw_value)
     if attr_type != PIIAttributeType.ADDRESS:
+        for masked_variant in _high_precision_mask_variants(attr_type, raw_value):
+            _add_match_variant(variants, attr_type, masked_variant)
         return variants
 
     components = parse_address_components(raw_value)
@@ -234,6 +370,8 @@ def dictionary_match_variants(attr_type: PIIAttributeType, value: str) -> set[st
                 if part
             ),
         )
+    for shorthand in _address_shorthand_variants(components):
+        _add_match_variant(variants, attr_type, shorthand)
     for alias in _address_detail_aliases(raw_value, components):
         _add_match_variant(variants, attr_type, alias)
     return variants
@@ -319,6 +457,86 @@ def _add_match_variant(target: set[str], attr_type: PIIAttributeType, value: str
         target.add(match_text)
 
 
+def _high_precision_mask_variants(attr_type: PIIAttributeType, value: str) -> set[str]:
+    if attr_type == PIIAttributeType.PHONE:
+        return _masked_phone_variants(value)
+    if attr_type == PIIAttributeType.CARD_NUMBER:
+        return _masked_numeric_variants(compact_card_number_value(value), prefix_len=4, suffix_len=4, min_mask_len=5)
+    if attr_type == PIIAttributeType.BANK_ACCOUNT:
+        return _masked_numeric_variants(compact_bank_account_value(value), prefix_len=4, suffix_len=4, min_mask_len=4)
+    if attr_type == PIIAttributeType.ID_NUMBER:
+        return _masked_numeric_variants(compact_id_value(value), prefix_len=6, suffix_len=4, min_mask_len=4)
+    if attr_type == PIIAttributeType.PASSPORT_NUMBER:
+        return _masked_alnum_variants(compact_passport_value(value), prefix_len=2, suffix_len=4, min_mask_len=3)
+    if attr_type == PIIAttributeType.DRIVER_LICENSE:
+        return _masked_alnum_variants(compact_driver_license_value(value), prefix_len=6, suffix_len=4, min_mask_len=4)
+    if attr_type == PIIAttributeType.EMAIL:
+        return _masked_email_variants(value)
+    return set()
+
+
+def _masked_phone_variants(value: str) -> set[str]:
+    compact = compact_phone_value(value)
+    if not re.fullmatch(r"1[3-9]\d{9}", compact):
+        return set()
+    prefix = compact[:3]
+    suffix = compact[-4:]
+    masked_middle_len = len(compact) - 7
+    masked_tail_len = len(compact) - 3
+    masked_head_len = len(compact) - 4
+    variants = {
+        f"{prefix}{'*' * masked_middle_len}{suffix}",
+        f"{prefix}{'*' * masked_tail_len}",
+        f"{'*' * masked_head_len}{suffix}",
+    }
+    return {item for item in variants if item != compact}
+
+
+def _masked_numeric_variants(value: str, *, prefix_len: int, suffix_len: int, min_mask_len: int) -> set[str]:
+    compact = _compact_text(value).upper()
+    if not re.fullmatch(r"[\dX]{8,30}", compact):
+        return set()
+    variants: set[str] = set()
+    if len(compact) - prefix_len >= min_mask_len:
+        variants.add(f"{compact[:prefix_len]}{'*' * (len(compact) - prefix_len)}")
+    if len(compact) - suffix_len >= min_mask_len:
+        variants.add(f"{'*' * (len(compact) - suffix_len)}{compact[-suffix_len:]}")
+    if len(compact) - prefix_len - suffix_len >= min_mask_len:
+        variants.add(f"{compact[:prefix_len]}{'*' * (len(compact) - prefix_len - suffix_len)}{compact[-suffix_len:]}")
+    return {item for item in variants if item != compact}
+
+
+def _masked_alnum_variants(value: str, *, prefix_len: int, suffix_len: int, min_mask_len: int) -> set[str]:
+    compact = _compact_text(value).upper()
+    if not re.fullmatch(r"[A-Z0-9]{6,30}", compact):
+        return set()
+    variants: set[str] = set()
+    if len(compact) - prefix_len >= min_mask_len:
+        variants.add(f"{compact[:prefix_len]}{'*' * (len(compact) - prefix_len)}")
+    if len(compact) - suffix_len >= min_mask_len:
+        variants.add(f"{'*' * (len(compact) - suffix_len)}{compact[-suffix_len:]}")
+    if len(compact) - prefix_len - suffix_len >= min_mask_len:
+        variants.add(f"{compact[:prefix_len]}{'*' * (len(compact) - prefix_len - suffix_len)}{compact[-suffix_len:]}")
+    return {item for item in variants if item != compact}
+
+
+def _masked_email_variants(value: str) -> set[str]:
+    compact = compact_email_value(value)
+    if not re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", compact):
+        return set()
+    local, domain = compact.split("@", 1)
+    if not local or not domain:
+        return set()
+    variants: set[str] = set()
+    if len(local) >= 1:
+        exact_tail_mask_len = max(1, len(local) - 1)
+        variants.add(f"{local[:1]}{'*' * exact_tail_mask_len}@{domain}")
+        variants.add(f"{'*' * len(local)}@{domain}")
+        variants.add(f"{local[:1]}{'*' * max(3, exact_tail_mask_len)}@{domain}")
+        variants.add(f"{'*' * max(3, len(local))}@{domain}")
+    return {item for item in variants if item != compact}
+
+
 def _address_detail_aliases(raw_value: str, components: AddressComponents) -> set[str]:
     alias_texts: set[str] = set()
     detail_sources = {components.detail_text or ""}
@@ -335,6 +553,47 @@ def _address_detail_aliases(raw_value: str, components: AddressComponents) -> se
                 if district and not road_alias.startswith(district):
                     alias_texts.add(f"{district}{road_alias}")
     return {item for item in alias_texts if item}
+
+
+def _address_shorthand_variants(components: AddressComponents) -> set[str]:
+    variants: set[str] = set()
+    province_forms = _address_component_forms(components.province_text, keep_suffixes=("省",))
+    city_forms = _address_component_forms(components.city_text, keep_suffixes=("市", "自治州", "地区", "盟"))
+    district_forms = _address_component_forms(components.district_text, keep_suffixes=("区", "县", "旗", "市", "新区", "自治县", "自治旗"))
+    detail_forms = _address_detail_forms(components.detail_text)
+    for province in province_forms:
+        for city in city_forms or {""}:
+            for district in district_forms or {""}:
+                for detail in detail_forms or {""}:
+                    candidate = "".join(part for part in (province, city, district, detail) if part)
+                    if candidate and candidate != components.original_text:
+                        variants.add(candidate)
+    return variants
+
+
+def _address_component_forms(value: str | None, *, keep_suffixes: tuple[str, ...]) -> set[str]:
+    if not value:
+        return set()
+    forms = {value}
+    for suffix in keep_suffixes:
+        if value.endswith(suffix) and len(value) > len(suffix):
+            forms.add(value[: -len(suffix)])
+    return {item for item in forms if item}
+
+
+def _address_detail_forms(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    forms = {value}
+    compact = _compact_text(value)
+    if compact.endswith("号") and len(compact) > 1:
+        forms.add(compact[:-1])
+    forms.add(re.sub(r"(路|街|大道|道|巷|弄|胡同)(\d+[A-Za-z一-龥号室层栋单元]*)$", r"\2", compact))
+    forms.add(re.sub(r"(路|街|大道|道|巷|弄|胡同)(\d+)$", r"\2", compact))
+    cleaned_forms = {item for item in forms if item}
+    if compact.endswith("号") and len(compact) > 1:
+        cleaned_forms.update(item[:-1] for item in list(cleaned_forms) if item.endswith("号") and len(item) > 1)
+    return cleaned_forms
 
 
 def _extract_detail_like_tail(raw_value: str) -> str:
@@ -418,12 +677,52 @@ def _is_ignorable_match_char(attr_type: PIIAttributeType, char: str) -> bool:
         return char in _NAME_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.PHONE:
         return char in _PHONE_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.CARD_NUMBER:
+        return char in _CARD_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.BANK_ACCOUNT:
+        return char in _BANK_ACCOUNT_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.PASSPORT_NUMBER:
+        return char in _PASSPORT_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.DRIVER_LICENSE:
+        return char in _DRIVER_LICENSE_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ID_NUMBER:
         return char in _ID_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.EMAIL:
         return char in _EMAIL_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.OTHER:
+        return char in _OTHER_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ADDRESS:
         return char in _ADDRESS_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ORGANIZATION:
         return char in _ORG_MATCH_IGNORABLE
     return char.isspace()
+
+
+def _normalize_email_char(char: str) -> str:
+    if char in _EMAIL_AT_EQUIVALENTS:
+        return "@"
+    if char in _EMAIL_DOT_EQUIVALENTS:
+        return "."
+    return char
+
+
+def _normalize_match_char(attr_type: PIIAttributeType, char: str) -> str:
+    char = _normalize_mask_char(attr_type, char)
+    if attr_type == PIIAttributeType.EMAIL:
+        return _normalize_email_char(char)
+    return char
+
+
+def _normalize_mask_char(attr_type: PIIAttributeType, char: str) -> str:
+    if attr_type in {PIIAttributeType.PHONE, PIIAttributeType.CARD_NUMBER, PIIAttributeType.BANK_ACCOUNT}:
+        if char in _MASK_EQUIVALENTS_WITH_X:
+            return "*"
+    if attr_type in {
+        PIIAttributeType.ID_NUMBER,
+        PIIAttributeType.PASSPORT_NUMBER,
+        PIIAttributeType.DRIVER_LICENSE,
+        PIIAttributeType.EMAIL,
+    }:
+        if char in _MASK_EQUIVALENTS_COMMON:
+            return "*"
+    return char

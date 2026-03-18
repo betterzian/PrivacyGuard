@@ -11,6 +11,7 @@ class PIICandidate(BaseModel):
 
     entity_id: str
     text: str
+    canonical_source_text: str | None = None
     normalized_text: str
     attr_type: PIIAttributeType
     source: PIISourceType

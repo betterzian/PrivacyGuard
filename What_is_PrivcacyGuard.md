@@ -156,7 +156,7 @@ PrivacyGuard 不是完整的 Agent 安全框架，不直接承诺解决：
 
 PrivacyGuard 当前有两个 API 调用入口。
 
-#### API_1：sanitize
+#### SANITIZE：sanitize
 边界层 payload 当前为：
 
 - `session_id`
@@ -166,7 +166,7 @@ PrivacyGuard 当前有两个 API 调用入口。
 
 完整流程如下：
 
-1. **API_1 入口**
+1. **SANITIZE 入口**
    接收 `prompt` 与 `image`。
 2. **OCR**
    若 `image` 不为空，则调用 `ocr.extract(image)` 得到 `ocr_blocks`。
@@ -182,10 +182,10 @@ PrivacyGuard 当前有两个 API 调用入口。
 7. **映射与绑定写回**
    将本轮 `ReplacementRecord` 写入映射表；
    若 `plan.active_persona_id` 非空，则回写会话 persona 绑定。
-8. **API_1 返回**
+8. **SANITIZE 返回**
    返回 `masked_prompt`、`masked_image`、`mapping_count`、`active_persona_id`。
 
-#### API_2：restore
+#### RESTORE：restore
 边界层 payload 当前为：
 
 - `session_id`
@@ -194,13 +194,13 @@ PrivacyGuard 当前有两个 API 调用入口。
 
 完整流程如下：
 
-1. **API_2 入口**
+1. **RESTORE 入口**
    接收云端返回文本。
 2. **映射记录读取**
    优先读取当前 `turn_id` 的替换记录，再回溯同会话历史记录。
 3. **文本还原**
    调用 `restoration_module.restore(cloud_text, records)` 执行恢复。
-4. **API_2 返回**
+4. **RESTORE 返回**
    返回 `restored_text`。
 
 ### 3.4 模块耦合与边界

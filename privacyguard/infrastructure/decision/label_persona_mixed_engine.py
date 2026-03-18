@@ -24,8 +24,14 @@ class LabelPersonaMixedDecisionEngine:
         self.persona_attr_types = {
             PIIAttributeType.NAME,
             PIIAttributeType.PHONE,
+            PIIAttributeType.CARD_NUMBER,
+            PIIAttributeType.BANK_ACCOUNT,
+            PIIAttributeType.PASSPORT_NUMBER,
+            PIIAttributeType.DRIVER_LICENSE,
             PIIAttributeType.ADDRESS,
             PIIAttributeType.EMAIL,
+            PIIAttributeType.ID_NUMBER,
+            PIIAttributeType.ORGANIZATION,
         }
 
     def plan(
@@ -47,6 +53,7 @@ class LabelPersonaMixedDecisionEngine:
                         attr_type=candidate.attr_type,
                         source=candidate.source,
                         source_text=candidate.text,
+                        canonical_source_text=candidate.canonical_source_text,
                         bbox=candidate.bbox,
                         block_id=candidate.block_id,
                         span_start=candidate.span_start,
@@ -66,6 +73,7 @@ class LabelPersonaMixedDecisionEngine:
                         persona_id=active_persona_id,
                         replacement_text=None,
                         source_text=candidate.text,
+                        canonical_source_text=candidate.canonical_source_text,
                         bbox=candidate.bbox,
                         block_id=candidate.block_id,
                         span_start=candidate.span_start,
@@ -83,6 +91,7 @@ class LabelPersonaMixedDecisionEngine:
                     source=candidate.source,
                     replacement_text=self._label_for_attr(candidate.attr_type),
                     source_text=candidate.text,
+                    canonical_source_text=candidate.canonical_source_text,
                     bbox=candidate.bbox,
                     block_id=candidate.block_id,
                     span_start=candidate.span_start,
@@ -119,6 +128,10 @@ class LabelPersonaMixedDecisionEngine:
         mapping = {
             PIIAttributeType.NAME: "姓名",
             PIIAttributeType.PHONE: "手机号",
+            PIIAttributeType.CARD_NUMBER: "卡号",
+            PIIAttributeType.BANK_ACCOUNT: "银行账号",
+            PIIAttributeType.PASSPORT_NUMBER: "护照号",
+            PIIAttributeType.DRIVER_LICENSE: "驾驶证号",
             PIIAttributeType.EMAIL: "邮箱",
             PIIAttributeType.ADDRESS: "地址",
             PIIAttributeType.ID_NUMBER: "身份证号",

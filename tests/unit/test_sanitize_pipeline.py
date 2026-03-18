@@ -56,12 +56,14 @@ class _ContextAwareDetector:
         session_id: str | None = None,
         turn_id: int | None = None,
         protection_level: ProtectionLevel | None = None,
+        detector_overrides: dict[PIIAttributeType, float] | None = None,
     ) -> list[PIICandidate]:
         self.received = {
             "prompt_text": prompt_text,
             "session_id": session_id,
             "turn_id": turn_id,
             "protection_level": protection_level,
+            "detector_overrides": detector_overrides or {},
             "ocr_count": len(ocr_blocks),
         }
         return self.candidates
@@ -144,9 +146,33 @@ def test_sanitize_pipeline_passes_detector_context_when_supported() -> None:
         "session_id": "session-detector-context",
         "turn_id": 3,
         "protection_level": ProtectionLevel.STRONG,
+        "detector_overrides": {},
         "ocr_count": 0,
     }
     assert response.metadata["protection_level"] == ProtectionLevel.STRONG.value
+
+
+def test_sanitize_pipeline_passes_detector_overrides_when_supported() -> None:
+    detector = _ContextAwareDetector(candidates=[])
+
+    run_sanitize_pipeline(
+        request=SanitizeRequest(
+            session_id="session-detector-override",
+            turn_id=4,
+            prompt_text="腾讯科技",
+            screenshot=None,
+            protection_level=ProtectionLevel.BALANCED,
+            detector_overrides={PIIAttributeType.ORGANIZATION: 0.6},
+        ),
+        ocr_engine=_OCR([]),
+        pii_detector=detector,
+        persona_repository=_PersonaRepository([]),
+        mapping_store=InMemoryMappingStore(),
+        decision_engine=_PlainDecisionEngine(),
+        rendering_engine=_PassthroughRenderer(),
+    )
+
+    assert detector.received["detector_overrides"] == {PIIAttributeType.ORGANIZATION: 0.6}
 
 
 def test_sanitize_pipeline_prefers_context_aware_decision_engine() -> None:

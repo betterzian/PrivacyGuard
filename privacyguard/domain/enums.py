@@ -31,6 +31,10 @@ class PIIAttributeType(str, Enum):
 
     NAME = "name"
     PHONE = "phone"
+    CARD_NUMBER = "card_number"
+    BANK_ACCOUNT = "bank_account"
+    PASSPORT_NUMBER = "passport_number"
+    DRIVER_LICENSE = "driver_license"
     EMAIL = "email"
     ADDRESS = "address"
     ID_NUMBER = "id_number"

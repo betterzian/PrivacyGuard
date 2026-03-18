@@ -42,6 +42,7 @@ class PrivacyGuard:
         mapping_table: MappingStore | None = None,
         registry: ComponentRegistry | None = None,
         screenshot_fill_mode: str | None = None,
+        detector_config: dict[str, Any] | None = None,
     ) -> None:
         """初始化核心依赖并构建 sanitize/restore 两条流水线。screenshot_fill_mode: ring（纯色）、gradient（渐变）、cv（OpenCV inpaint）、mix（三段式自动选择，默认）。"""
         self.registry = get_or_create_registry(registry)
@@ -78,6 +79,7 @@ class PrivacyGuard:
             self.detector_mode,
             self.registry,
             mapping_table=self.mapping_table,
+            detector_config=detector_config,
         )
         self.decision_engine = decision_engine or build_decision(
             self.decision_mode,

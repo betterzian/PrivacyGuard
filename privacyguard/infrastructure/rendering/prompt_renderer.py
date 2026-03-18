@@ -39,6 +39,7 @@ class PromptRenderer:
             if action.action_type == ActionType.KEEP:
                 continue
             source_text = action.source_text or ""
+            canonical_source_text = action.canonical_source_text or None
             replacement_text = action.replacement_text or ""
             if not source_text or not replacement_text:
                 continue
@@ -48,6 +49,7 @@ class PromptRenderer:
                     turn_id=plan.turn_id,
                     candidate_id=action.candidate_id,
                     source_text=source_text,
+                    canonical_source_text=canonical_source_text,
                     replacement_text=replacement_text,
                     attr_type=action.attr_type,
                     action_type=action.action_type,

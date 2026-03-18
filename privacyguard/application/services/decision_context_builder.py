@@ -115,10 +115,16 @@ class DecisionContextBuilder:
         geometry_bounds: tuple[int, int],
     ) -> CandidateDecisionFeatures:
         history_attr_exposure_count = sum(1 for record in history_records if record.attr_type == candidate.attr_type)
+        candidate_source_texts = {
+            candidate.text,
+            candidate.normalized_text,
+            candidate.canonical_source_text or "",
+        }
         history_exact_match_count = sum(
             1
             for record in history_records
-            if record.source_text == candidate.text or record.source_text == candidate.normalized_text
+            if (record.canonical_source_text or record.source_text) in candidate_source_texts
+            or record.source_text in candidate_source_texts
         )
         block_text = ""
         if candidate.block_id and candidate.block_id in block_map:

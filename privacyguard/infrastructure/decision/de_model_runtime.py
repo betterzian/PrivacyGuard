@@ -36,8 +36,14 @@ class TinyPolicyRuntime:
         self.persona_attr_types = {
             PIIAttributeType.NAME,
             PIIAttributeType.PHONE,
+            PIIAttributeType.CARD_NUMBER,
+            PIIAttributeType.BANK_ACCOUNT,
+            PIIAttributeType.PASSPORT_NUMBER,
+            PIIAttributeType.DRIVER_LICENSE,
             PIIAttributeType.ADDRESS,
             PIIAttributeType.EMAIL,
+            PIIAttributeType.ID_NUMBER,
+            PIIAttributeType.ORGANIZATION,
         }
         self._tie_priority = {
             ActionType.KEEP: 0,
@@ -131,7 +137,15 @@ class TinyPolicyRuntime:
 
         generic_score = 0.24 + feature.confidence * 0.52
         generic_score += min(0.16, feature.history_attr_exposure_count * 0.025)
-        if feature.attr_type in {PIIAttributeType.ID_NUMBER, PIIAttributeType.ORGANIZATION, PIIAttributeType.OTHER}:
+        if feature.attr_type in {
+            PIIAttributeType.ID_NUMBER,
+            PIIAttributeType.CARD_NUMBER,
+            PIIAttributeType.BANK_ACCOUNT,
+            PIIAttributeType.PASSPORT_NUMBER,
+            PIIAttributeType.DRIVER_LICENSE,
+            PIIAttributeType.ORGANIZATION,
+            PIIAttributeType.OTHER,
+        }:
             generic_score += 0.12
         if feature.attr_type == PIIAttributeType.PHONE and prompt_digit_bias > 0:
             generic_score += 0.04

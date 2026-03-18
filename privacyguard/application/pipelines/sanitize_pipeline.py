@@ -65,6 +65,8 @@ def _detect_candidates(request: SanitizeRequest, pii_detector: PIIDetector, ocr_
         kwargs["turn_id"] = request.turn_id
     if "protection_level" in parameters:
         kwargs["protection_level"] = request.protection_level
+    if "detector_overrides" in parameters:
+        kwargs["detector_overrides"] = request.detector_overrides
     return detect_method(**kwargs)
 
 

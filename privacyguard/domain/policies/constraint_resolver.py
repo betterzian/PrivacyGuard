@@ -41,6 +41,7 @@ class ConstraintResolver:
                         span_end=action.span_end,
                         reason="候选不存在，动作降级为 KEEP。",
                         source_text=action.source_text,
+                        canonical_source_text=action.canonical_source_text,
                         metadata=clone_action_metadata(action.metadata),
                     )
                 )
@@ -108,6 +109,10 @@ class ConstraintResolver:
         mapping = {
             PIIAttributeType.NAME: "姓名",
             PIIAttributeType.PHONE: "手机号",
+            PIIAttributeType.CARD_NUMBER: "卡号",
+            PIIAttributeType.BANK_ACCOUNT: "银行账号",
+            PIIAttributeType.PASSPORT_NUMBER: "护照号",
+            PIIAttributeType.DRIVER_LICENSE: "驾驶证号",
             PIIAttributeType.EMAIL: "邮箱",
             PIIAttributeType.ADDRESS: "地址",
             PIIAttributeType.ID_NUMBER: "身份证号",

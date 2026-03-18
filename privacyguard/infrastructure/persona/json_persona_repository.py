@@ -42,6 +42,10 @@ class JsonPersonaRepository:
         mapping = {
             "name": PIIAttributeType.NAME,
             "phone": PIIAttributeType.PHONE,
+            "card_number": PIIAttributeType.CARD_NUMBER,
+            "bank_account": PIIAttributeType.BANK_ACCOUNT,
+            "passport_number": PIIAttributeType.PASSPORT_NUMBER,
+            "driver_license": PIIAttributeType.DRIVER_LICENSE,
             "email": PIIAttributeType.EMAIL,
             "address": PIIAttributeType.ADDRESS,
             "id_number": PIIAttributeType.ID_NUMBER,
@@ -77,4 +81,3 @@ class JsonPersonaRepository:
         if persona is None:
             return None
         return persona.slots.get(attr_type)
-

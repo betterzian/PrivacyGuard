@@ -1,10 +1,35 @@
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from privacyguard.api.dto import RestoreRequest, RestoreResponse, SanitizeRequest, SanitizeResponse
-from privacyguard.domain.enums import ProtectionLevel
+from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
+
+
+class DetectorOverridesModel(BaseModel):
+    """请求层允许覆盖的 detector rule 阈值。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: float | None = Field(default=None, ge=0.0, le=1.0)
+    address: float | None = Field(default=None, ge=0.0, le=1.0)
+    organization: float | None = Field(default=None, ge=0.0, le=1.0)
+    other: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    def to_attr_map(self) -> dict[PIIAttributeType, float]:
+        mapping = {
+            "name": PIIAttributeType.NAME,
+            "address": PIIAttributeType.ADDRESS,
+            "organization": PIIAttributeType.ORGANIZATION,
+            "other": PIIAttributeType.OTHER,
+        }
+        result: dict[PIIAttributeType, float] = {}
+        for key, value in self.model_dump(exclude_none=True).items():
+            attr_type = mapping.get(key)
+            if attr_type is not None:
+                result[attr_type] = float(value)
+        return result
 
 
 class SanitizePayloadModel(BaseModel):
@@ -17,6 +42,7 @@ class SanitizePayloadModel(BaseModel):
     prompt: str
     image: Any | None = None
     protection_level: ProtectionLevel = ProtectionLevel.BALANCED
+    detector_overrides: DetectorOverridesModel | None = None
 
 
 class RestorePayloadModel(BaseModel):
@@ -38,6 +64,7 @@ class SanitizeRequestModel:
     prompt: str
     image: Any | None = None
     protection_level: ProtectionLevel = ProtectionLevel.BALANCED
+    detector_overrides: dict[PIIAttributeType, float] = field(default_factory=dict)
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "SanitizeRequestModel":
@@ -49,6 +76,7 @@ class SanitizeRequestModel:
             prompt=dto.prompt,
             image=dto.image,
             protection_level=dto.protection_level,
+            detector_overrides=dto.detector_overrides.to_attr_map() if dto.detector_overrides else {},
         )
 
     def to_dto(self) -> SanitizeRequest:
@@ -59,6 +87,7 @@ class SanitizeRequestModel:
             prompt_text=self.prompt,
             screenshot=self.image,
             protection_level=self.protection_level,
+            detector_overrides=self.detector_overrides,
         )
 
 

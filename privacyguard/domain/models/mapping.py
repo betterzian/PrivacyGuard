@@ -17,6 +17,7 @@ class ReplacementRecord(BaseModel):
     turn_id: int = Field(ge=0)
     candidate_id: str
     source_text: str
+    canonical_source_text: str | None = None
     replacement_text: str
     attr_type: PIIAttributeType
     action_type: ActionType

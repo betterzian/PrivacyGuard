@@ -41,10 +41,18 @@ class _Detector:
         return self._candidates
 
 
-def _name_candidate(entity_id: str, text: str, start: int, end: int) -> PIICandidate:
+def _name_candidate(
+    entity_id: str,
+    text: str,
+    start: int,
+    end: int,
+    *,
+    canonical_source_text: str | None = None,
+) -> PIICandidate:
     return PIICandidate(
         entity_id=entity_id,
         text=text,
+        canonical_source_text=canonical_source_text,
         normalized_text=text,
         attr_type=PIIAttributeType.NAME,
         source=PIISourceType.PROMPT,
@@ -106,6 +114,47 @@ def test_sanitize_pipeline_allocates_session_unique_placeholders_across_turns() 
     )
 
     assert restored.restored_text == "当前是李四"
+
+
+def test_sanitize_pipeline_reuses_placeholder_for_name_noise_canonical_source() -> None:
+    mapping_store = InMemoryMappingStore()
+    persona_repo = _EmptyPersonaRepo()
+    renderer = PromptRenderer()
+    engine = LabelOnlyDecisionEngine(persona_repository=persona_repo)
+
+    turn1 = run_sanitize_pipeline(
+        request=SanitizeRequest(session_id="session-name-noise", turn_id=1, prompt_text="张三", screenshot=None),
+        ocr_engine=_OCR(),
+        pii_detector=_Detector([_name_candidate("cand-1", "张三", 0, 2, canonical_source_text="张三")]),
+        persona_repository=persona_repo,
+        mapping_store=mapping_store,
+        decision_engine=engine,
+        rendering_engine=renderer,
+    )
+    turn2 = run_sanitize_pipeline(
+        request=SanitizeRequest(session_id="session-name-noise", turn_id=2, prompt_text="张1三", screenshot=None),
+        ocr_engine=_OCR(),
+        pii_detector=_Detector([_name_candidate("cand-2", "张1三", 0, 3, canonical_source_text="张三")]),
+        persona_repository=persona_repo,
+        mapping_store=mapping_store,
+        decision_engine=engine,
+        rendering_engine=renderer,
+    )
+
+    assert turn1.sanitized_prompt_text == "@姓名1"
+    assert turn2.sanitized_prompt_text == "@姓名1"
+
+    restored = run_restore_pipeline(
+        request=RestoreRequest(
+            session_id="session-name-noise",
+            turn_id=2,
+            cloud_text="当前是@姓名1",
+        ),
+        mapping_store=mapping_store,
+        restoration_module=ActionRestorer(),
+    )
+
+    assert restored.restored_text == "当前是张三"
 
 
 def test_restore_only_uses_current_turn_records() -> None:
@@ -221,6 +270,57 @@ def test_label_persona_mixed_replaces_address_by_source_granularity() -> None:
     )
 
     assert response.sanitized_prompt_text == "收货地址：广东省广州市"
+
+
+def test_label_persona_mixed_uses_persona_slot_for_card_number() -> None:
+    class _CardPersonaRepo:
+        def get_persona(self, persona_id):
+            return PersonaProfile(
+                persona_id="persona-card",
+                display_name="persona-card",
+                slots={PIIAttributeType.CARD_NUMBER: "4111111111111111"},
+                stats={},
+            )
+
+        def list_personas(self):
+            return [self.get_persona("persona-card")]
+
+        def get_slot_value(self, persona_id, attr_type):
+            if attr_type == PIIAttributeType.CARD_NUMBER:
+                return "4111111111111111"
+            return None
+
+    mapping_store = InMemoryMappingStore()
+
+    response = run_sanitize_pipeline(
+        request=SanitizeRequest(
+            session_id="session-persona-card",
+            turn_id=1,
+            prompt_text="信用卡号：6222021001112223334",
+            screenshot=None,
+        ),
+        ocr_engine=_OCR(),
+        pii_detector=_Detector(
+            [
+                PIICandidate(
+                    entity_id="cand-card",
+                    text="6222021001112223334",
+                    normalized_text="6222021001112223334",
+                    attr_type=PIIAttributeType.CARD_NUMBER,
+                    source=PIISourceType.PROMPT,
+                    span_start=5,
+                    span_end=24,
+                    confidence=0.96,
+                )
+            ]
+        ),
+        persona_repository=_CardPersonaRepo(),
+        mapping_store=mapping_store,
+        decision_engine=LabelPersonaMixedDecisionEngine(persona_repository=_CardPersonaRepo()),
+        rendering_engine=PromptRenderer(),
+    )
+
+    assert response.sanitized_prompt_text == "信用卡号：4111111111111111"
 
 
 def test_label_persona_mixed_downgrade_still_produces_unique_placeholders() -> None:

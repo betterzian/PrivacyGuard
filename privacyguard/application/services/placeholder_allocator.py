@@ -14,6 +14,10 @@ from privacyguard.utils.pii_value import canonicalize_pii_value
 _PLACEHOLDER_PREFIX = {
     PIIAttributeType.NAME: "姓名",
     PIIAttributeType.PHONE: "手机号",
+    PIIAttributeType.CARD_NUMBER: "卡号",
+    PIIAttributeType.BANK_ACCOUNT: "银行账号",
+    PIIAttributeType.PASSPORT_NUMBER: "护照号",
+    PIIAttributeType.DRIVER_LICENSE: "驾驶证号",
     PIIAttributeType.EMAIL: "邮箱",
     PIIAttributeType.ADDRESS: "地址",
     PIIAttributeType.ID_NUMBER: "身份证号",
@@ -40,7 +44,7 @@ class SessionPlaceholderAllocator:
             if action.action_type != ActionType.GENERICIZE or not action.source_text:
                 actions.append(action.model_copy(deep=True))
                 continue
-            source_key = self._source_key(action.attr_type, action.source_text)
+            source_key = self._source_key(action.attr_type, action.canonical_source_text or action.source_text)
             replacement_text = existing_by_source.get(source_key)
             if replacement_text is None:
                 next_index = next_indices[action.attr_type]
@@ -59,9 +63,10 @@ class SessionPlaceholderAllocator:
         for record in ordered:
             if record.action_type != ActionType.GENERICIZE:
                 continue
-            if not record.source_text or not record.replacement_text:
+            source_text = record.canonical_source_text or record.source_text
+            if not source_text or not record.replacement_text:
                 continue
-            key = self._source_key(record.attr_type, record.source_text)
+            key = self._source_key(record.attr_type, source_text)
             existing.setdefault(key, record.replacement_text)
         return existing
 

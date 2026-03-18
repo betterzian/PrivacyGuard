@@ -24,12 +24,13 @@ class ActionRestorer:
                 continue
             if record.replacement_text not in restored_text:
                 continue
-            restored_text = restored_text.replace(record.replacement_text, record.source_text)
+            source_value = record.canonical_source_text or record.source_text
+            restored_text = restored_text.replace(record.replacement_text, source_value)
             seen_placeholders.add(record.replacement_text)
             restored_slots.append(
                 RestoredSlot(
                     attr_type=record.attr_type.value,
-                    value=record.source_text,
+                    value=source_value,
                     source_placeholder=record.replacement_text,
                 )
             )

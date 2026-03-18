@@ -31,6 +31,7 @@ class ReplacementService:
                     turn_id=turn_id,
                     candidate_id=action.candidate_id,
                     source_text=action.source_text or candidate.text,
+                    canonical_source_text=action.canonical_source_text or candidate.canonical_source_text,
                     replacement_text=action.replacement_text or "",
                     attr_type=action.attr_type,
                     action_type=action.action_type,
