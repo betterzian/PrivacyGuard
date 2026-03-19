@@ -63,7 +63,7 @@ guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_only")
 
 | 顺序 | 组件 | 调用 | 实现类（本例） | 说明 |
 |------|------|------|----------------|------|
-| 3.1 | persona_repo | `_build_component(registry.persona_repository_types, "json", ...)` | `JsonPersonaRepository()` | 默认 path 为 `data/personas.sample.json`，内部 `_load_personas()` |
+| 3.1 | persona_repo | `_build_component(registry.persona_repository_types, "json", ...)` | `JsonPersonaRepository()` | 默认优先读取 `data/privacy_repository.json`，不存在时回退 `data/personas.sample.json`，内部 `_load_personas()` |
 | 3.2 | mapping_table | `_build_component(registry.mapping_store_types, "in_memory", ...)` | `InMemoryMappingStore()` | 空 `_records` / `_bindings` |
 | 3.3 | ocr | `_build_component(registry.ocr_providers, "ppocr_v5", ...)` | `PPOCREngineAdapter()` | 内部通过 `from paddleocr import PaddleOCR` 初始化，并调用 `predict(input=...)` |
 | 3.4 | renderer | `_build_component(registry.rendering_modes, "prompt_renderer", ...)` | `PromptRenderer()` | 内部可选 `ScreenshotRenderer()` |

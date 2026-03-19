@@ -102,6 +102,7 @@ _ID_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【�
 _EMAIL_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000")
 _OTHER_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•/\\|:：")
 _ADDRESS_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000,，;；:：、()（）")
+_LOCATION_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000,，;；:：、()（）")
 _ORG_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000")
 _EMAIL_AT_EQUIVALENTS = {"＠", "﹫"}
 _EMAIL_DOT_EQUIVALENTS = {".", "．", "。", "｡", ",", "，", "、", "﹒", "·", "•", "・"}
@@ -167,6 +168,8 @@ def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
         return ""
     if attr_type == PIIAttributeType.NAME:
         return cleaned.replace(" ", "")
+    if attr_type == PIIAttributeType.LOCATION_CLUE:
+        return canonicalize_location_clue_text(cleaned)
     if attr_type == PIIAttributeType.ORGANIZATION:
         return re.sub(r"\s+", "", cleaned)
     if attr_type == PIIAttributeType.PHONE:
@@ -292,6 +295,28 @@ def canonicalize_address_text(value: str) -> str:
         ]
         return "|".join(part for part in parts if part)
     return _compact_text(value)
+
+
+def canonicalize_location_clue_text(value: str) -> str:
+    """将位置线索文本归一为稳定 key。"""
+    compact = _compact_text(value)
+    if not compact:
+        return ""
+    if compact in _PROVINCE_ALIASES:
+        return _PROVINCE_ALIASES[compact]
+    components = parse_address_components(compact)
+    if components.district_key:
+        return components.district_key
+    if components.city_key:
+        city = components.city_key
+        if city.endswith("市") and len(city) > 2:
+            return city[:-1]
+        return city
+    if components.province_key:
+        return components.province_key
+    if compact.endswith("市") and len(compact) > 2:
+        return compact[:-1]
+    return compact
 
 
 def persona_slot_replacement(attr_type: PIIAttributeType, source_text: str, slot_value: str) -> str:
@@ -693,6 +718,8 @@ def _is_ignorable_match_char(attr_type: PIIAttributeType, char: str) -> bool:
         return char in _OTHER_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ADDRESS:
         return char in _ADDRESS_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.LOCATION_CLUE:
+        return char in _LOCATION_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ORGANIZATION:
         return char in _ORG_MATCH_IGNORABLE
     return char.isspace()

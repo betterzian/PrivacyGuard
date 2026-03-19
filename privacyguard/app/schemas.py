@@ -5,6 +5,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from privacyguard.api.dto import RestoreRequest, RestoreResponse, SanitizeRequest, SanitizeResponse
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
+from privacyguard.domain.models.persona import PersonaProfile
+
+PERSONA_SLOT_KEY_TO_ATTR_TYPE = {
+    "name": PIIAttributeType.NAME,
+    "phone": PIIAttributeType.PHONE,
+    "card_number": PIIAttributeType.CARD_NUMBER,
+    "bank_account": PIIAttributeType.BANK_ACCOUNT,
+    "passport_number": PIIAttributeType.PASSPORT_NUMBER,
+    "driver_license": PIIAttributeType.DRIVER_LICENSE,
+    "email": PIIAttributeType.EMAIL,
+    "address": PIIAttributeType.ADDRESS,
+    "id_number": PIIAttributeType.ID_NUMBER,
+    "organization": PIIAttributeType.ORGANIZATION,
+}
 
 
 class DetectorOverridesModel(BaseModel):
@@ -13,6 +27,7 @@ class DetectorOverridesModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: float | None = Field(default=None, ge=0.0, le=1.0)
+    location_clue: float | None = Field(default=None, ge=0.0, le=1.0)
     address: float | None = Field(default=None, ge=0.0, le=1.0)
     organization: float | None = Field(default=None, ge=0.0, le=1.0)
     other: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -20,6 +35,7 @@ class DetectorOverridesModel(BaseModel):
     def to_attr_map(self) -> dict[PIIAttributeType, float]:
         mapping = {
             "name": PIIAttributeType.NAME,
+            "location_clue": PIIAttributeType.LOCATION_CLUE,
             "address": PIIAttributeType.ADDRESS,
             "organization": PIIAttributeType.ORGANIZATION,
             "other": PIIAttributeType.OTHER,
@@ -53,6 +69,37 @@ class RestorePayloadModel(BaseModel):
     session_id: str
     turn_id: int = Field(default=0, ge=0)
     agent_text: str
+
+
+class PersonaStatsPayloadModel(BaseModel):
+    """本地隐私仓库允许写入的 stats 字段。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exposure_count: int | None = Field(default=None, ge=0)
+    last_exposed_session_id: str | None = None
+    last_exposed_turn_id: int | None = Field(default=None, ge=0)
+
+
+class PersonaWritePayloadModel(BaseModel):
+    """单个 persona 写入载荷。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    persona_id: str
+    display_name: str | None = None
+    profile: dict[str, str] = Field(default_factory=dict)
+    slots: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, str] = Field(default_factory=dict)
+    stats: PersonaStatsPayloadModel | None = None
+
+
+class PrivacyRepositoryWritePayloadModel(BaseModel):
+    """本地隐私仓库写入入口载荷。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    personas: list[PersonaWritePayloadModel] = Field(min_length=1)
 
 
 @dataclass(slots=True)
@@ -141,6 +188,95 @@ class RestoreRequestModel:
 
 
 @dataclass(slots=True)
+class PrivacyRepositoryWriteItemModel:
+    """本地隐私仓库单条 upsert 请求。"""
+
+    persona_id: str
+    display_name: str | None = None
+    slot_updates: dict[PIIAttributeType, str] = field(default_factory=dict)
+    metadata_updates: dict[str, str] = field(default_factory=dict)
+    stats_updates: dict[str, int | str | None] = field(default_factory=dict)
+
+    def build_profile(self, existing: PersonaProfile | None = None) -> PersonaProfile:
+        """合并已有 persona，生成新的 PersonaProfile。"""
+        slots = dict(existing.slots) if existing else {}
+        slots.update(self.slot_updates)
+
+        metadata = dict(existing.metadata) if existing else {}
+        metadata.update(self.metadata_updates)
+
+        stats = {
+            "exposure_count": 0,
+            "last_exposed_session_id": None,
+            "last_exposed_turn_id": None,
+        }
+        if existing:
+            stats.update(existing.stats)
+        stats.update(self.stats_updates)
+
+        if self.display_name:
+            display_name = self.display_name
+        elif PIIAttributeType.NAME in self.slot_updates:
+            display_name = self.slot_updates[PIIAttributeType.NAME]
+        elif existing and existing.display_name:
+            display_name = existing.display_name
+        elif PIIAttributeType.NAME in slots:
+            display_name = slots[PIIAttributeType.NAME]
+        else:
+            display_name = self.persona_id
+
+        return PersonaProfile(
+            persona_id=self.persona_id,
+            display_name=display_name,
+            slots=slots,
+            metadata=metadata,
+            stats=stats,
+        )
+
+
+@dataclass(slots=True)
+class PrivacyRepositoryWriteRequestModel:
+    """本地隐私仓库批量写入请求。"""
+
+    personas: list[PrivacyRepositoryWriteItemModel]
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "PrivacyRepositoryWriteRequestModel":
+        """从边界 payload 创建本地仓库写入请求。"""
+        dto = PrivacyRepositoryWritePayloadModel.model_validate(payload)
+        return cls(personas=[_to_privacy_repository_item(item) for item in dto.personas])
+
+
+@dataclass(slots=True)
+class PrivacyRepositoryWriteResponseModel:
+    """本地隐私仓库写入响应。"""
+
+    status: str
+    repository_path: str
+    written_count: int
+    persona_ids: list[str]
+
+    @classmethod
+    def from_request(
+        cls,
+        request: PrivacyRepositoryWriteRequestModel,
+        *,
+        repository_path: str,
+    ) -> "PrivacyRepositoryWriteResponseModel":
+        """根据写入请求生成响应。"""
+        return cls(
+            status="ok",
+            repository_path=repository_path,
+            written_count=len(request.personas),
+            persona_ids=[item.persona_id for item in request.personas],
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为对外返回字典。"""
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class RestoreResponseModel:
     """restore 对外响应模型。"""
 
@@ -160,3 +296,28 @@ class RestoreResponseModel:
     def to_dict(self) -> dict[str, Any]:
         """转换为对外返回字典。"""
         return asdict(self)
+
+
+def _to_privacy_repository_item(dto: PersonaWritePayloadModel) -> PrivacyRepositoryWriteItemModel:
+    """将 payload 模型转换为内部写入请求项。"""
+    slot_updates = _normalize_persona_slot_map(dto.profile)
+    slot_updates.update(_normalize_persona_slot_map(dto.slots))
+    stats_updates = dto.stats.model_dump(exclude_unset=True) if dto.stats else {}
+    return PrivacyRepositoryWriteItemModel(
+        persona_id=dto.persona_id,
+        display_name=dto.display_name,
+        slot_updates=slot_updates,
+        metadata_updates=dict(dto.metadata),
+        stats_updates=stats_updates,
+    )
+
+
+def _normalize_persona_slot_map(raw_mapping: dict[str, str]) -> dict[PIIAttributeType, str]:
+    """将 profile/slots 键归一化为 attr_type 映射。"""
+    normalized: dict[PIIAttributeType, str] = {}
+    for key, value in raw_mapping.items():
+        attr_type = PERSONA_SLOT_KEY_TO_ATTR_TYPE.get(str(key).strip().lower())
+        if attr_type is None:
+            continue
+        normalized[attr_type] = str(value)
+    return normalized

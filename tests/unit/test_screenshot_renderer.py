@@ -1,5 +1,7 @@
 """截图渲染器在 OCR 同框局部替换场景下的测试。"""
 
+from pathlib import Path
+
 from PIL import Image, ImageDraw
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
@@ -7,6 +9,7 @@ from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 import pytest
 
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock, PolygonPoint
+import privacyguard.infrastructure.rendering.screenshot_renderer as screenshot_renderer_module
 from privacyguard.infrastructure.rendering.screenshot_renderer import ScreenshotRenderer
 
 
@@ -168,7 +171,7 @@ def test_screenshot_renderer_keeps_full_text_when_layout_needs_adaptation() -> N
     assert layout.scale_y == 1.0
 
 
-def test_screenshot_renderer_expands_shorter_text_with_char_spacing() -> None:
+def test_screenshot_renderer_keeps_shorter_text_at_natural_spacing() -> None:
     renderer = ScreenshotRenderer()
     image = Image.new("RGB", (240, 80), "white")
     draw = ImageDraw.Draw(image)
@@ -182,7 +185,7 @@ def test_screenshot_renderer_expands_shorter_text_with_char_spacing() -> None:
 
     assert layout is not None
     assert layout.rendered_text == "李四"
-    assert layout.char_spacing > 0
+    assert layout.char_spacing == 0.0
     assert layout.scale_x == 1.0
     assert layout.scale_y == 1.0
 
@@ -310,3 +313,39 @@ def test_screenshot_renderer_persona_address_cross_block_splits_by_semantic_comp
     assert len(draw_items) == 2
     assert [item.block_id for item in draw_items] == ["ocr-c", "ocr-d"]
     assert [item.text for item in draw_items] == ["四川省", "成都市武侯区"]
+
+
+def test_get_font_path_prefers_cjk_font_for_chinese_text(monkeypatch) -> None:
+    monkeypatch.setattr(screenshot_renderer_module, "_CJK_FONT_PATHS", ["cjk.ttc"])
+    monkeypatch.setattr(screenshot_renderer_module, "_LATIN_FONT_PATHS", ["latin.ttf"])
+    monkeypatch.setattr(Path, "exists", lambda self: str(self) in {"cjk.ttc", "latin.ttf"})
+
+    assert screenshot_renderer_module._get_font_path("李恩慧") == Path("cjk.ttc")
+
+
+def test_get_font_path_prefers_latin_font_for_non_cjk_text(monkeypatch) -> None:
+    monkeypatch.setattr(screenshot_renderer_module, "_CJK_FONT_PATHS", ["cjk.ttc"])
+    monkeypatch.setattr(screenshot_renderer_module, "_LATIN_FONT_PATHS", ["latin.ttf"])
+    monkeypatch.setattr(Path, "exists", lambda self: str(self) in {"cjk.ttc", "latin.ttf"})
+
+    assert screenshot_renderer_module._get_font_path("Alice") == Path("latin.ttf")
+
+
+def test_estimate_base_font_size_respects_width_constraint(monkeypatch) -> None:
+    renderer = ScreenshotRenderer()
+    monkeypatch.setattr(renderer, "_load_font", lambda font_path, font_size, image_font_module: font_size)
+    monkeypatch.setattr(
+        renderer,
+        "_measure_multiline_text",
+        lambda draw, text, font: (0, 0, font * len(text), font),
+    )
+
+    size = renderer._estimate_base_font_size(
+        draw=None,
+        text="abcdef",
+        font_path=None,
+        target_w=48,
+        target_h=20,
+    )
+
+    assert size == 8

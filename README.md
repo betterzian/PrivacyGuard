@@ -179,10 +179,48 @@ print(sanitize_resp["masked_prompt"])
 print(restore_resp["restored_text"])
 ```
 
+写入本地隐私仓库并在后续运行时直接复用：
+
+```python
+from privacyguard import PrivacyGuard, PrivacyRepository
+
+repository = PrivacyRepository()
+repository.write(
+    {
+        "personas": [
+            {
+                "persona_id": "owner",
+                "display_name": "主身份",
+                "profile": {
+                    "name": "张三",
+                    "phone": "13800138000",
+                    "email": "zhangsan@example.com",
+                },
+                "metadata": {
+                    "source": "manual_import",
+                },
+                "stats": {
+                    "exposure_count": 0,
+                },
+            }
+        ]
+    }
+)
+
+guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_persona_mixed")
+print(guard.persona_repo.get_persona("owner"))
+```
+
 运行仓库内示例：
 
 ```bash
 python3 examples/minimal_demo.py
+```
+
+如果想单独验证本地隐私仓库写入：
+
+```bash
+python3 examples/privacy_repository_demo.py
 ```
 
 如果想单独验证 PP-OCRv5 的官方 `import` 用法：
@@ -193,14 +231,17 @@ python3 examples/paddleocr_import_demo.py
 
 ## 8. 示例数据与配置说明
 
+- `data/privacy_repository.json`
+  本地隐私仓库默认落盘位置；`PrivacyRepository()` 会写到这里，`PrivacyGuard()` 会优先读取这里。
 - `data/personas.sample.json`
-  用于 `JsonPersonaRepository` 的示例 persona 数据。
+  当本地隐私仓库不存在时，`JsonPersonaRepository` 会回退读取这份示例 persona 数据。
 - `data/pii_dictionary.sample.json`
   用于 `RuleBasedPIIDetector` 的示例本地词典。
 
 需要注意：
 
 - 示例词典不会自动加载；如果需要启用，必须显式传入 `detector_config={"dictionary_path": ...}`。
+- 本地隐私仓库写入口为 `PrivacyRepository.write(...)`，支持按 `persona_id` 合并写入 `profile / slots / metadata / stats`。
 - persona JSON 当前兼容旧格式和实体列表格式。
 - 如果未安装 `paddleocr`，截图 OCR 不会静默降级，而会明确报错提示安装依赖。
 

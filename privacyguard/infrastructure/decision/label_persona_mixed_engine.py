@@ -127,6 +127,7 @@ class LabelPersonaMixedDecisionEngine:
         """返回属性类型对应的中文标签，格式为 @姓名1、@手机号1 等（无尖括号）。"""
         mapping = {
             PIIAttributeType.NAME: "姓名",
+            PIIAttributeType.LOCATION_CLUE: "位置",
             PIIAttributeType.PHONE: "手机号",
             PIIAttributeType.CARD_NUMBER: "卡号",
             PIIAttributeType.BANK_ACCOUNT: "银行账号",

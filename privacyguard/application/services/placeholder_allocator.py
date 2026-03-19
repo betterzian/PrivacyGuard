@@ -13,6 +13,7 @@ from privacyguard.utils.pii_value import canonicalize_pii_value
 
 _PLACEHOLDER_PREFIX = {
     PIIAttributeType.NAME: "姓名",
+    PIIAttributeType.LOCATION_CLUE: "位置",
     PIIAttributeType.PHONE: "手机号",
     PIIAttributeType.CARD_NUMBER: "卡号",
     PIIAttributeType.BANK_ACCOUNT: "银行账号",

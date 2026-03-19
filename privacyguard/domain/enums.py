@@ -30,6 +30,7 @@ class PIIAttributeType(str, Enum):
     """定义常见 PII 属性类别。"""
 
     NAME = "name"
+    LOCATION_CLUE = "location_clue"
     PHONE = "phone"
     CARD_NUMBER = "card_number"
     BANK_ACCOUNT = "bank_account"

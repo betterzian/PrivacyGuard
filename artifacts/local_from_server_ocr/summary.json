@@ -1,0 +1,130 @@
+{
+  "input_json": "/Users/vis/Documents/GitHub/PrivacyGuard/_server_test_output.json",
+  "image_path": "/Users/vis/Documents/GitHub/PrivacyGuard/test.PNG",
+  "ocr_block_count": 43,
+  "server_config": {
+    "detector_mode": "rule_based",
+    "decision_mode": "de_model",
+    "protection_level": "balanced",
+    "ocr_backend": "ppocr_v5_mobile_cpu",
+    "image_path": "/root/PrivacyGuard/test.PNG"
+  },
+  "levels": {
+    "strong": {
+      "candidate_count": 9,
+      "candidate_attr_counts": {
+        "name": 2,
+        "location_clue": 2,
+        "address": 1,
+        "other": 4
+      },
+      "action_count": 9,
+      "action_type_counts": {
+        "PERSONA_SLOT": 3,
+        "GENERICIZE": 6
+      },
+      "active_persona_id": "zhangsan",
+      "plan_metadata": {
+        "mode": "de_model",
+        "engine_type": "tiny_policy_skeleton",
+        "runtime_type": "heuristic_runtime",
+        "runtime_device": "cpu",
+        "selected_persona_id": "zhangsan",
+        "candidate_count": "9",
+        "persona_count": "2",
+        "page_vector_dim": "9"
+      },
+      "detector_json": "/Users/vis/Documents/GitHub/PrivacyGuard/artifacts/local_from_server_ocr/detector_strong.json",
+      "decision_json": "/Users/vis/Documents/GitHub/PrivacyGuard/artifacts/local_from_server_ocr/decision_strong.json",
+      "rendered_image": "/Users/vis/Documents/GitHub/PrivacyGuard/artifacts/local_from_server_ocr/rendered_strong.png",
+      "candidate_texts": [
+        "name:李恩慧",
+        "name:李晓红",
+        "location_clue:哈尔滨",
+        "address:江宁区",
+        "location_clue:泰州",
+        "other:2024-26",
+        "other:25.12.4",
+        "other:2025",
+        "other:15951169"
+      ]
+    },
+    "balanced": {
+      "candidate_count": 9,
+      "candidate_attr_counts": {
+        "name": 2,
+        "location_clue": 2,
+        "address": 1,
+        "other": 4
+      },
+      "action_count": 9,
+      "action_type_counts": {
+        "PERSONA_SLOT": 3,
+        "GENERICIZE": 6
+      },
+      "active_persona_id": "zhangsan",
+      "plan_metadata": {
+        "mode": "de_model",
+        "engine_type": "tiny_policy_skeleton",
+        "runtime_type": "heuristic_runtime",
+        "runtime_device": "cpu",
+        "selected_persona_id": "zhangsan",
+        "candidate_count": "9",
+        "persona_count": "2",
+        "page_vector_dim": "9"
+      },
+      "detector_json": "/Users/vis/Documents/GitHub/PrivacyGuard/artifacts/local_from_server_ocr/detector_balanced.json",
+      "decision_json": "/Users/vis/Documents/GitHub/PrivacyGuard/artifacts/local_from_server_ocr/decision_balanced.json",
+      "rendered_image": "/Users/vis/Documents/GitHub/PrivacyGuard/artifacts/local_from_server_ocr/rendered_balanced.png",
+      "candidate_texts": [
+        "name:李恩慧",
+        "name:李晓红",
+        "location_clue:哈尔滨",
+        "address:江宁区",
+        "location_clue:泰州",
+        "other:2024-26",
+        "other:25.12.4",
+        "other:2025",
+        "other:15951169"
+      ]
+    },
+    "weak": {
+      "candidate_count": 8,
+      "candidate_attr_counts": {
+        "name": 2,
+        "location_clue": 1,
+        "address": 1,
+        "other": 4
+      },
+      "action_count": 8,
+      "action_type_counts": {
+        "PERSONA_SLOT": 3,
+        "GENERICIZE": 5
+      },
+      "active_persona_id": "zhangsan",
+      "plan_metadata": {
+        "mode": "de_model",
+        "engine_type": "tiny_policy_skeleton",
+        "runtime_type": "heuristic_runtime",
+        "runtime_device": "cpu",
+        "selected_persona_id": "zhangsan",
+        "candidate_count": "8",
+        "persona_count": "2",
+        "page_vector_dim": "9"
+      },
+      "detector_json": "/Users/vis/Documents/GitHub/PrivacyGuard/artifacts/local_from_server_ocr/detector_weak.json",
+      "decision_json": "/Users/vis/Documents/GitHub/PrivacyGuard/artifacts/local_from_server_ocr/decision_weak.json",
+      "rendered_image": "/Users/vis/Documents/GitHub/PrivacyGuard/artifacts/local_from_server_ocr/rendered_weak.png",
+      "candidate_texts": [
+        "name:李恩慧",
+        "name:李晓红",
+        "location_clue:哈尔滨",
+        "address:江宁区",
+        "other:2024-26",
+        "other:25.12.4",
+        "other:2025",
+        "other:15951169"
+      ]
+    }
+  }
+}

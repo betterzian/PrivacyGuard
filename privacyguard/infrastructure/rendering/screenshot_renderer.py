@@ -13,21 +13,62 @@ from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock, PolygonPoi
 from privacyguard.infrastructure.rendering.fill_strategies import MixFillStrategy
 from privacyguard.utils.pii_value import parse_address_components
 
-# 常见系统字体路径
-_DEFAULT_FONT_PATHS = [
+# 常见系统字体路径。优先贴近 Android 默认无衬线风格；本机缺少 Android 字体时回退到 macOS 的中文黑体。
+_CJK_FONT_PATHS = [
+    "/system/fonts/NotoSansCJK-Regular.ttc",
+    "/system/fonts/NotoSansSC-Regular.otf",
+    "/system/fonts/NotoSansCJKsc-Regular.otf",
+    "/system/fonts/DroidSansFallback.ttf",
+    "/system/fonts/SourceHanSansSC-Regular.otf",
     "C:/Windows/Fonts/msyh.ttc",   # Windows 微软雅黑
     "C:/Windows/Fonts/msyhbd.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "/Library/Fonts/Roboto-Regular.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/Supplemental/Songti.ttc",
+]
+_LATIN_FONT_PATHS = [
+    "/system/fonts/Roboto-Regular.ttf",
+    "/system/fonts/RobotoFlex-Regular.ttf",
+    "/Library/Fonts/Roboto-Regular.ttf",
     "C:/Windows/Fonts/arial.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/System/Library/Fonts/PingFang.ttc",
     "/System/Library/Fonts/Helvetica.ttc",
 ]
 LOGGER = logging.getLogger(__name__)
 
 
-def _get_font_path() -> Path | None:
+def _contains_cjk_text(text: str | None) -> bool:
+    if not text:
+        return False
+    return any(
+        "\u3400" <= char <= "\u4dbf"
+        or "\u4e00" <= char <= "\u9fff"
+        or "\uf900" <= char <= "\ufaff"
+        for char in text
+    )
+
+
+def _font_path_candidates(sample_text: str | None = None) -> tuple[str, ...]:
+    ordered: list[str] = []
+    if _contains_cjk_text(sample_text):
+        ordered.extend(_CJK_FONT_PATHS)
+        ordered.extend(_LATIN_FONT_PATHS)
+    else:
+        ordered.extend(_LATIN_FONT_PATHS)
+        ordered.extend(_CJK_FONT_PATHS)
+    return tuple(dict.fromkeys(ordered))
+
+
+def _get_font_path(sample_text: str | None = None) -> Path | None:
     """获取可用的 TrueType 字体路径。"""
-    for p in _DEFAULT_FONT_PATHS:
+    for p in _font_path_candidates(sample_text):
         path = Path(p)
         if path.exists():
             return path
@@ -634,7 +675,10 @@ class ScreenshotRenderer:
         if abs(rotation_degrees) >= 1.0:
             mask = self._rotate_mask(mask, -rotation_degrees)
         mask_w, mask_h = mask.size
-        tx = int(round(center_x - mask_w / 2))
+        if abs(rotation_degrees) < 1.0:
+            tx = left + pad
+        else:
+            tx = int(round(center_x - mask_w / 2))
         ty = int(round(center_y - mask_h / 2))
         r, g, b = fill_rgb
         luminance = (r * 299 + g * 587 + b * 114) / 1000
@@ -657,11 +701,12 @@ class ScreenshotRenderer:
         pad = 2
         target_w = target_w if target_w is not None else max(4, bbox.width - 2 * pad)
         target_h = target_h if target_h is not None else max(4, bbox.height - 2 * pad)
-        font_path = _get_font_path()
+        font_path = _get_font_path(f"{original_text}{text}")
         base_font_size = self._estimate_base_font_size(
             draw=draw,
             text=original_text or text,
             font_path=font_path,
+            target_w=target_w,
             target_h=target_h,
         )
         min_font_size = 6
@@ -754,9 +799,10 @@ class ScreenshotRenderer:
         draw,
         text: str,
         font_path: Path | None,
+        target_w: int | None,
         target_h: int,
     ) -> int:
-        """根据原 OCR 文本的视觉高度反推一个接近原图的基准字号。"""
+        """根据原 OCR 文本的视觉高宽反推一个接近原图的基准字号。"""
         from PIL import ImageFont
 
         sample_text = text or "Hg"
@@ -767,8 +813,11 @@ class ScreenshotRenderer:
             mid = (low + high) // 2
             font = self._load_font(font_path, mid, ImageFont)
             bbox_xy = self._measure_multiline_text(draw, sample_text, font)
+            text_w = bbox_xy[2] - bbox_xy[0]
             text_h = bbox_xy[3] - bbox_xy[1]
-            if text_h <= target_h:
+            fits_height = text_h <= target_h
+            fits_width = target_w is None or text_w <= target_w
+            if fits_height and fits_width:
                 best = mid
                 low = mid + 1
             else:
@@ -791,15 +840,9 @@ class ScreenshotRenderer:
         font,
         desired_width: int,
     ) -> list[tuple[Any, float]]:
-        """生成单行文本的自然字距与自适应字距候选。"""
-        candidates: list[tuple[Any, float]] = []
+        """生成单行文本候选；保持原始字距，不做人为字间拉伸。"""
         natural_mask = self._build_text_mask(draw, text, font)
-        candidates.append((natural_mask, 0.0))
-        char_spacing = self._estimate_char_spacing(text, natural_mask.size[0], desired_width)
-        if abs(char_spacing) < 0.5:
-            return candidates
-        candidates.append((self._build_text_mask(draw, text, font, char_spacing=char_spacing), char_spacing))
-        return sorted(candidates, key=lambda item: abs(item[0].size[0] - desired_width))
+        return [(natural_mask, 0.0)]
 
     def _estimate_char_spacing(self, text: str, natural_width: int, desired_width: int) -> float:
         """估计单行文本的字符间距，使其更接近原文占宽。"""

@@ -13,6 +13,7 @@ from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.utils.aho_matcher import AhoCorasickMatcher
 from privacyguard.utils.pii_value import (
     build_match_text,
     compact_bank_account_value,
@@ -28,6 +29,106 @@ from privacyguard.utils.pii_value import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+_DATA_ROOT = Path(__file__).resolve().parents[3] / "data"
+_GEO_ADMIN_SUFFIXES = ("特别行政区", "自治区", "自治州", "省", "市", "州", "盟", "区", "县", "旗", "乡", "镇")
+_GEO_ADDRESS_SUFFIXES = (
+    "地铁站",
+    "火车站",
+    "高铁站",
+    "机场",
+    "码头",
+    "街道",
+    "社区",
+    "小区",
+    "公寓",
+    "大厦",
+    "广场",
+    "花园",
+    "家园",
+    "园区",
+    "校区",
+    "宿舍",
+    "公园",
+    "景区",
+    "商圈",
+    "路",
+    "街",
+    "巷",
+    "弄",
+    "胡同",
+    "大道",
+    "道",
+    "村",
+    "苑",
+    "庭",
+    "府",
+    "湾",
+    "城",
+    "里",
+    "站",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _BuiltinGeoLexicon:
+    provinces: frozenset[str]
+    cities: frozenset[str]
+    districts: frozenset[str]
+    local_places: frozenset[str]
+    address_tokens: frozenset[str]
+    ordered_tokens: tuple[str, ...]
+
+
+def _normalize_geo_entries(values) -> tuple[str, ...]:
+    if not isinstance(values, list):
+        return ()
+    normalized = []
+    for item in values:
+        text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return tuple(dict.fromkeys(normalized))
+
+
+def _expand_city_tokens(values: tuple[str, ...]) -> frozenset[str]:
+    expanded: set[str] = set()
+    for value in values:
+        expanded.add(value)
+        if not value.endswith(("市", "地区", "自治州", "盟", "新区")):
+            expanded.add(f"{value}市")
+    return frozenset(expanded)
+
+
+def _load_builtin_geo_lexicon() -> _BuiltinGeoLexicon:
+    lexicon_path = _DATA_ROOT / "china_geo_lexicon.json"
+    if not lexicon_path.exists():
+        LOGGER.warning("builtin geo lexicon not found: %s", lexicon_path)
+        return _BuiltinGeoLexicon(
+            provinces=frozenset(),
+            cities=frozenset(),
+            districts=frozenset(),
+            local_places=frozenset(),
+            address_tokens=frozenset(),
+            ordered_tokens=(),
+        )
+    content = json.loads(lexicon_path.read_text(encoding="utf-8"))
+    provinces = frozenset(_normalize_geo_entries(content.get("provinces")))
+    cities = _expand_city_tokens(_normalize_geo_entries(content.get("cities")))
+    districts = frozenset(_normalize_geo_entries(content.get("districts")))
+    local_places = frozenset(_normalize_geo_entries(content.get("local_places")))
+    address_tokens = frozenset(
+        token for token in (districts | local_places) if token.endswith(_GEO_ADDRESS_SUFFIXES) or token in local_places
+    )
+    ordered_tokens = tuple(sorted(provinces | cities | districts | local_places, key=lambda item: (-len(item), item)))
+    return _BuiltinGeoLexicon(
+        provinces=provinces,
+        cities=cities,
+        districts=districts,
+        local_places=local_places,
+        address_tokens=address_tokens,
+        ordered_tokens=ordered_tokens,
+    )
 
 _MASK_CHAR_CLASS_COMMON = r"[*＊●○◦◯⚫⚪■□▪▫█▇▉◆◇★☆※×✕✖╳]"
 _MASK_CHAR_CLASS_WITH_X = r"[*＊xX●○◦◯⚫⚪■□▪▫█▇▉◆◇★☆※×✕✖╳]"
@@ -153,6 +254,35 @@ _NON_PERSON_TOKENS = {
     "老板",
     "助理",
 }
+_LOCATION_ACTIVITY_TOKENS = (
+    "拼车",
+    "滑雪",
+    "住宿",
+    "酒店",
+    "旅馆",
+    "民宿",
+    "旅行",
+    "旅游",
+    "出发",
+    "返程",
+    "集合",
+    "探店",
+    "租房",
+    "求职",
+    "兼职",
+    "上班",
+    "夜跑",
+    "搭子",
+)
+_OCR_FRAGMENT_DELIMITERS = "-－—_/|｜"
+_OCR_SEMANTIC_BREAK_TOKEN = " <OCR_BREAK> "
+_BUILTIN_GEO_LEXICON = _load_builtin_geo_lexicon()
+_COMMON_CITY_TOKENS = set(_BUILTIN_GEO_LEXICON.cities)
+_COMMON_DISTRICT_TOKENS = set(_BUILTIN_GEO_LEXICON.districts)
+_COMMON_BUSINESS_AREA_TOKENS = set(_BUILTIN_GEO_LEXICON.local_places)
+_LOCATION_CLUE_TOKENS = _BUILTIN_GEO_LEXICON.ordered_tokens
+_LOCATION_CLUE_MATCHER = AhoCorasickMatcher(_LOCATION_CLUE_TOKENS)
+_TITLE_SEGMENT_PATTERN = re.compile(r"[-—_|｜/／]")
 _NAME_FIELD_KEYWORDS = (
     "name",
     "username",
@@ -344,6 +474,81 @@ _NAME_DICTIONARY_ALLOWED_NEXT_CHARS = (
     set("的了呢吗吧啊呀哦哈呗嘛是在于与和及并或给让把将向从到回处办找发传交送问说看来去要想会能可应需请先再就已未还都也被把按")
     | {item[0] for item in _NAME_HONORIFICS if item}
 )
+_NAME_CONTEXT_PREFIX_TOKENS = (
+    "联系",
+    "找",
+    "叫",
+    "叫做",
+    "姓名",
+    "名字",
+    "昵称",
+    "联系人",
+    "收件人",
+    "寄件人",
+    "申请人",
+    "委托人",
+    "法定代表人",
+    "患者",
+    "病人",
+    "同学",
+    "老师",
+    "医生",
+    "经理",
+    "群主",
+)
+_NAME_CONTEXT_CARRIER_TOKENS = (
+    "药房",
+    "药店",
+    "店铺",
+    "商店",
+    "超市",
+    "饭店",
+    "酒店",
+    "宾馆",
+    "民宿",
+    "公司",
+    "工厂",
+    "学校",
+    "医院",
+    "银行",
+    "门店",
+    "车队",
+    "群",
+)
+_NAME_NEGATIVE_RIGHT_CONTEXT_TOKENS = (
+    "大学",
+    "学院",
+    "公司",
+    "集团",
+    "科技",
+    "信息",
+    "软件",
+    "平台",
+    "鞋",
+    "店",
+    "馆",
+    "牌",
+)
+_NAME_STANDALONE_NEGATIVE_SUFFIXES = (
+    "录",
+    "册",
+    "表",
+)
+_GEO_NEGATIVE_RIGHT_CONTEXT_TOKENS = (
+    "大学",
+    "学院",
+    "医院",
+    "银行",
+    "公司",
+    "集团",
+    "科技",
+    "软件",
+    "信息",
+    "药房",
+    "药店",
+    "超市",
+    "门店",
+)
 _ORGANIZATION_BLACKLIST = {
     "机构",
     "组织",
@@ -378,75 +583,7 @@ _ORGANIZATION_SENTENCE_NOISE_TOKENS = {
     "非常",
     "比较",
 }
-_REGION_TOKENS = {
-    "北京",
-    "北京市",
-    "上海",
-    "上海市",
-    "天津",
-    "天津市",
-    "重庆",
-    "重庆市",
-    "香港",
-    "香港特别行政区",
-    "澳门",
-    "澳门特别行政区",
-    "台湾",
-    "安徽",
-    "安徽省",
-    "福建",
-    "福建省",
-    "甘肃",
-    "甘肃省",
-    "广东",
-    "广东省",
-    "广西",
-    "广西壮族自治区",
-    "贵州",
-    "贵州省",
-    "海南",
-    "海南省",
-    "河北",
-    "河北省",
-    "河南",
-    "河南省",
-    "黑龙江",
-    "黑龙江省",
-    "湖北",
-    "湖北省",
-    "湖南",
-    "湖南省",
-    "吉林",
-    "吉林省",
-    "江苏",
-    "江苏省",
-    "江西",
-    "江西省",
-    "辽宁",
-    "辽宁省",
-    "内蒙古",
-    "内蒙古自治区",
-    "宁夏",
-    "宁夏回族自治区",
-    "青海",
-    "青海省",
-    "山东",
-    "山东省",
-    "山西",
-    "山西省",
-    "陕西",
-    "陕西省",
-    "四川",
-    "四川省",
-    "西藏",
-    "西藏自治区",
-    "新疆",
-    "新疆维吾尔自治区",
-    "云南",
-    "云南省",
-    "浙江",
-    "浙江省",
-}
+_REGION_TOKENS = set(_BUILTIN_GEO_LEXICON.provinces)
 _ADDRESS_SUFFIX_PATTERN = re.compile(
     r"(?:特别行政区|自治区|自治州|盟|省|市|区|县|旗|乡|镇|街道|村|屯|组|路|街|巷|弄|胡同|大道|道|"
     r"社区|小区|公寓|大厦|广场|花园|家园|苑|庭|府|湾|城|里|园区|校区|宿舍|号院|号楼|栋|幢|座|单元|室|层|号)"
@@ -472,6 +609,13 @@ _ADDRESS_SPAN_PATTERNS = (
     ),
     re.compile(r"(?:\d{1,5}|[A-Za-z]\d{1,5})(?:号院|号楼|栋|幢|座|单元|室|层|号|户)(?:\d{0,4}(?:室|层|户))?"),
 )
+_GENERIC_GEO_FRAGMENT_PATTERNS = (
+    re.compile(r"[一-龥]{2,12}(?:省|市|州|盟)"),
+    re.compile(r"[一-龥]{2,12}(?:区|县|旗|乡|镇|街道)"),
+    re.compile(r"[一-龥]{2,18}(?:路|街|巷|弄|胡同|大道|道)"),
+    re.compile(r"[一-龥]{2,18}(?:地铁站|火车站|高铁站|机场|码头|社区|小区|公寓|大厦|广场|花园|家园|苑|庭|府|湾|园区|校区|宿舍|公园|景区|商圈|站)"),
+)
+_GENERIC_NUMBER_PATTERN = re.compile(r"(?<!\d)(?:\d(?:[\s\-－—_.,，。·•]?\d){3,})(?!\d)")
 _LEADING_ADDRESS_NOISE_PATTERN = re.compile(
     r"^(?:请)?(?:在|住在|我住在|我住|位于|位于中国|地址在|住址在|家住|家住在|现住|居住于|收货到|寄往|寄到|送到|派送至|发往|前往|来自|来自于|发自|到达)\s*"
 )
@@ -607,13 +751,14 @@ _RULE_PROFILES = {
         enable_honorific_name_pattern=True,
         enable_full_text_address=True,
         address_min_confidence=0.35,
-        allow_weak_org_suffix=True,
+        allow_weak_org_suffix=False,
         enable_context_masked_text=True,
         enable_standalone_masked_text=False,
         masked_text_min_run=3,
         allow_alpha_mask_text=True,
         min_confidence_by_attr={
             PIIAttributeType.NAME: 0.72,
+            PIIAttributeType.LOCATION_CLUE: 0.48,
             PIIAttributeType.ADDRESS: 0.35,
             PIIAttributeType.ORGANIZATION: 0.48,
             PIIAttributeType.OTHER: 0.76,
@@ -632,13 +777,14 @@ _RULE_PROFILES = {
         enable_honorific_name_pattern=True,
         enable_full_text_address=True,
         address_min_confidence=0.45,
-        allow_weak_org_suffix=True,
+        allow_weak_org_suffix=False,
         enable_context_masked_text=True,
         enable_standalone_masked_text=False,
         masked_text_min_run=4,
         allow_alpha_mask_text=False,
         min_confidence_by_attr={
             PIIAttributeType.NAME: 0.72,
+            PIIAttributeType.LOCATION_CLUE: 0.52,
             PIIAttributeType.ADDRESS: 0.45,
             PIIAttributeType.ORGANIZATION: 0.48,
             PIIAttributeType.OTHER: 0.76,
@@ -664,8 +810,9 @@ _RULE_PROFILES = {
         allow_alpha_mask_text=False,
         min_confidence_by_attr={
             PIIAttributeType.NAME: 0.9,
+            PIIAttributeType.LOCATION_CLUE: 0.9,
             PIIAttributeType.ADDRESS: 0.6,
-            PIIAttributeType.ORGANIZATION: 0.86,
+            PIIAttributeType.ORGANIZATION: 0.74,
             PIIAttributeType.OTHER: 0.9,
             PIIAttributeType.PHONE: 0.74,
             PIIAttributeType.CARD_NUMBER: 0.74,
@@ -725,6 +872,9 @@ class RuleBasedPIIDetector:
         self.name_title_pattern = re.compile(
             rf"(?P<value>(?:(?:{compound_surname_pattern})[一-龥·]{{1,3}}|(?:{single_surname_pattern})[一-龥·]{{0,2}})"
             rf"(?:{'|'.join(map(re.escape, _NAME_HONORIFICS))}))"
+        )
+        self.generic_name_pattern = re.compile(
+            rf"(?=(?P<value>(?:(?:{compound_surname_pattern})[一-龥·]{{1,2}}|(?:{single_surname_pattern})[一-龥·]{{1,3}})))"
         )
 
     def detect(
@@ -1400,6 +1550,28 @@ class RuleBasedPIIDetector:
             shadow_index_map=address_shadow.index_map,
         )
         protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
+        location_shadow = self._build_shadow_text(text, collected)
+        self._collect_geo_fragment_hits(
+            collected,
+            location_shadow.text,
+            source,
+            bbox,
+            block_id,
+            skip_spans=protected_spans,
+            rule_profile=rule_profile,
+            original_text=text,
+            shadow_index_map=location_shadow.index_map,
+        )
+        protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
+        self._collect_generic_number_hits(
+            collected,
+            text,
+            source,
+            bbox,
+            block_id,
+            skip_spans=protected_spans,
+        )
+        protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
         masked_shadow = self._build_shadow_text(text, collected)
         self._collect_masked_text_hits(
             collected,
@@ -1456,22 +1628,16 @@ class RuleBasedPIIDetector:
         ordered_blocks: list[OCRTextBlock] = []
         lines = self._group_blocks_by_page_line(ocr_blocks)
         assigned_blocks = {id(block) for line in lines for block in line if block.text.strip()}
+        chains = self._collect_ocr_block_chains(lines)
         line_count = 0
-        for line_blocks in lines:
-            visible_blocks = [block for block in line_blocks if block.text.strip()]
-            if not visible_blocks:
+        for chain in chains:
+            if not chain:
                 continue
             if line_count > 0:
-                merged_chars.append("\n")
-                char_refs.append(None)
-            for block in visible_blocks:
-                if ordered_blocks:
-                    prev_block = ordered_blocks[-1]
-                    if prev_block in visible_blocks:
-                        separator = self._block_join_separator(prev_block, block)
-                        if separator:
-                            merged_chars.append(separator)
-                            char_refs.append(None)
+                self._append_ocr_page_separator(merged_chars, char_refs, _OCR_SEMANTIC_BREAK_TOKEN)
+            for block, separator in chain:
+                if separator:
+                    self._append_ocr_page_separator(merged_chars, char_refs, separator)
                 block_index = len(ordered_blocks)
                 ordered_blocks.append(block)
                 for char_index, char in enumerate(block.text):
@@ -1482,8 +1648,7 @@ class RuleBasedPIIDetector:
             if id(block) in assigned_blocks or not block.text.strip():
                 continue
             if line_count > 0:
-                merged_chars.append("\n")
-                char_refs.append(None)
+                self._append_ocr_page_separator(merged_chars, char_refs, "\n")
             block_index = len(ordered_blocks)
             ordered_blocks.append(block)
             for char_index, char in enumerate(block.text):
@@ -1516,6 +1681,118 @@ class RuleBasedPIIDetector:
                 lines.append([block])
         return lines
 
+    def _collect_ocr_block_chains(self, lines: list[list[OCRTextBlock]]) -> list[list[tuple[OCRTextBlock, str]]]:
+        """按 block 级别选择右邻或下邻后继，构建 OCR 阅读链。"""
+        indexed_lines = [
+            [
+                ((line_index, block_index), block)
+                for block_index, block in enumerate(line)
+                if block.text.strip()
+            ]
+            for line_index, line in enumerate(lines)
+        ]
+        indexed_lines = [line for line in indexed_lines if line]
+        if not indexed_lines:
+            return []
+        page_order = [key for line in indexed_lines for key, _ in line]
+        block_by_key = {key: block for line in indexed_lines for key, block in line}
+        position_by_key = {key: index for index, key in enumerate(page_order)}
+        proposals = self._collect_ocr_successor_proposals(indexed_lines)
+        accepted: dict[tuple[int, int], tuple[tuple[int, int], str]] = {}
+        used_sources: set[tuple[int, int]] = set()
+        used_targets: set[tuple[int, int]] = set()
+        for source_key, target_key, separator, score in sorted(
+            proposals,
+            key=lambda item: (-item[3], position_by_key[item[0]], position_by_key[item[1]]),
+        ):
+            if source_key in used_sources or target_key in used_targets:
+                continue
+            accepted[source_key] = (target_key, separator)
+            used_sources.add(source_key)
+            used_targets.add(target_key)
+
+        start_keys = [key for key in page_order if key not in used_targets]
+        visited: set[tuple[int, int]] = set()
+        chains: list[list[tuple[OCRTextBlock, str]]] = []
+        for start_key in start_keys:
+            if start_key in visited:
+                continue
+            chain: list[tuple[OCRTextBlock, str]] = []
+            current_key = start_key
+            separator = ""
+            while current_key not in visited:
+                visited.add(current_key)
+                chain.append((block_by_key[current_key], separator))
+                next_item = accepted.get(current_key)
+                if next_item is None:
+                    break
+                current_key, separator = next_item
+            if chain:
+                chains.append(chain)
+        for key in page_order:
+            if key in visited:
+                continue
+            chains.append([(block_by_key[key], "")])
+            visited.add(key)
+        return chains
+
+    def _collect_ocr_successor_proposals(
+        self,
+        indexed_lines: list[list[tuple[tuple[int, int], OCRTextBlock]]],
+    ) -> list[tuple[tuple[int, int], tuple[int, int], str, float]]:
+        """为每个 block 提议右邻/下邻后继，再交给贪心匹配挑选。"""
+        proposals: list[tuple[tuple[int, int], tuple[int, int], str, float]] = []
+        for line_index, line in enumerate(indexed_lines):
+            for block_index, (source_key, source_block) in enumerate(line):
+                right_candidate = self._horizontal_successor_proposal(line, block_index)
+                if right_candidate is not None:
+                    proposals.append((source_key, right_candidate[0], right_candidate[1], right_candidate[2]))
+                down_candidate = self._downward_successor_proposal(indexed_lines, line_index, block_index)
+                if down_candidate is not None:
+                    proposals.append((source_key, down_candidate[0], down_candidate[1], down_candidate[2]))
+        return proposals
+
+    def _horizontal_successor_proposal(
+        self,
+        line: list[tuple[tuple[int, int], OCRTextBlock]],
+        block_index: int,
+    ) -> tuple[tuple[int, int], str, float] | None:
+        """提议同一行内的右侧后继。"""
+        if block_index + 1 >= len(line):
+            return None
+        _, source_block = line[block_index]
+        target_key, target_block = line[block_index + 1]
+        score = self._score_horizontal_successor(source_block, target_block)
+        if score is None:
+            return None
+        return target_key, self._block_join_separator(source_block, target_block), score
+
+    def _downward_successor_proposal(
+        self,
+        indexed_lines: list[list[tuple[tuple[int, int], OCRTextBlock]]],
+        line_index: int,
+        block_index: int,
+    ) -> tuple[tuple[int, int], str, float] | None:
+        """提议更像是纵向续写的下方后继。"""
+        source_key, source_block = indexed_lines[line_index][block_index]
+        source_prefix = [block for _, block in indexed_lines[line_index][: block_index + 1]]
+        best_target: tuple[tuple[int, int], str, float] | None = None
+        for next_line in indexed_lines[line_index + 1 :]:
+            next_blocks = [block for _, block in next_line]
+            line_score = self._score_vertical_line_successor(source_prefix, next_blocks)
+            if line_score is None:
+                continue
+            for target_key, target_block in next_line:
+                block_score = self._score_vertical_block_successor(source_block, target_block)
+                if block_score is None:
+                    continue
+                score = line_score * 0.45 + block_score * 0.55
+                if best_target is None or score > best_target[2]:
+                    best_target = (target_key, "\n", score)
+            if best_target is not None:
+                return best_target
+        return None
+
     def _belongs_to_same_page_line(self, line: list[OCRTextBlock], block: OCRTextBlock) -> bool:
         """判断一个 OCR block 是否应并入已有页面文本行。"""
         if block.bbox is None or not line:
@@ -1533,10 +1810,18 @@ class RuleBasedPIIDetector:
             min((item.bbox.height for item in line if item.bbox is not None), default=block.bbox.height),
         )
         center_delta = abs(sum(line_centers) / len(line_centers) - self._bbox_center_y(block.bbox))
-        return overlap >= max(1, int(min_height * 0.35)) or center_delta <= max(6.0, block.bbox.height * 0.6)
+        center_delta_threshold = self._clamped_ocr_tolerance(
+            float(block.bbox.height),
+            ratio=0.28,
+            min_px=4.0,
+            max_px=10.0,
+        )
+        return overlap >= max(1, int(min_height * 0.35)) or center_delta <= center_delta_threshold
 
     def _block_join_separator(self, left: OCRTextBlock, right: OCRTextBlock) -> str:
         """决定两个相邻 OCR block 在拼接时是否需要补空格。"""
+        if not self._blocks_semantically_related(left, right):
+            return _OCR_SEMANTIC_BREAK_TOKEN
         if left.bbox is None or right.bbox is None:
             return ""
         left_char = left.text[-1:] if left.text else ""
@@ -1544,12 +1829,215 @@ class RuleBasedPIIDetector:
         if not left_char or not right_char:
             return ""
         gap = right.bbox.x - (left.bbox.x + left.bbox.width)
-        threshold = max(6, int(min(left.bbox.height, right.bbox.height) * 0.6))
+        threshold = int(
+            self._clamped_ocr_tolerance(
+                float(min(left.bbox.height, right.bbox.height)),
+                ratio=0.4,
+                min_px=6.0,
+                max_px=12.0,
+            )
+        )
         if gap <= threshold:
             return ""
         if left_char.isascii() and left_char.isalnum() and right_char.isascii() and right_char.isalnum():
             return " "
         return ""
+
+    def _append_ocr_page_separator(
+        self,
+        merged_chars: list[str],
+        char_refs: list[tuple[int, int] | None],
+        separator: str,
+    ) -> None:
+        for char in separator:
+            merged_chars.append(char)
+            char_refs.append(None)
+
+    def _line_join_separator(
+        self,
+        previous_line: list[OCRTextBlock] | None,
+        current_line: list[OCRTextBlock],
+    ) -> str:
+        if not previous_line:
+            return "\n"
+        if self._lines_semantically_related(previous_line, current_line):
+            return "\n"
+        return _OCR_SEMANTIC_BREAK_TOKEN
+
+    def _blocks_semantically_related(self, left: OCRTextBlock, right: OCRTextBlock) -> bool:
+        """根据 bbox 几何关系判断两个 OCR block 是否应视为同一语义片段。"""
+        if left.bbox is None or right.bbox is None:
+            return True
+        left_box = left.bbox
+        right_box = right.bbox
+        min_height = float(min(left_box.height, right_box.height))
+        max_height = float(max(left_box.height, right_box.height))
+        avg_height = (left_box.height + right_box.height) / 2
+        top_delta = abs(left_box.y - right_box.y)
+        bottom_delta = abs((left_box.y + left_box.height) - (right_box.y + right_box.height))
+        center_delta = abs(self._bbox_center_y(left_box) - self._bbox_center_y(right_box))
+        gap = right_box.x - (left_box.x + left_box.width)
+        vertical_overlap = max(0, min(left_box.y + left_box.height, right_box.y + right_box.height) - max(left_box.y, right_box.y))
+        vertical_overlap_ratio = vertical_overlap / max(1.0, min_height)
+        height_ratio = max_height / max(1.0, min_height)
+        gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=8.0, max_px=18.0)
+        center_delta_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.3, min_px=4.0, max_px=10.0)
+        left_edge_threshold = self._clamped_ocr_tolerance(min_height, ratio=0.35, min_px=6.0, max_px=12.0)
+        vertical_delta_threshold = self._clamped_ocr_tolerance(max_height, ratio=0.2, min_px=4.0, max_px=8.0)
+        overlap_center_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.22, min_px=4.0, max_px=8.0)
+        left_edge_aligned = abs(left_box.x - right_box.x) <= left_edge_threshold
+        horizontal_overlap = max(0, min(left_box.x + left_box.width, right_box.x + right_box.width) - max(left_box.x, right_box.x))
+        horizontal_overlap_ratio = horizontal_overlap / max(1.0, float(min(left_box.width, right_box.width)))
+
+        if gap > gap_threshold:
+            return False
+        if vertical_overlap_ratio < 0.38 and center_delta > center_delta_threshold:
+            return False
+        if left_edge_aligned and (
+            height_ratio >= 1.55
+            or top_delta > vertical_delta_threshold
+            or bottom_delta > vertical_delta_threshold
+        ):
+            return False
+        if horizontal_overlap_ratio >= 0.45 and center_delta > overlap_center_threshold:
+            return False
+        return True
+
+    def _lines_semantically_related(self, previous_line: list[OCRTextBlock], current_line: list[OCRTextBlock]) -> bool:
+        """判断相邻页面文本行是否像同一语义片段的连续换行。"""
+        previous_boxes = [block.bbox for block in previous_line if block.bbox is not None]
+        current_boxes = [block.bbox for block in current_line if block.bbox is not None]
+        if not previous_boxes or not current_boxes:
+            return True
+        previous_box = self._combine_bboxes(previous_boxes)
+        current_box = self._combine_bboxes(current_boxes)
+        previous_head = next((block for block in previous_line if block.bbox is not None), None)
+        current_head = next((block for block in current_line if block.bbox is not None), None)
+        if previous_box is None or current_box is None or previous_head is None or current_head is None:
+            return True
+        previous_heights = [box.height for box in previous_boxes]
+        current_heights = [box.height for box in current_boxes]
+        avg_height = (sum(previous_heights) / len(previous_heights) + sum(current_heights) / len(current_heights)) / 2
+        min_height = float(min(min(previous_heights), min(current_heights)))
+        max_height = float(max(max(previous_heights), max(current_heights)))
+        height_ratio = max_height / max(1.0, min_height)
+        vertical_gap = current_box.y - (previous_box.y + previous_box.height)
+        left_edge_delta = abs(previous_head.bbox.x - current_head.bbox.x)
+        vertical_gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=6.0, max_px=16.0)
+        left_edge_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=8.0, max_px=18.0)
+        horizontal_overlap_gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.45, min_px=6.0, max_px=12.0)
+        horizontal_overlap = max(
+            0,
+            min(previous_box.x + previous_box.width, current_box.x + current_box.width) - max(previous_box.x, current_box.x),
+        )
+        horizontal_overlap_ratio = horizontal_overlap / max(1.0, float(min(previous_box.width, current_box.width)))
+        previous_text = "".join(block.text.strip() for block in previous_line)
+        current_text = "".join(block.text.strip() for block in current_line)
+
+        if vertical_gap > vertical_gap_threshold:
+            return False
+        if height_ratio > 1.55:
+            return False
+        if (
+            left_edge_delta <= left_edge_threshold
+            and len(previous_text) <= 6
+            and len(current_text) >= 8
+            and current_box.width >= previous_box.width * 1.8
+        ):
+            return False
+        if left_edge_delta <= left_edge_threshold:
+            return True
+        return horizontal_overlap_ratio >= 0.55 and vertical_gap <= horizontal_overlap_gap_threshold
+
+    def _score_horizontal_successor(self, left: OCRTextBlock, right: OCRTextBlock) -> float | None:
+        """给同一行右邻 block 计算续写分数。"""
+        if left.bbox is None or right.bbox is None:
+            return None
+        if not self._blocks_semantically_related(left, right):
+            return None
+        avg_height = (left.bbox.height + right.bbox.height) / 2
+        gap = max(0.0, float(right.bbox.x - (left.bbox.x + left.bbox.width)))
+        gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=8.0, max_px=18.0)
+        center_delta = abs(self._bbox_center_y(left.bbox) - self._bbox_center_y(right.bbox))
+        center_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.3, min_px=4.0, max_px=10.0)
+        min_height = float(min(left.bbox.height, right.bbox.height))
+        max_height = float(max(left.bbox.height, right.bbox.height))
+        height_ratio = max_height / max(1.0, min_height)
+        score = 1.0
+        score -= 0.55 * min(1.0, gap / max(1.0, gap_threshold))
+        score -= 0.3 * min(1.0, center_delta / max(1.0, center_threshold))
+        score -= 0.15 * min(1.0, max(0.0, height_ratio - 1.0) / 0.45)
+        return max(0.0, score)
+
+    def _score_vertical_line_successor(
+        self,
+        previous_line: list[OCRTextBlock],
+        current_line: list[OCRTextBlock],
+    ) -> float | None:
+        """给纵向续写的整行关系计算分数。"""
+        if not previous_line or not current_line:
+            return None
+        if not self._lines_semantically_related(previous_line, current_line):
+            return None
+        previous_box = self._combine_bboxes(block.bbox for block in previous_line if block.bbox is not None)
+        current_box = self._combine_bboxes(block.bbox for block in current_line if block.bbox is not None)
+        if previous_box is None or current_box is None:
+            return None
+        avg_height = (previous_box.height + current_box.height) / 2
+        vertical_gap = max(0.0, float(current_box.y - (previous_box.y + previous_box.height)))
+        left_edge_delta = abs(previous_box.x - current_box.x)
+        gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=6.0, max_px=16.0)
+        left_edge_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=8.0, max_px=18.0)
+        score = 1.0
+        score -= 0.45 * min(1.0, vertical_gap / max(1.0, gap_threshold))
+        score -= 0.45 * min(1.0, left_edge_delta / max(1.0, left_edge_threshold))
+        previous_text = "".join(block.text.strip() for block in previous_line)
+        current_text = "".join(block.text.strip() for block in current_line)
+        if self._looks_like_short_numeric_metadata(current_text) and len(previous_text) >= 6:
+            score -= 0.25
+        return max(0.0, score)
+
+    def _score_vertical_block_successor(self, upper: OCRTextBlock, lower: OCRTextBlock) -> float | None:
+        """给纵向 block 续写关系计算分数。"""
+        if upper.bbox is None or lower.bbox is None:
+            return None
+        if self._bbox_center_y(lower.bbox) <= self._bbox_center_y(upper.bbox):
+            return None
+        if self._looks_like_short_numeric_metadata(lower.text.strip()) and len(upper.text.strip()) >= 6:
+            return None
+        avg_height = (upper.bbox.height + lower.bbox.height) / 2
+        left_edge_delta = abs(upper.bbox.x - lower.bbox.x)
+        left_edge_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.35, min_px=6.0, max_px=12.0)
+        horizontal_overlap = max(
+            0,
+            min(upper.bbox.x + upper.bbox.width, lower.bbox.x + lower.bbox.width) - max(upper.bbox.x, lower.bbox.x),
+        )
+        min_width = float(min(upper.bbox.width, lower.bbox.width))
+        horizontal_overlap_ratio = horizontal_overlap / max(1.0, min_width)
+        if left_edge_delta > left_edge_threshold and horizontal_overlap_ratio < 0.35:
+            return None
+        vertical_gap = max(0.0, float(lower.bbox.y - (upper.bbox.y + upper.bbox.height)))
+        vertical_gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.4, min_px=4.0, max_px=10.0)
+        min_height = float(min(upper.bbox.height, lower.bbox.height))
+        max_height = float(max(upper.bbox.height, lower.bbox.height))
+        height_ratio = max_height / max(1.0, min_height)
+        if height_ratio > 1.35:
+            return None
+        score = 1.0
+        score -= 0.4 * min(1.0, left_edge_delta / max(1.0, left_edge_threshold))
+        score -= 0.35 * min(1.0, vertical_gap / max(1.0, vertical_gap_threshold))
+        score -= 0.15 * min(1.0, max(0.0, height_ratio - 1.0) / 0.35)
+        score += 0.1 * min(1.0, horizontal_overlap_ratio)
+        return max(0.0, score)
+
+    def _looks_like_short_numeric_metadata(self, text: str) -> bool:
+        """识别短时间/计数类 UI 元信息，避免误拼成正文续写。"""
+        stripped = text.strip()
+        if len(stripped) > 6 or not stripped:
+            return False
+        if re.fullmatch(r"[\d\s:：./\-]{1,6}", stripped) is None:
+            return False
+        return any(char.isdigit() for char in stripped)
 
     def _remap_ocr_page_candidate(
         self,
@@ -1657,6 +2145,19 @@ class RuleBasedPIIDetector:
     def _bbox_center_y(self, bbox) -> float:
         return bbox.y + bbox.height / 2
 
+    def _clamped_ocr_tolerance(
+        self,
+        reference: float,
+        *,
+        ratio: float,
+        min_px: float,
+        max_px: float,
+    ) -> float:
+        """OCR 几何容差：小字号按比例，大字号按像素封顶。"""
+        if reference <= 0:
+            return min_px
+        return min(max_px, max(min_px, reference * ratio))
+
     def _derive_address_block_candidates(
         self,
         candidate: PIICandidate,
@@ -1758,6 +2259,7 @@ class RuleBasedPIIDetector:
     def _shadow_token(self, attr_type: PIIAttributeType) -> str:
         mapping = {
             PIIAttributeType.NAME: " <NAME> ",
+            PIIAttributeType.LOCATION_CLUE: " <LOC> ",
             PIIAttributeType.PHONE: " <PHONE> ",
             PIIAttributeType.CARD_NUMBER: " <CARD> ",
             PIIAttributeType.BANK_ACCOUNT: " <ACCOUNT> ",
@@ -2002,6 +2504,45 @@ class RuleBasedPIIDetector:
                         metadata=resolved_metadata,
                         skip_spans=skip_spans,
                     )
+
+    def _collect_generic_number_hits(
+        self,
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
+        raw_text: str,
+        source: PIISourceType,
+        bbox: object,
+        block_id: str | None,
+        *,
+        skip_spans: list[tuple[int, int]],
+    ) -> None:
+        """兜底识别 4 位及以上数字串，避免高精度信息漏检。"""
+        for match in _GENERIC_NUMBER_PATTERN.finditer(raw_text):
+            extracted = self._extract_match(raw_text, *match.span(0))
+            if extracted is None:
+                continue
+            matched_text, span_start, span_end = extracted
+            if skip_spans and span_start is not None and span_end is not None:
+                if self._overlaps_any_span(span_start, span_end, skip_spans):
+                    continue
+            digit_count = len(re.sub(r"\D", "", matched_text))
+            if digit_count < 4:
+                continue
+            confidence = 0.98 if digit_count >= 7 else 0.94
+            self._upsert_candidate(
+                collected=collected,
+                text=raw_text,
+                matched_text=matched_text,
+                attr_type=PIIAttributeType.OTHER,
+                source=source,
+                bbox=bbox,
+                block_id=block_id,
+                span_start=span_start,
+                span_end=span_end,
+                confidence=confidence,
+                matched_by="regex_generic_number",
+                metadata={"digit_count": [str(digit_count)]},
+                skip_spans=skip_spans,
+            )
 
     def _upsert_regex_candidate(
         self,
@@ -2468,6 +3009,79 @@ class RuleBasedPIIDetector:
                     canonical_source_text=canonical_source_text,
                     skip_spans=skip_spans,
                 )
+        self._collect_generic_name_fragment_hits(
+            collected,
+            raw_text,
+            source,
+            bbox,
+            block_id,
+            skip_spans=skip_spans,
+            rule_profile=rule_profile,
+            original_text=original_text,
+            shadow_index_map=shadow_index_map,
+        )
+
+    def _collect_generic_name_fragment_hits(
+        self,
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
+        raw_text: str,
+        source: PIISourceType,
+        bbox: object,
+        block_id: str | None,
+        *,
+        skip_spans: list[tuple[int, int]],
+        rule_profile: _RuleStrengthProfile,
+        original_text: str | None = None,
+        shadow_index_map: tuple[int | None, ...] | None = None,
+    ) -> None:
+        local_skip_spans = list(skip_spans)
+        for match in self.generic_name_pattern.finditer(raw_text):
+            extracted = self._extract_match(
+                raw_text,
+                *match.span("value"),
+                original_text=original_text,
+                shadow_index_map=shadow_index_map,
+            )
+            if extracted is None:
+                continue
+            value, span_start, span_end = extracted
+            if span_start is None or span_end is None:
+                continue
+            if self._overlaps_any_span(span_start, span_end, local_skip_spans):
+                continue
+            canonical_source_text = self._canonical_name_source_text(
+                value,
+                allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+            )
+            validator_value = canonical_source_text or value
+            if not self._is_name_candidate(validator_value):
+                continue
+            confidence = self._generic_name_confidence(
+                original_text or raw_text,
+                span_start,
+                span_end,
+                value=validator_value,
+                source=source,
+                rule_profile=rule_profile,
+            )
+            if confidence <= 0.0:
+                continue
+            self._upsert_candidate(
+                collected=collected,
+                text=raw_text,
+                matched_text=value,
+                attr_type=PIIAttributeType.NAME,
+                source=source,
+                bbox=bbox,
+                block_id=block_id,
+                span_start=span_start,
+                span_end=span_end,
+                confidence=confidence,
+                matched_by="heuristic_name_fragment",
+                canonical_source_text=canonical_source_text,
+                skip_spans=local_skip_spans,
+            )
+            local_skip_spans.append((span_start, span_end))
 
     def _collect_masked_text_hits(
         self,
@@ -2590,6 +3204,107 @@ class RuleBasedPIIDetector:
                     skip_spans=skip_spans,
                 )
 
+    def _collect_geo_fragment_hits(
+        self,
+        collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
+        raw_text: str,
+        source: PIISourceType,
+        bbox: object,
+        block_id: str | None,
+        *,
+        skip_spans: list[tuple[int, int]],
+        rule_profile: _RuleStrengthProfile,
+        original_text: str | None = None,
+        shadow_index_map: tuple[int | None, ...] | None = None,
+    ) -> None:
+        """用内置地名词库和通用地理后缀规则补充地址/地名碎片。"""
+        local_skip_spans = list(skip_spans)
+        confidence_text = original_text or raw_text
+        builtin_matches = sorted(
+            _LOCATION_CLUE_MATCHER.finditer(raw_text),
+            key=lambda item: (-(item[1] - item[0]), item[0], item[2]),
+        )
+        for index, end, _token in builtin_matches:
+            extracted = self._extract_match(
+                raw_text,
+                index,
+                end,
+                original_text=original_text,
+                shadow_index_map=shadow_index_map,
+            )
+            if extracted is None:
+                continue
+            value, span_start, span_end = extracted
+            if self._overlaps_any_span(span_start, span_end, local_skip_spans):
+                continue
+            attr_type = self._geo_candidate_attr_type(value)
+            confidence = self._geo_fragment_confidence(
+                confidence_text,
+                span_start,
+                span_end,
+                value=value,
+                attr_type=attr_type,
+                is_builtin_token=True,
+                rule_profile=rule_profile,
+            )
+            if confidence <= 0.0:
+                continue
+            self._upsert_candidate(
+                collected=collected,
+                text=raw_text,
+                matched_text=value,
+                attr_type=attr_type,
+                source=source,
+                bbox=bbox,
+                block_id=block_id,
+                span_start=span_start,
+                span_end=span_end,
+                confidence=confidence,
+                matched_by="heuristic_geo_lexicon",
+                skip_spans=local_skip_spans,
+            )
+            local_skip_spans.append((span_start, span_end))
+        for pattern in _GENERIC_GEO_FRAGMENT_PATTERNS:
+            for match in pattern.finditer(raw_text):
+                extracted = self._extract_match(
+                    raw_text,
+                    *match.span(0),
+                    original_text=original_text,
+                    shadow_index_map=shadow_index_map,
+                )
+                if extracted is None:
+                    continue
+                value, span_start, span_end = extracted
+                if self._overlaps_any_span(span_start, span_end, local_skip_spans):
+                    continue
+                attr_type = self._geo_candidate_attr_type(value)
+                confidence = self._geo_fragment_confidence(
+                    confidence_text,
+                    span_start,
+                    span_end,
+                    value=value,
+                    attr_type=attr_type,
+                    is_builtin_token=False,
+                    rule_profile=rule_profile,
+                )
+                if confidence <= 0.0:
+                    continue
+                self._upsert_candidate(
+                    collected=collected,
+                    text=raw_text,
+                    matched_text=value,
+                    attr_type=attr_type,
+                    source=source,
+                    bbox=bbox,
+                    block_id=block_id,
+                    span_start=span_start,
+                    span_end=span_end,
+                    confidence=confidence,
+                    matched_by="heuristic_geo_suffix",
+                    skip_spans=local_skip_spans,
+                )
+                local_skip_spans.append((span_start, span_end))
+
     def _collect_organization_hits(
         self,
         collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
@@ -2616,7 +3331,12 @@ class RuleBasedPIIDetector:
                 if extracted is None:
                     continue
                 value, span_start, span_end = extracted
-                if not self._is_organization_candidate(value, allow_weak_suffix=rule_profile.allow_weak_org_suffix):
+                allow_weak_suffix = rule_profile.allow_weak_org_suffix or self._organization_has_explicit_context(
+                    original_text or raw_text,
+                    span_start,
+                    span_end,
+                )
+                if not self._is_organization_candidate(value, allow_weak_suffix=allow_weak_suffix):
                     continue
                 self._upsert_candidate(
                     collected=collected,
@@ -2628,7 +3348,7 @@ class RuleBasedPIIDetector:
                     block_id=block_id,
                     span_start=span_start,
                     span_end=span_end,
-                    confidence=self._organization_confidence(value, allow_weak_suffix=rule_profile.allow_weak_org_suffix),
+                    confidence=self._organization_confidence(value, allow_weak_suffix=allow_weak_suffix),
                     matched_by="regex_organization_suffix",
                     skip_spans=skip_spans,
                 )
@@ -2840,7 +3560,7 @@ class RuleBasedPIIDetector:
         """清理上下文提取值两侧的噪声字符。"""
         cleaned = value.strip()
         cleaned = re.sub(r"^[\s\[{(<（【「『\"'`]+", "", cleaned)
-        cleaned = re.sub(r"[\s\]})>）】」』\"'`.,，;；、]+$", "", cleaned)
+        cleaned = re.sub(r"[\s\]})>）】」』\"'`.,，;；、。！？!?]+$", "", cleaned)
         return cleaned.strip()
 
     def _clean_address_candidate(self, value: str) -> str:
@@ -2870,7 +3590,7 @@ class RuleBasedPIIDetector:
         return next_char in _NAME_DICTIONARY_ALLOWED_NEXT_CHARS
 
     def _next_significant_char(self, raw_text: str, start: int) -> str | None:
-        index = start
+        index = max(0, min(start, len(raw_text)))
         while index < len(raw_text):
             current = raw_text[index]
             if current in _NAME_MATCH_IGNORABLE:
@@ -2878,6 +3598,111 @@ class RuleBasedPIIDetector:
                 continue
             return current
         return None
+
+    def _previous_significant_char(self, raw_text: str, end: int) -> str | None:
+        index = min(end, len(raw_text)) - 1
+        while index >= 0:
+            current = raw_text[index]
+            if current in _NAME_MATCH_IGNORABLE:
+                index -= 1
+                continue
+            return current
+        return None
+
+    def _left_context(self, raw_text: str, start: int, *, size: int = 8) -> str:
+        return self._clean_extracted_value(raw_text[max(0, start - size):start])
+
+    def _right_context(self, raw_text: str, end: int, *, size: int = 10) -> str:
+        return self._clean_extracted_value(raw_text[end:min(len(raw_text), end + size)])
+
+    def _starts_with_geo_or_activity(self, value: str) -> bool:
+        compact = re.sub(rf"^[\s{re.escape(_OCR_FRAGMENT_DELIMITERS)}:：,，;；]+", "", value)
+        if not compact:
+            return False
+        if any(compact.startswith(token) for token in _LOCATION_ACTIVITY_TOKENS):
+            return True
+        return any(compact.startswith(token) for token in _LOCATION_CLUE_TOKENS)
+
+    def _generic_name_confidence(
+        self,
+        raw_text: str,
+        span_start: int,
+        span_end: int,
+        *,
+        value: str,
+        source: PIISourceType,
+        rule_profile: _RuleStrengthProfile,
+    ) -> float:
+        if any(value.endswith(honorific) for honorific in _NAME_HONORIFICS) and not self._looks_like_name_with_title(value):
+            return 0.0
+        left_char = self._previous_significant_char(raw_text, span_start)
+        right_char = self._next_significant_char(raw_text, span_end)
+        left_context = self._left_context(raw_text, span_start)
+        right_context = self._right_context(raw_text, span_end)
+        left_support = any(left_context.endswith(token) for token in (*_NAME_CONTEXT_PREFIX_TOKENS, *_NAME_CONTEXT_CARRIER_TOKENS))
+        right_support = (
+            right_char is None
+            or right_char.isdigit()
+            or right_char in _OCR_FRAGMENT_DELIMITERS
+            or not self._is_cjk_char(right_char)
+        )
+        if any(right_context.startswith(token) for token in _NAME_NEGATIVE_RIGHT_CONTEXT_TOKENS) and not left_support:
+            return 0.0
+        if left_support and (right_support or source == PIISourceType.OCR):
+            return 0.96 if rule_profile.level == ProtectionLevel.WEAK else 0.94
+        if self._starts_with_geo_or_activity(right_context):
+            return 0.96 if rule_profile.level == ProtectionLevel.WEAK else 0.92
+        standalone = (left_char is None or not self._is_cjk_char(left_char)) and (
+            right_char is None or not self._is_cjk_char(right_char)
+        )
+        if standalone:
+            return self._strong_standalone_name_confidence(
+                raw_text,
+                span_start,
+                span_end,
+                value=value,
+                source=source,
+                rule_profile=rule_profile,
+            )
+        if right_char is not None and right_char.isdigit():
+            if left_support or left_char is None or not self._is_cjk_char(left_char):
+                return 0.96 if rule_profile.level == ProtectionLevel.WEAK else 0.94
+            return 0.0
+        return 0.0
+
+    def _strong_standalone_name_confidence(
+        self,
+        raw_text: str,
+        span_start: int,
+        span_end: int,
+        *,
+        value: str,
+        source: PIISourceType,
+        rule_profile: _RuleStrengthProfile,
+    ) -> float:
+        if rule_profile.level != ProtectionLevel.STRONG:
+            return 0.0
+        compact = self._compact_name_value(value, allow_ocr_noise=False)
+        if not compact:
+            return 0.0
+        if any(compact.endswith(suffix) for suffix in _NAME_STANDALONE_NEGATIVE_SUFFIXES):
+            return 0.0
+        if any(token in compact for token in _NON_PERSON_TOKENS):
+            return 0.0
+        is_compound = compact[:2] in _COMMON_COMPOUND_SURNAMES
+        if is_compound:
+            if not 3 <= len(compact) <= 4:
+                return 0.0
+        elif not 2 <= len(compact) <= 3:
+            return 0.0
+        full_text = self._clean_extracted_value(raw_text)
+        if full_text == value:
+            return 0.9
+        if source == PIISourceType.OCR:
+            window = self._clean_extracted_value(raw_text[max(0, span_start - 2):min(len(raw_text), span_end + 2)])
+            if value in window and len(window) <= len(value) + 2:
+                return 0.86
+        return 0.0
 
     def _is_cjk_char(self, char: str) -> bool:
         return bool(char) and "\u4e00" <= char <= "\u9fff"
@@ -3074,6 +3899,8 @@ class RuleBasedPIIDetector:
             return False
         if compact in _REGION_TOKENS:
             return False
+        if compact in _COMMON_CITY_TOKENS or compact in _COMMON_DISTRICT_TOKENS or compact in _COMMON_BUSINESS_AREA_TOKENS:
+            return False
         if _ADDRESS_SUFFIX_PATTERN.search(compact):
             return False
         if self._looks_like_address_candidate(compact):
@@ -3114,6 +3941,28 @@ class RuleBasedPIIDetector:
             return len(compact) >= 4
         return False
 
+    def _organization_has_explicit_context(self, raw_text: str, span_start: int, span_end: int) -> bool:
+        window = self._match_context_window(raw_text, span_start, span_end, radius=16)
+        if self._window_has_keywords(window, _ORGANIZATION_FIELD_KEYWORDS):
+            return True
+        lowered = window.lower()
+        return any(
+            token in lowered
+            for token in (
+                "就职于",
+                "任职于",
+                "供职于",
+                "毕业于",
+                "就读于",
+                "工作单位",
+                "所在单位",
+                "我在",
+                "当前在",
+                "目前在",
+                "曾在",
+            )
+        )
+
     def _looks_like_name_with_title(self, value: str) -> bool:
         """判断是否为带敬称的姓名片段。"""
         if not re.fullmatch(rf"[一-龥·]{{1,5}}(?:{'|'.join(map(re.escape, _NAME_HONORIFICS))})", value):
@@ -3128,6 +3977,57 @@ class RuleBasedPIIDetector:
         if len(core) == 1:
             return core in _COMMON_SINGLE_CHAR_SURNAMES
         return self._is_name_candidate(core)
+
+    def _geo_candidate_attr_type(self, value: str) -> PIIAttributeType:
+        compact = self._clean_extracted_value(value)
+        if compact in _BUILTIN_GEO_LEXICON.address_tokens:
+            return PIIAttributeType.ADDRESS
+        if compact.endswith(("区", "县", "旗", "乡", "镇", "街道", *_GEO_ADDRESS_SUFFIXES)):
+            return PIIAttributeType.ADDRESS
+        return PIIAttributeType.LOCATION_CLUE
+
+    def _geo_fragment_confidence(
+        self,
+        raw_text: str,
+        span_start: int,
+        span_end: int,
+        *,
+        value: str,
+        attr_type: PIIAttributeType,
+        is_builtin_token: bool,
+        rule_profile: _RuleStrengthProfile,
+    ) -> float:
+        """根据几何边界和上下文估计地名/地址碎片置信度。"""
+        left_char = self._previous_significant_char(raw_text, span_start)
+        right_char = self._next_significant_char(raw_text, span_end)
+        left_open = left_char is None or not self._is_cjk_char(left_char)
+        right_open = right_char is None or not self._is_cjk_char(right_char)
+        right_context = self._right_context(raw_text, span_end)
+        cleaned_text = self._clean_extracted_value(raw_text)
+        if cleaned_text == value:
+            return 0.96 if is_builtin_token else 0.9
+        if any(right_context.startswith(token) for token in _GEO_NEGATIVE_RIGHT_CONTEXT_TOKENS):
+            if attr_type == PIIAttributeType.LOCATION_CLUE and not right_open:
+                return 0.0
+        if left_open and right_open:
+            return 0.96 if is_builtin_token else 0.9
+        if self._starts_with_geo_or_activity(right_context):
+            return 0.94 if is_builtin_token else 0.88
+        if right_char is not None and right_char.isdigit():
+            return 0.92 if is_builtin_token else 0.86
+        if attr_type == PIIAttributeType.ADDRESS:
+            if left_open or right_open:
+                return 0.9 if is_builtin_token else 0.82
+            if rule_profile.level == ProtectionLevel.STRONG:
+                return 0.76 if is_builtin_token else 0.72
+            if rule_profile.level == ProtectionLevel.BALANCED:
+                return 0.72 if is_builtin_token else 0.66
+            return 0.0
+        if left_open or right_open:
+            return 0.86 if is_builtin_token else 0.78
+        if rule_profile.level == ProtectionLevel.STRONG and (is_builtin_token or len(value) >= 3):
+            return 0.72
+        return 0.0
 
     def _looks_like_address_candidate(self, value: str, *, min_confidence: float = 0.45) -> bool:
         """判断是否像地址或地址碎片。"""
@@ -3164,6 +4064,7 @@ class RuleBasedPIIDetector:
             _ADDRESS_SUFFIX_PATTERN.search(compact)
             or _ADDRESS_NUMBER_PATTERN.search(compact)
             or any(token in visible for token in _REGION_TOKENS)
+            or any(token in visible for token in _BUILTIN_GEO_LEXICON.address_tokens)
         ):
             return False
         confidence = self._address_confidence(cleaned)
@@ -3183,6 +4084,8 @@ class RuleBasedPIIDetector:
         rule_profile: _RuleStrengthProfile,
     ) -> bool:
         """仅在整段文本本身已经像独立地址片段时才直接收整段。"""
+        if _OCR_SEMANTIC_BREAK_TOKEN in raw_text:
+            return False
         if not self._looks_like_address_candidate(cleaned, min_confidence=rule_profile.address_min_confidence):
             return False
         base_text = self._clean_extracted_value(raw_text)
@@ -3201,6 +4104,8 @@ class RuleBasedPIIDetector:
         suffix_hits = _ADDRESS_SUFFIX_PATTERN.findall(cleaned)
         if any(token in cleaned for token in _REGION_TOKENS):
             score += 0.34
+        if any(token in cleaned for token in _BUILTIN_GEO_LEXICON.address_tokens):
+            score += 0.24
         if suffix_hits:
             score += min(0.36, 0.18 * len(suffix_hits))
         if _ADDRESS_NUMBER_PATTERN.search(cleaned):
@@ -3357,6 +4262,7 @@ class RuleBasedPIIDetector:
         key = raw_key.strip().lower()
         mapping = {
             "name": PIIAttributeType.NAME,
+            "location_clue": PIIAttributeType.LOCATION_CLUE,
             "phone": PIIAttributeType.PHONE,
             "card_number": PIIAttributeType.CARD_NUMBER,
             "card": PIIAttributeType.CARD_NUMBER,

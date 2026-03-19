@@ -6,7 +6,7 @@ from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceTyp
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
-from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector
+from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector, _OCR_SEMANTIC_BREAK_TOKEN
 
 
 def _make_detector(tmp_path) -> RuleBasedPIIDetector:
@@ -27,15 +27,15 @@ def test_rule_based_detects_name_fields_with_symbol_prefix(tmp_path) -> None:
     assert "张三" in _candidate_texts(candidates, PIIAttributeType.NAME)
 
 
-def test_rule_based_default_detector_does_not_load_sample_dictionary() -> None:
+def test_rule_based_default_detector_uses_rules_without_sample_dictionary() -> None:
     detector = RuleBasedPIIDetector()
 
     candidates = detector.detect(prompt_text="请联系李四", ocr_blocks=[])
 
-    assert candidates == []
+    assert "李四" in _candidate_texts(candidates, PIIAttributeType.NAME)
 
 
-def test_rule_based_protection_level_weak_disables_secondary_name_rules(tmp_path) -> None:
+def test_rule_based_protection_level_weak_keeps_high_confidence_name_rules(tmp_path) -> None:
     detector = _make_detector(tmp_path)
 
     strong_candidates = detector.detect(
@@ -50,7 +50,7 @@ def test_rule_based_protection_level_weak_disables_secondary_name_rules(tmp_path
     )
 
     assert "王老师" in _candidate_texts(strong_candidates, PIIAttributeType.NAME)
-    assert _candidate_texts(weak_candidates, PIIAttributeType.NAME) == set()
+    assert "王老师" in _candidate_texts(weak_candidates, PIIAttributeType.NAME)
 
 
 def test_rule_based_masked_address_context_support_varies_by_protection_level(tmp_path) -> None:
@@ -94,7 +94,7 @@ def test_rule_based_pure_masked_name_is_not_detected(tmp_path) -> None:
     assert "XXX" not in _candidate_texts(weak_candidates, PIIAttributeType.NAME)
 
 
-def test_rule_based_other_detection_is_filtered_by_profile_confidence_threshold(tmp_path) -> None:
+def test_rule_based_other_detection_keeps_generic_number_fallback_across_profiles(tmp_path) -> None:
     detector = _make_detector(tmp_path)
     prompt_text = "订单号：20240318"
 
@@ -104,7 +104,16 @@ def test_rule_based_other_detection_is_filtered_by_profile_confidence_threshold(
 
     assert "20240318" in _candidate_texts(strong_candidates, PIIAttributeType.OTHER)
     assert "20240318" in _candidate_texts(balanced_candidates, PIIAttributeType.OTHER)
-    assert "20240318" not in _candidate_texts(weak_candidates, PIIAttributeType.OTHER)
+    assert "20240318" in _candidate_texts(weak_candidates, PIIAttributeType.OTHER)
+
+
+def test_rule_based_trims_terminal_punctuation_from_other_context_value(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(prompt_text="订单号：A12345。", ocr_blocks=[], protection_level=ProtectionLevel.BALANCED)
+
+    assert "A12345" in _candidate_texts(candidates, PIIAttributeType.OTHER)
+    assert "A12345。" not in _candidate_texts(candidates, PIIAttributeType.OTHER)
 
 
 def test_rule_based_detector_init_min_confidence_override_changes_default_thresholds(tmp_path) -> None:
@@ -283,6 +292,45 @@ def test_rule_based_prefers_session_history_over_duplicate_local_dictionary(tmp_
     )
 
 
+def test_rule_based_session_history_handles_long_mixed_prompt_without_name_span_crash(tmp_path) -> None:
+    mapping_store = InMemoryMappingStore()
+    mapping_store.save_replacements(
+        session_id="session-long-mixed",
+        turn_id=1,
+        records=[
+            ReplacementRecord(
+                session_id="session-long-mixed",
+                turn_id=1,
+                candidate_id="session-name-1",
+                source_text="张三",
+                replacement_text="@姓名1",
+                attr_type=PIIAttributeType.NAME,
+                action_type=ActionType.GENERICIZE,
+                source=PIISourceType.PROMPT,
+            )
+        ],
+    )
+    detector = RuleBasedPIIDetector(mapping_store=mapping_store)
+
+    candidates = detector.detect(
+        prompt_text=(
+            "请联系张 三，不要联系张三丰。邮箱 demo @ example.com。公司 星海数据科技有限公司。"
+            "卡号 6222 0210 0111 2223 334。账号 6217000012345678901。证件 110101199001011234。护照 E12345678。"
+        ),
+        ocr_blocks=[],
+        session_id="session-long-mixed",
+        turn_id=2,
+        protection_level=ProtectionLevel.STRONG,
+    )
+
+    assert any(
+        candidate.text == "张 三"
+        and candidate.attr_type == PIIAttributeType.NAME
+        and "dictionary_session" in candidate.metadata.get("matched_by", [])
+        for candidate in candidates
+    )
+
+
 def test_rule_based_detects_name_fields_with_chinese_keywords(tmp_path) -> None:
     detector = _make_detector(tmp_path)
 
@@ -428,6 +476,18 @@ def test_rule_based_detects_school_from_sentence(tmp_path) -> None:
     assert "北京大学" in _candidate_texts(candidates, PIIAttributeType.ORGANIZATION)
 
 
+def test_rule_based_weak_keeps_strong_suffix_organization(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(
+        prompt_text="她毕业于北京大学",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.WEAK,
+    )
+
+    assert "北京大学" in _candidate_texts(candidates, PIIAttributeType.ORGANIZATION)
+
+
 def test_rule_based_avoids_false_positive_generic_technology_word(tmp_path) -> None:
     detector = _make_detector(tmp_path)
 
@@ -448,6 +508,148 @@ def test_rule_based_detects_short_ocr_address_fragments(tmp_path) -> None:
 
     assert "海淀区" in address_texts
     assert "知春路" in address_texts
+
+
+def test_rule_based_detects_name_and_location_clue_from_ocr_label_block(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="李恩慧-哈尔滨滑雪",
+            bbox=BoundingBox(x=0, y=0, width=120, height=20),
+            block_id="ocr-label-1",
+        ),
+    ]
+
+    strong_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.STRONG)
+    balanced_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.BALANCED)
+    weak_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.WEAK)
+
+    assert "李恩慧" in _candidate_texts(strong_candidates, PIIAttributeType.NAME)
+    assert "哈尔滨" in _candidate_texts(strong_candidates, PIIAttributeType.LOCATION_CLUE)
+    assert "李恩慧" in _candidate_texts(balanced_candidates, PIIAttributeType.NAME)
+    assert "哈尔滨" in _candidate_texts(balanced_candidates, PIIAttributeType.LOCATION_CLUE)
+    assert "李恩慧" in _candidate_texts(weak_candidates, PIIAttributeType.NAME)
+    assert "哈尔滨" in _candidate_texts(weak_candidates, PIIAttributeType.LOCATION_CLUE)
+
+
+def test_rule_based_detects_bare_city_name_as_location_clue_in_ocr(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="哈尔滨",
+            bbox=BoundingBox(x=0, y=0, width=60, height=20),
+            block_id="ocr-city-1",
+        ),
+    ]
+
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.BALANCED)
+
+    assert "哈尔滨" in _candidate_texts(candidates, PIIAttributeType.LOCATION_CLUE)
+
+
+def test_rule_based_strong_detects_bare_exact_name_without_context(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(prompt_text="李雷", ocr_blocks=[], protection_level=ProtectionLevel.STRONG)
+
+    assert "李雷" in _candidate_texts(candidates, PIIAttributeType.NAME)
+
+
+def test_rule_based_prefers_longest_builtin_geo_match_in_ocr(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="哈尔滨市",
+            bbox=BoundingBox(x=0, y=0, width=72, height=20),
+            block_id="ocr-city-longest-1",
+        ),
+    ]
+
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.BALANCED)
+    location_texts = _candidate_texts(candidates, PIIAttributeType.LOCATION_CLUE)
+
+    assert "哈尔滨市" in location_texts
+    assert "哈尔滨" not in location_texts
+
+
+def test_rule_based_strong_avoids_false_positive_name_fragment_in_long_sentence(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    prompt_text = (
+        "患者姓名：李雷，收货地址：上海市浦东新区世纪大道100号，我在北京大学实习，"
+        "邮箱 foo@bar.com，身份证 110101199001011234，订单号A12345。这个方案很高科技，项目经理在通知中心。"
+    )
+
+    candidates = detector.detect(prompt_text=prompt_text, ocr_blocks=[], protection_level=ProtectionLevel.STRONG)
+
+    assert "李雷" in _candidate_texts(candidates, PIIAttributeType.NAME)
+    assert "经理在通" not in _candidate_texts(candidates, PIIAttributeType.NAME)
+
+
+def test_rule_based_detects_embedded_district_from_mixed_ocr_title(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="乐享江宁：2025年江宁区住宿、餐饮业团购",
+            bbox=BoundingBox(x=0, y=0, width=260, height=20),
+            block_id="ocr-district-1",
+        ),
+    ]
+
+    strong_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.STRONG)
+    balanced_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.BALANCED)
+
+    assert "江宁区" in _candidate_texts(strong_candidates, PIIAttributeType.ADDRESS)
+    assert "江宁区" in _candidate_texts(balanced_candidates, PIIAttributeType.ADDRESS)
+
+
+def test_rule_based_strong_avoids_standalone_ui_label_name_false_positives_in_ocr(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(text="通讯录", bbox=BoundingBox(x=0, y=0, width=56, height=20), block_id="ocr-ui-name-1"),
+        OCRTextBlock(text="乐享江宁", bbox=BoundingBox(x=0, y=30, width=84, height=20), block_id="ocr-ui-name-2"),
+    ]
+
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.STRONG)
+
+    assert "通讯录" not in _candidate_texts(candidates, PIIAttributeType.NAME)
+    assert "乐享江宁" not in _candidate_texts(candidates, PIIAttributeType.NAME)
+
+
+def test_rule_based_detects_embedded_name_and_number_from_mixed_ocr_block(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="A德新元药房李晓红15951169",
+            bbox=BoundingBox(x=0, y=0, width=220, height=20),
+            block_id="ocr-mixed-1",
+        ),
+    ]
+
+    strong_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.STRONG)
+    balanced_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.BALANCED)
+    weak_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.WEAK)
+
+    assert "李晓红" in _candidate_texts(strong_candidates, PIIAttributeType.NAME)
+    assert "15951169" in _candidate_texts(strong_candidates, PIIAttributeType.OTHER)
+    assert "李晓红" in _candidate_texts(balanced_candidates, PIIAttributeType.NAME)
+    assert "15951169" in _candidate_texts(balanced_candidates, PIIAttributeType.OTHER)
+    assert "李晓红" in _candidate_texts(weak_candidates, PIIAttributeType.NAME)
+    assert "15951169" in _candidate_texts(weak_candidates, PIIAttributeType.OTHER)
+
+
+def test_rule_based_strong_keeps_compound_surname_standalone_name_fragment(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="欧阳娜娜",
+            bbox=BoundingBox(x=0, y=0, width=84, height=20),
+            block_id="ocr-compound-name-1",
+        ),
+    ]
+
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.STRONG)
+
+    assert "欧阳娜娜" in _candidate_texts(candidates, PIIAttributeType.NAME)
 
 
 def test_rule_based_does_not_collect_full_sentence_as_address_when_multiple_fields_present(tmp_path) -> None:
@@ -492,6 +694,107 @@ def test_rule_based_detects_context_value_across_adjacent_ocr_blocks(tmp_path) -
         and "ocr_page_span" in candidate.metadata.get("matched_by", [])
         for candidate in candidates
     )
+
+
+def test_rule_based_inserts_semantic_break_for_distant_same_line_ocr_blocks(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(text="1380013", bbox=BoundingBox(x=0, y=0, width=42, height=18), block_id="ocr-phone-gap-1"),
+        OCRTextBlock(text="8000", bbox=BoundingBox(x=96, y=0, width=24, height=18), block_id="ocr-phone-gap-2"),
+    ]
+
+    document = detector._build_ocr_page_document(ocr_blocks)
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks)
+
+    assert document is not None
+    assert document.text == f"1380013{_OCR_SEMANTIC_BREAK_TOKEN}8000"
+    assert "13800138000" not in _candidate_texts(candidates, PIIAttributeType.PHONE)
+
+
+def test_rule_based_inserts_semantic_break_for_misaligned_same_column_ocr_blocks(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(text="1380013", bbox=BoundingBox(x=0, y=0, width=42, height=18), block_id="ocr-phone-stack-1"),
+        OCRTextBlock(text="8000", bbox=BoundingBox(x=2, y=10, width=24, height=32), block_id="ocr-phone-stack-2"),
+    ]
+
+    document = detector._build_ocr_page_document(ocr_blocks)
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks)
+
+    assert document is not None
+    assert document.text == f"1380013{_OCR_SEMANTIC_BREAK_TOKEN}8000"
+    assert "13800138000" not in _candidate_texts(candidates, PIIAttributeType.PHONE)
+
+
+def test_rule_based_inserts_semantic_break_between_unrelated_ocr_lines(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(text="1380013", bbox=BoundingBox(x=120, y=0, width=42, height=18), block_id="ocr-phone-line-1"),
+        OCRTextBlock(text="8000", bbox=BoundingBox(x=0, y=32, width=24, height=18), block_id="ocr-phone-line-2"),
+    ]
+
+    document = detector._build_ocr_page_document(ocr_blocks)
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks)
+
+    assert document is not None
+    assert document.text == f"1380013{_OCR_SEMANTIC_BREAK_TOKEN}8000"
+    assert "13800138000" not in _candidate_texts(candidates, PIIAttributeType.PHONE)
+
+
+def test_rule_based_inserts_semantic_break_between_short_header_and_following_long_line(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(text="折叠的聊天", bbox=BoundingBox(x=0, y=0, width=96, height=20), block_id="ocr-header-1"),
+        OCRTextBlock(text="泰州夜之幕拼车信息", bbox=BoundingBox(x=0, y=24, width=260, height=20), block_id="ocr-header-2"),
+    ]
+
+    document = detector._build_ocr_page_document(ocr_blocks)
+
+    assert document is not None
+    assert document.text == f"折叠的聊天{_OCR_SEMANTIC_BREAK_TOKEN}泰州夜之幕拼车信息"
+
+
+def test_rule_based_inserts_semantic_break_between_right_metadata_and_next_line_number(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="A德新元药房李晓红15951169...",
+            bbox=BoundingBox(x=0, y=0, width=180, height=20),
+            block_id="ocr-meta-1",
+        ),
+        OCRTextBlock(text="12:01", bbox=BoundingBox(x=220, y=0, width=40, height=20), block_id="ocr-meta-2"),
+        OCRTextBlock(text="19", bbox=BoundingBox(x=0, y=28, width=20, height=20), block_id="ocr-meta-3"),
+    ]
+
+    document = detector._build_ocr_page_document(ocr_blocks)
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks)
+    other_texts = _candidate_texts(candidates, PIIAttributeType.OTHER)
+
+    assert document is not None
+    assert document.text == (
+        f"A德新元药房李晓红15951169...{_OCR_SEMANTIC_BREAK_TOKEN}"
+        f"12:01{_OCR_SEMANTIC_BREAK_TOKEN}19"
+    )
+    assert "01\n19" not in other_texts
+
+
+def test_rule_based_prefers_downward_continuation_over_right_metadata_block(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(text="上海市浦东新区", bbox=BoundingBox(x=0, y=0, width=120, height=20), block_id="ocr-down-1"),
+        OCRTextBlock(text="12:01", bbox=BoundingBox(x=132, y=0, width=40, height=20), block_id="ocr-down-2"),
+        OCRTextBlock(text="世纪大道100号", bbox=BoundingBox(x=0, y=28, width=120, height=20), block_id="ocr-down-3"),
+    ]
+
+    document = detector._build_ocr_page_document(ocr_blocks)
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks)
+
+    assert document is not None
+    assert document.text == f"上海市浦东新区\n世纪大道100号{_OCR_SEMANTIC_BREAK_TOKEN}12:01"
+    address_texts = _candidate_texts(candidates, PIIAttributeType.ADDRESS)
+    assert "上海市浦东新区" in address_texts
+    assert "世纪大道100号" in address_texts
+    assert f"上海市浦东新区\n世纪大道100号{_OCR_SEMANTIC_BREAK_TOKEN}12:01" not in address_texts
 
 
 def test_rule_based_detects_address_across_adjacent_ocr_blocks(tmp_path) -> None:
@@ -616,13 +919,13 @@ def test_rule_based_detects_phone_email_id_with_ocr_punctuation_noise(tmp_path) 
     assert "110101·19900101_1234" in _candidate_texts(id_candidates, PIIAttributeType.ID_NUMBER)
 
 
-def test_rule_based_detects_other_only_with_explicit_context(tmp_path) -> None:
+def test_rule_based_detects_generic_number_without_explicit_context(tmp_path) -> None:
     detector = _make_detector(tmp_path)
 
     bare_candidates = detector.detect(prompt_text="今天是20240318", ocr_blocks=[])
     context_candidates = detector.detect(prompt_text="订单号：20240318", ocr_blocks=[])
 
-    assert not _candidate_texts(bare_candidates, PIIAttributeType.OTHER)
+    assert "20240318" in _candidate_texts(bare_candidates, PIIAttributeType.OTHER)
     assert "20240318" in _candidate_texts(context_candidates, PIIAttributeType.OTHER)
 
 

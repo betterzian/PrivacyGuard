@@ -1,0 +1,606 @@
+{
+  "config": {
+    "detector_mode": "rule_based",
+    "decision_mode": "de_model",
+    "protection_level": "balanced",
+    "ocr_backend": "ppocr_v5_mobile_cpu",
+    "image_path": "/root/PrivacyGuard/test.PNG"
+  },
+  "ocr": [
+    {
+      "text": "14:07",
+      "score": 0.9958053827285767,
+      "line_id": 0,
+      "block_id": "ocr-0-0-99-42-134-58",
+      "bbox": {
+        "x": 99,
+        "y": 42,
+        "width": 134,
+        "height": 58
+      }
+    },
+    {
+      "text": "5G",
+      "score": 0.994674563407898,
+      "line_id": 1,
+      "block_id": "ocr-1-1-828-57-157-64",
+      "bbox": {
+        "x": 828,
+        "y": 57,
+        "width": 157,
+        "height": 64
+      }
+    },
+    {
+      "text": "100",
+      "score": 0.9911354184150696,
+      "line_id": 2,
+      "block_id": "ocr-2-2-979-59-90-55",
+      "bbox": {
+        "x": 979,
+        "y": 59,
+        "width": 90,
+        "height": 55
+      }
+    },
+    {
+      "text": "微信",
+      "score": 0.9999560713768005,
+      "line_id": 3,
+      "block_id": "ocr-3-3-502-180-119-70",
+      "bbox": {
+        "x": 502,
+        "y": 180,
+        "width": 119,
+        "height": 70
+      }
+    },
+    {
+      "text": "马局的书童丫鬟群",
+      "score": 0.9915413856506348,
+      "line_id": 4,
+      "block_id": "ocr-4-4-228-302-406-59",
+      "bbox": {
+        "x": 228,
+        "y": 302,
+        "width": 406,
+        "height": 59
+      }
+    },
+    {
+      "text": "14:06",
+      "score": 0.992599368095398,
+      "line_id": 5,
+      "block_id": "ocr-5-5-974-298-109-45",
+      "bbox": {
+        "x": 974,
+        "y": 298,
+        "width": 109,
+        "height": 45
+      }
+    },
+    {
+      "text": "[捂脸]",
+      "score": 0.987390398979187,
+      "line_id": 6,
+      "block_id": "ocr-6-6-222-373-126-59",
+      "bbox": {
+        "x": 222,
+        "y": 373,
+        "width": 126,
+        "height": 59
+      }
+    },
+    {
+      "text": "李恩慧-哈尔滨滑雪",
+      "score": 0.997013509273529,
+      "line_id": 7,
+      "block_id": "ocr-7-7-227-518-428-58",
+      "bbox": {
+        "x": 227,
+        "y": 518,
+        "width": 428,
+        "height": 58
+      }
+    },
+    {
+      "text": "14:02",
+      "score": 0.9915124773979187,
+      "line_id": 8,
+      "block_id": "ocr-8-8-975-513-109-47",
+      "bbox": {
+        "x": 975,
+        "y": 513,
+        "width": 109,
+        "height": 47
+      }
+    },
+    {
+      "text": "[旺柴]",
+      "score": 0.9974386692047119,
+      "line_id": 9,
+      "block_id": "ocr-9-9-223-591-122-56",
+      "bbox": {
+        "x": 223,
+        "y": 591,
+        "width": 122,
+        "height": 56
+      }
+    },
+    {
+      "text": "aminxe",
+      "score": 0.5903621315956116,
+      "line_id": 10,
+      "block_id": "ocr-10-10-120-614-63-18",
+      "bbox": {
+        "x": 120,
+        "y": 614,
+        "width": 63,
+        "height": 18
+      }
+    },
+    {
+      "text": "•",
+      "score": 0.43376216292381287,
+      "line_id": 11,
+      "block_id": "ocr-11-11-166-712-39-38",
+      "bbox": {
+        "x": 166,
+        "y": 712,
+        "width": 39,
+        "height": 38
+      }
+    },
+    {
+      "text": "2024-26澳洲 PhD(500) 快快...",
+      "score": 0.9447380900382996,
+      "line_id": 12,
+      "block_id": "ocr-12-12-223-729-705-64",
+      "bbox": {
+        "x": 223,
+        "y": 729,
+        "width": 705,
+        "height": 64
+      }
+    },
+    {
+      "text": "13:58",
+      "score": 0.9921196103096008,
+      "line_id": 13,
+      "block_id": "ocr-13-13-974-730-109-44",
+      "bbox": {
+        "x": 974,
+        "y": 730,
+        "width": 109,
+        "height": 44
+      }
+    },
+    {
+      "text": "[15条]25.12.4-数学-无 bug无s56：[..",
+      "score": 0.9383903741836548,
+      "line_id": 14,
+      "block_id": "ocr-14-14-225-809-715-50",
+      "bbox": {
+        "x": 225,
+        "y": 809,
+        "width": 715,
+        "height": 50
+      }
+    },
+    {
+      "text": "A",
+      "score": 0.16251018643379211,
+      "line_id": 15,
+      "block_id": "ocr-15-15-1037-812-37-40",
+      "bbox": {
+        "x": 1037,
+        "y": 812,
+        "width": 37,
+        "height": 40
+      }
+    },
+    {
+      "text": "哈了滨推坡大队",
+      "score": 0.9991618394851685,
+      "line_id": 16,
+      "block_id": "ocr-16-16-362-952-357-55",
+      "bbox": {
+        "x": 362,
+        "y": 952,
+        "width": 357,
+        "height": 55
+      }
+    },
+    {
+      "text": "13:44",
+      "score": 0.9928566813468933,
+      "line_id": 17,
+      "block_id": "ocr-17-17-974-947-108-43",
+      "bbox": {
+        "x": 974,
+        "y": 947,
+        "width": 108,
+        "height": 43
+      }
+    },
+    {
+      "text": "蓉蓉蓉蓉蓉蓉蓉蓉： [动画表情]",
+      "score": 0.956696629524231,
+      "line_id": 18,
+      "block_id": "ocr-18-18-227-1026-552-48",
+      "bbox": {
+        "x": 227,
+        "y": 1026,
+        "width": 552,
+        "height": 48
+      }
+    },
+    {
+      "text": "人",
+      "score": 0.19346654415130615,
+      "line_id": 19,
+      "block_id": "ocr-19-19-1034-1026-41-45",
+      "bbox": {
+        "x": 1034,
+        "y": 1026,
+        "width": 41,
+        "height": 45
+      }
+    },
+    {
+      "text": "disney",
+      "score": 0.9955234527587891,
+      "line_id": 20,
+      "block_id": "ocr-20-20-221-1163-164-68",
+      "bbox": {
+        "x": 221,
+        "y": 1163,
+        "width": 164,
+        "height": 68
+      }
+    },
+    {
+      "text": "13:11",
+      "score": 0.9529826045036316,
+      "line_id": 21,
+      "block_id": "ocr-21-21-986-1162-97-45",
+      "bbox": {
+        "x": 986,
+        "y": 1162,
+        "width": 97,
+        "height": 45
+      }
+    },
+    {
+      "text": "disney 秦胖哥：冲吗",
+      "score": 0.9690249562263489,
+      "line_id": 22,
+      "block_id": "ocr-22-22-226-1241-372-50",
+      "bbox": {
+        "x": 226,
+        "y": 1241,
+        "width": 372,
+        "height": 50
+      }
+    },
+    {
+      "text": "●",
+      "score": 0.3519282937049866,
+      "line_id": 23,
+      "block_id": "ocr-23-23-171-1363-31-32",
+      "bbox": {
+        "x": 171,
+        "y": 1363,
+        "width": 31,
+        "height": 32
+      }
+    },
+    {
+      "text": "公众号",
+      "score": 0.9999721646308899,
+      "line_id": 24,
+      "block_id": "ocr-24-24-223-1377-163-66",
+      "bbox": {
+        "x": 223,
+        "y": 1377,
+        "width": 163,
+        "height": 66
+      }
+    },
+    {
+      "text": "12:32",
+      "score": 0.9920247793197632,
+      "line_id": 25,
+      "block_id": "ocr-25-25-976-1376-108-47",
+      "bbox": {
+        "x": 976,
+        "y": 1376,
+        "width": 108,
+        "height": 47
+      }
+    },
+    {
+      "text": "[10 条]快讯：欧盟证实：美社交媒体平台X。.。",
+      "score": 0.9146921038627625,
+      "line_id": 26,
+      "block_id": "ocr-26-26-225-1457-816-50",
+      "bbox": {
+        "x": 225,
+        "y": 1457,
+        "width": 816,
+        "height": 50
+      }
+    },
+    {
+      "text": "の",
+      "score": 0.5062563419342041,
+      "line_id": 27,
+      "block_id": "ocr-27-27-167-1577-37-37",
+      "bbox": {
+        "x": 167,
+        "y": 1577,
+        "width": 37,
+        "height": 37
+      }
+    },
+    {
+      "text": "服务号",
+      "score": 0.9998539090156555,
+      "line_id": 28,
+      "block_id": "ocr-28-28-222-1594-164-66",
+      "bbox": {
+        "x": 222,
+        "y": 1594,
+        "width": 164,
+        "height": 66
+      }
+    },
+    {
+      "text": "12:05",
+      "score": 0.993233323097229,
+      "line_id": 29,
+      "block_id": "ocr-29-29-974-1593-109-47",
+      "bbox": {
+        "x": 974,
+        "y": 1593,
+        "width": 109,
+        "height": 47
+      }
+    },
+    {
+      "text": "乐享江宁：2025年江宁区住宿、餐饮业团...",
+      "score": 0.968442440032959,
+      "line_id": 30,
+      "block_id": "ocr-30-30-225-1674-801-50",
+      "bbox": {
+        "x": 225,
+        "y": 1674,
+        "width": 801,
+        "height": 50
+      }
+    },
+    {
+      "text": "A德新元药房李晓红15951169...",
+      "score": 0.97266685962677,
+      "line_id": 31,
+      "block_id": "ocr-31-31-225-1813-719-59",
+      "bbox": {
+        "x": 225,
+        "y": 1813,
+        "width": 719,
+        "height": 59
+      }
+    },
+    {
+      "text": "12:01",
+      "score": 0.9945069551467896,
+      "line_id": 32,
+      "block_id": "ocr-32-32-981-1810-102-44",
+      "bbox": {
+        "x": 981,
+        "y": 1810,
+        "width": 102,
+        "height": 44
+      }
+    },
+    {
+      "text": "19",
+      "score": 0.9988914728164673,
+      "line_id": 33,
+      "block_id": "ocr-33-33-222-1889-57-47",
+      "bbox": {
+        "x": 222,
+        "y": 1889,
+        "width": 57,
+        "height": 47
+      }
+    },
+    {
+      "text": "折叠的聊天",
+      "score": 0.9770625829696655,
+      "line_id": 34,
+      "block_id": "ocr-34-34-225-2029-257-60",
+      "bbox": {
+        "x": 225,
+        "y": 2029,
+        "width": 257,
+        "height": 60
+      }
+    },
+    {
+      "text": "泰州夜之幕拼车信息七群：15：30《漓川怪.。",
+      "score": 0.9684411883354187,
+      "line_id": 35,
+      "block_id": "ocr-35-35-226-2104-827-50",
+      "bbox": {
+        "x": 226,
+        "y": 2104,
+        "width": 827,
+        "height": 50
+      }
+    },
+    {
+      "text": "&=",
+      "score": 0.5694055557250977,
+      "line_id": 36,
+      "block_id": "ocr-36-36-375-2188-100-89",
+      "bbox": {
+        "x": 375,
+        "y": 2188,
+        "width": 100,
+        "height": 89
+      }
+    },
+    {
+      "text": "•",
+      "score": 0.28607407212257385,
+      "line_id": 37,
+      "block_id": "ocr-37-37-722-2189-24-25",
+      "bbox": {
+        "x": 722,
+        "y": 2189,
+        "width": 24,
+        "height": 25
+      }
+    },
+    {
+      "text": "&",
+      "score": 0.518321692943573,
+      "line_id": 38,
+      "block_id": "ocr-38-38-943-2188-89-90",
+      "bbox": {
+        "x": 943,
+        "y": 2188,
+        "width": 89,
+        "height": 90
+      }
+    },
+    {
+      "text": "微信",
+      "score": 0.9999029636383057,
+      "line_id": 39,
+      "block_id": "ocr-39-39-103-2275-73-44",
+      "bbox": {
+        "x": 103,
+        "y": 2275,
+        "width": 73,
+        "height": 44
+      }
+    },
+    {
+      "text": "通讯录",
+      "score": 0.9994760155677795,
+      "line_id": 40,
+      "block_id": "ocr-40-40-369-2273-107-48",
+      "bbox": {
+        "x": 369,
+        "y": 2273,
+        "width": 107,
+        "height": 48
+      }
+    },
+    {
+      "text": "发现",
+      "score": 0.9998130798339844,
+      "line_id": 41,
+      "block_id": "ocr-41-41-666-2275-76-46",
+      "bbox": {
+        "x": 666,
+        "y": 2275,
+        "width": 76,
+        "height": 46
+      }
+    },
+    {
+      "text": "我",
+      "score": 0.9999780654907227,
+      "line_id": 42,
+      "block_id": "ocr-42-42-960-2273-54-50",
+      "bbox": {
+        "x": 960,
+        "y": 2273,
+        "width": 54,
+        "height": 50
+      }
+    }
+  ],
+  "detector": [
+    {
+      "entity_id": "5d921f53749459c2318e9d0f562c97f7",
+      "text": "01\n19\n折叠的聊天\n泰州夜之幕拼车信息",
+      "canonical_source_text": null,
+      "normalized_text": "0119折叠的聊天泰州夜之幕拼车信息",
+      "attr_type": "organization",
+      "source": "ocr",
+      "confidence": 0.5599999999999999,
+      "block_id": "ocr-merge-ocr-32-32-981-1810-102-44-ocr-33-33-222-1889-57-47-ocr-34-34-225-2029-257-60-ocr-35-35-226-2104-827-50",
+      "span_start": null,
+      "span_end": null,
+      "bbox": {
+        "x": 222,
+        "y": 1810,
+        "width": 861,
+        "height": 344
+      },
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_organization_suffix"
+        ],
+        "ocr_block_ids": [
+          "ocr-32-32-981-1810-102-44",
+          "ocr-33-33-222-1889-57-47",
+          "ocr-34-34-225-2029-257-60",
+          "ocr-35-35-226-2104-827-50"
+        ]
+      }
+    }
+  ],
+  "decision": {
+    "active_persona_id": "zhangsan",
+    "summary": "de_model 占位评分生成 1 条动作。",
+    "metadata": {
+      "mode": "de_model",
+      "engine_type": "tiny_policy_skeleton",
+      "runtime_type": "heuristic_runtime",
+      "runtime_device": "cpu",
+      "selected_persona_id": "zhangsan",
+      "candidate_count": "1",
+      "persona_count": "2",
+      "page_vector_dim": "9"
+    },
+    "actions": [
+      {
+        "candidate_id": "5d921f53749459c2318e9d0f562c97f7",
+        "action_type": "PERSONA_SLOT",
+        "attr_type": "organization",
+        "source_text": "01\n19\n折叠的聊天\n泰州夜之幕拼车信息",
+        "canonical_source_text": null,
+        "replacement_text": "星海数科有限公司",
+        "persona_id": "zhangsan",
+        "reason": "tiny_policy 选择 PERSONA_SLOT；conf=0.56，history_attr=0，history_exact=0，persona_slot=yes，scores={KEEP:0.16,GENERIC:0.57,PERSONA:0.64}",
+        "block_id": "ocr-merge-ocr-32-32-981-1810-102-44-ocr-33-33-222-1889-57-47-ocr-34-34-225-2029-257-60-ocr-35-35-226-2104-827-50",
+        "span_start": null,
+        "span_end": null,
+        "bbox": {
+          "x": 222,
+          "y": 1810,
+          "width": 861,
+          "height": 344
+        },
+        "metadata": {
+          "matched_by": [
+            "ocr_page_span",
+            "regex_organization_suffix"
+          ],
+          "ocr_block_ids": [
+            "ocr-32-32-981-1810-102-44",
+            "ocr-33-33-222-1889-57-47",
+            "ocr-34-34-225-2029-257-60",
+            "ocr-35-35-226-2104-827-50"
+          ]
+        }
+      }
+    ]
+  }
+}
