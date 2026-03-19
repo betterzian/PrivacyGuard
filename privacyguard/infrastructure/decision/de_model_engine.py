@@ -2,14 +2,12 @@
 
 from pathlib import Path
 
-from privacyguard.application.services.decision_context_builder import DecisionContextBuilder
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, clone_action_metadata
-from privacyguard.domain.models.decision_context import DecisionModelContext
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import SessionBinding
-from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
 from privacyguard.infrastructure.decision.de_model_runtime import (
     DEModelRuntimeOutput,
@@ -50,10 +48,6 @@ class DEModelEngine:
         self.bundle_path = str(Path(bundle_path)) if bundle_path else None
         self.device = str(device).strip() or "cpu"
         self.constraint_resolver = ConstraintResolver(self.persona_repository)
-        self.context_builder = DecisionContextBuilder(
-            mapping_store=self.mapping_store,
-            persona_repository=self.persona_repository,
-        )
         self.feature_extractor = feature_extractor or DecisionFeatureExtractor()
         self.runtime = runtime or self._build_runtime()
 
@@ -91,28 +85,8 @@ class DEModelEngine:
             raise NotImplementedError("de_model bundle runtime 尚未实现；当前请使用 runtime_type='heuristic'。")
         raise ValueError(f"不支持的 de_model runtime_type: {self.runtime_type}")
 
-    def plan(
-        self,
-        session_id: str,
-        turn_id: int,
-        candidates: list[PIICandidate],
-        session_binding: SessionBinding | None,
-    ) -> DecisionPlan:
-        """兼容旧接口，使用最小上下文构建 de_model 计划。"""
-        context = self.context_builder.build(
-            session_id=session_id,
-            turn_id=turn_id,
-            prompt_text="",
-            ocr_blocks=[],
-            candidates=candidates,
-            session_binding=session_binding,
-        )
-        plan = self.plan_with_context(context)
-        plan.metadata["context_mode"] = "minimal_fallback"
-        return plan
-
-    def plan_with_context(self, context: DecisionModelContext) -> DecisionPlan:
-        """使用完整上下文生成 de_model 占位计划。"""
+    def plan(self, context: DecisionContext) -> DecisionPlan:
+        """使用统一上下文生成 de_model 占位计划。"""
         packed = self.feature_extractor.pack(context)
         runtime_output = self.runtime.predict(context=context, packed=packed)
         binding = context.session_binding or SessionBinding(
@@ -143,16 +117,19 @@ class DEModelEngine:
                 "runtime_type": f"{self.runtime_type}_runtime",
                 "runtime_device": self.device,
                 "selected_persona_id": binding.active_persona_id or "",
+                "protection_level": context.protection_level.value,
                 "candidate_count": str(len(context.candidates)),
                 "persona_count": str(len(context.persona_profiles)),
                 "page_vector_dim": str(len(packed.page_vector)),
+                "average_ocr_block_score": f"{context.page_features.average_ocr_block_score:.4f}",
+                "average_candidate_confidence": f"{context.page_features.average_candidate_confidence:.4f}",
             },
         )
 
     def _build_actions(
         self,
         *,
-        context: DecisionModelContext,
+        context: DecisionContext,
         active_persona_id: str | None,
         runtime_output: DEModelRuntimeOutput,
     ) -> list[DecisionAction]:

@@ -3,8 +3,7 @@
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, clone_action_metadata
-from privacyguard.domain.models.mapping import SessionBinding
-from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 
@@ -18,17 +17,11 @@ class LabelOnlyDecisionEngine:
         self.persona_repository = persona_repository or JsonPersonaRepository()
         self.constraint_resolver = ConstraintResolver(self.persona_repository)
 
-    def plan(
-        self,
-        session_id: str,
-        turn_id: int,
-        candidates: list[PIICandidate],
-        session_binding: SessionBinding | None,
-    ) -> DecisionPlan:
+    def plan(self, context: DecisionContext) -> DecisionPlan:
         """生成 label_only 决策计划。"""
         actions: list[DecisionAction] = []
         attr_counts: dict[PIIAttributeType, int] = {}
-        for candidate in candidates:
+        for candidate in context.candidates:
             if candidate.confidence < self.confidence_threshold:
                 actions.append(
                     DecisionAction(
@@ -66,11 +59,15 @@ class LabelOnlyDecisionEngine:
                     metadata=clone_action_metadata(candidate.metadata),
                 )
             )
-        resolved = self.constraint_resolver.resolve(actions=actions, candidates=candidates, session_binding=session_binding)
+        resolved = self.constraint_resolver.resolve(
+            actions=actions,
+            candidates=context.candidates,
+            session_binding=context.session_binding,
+        )
         return DecisionPlan(
-            session_id=session_id,
-            turn_id=turn_id,
-            active_persona_id=session_binding.active_persona_id if session_binding else None,
+            session_id=context.session_id,
+            turn_id=context.turn_id,
+            active_persona_id=context.session_binding.active_persona_id if context.session_binding else None,
             actions=resolved,
             summary=f"label_only 共生成 {len(resolved)} 条动作。",
             metadata={"mode": "label_only"},

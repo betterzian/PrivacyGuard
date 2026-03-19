@@ -7,6 +7,7 @@ from privacyguard.api.errors import ComponentNotRegisteredError
 from privacyguard.bootstrap.registry import ComponentRegistry, create_default_registry
 from privacyguard.domain.models.action import RestoredSlot
 from privacyguard.domain.models.decision import DecisionPlan
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
 from privacyguard.domain.models.ocr import OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
@@ -94,13 +95,7 @@ class PlaceholderMappingStore:
 class PlaceholderDecisionEngine:
     """Decision 引擎占位实现。"""
 
-    def plan(
-        self,
-        session_id: str,
-        turn_id: int,
-        candidates: list[Any],
-        session_binding: SessionBinding | None,
-    ) -> DecisionPlan:
+    def plan(self, context: DecisionContext) -> DecisionPlan:
         """占位生成决策计划。"""
         raise NotImplementedError("第 1 轮不实现 Decision 业务逻辑。")
 

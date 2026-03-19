@@ -1,7 +1,7 @@
 """de_model 上下文构造测试。"""
 
 from privacyguard.application.services.decision_context_builder import DecisionContextBuilder
-from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType
+from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
@@ -106,17 +106,23 @@ def test_decision_context_builder_derives_page_candidate_and_persona_features() 
         session_id="session-1",
         turn_id=2,
         prompt_text="姓名：张三，电话 13800138000",
+        protection_level=ProtectionLevel.STRONG,
         ocr_blocks=ocr_blocks,
         candidates=candidates,
         session_binding=SessionBinding(session_id="session-1", active_persona_id="persona-b"),
     )
 
+    assert context.protection_level == ProtectionLevel.STRONG
     assert context.page_features.prompt_length == len("姓名：张三，电话 13800138000")
     assert context.page_features.ocr_block_count == 1
     assert context.page_features.candidate_count == 2
     assert context.page_features.history_record_count == 1
     assert context.page_features.prompt_has_digits is True
     assert context.page_features.active_persona_bound is True
+    assert context.page_features.prompt_candidate_count == 1
+    assert context.page_features.ocr_candidate_count == 1
+    assert context.page_features.average_ocr_block_score == 0.98
+    assert context.page_features.min_candidate_confidence == 0.88
 
     name_feature = next(item for item in context.candidate_features if item.candidate_id == "cand-name")
     assert "姓名：张三" in name_feature.prompt_context
@@ -129,6 +135,8 @@ def test_decision_context_builder_derives_page_candidate_and_persona_features() 
     assert "北京市海淀区中关村" in address_feature.ocr_context
     assert address_feature.relative_area > 0.0
     assert address_feature.center_x > 0.0
+    assert address_feature.ocr_block_score == 0.98
+    assert address_feature.is_low_ocr_confidence is False
     assert address_feature.is_ocr_source is True
 
     persona_feature = next(item for item in context.persona_features if item.persona_id == "persona-b")

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 import torch
 
-from privacyguard.domain.models.decision_context import DecisionModelContext
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.features import (
     CANDIDATE_FEATURE_DIM,
     PAGE_FEATURE_DIM,
@@ -20,7 +20,7 @@ from training.types import TrainingTurnExample
 
 @dataclass(slots=True)
 class TinyPolicyBatchBuilder:
-    """把 DecisionModelContext 打包为 TinyPolicyNet 可消费的 batch。"""
+    """把 DecisionContext 打包为 TinyPolicyNet 可消费的 batch。"""
 
     max_candidates: int = 32
     max_personas: int = 8
@@ -33,7 +33,7 @@ class TinyPolicyBatchBuilder:
         self.tokenizer = CharacterHashTokenizer(vocab_size=self.vocab_size)
         self.feature_extractor = DecisionFeatureExtractor()
 
-    def build(self, contexts: list[DecisionModelContext]) -> TinyPolicyBatch:
+    def build(self, contexts: list[DecisionContext]) -> TinyPolicyBatch:
         """将多个上下文转换为一个张量 batch。"""
         if not contexts:
             raise ValueError("contexts 不能为空。")

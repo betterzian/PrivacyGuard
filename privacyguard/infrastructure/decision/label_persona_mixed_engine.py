@@ -3,8 +3,8 @@
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, clone_action_metadata
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import SessionBinding
-from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 
@@ -34,17 +34,11 @@ class LabelPersonaMixedDecisionEngine:
             PIIAttributeType.ORGANIZATION,
         }
 
-    def plan(
-        self,
-        session_id: str,
-        turn_id: int,
-        candidates: list[PIICandidate],
-        session_binding: SessionBinding | None,
-    ) -> DecisionPlan:
+    def plan(self, context: DecisionContext) -> DecisionPlan:
         """生成 label_persona_mixed 决策计划。"""
-        active_persona_id = self._select_persona_id(session_binding)
+        active_persona_id = self._select_persona_id(context.session_binding)
         actions: list[DecisionAction] = []
-        for candidate in candidates:
+        for candidate in context.candidates:
             if candidate.confidence < self.confidence_threshold:
                 actions.append(
                     DecisionAction(
@@ -100,13 +94,16 @@ class LabelPersonaMixedDecisionEngine:
                     metadata=clone_action_metadata(candidate.metadata),
                 )
             )
-        binding = session_binding or SessionBinding(session_id=session_id, active_persona_id=active_persona_id)
+        binding = context.session_binding or SessionBinding(
+            session_id=context.session_id,
+            active_persona_id=active_persona_id,
+        )
         if binding.active_persona_id is None:
             binding.active_persona_id = active_persona_id
-        resolved = self.constraint_resolver.resolve(actions=actions, candidates=candidates, session_binding=binding)
+        resolved = self.constraint_resolver.resolve(actions=actions, candidates=context.candidates, session_binding=binding)
         return DecisionPlan(
-            session_id=session_id,
-            turn_id=turn_id,
+            session_id=context.session_id,
+            turn_id=context.turn_id,
             active_persona_id=binding.active_persona_id,
             actions=resolved,
             summary=f"label_persona_mixed 共生成 {len(resolved)} 条动作。",

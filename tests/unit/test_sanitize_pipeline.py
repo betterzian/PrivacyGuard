@@ -73,10 +73,7 @@ class _SpyDecisionEngine:
     def __init__(self) -> None:
         self.received_context = None
 
-    def plan(self, session_id: str, turn_id: int, candidates, session_binding):
-        raise AssertionError("sanitize pipeline 应该优先走 plan_with_context。")
-
-    def plan_with_context(self, context):
+    def plan(self, context):
         self.received_context = context
         return DecisionPlan(
             session_id=context.session_id,
@@ -113,10 +110,10 @@ class _PassthroughRenderer:
 
 
 class _PlainDecisionEngine:
-    def plan(self, session_id: str, turn_id: int, candidates, session_binding):
+    def plan(self, context):
         return DecisionPlan(
-            session_id=session_id,
-            turn_id=turn_id,
+            session_id=context.session_id,
+            turn_id=context.turn_id,
             actions=[],
             metadata={"mode": "label_only"},
         )
@@ -175,7 +172,7 @@ def test_sanitize_pipeline_passes_detector_overrides_when_supported() -> None:
     assert detector.received["detector_overrides"] == {PIIAttributeType.ORGANIZATION: 0.6}
 
 
-def test_sanitize_pipeline_prefers_context_aware_decision_engine() -> None:
+def test_sanitize_pipeline_builds_unified_decision_context() -> None:
     blocks = [
         OCRTextBlock(
             text="张三",
@@ -229,7 +226,10 @@ def test_sanitize_pipeline_prefers_context_aware_decision_engine() -> None:
     assert spy_engine.received_context.prompt_text == "张三去吃饭"
     assert spy_engine.received_context.ocr_blocks == blocks
     assert spy_engine.received_context.candidates == candidates
+    assert spy_engine.received_context.protection_level == ProtectionLevel.BALANCED
     assert spy_engine.received_context.session_binding.session_id == "session-pipeline"
+    assert spy_engine.received_context.page_features.average_ocr_block_score == 1.0
+    assert spy_engine.received_context.page_features.ocr_candidate_count == 1
     assert response.sanitized_prompt_text == "@姓名1去吃饭"
     assert response.active_persona_id == "persona-1"
     assert mapping_store.get_session_binding("session-pipeline").active_persona_id == "persona-1"

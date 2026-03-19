@@ -38,7 +38,7 @@
 
 ```text
 sanitize pipeline
-  -> DecisionModelContext
+  -> DecisionContext
   -> DecisionFeatureExtractor
   -> policy model
   -> DecisionPlan
@@ -55,7 +55,7 @@ sanitize pipeline
 
 当前仓库已经具备：
 
-- runtime 侧 `DecisionModelContext`
+- runtime 侧 `DecisionContext`
 - runtime 侧 `DecisionFeatureExtractor`
 - runtime 侧 `TinyPolicyRuntime`
 - runtime/导出共用的 `TinyPolicyNet` PyTorch 原型

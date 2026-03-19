@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
-from privacyguard.domain.models.decision_context import CandidateDecisionFeatures, DecisionModelContext, PersonaDecisionFeatures
+from privacyguard.domain.models.decision_context import CandidateDecisionFeatures, DecisionContext, PersonaDecisionFeatures
 from privacyguard.infrastructure.decision.features import PackedDecisionFeatures
 
 RUNTIME_ACTION_ORDER: tuple[ActionType, ActionType, ActionType] = (
@@ -136,7 +136,7 @@ class DecisionPolicyRuntime(Protocol):
     def predict(
         self,
         *,
-        context: DecisionModelContext,
+        context: DecisionContext,
         packed: PackedDecisionFeatures,
     ) -> DEModelRuntimeOutput:
         """根据完整上下文与压缩特征输出 runtime 决策。"""
@@ -168,7 +168,7 @@ class TinyPolicyRuntime:
     def predict(
         self,
         *,
-        context: DecisionModelContext,
+        context: DecisionContext,
         packed: PackedDecisionFeatures,
     ) -> DEModelRuntimeOutput:
         """基于上下文与压缩特征生成占位策略输出。"""
@@ -206,7 +206,7 @@ class TinyPolicyRuntime:
             candidate_decisions=candidate_decisions,
         )
 
-    def _select_persona(self, context: DecisionModelContext) -> tuple[str | None, dict[str, float]]:
+    def _select_persona(self, context: DecisionContext) -> tuple[str | None, dict[str, float]]:
         if not context.persona_features:
             return (None, {})
         active_persona_id = context.session_binding.active_persona_id if context.session_binding else None
@@ -340,7 +340,7 @@ class TorchTinyPolicyRuntime:
     def predict(
         self,
         *,
-        context: DecisionModelContext,
+        context: DecisionContext,
         packed: PackedDecisionFeatures,
     ) -> DEModelRuntimeOutput:
         """执行 TinyPolicyNet 前向，并把 logits 解码为运行时输出。"""

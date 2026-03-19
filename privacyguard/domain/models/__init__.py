@@ -4,7 +4,7 @@ from privacyguard.domain.models.action import RestoredSlot
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.decision_context import (
     CandidateDecisionFeatures,
-    DecisionModelContext,
+    DecisionContext,
     PageDecisionFeatures,
     PersonaDecisionFeatures,
 )
@@ -28,6 +28,6 @@ __all__ = [
     "PageDecisionFeatures",
     "CandidateDecisionFeatures",
     "PersonaDecisionFeatures",
-    "DecisionModelContext",
+    "DecisionContext",
     "RestoredSlot",
 ]

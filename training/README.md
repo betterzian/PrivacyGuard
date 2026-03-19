@@ -32,9 +32,9 @@ training/
 - `types.py`
   定义训练侧的 episode、turn、policy 输出、adversary 观测结构。
 - `runtime_bridge.py`
-  把运行时 `DecisionModelContext` / `DecisionPlan` 转成训练样本与导出元数据。
+  把运行时 `DecisionContext` / `DecisionPlan` 转成训练样本与导出元数据。
 - `torch_batch.py`
-  把 `DecisionModelContext` 打成 `TinyPolicyNet` 可直接消费的 PyTorch batch。
+  把 `DecisionContext` 打成 `TinyPolicyNet` 可直接消费的 PyTorch batch。
 - `session_rollout.py`
   管理多轮会话 rollout，把连续 turn 拼成 adversary 可消费的观察窗口。
 - `adversary.py`
@@ -57,7 +57,7 @@ training/
 ## 数据流
 
 ```text
-DecisionModelContext
+DecisionContext
   -> DecisionFeatureExtractor
   -> policy model
   -> DecisionPlan / rendered turn
@@ -73,7 +73,7 @@ DecisionModelContext
 
 - 训练侧可以很重：PyTorch、对抗模型、会话模拟都放这里。
 - 运行时必须很轻：只保留特征提取、轻量 policy 推理、约束解析和回退逻辑。
-- `DecisionModelContext` 与 `DecisionFeatureExtractor` 是训练和推理共享边界，尽量不要各自定义两套输入。
+- `DecisionContext` 与 `DecisionFeatureExtractor` 是训练和推理共享边界，尽量不要各自定义两套输入。
 - 若要使用模型原型，推荐安装 `python -m pip install -e '.[train]'`。
 
 当前已经实现了最小 supervised finetune 闭环；对抗训练和移动端导出仍然是后续工作。

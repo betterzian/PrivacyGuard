@@ -106,6 +106,7 @@ def run_sanitize_pipeline(
     rendering_engine: RenderingEngine,
 ) -> SanitizeResponse:
     """按固定顺序执行 sanitize 编排并返回响应。"""
+    context_builder = DecisionContextBuilder(mapping_store=mapping_store, persona_repository=persona_repository)
     ocr_blocks = ocr_engine.extract(request.screenshot) if request.screenshot is not None else []
     _trace_ocr_blocks(request.session_id, request.turn_id, ocr_blocks)
     _trace_detector_input(request.session_id, request.turn_id, request.prompt_text, ocr_blocks)
@@ -113,25 +114,17 @@ def run_sanitize_pipeline(
     _trace_detector_output(request.session_id, request.turn_id, candidates)
     session_service = SessionService(mapping_store=mapping_store, persona_repository=persona_repository)
     session_binding = session_service.get_or_create_binding(request.session_id)
-    plan_with_context = getattr(decision_engine, "plan_with_context", None)
-    if callable(plan_with_context):
-        context_builder = DecisionContextBuilder(mapping_store=mapping_store, persona_repository=persona_repository)
-        decision_context = context_builder.build(
-            session_id=request.session_id,
-            turn_id=request.turn_id,
-            prompt_text=request.prompt_text,
-            ocr_blocks=ocr_blocks,
-            candidates=candidates,
-            session_binding=session_binding,
-        )
-        plan = plan_with_context(decision_context)
-    else:
-        plan = decision_engine.plan(
-            session_id=request.session_id,
-            turn_id=request.turn_id,
-            candidates=candidates,
-            session_binding=session_binding,
-        )
+    decision_context = context_builder.build(
+        session_id=request.session_id,
+        turn_id=request.turn_id,
+        prompt_text=request.prompt_text,
+        protection_level=request.protection_level,
+        detector_overrides=request.detector_overrides,
+        ocr_blocks=ocr_blocks,
+        candidates=candidates,
+        session_binding=session_binding,
+    )
+    plan = decision_engine.plan(decision_context)
     plan = SessionPlaceholderAllocator(mapping_store=mapping_store).assign(plan)
     sanitized_prompt_text, applied_records = rendering_engine.render_text(request.prompt_text, plan)
     sanitized_screenshot = (

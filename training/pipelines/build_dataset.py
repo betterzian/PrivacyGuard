@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Iterable
 
 from privacyguard.domain.models.decision import DecisionPlan
-from privacyguard.domain.models.decision_context import DecisionModelContext
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.features import DecisionFeatureExtractor
 from training.runtime_bridge import pack_training_turn, plan_to_supervision
 
 
 def build_jsonl_dataset(
-    contexts: Iterable[DecisionModelContext],
+    contexts: Iterable[DecisionContext],
     output_path: str | Path,
     extractor: DecisionFeatureExtractor | None = None,
 ) -> Path:
@@ -31,7 +31,7 @@ def build_jsonl_dataset(
 
 
 def build_supervised_jsonl_dataset(
-    samples: Iterable[tuple[DecisionModelContext, DecisionPlan]],
+    samples: Iterable[tuple[DecisionContext, DecisionPlan]],
     output_path: str | Path,
     extractor: DecisionFeatureExtractor | None = None,
 ) -> Path:

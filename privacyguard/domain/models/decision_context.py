@@ -1,10 +1,10 @@
-"""Decision Model 上下文领域模型定义。"""
+"""Decision 上下文领域模型定义。"""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from privacyguard.domain.enums import PIIAttributeType, PIISourceType
+from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
@@ -23,6 +23,14 @@ class PageDecisionFeatures(BaseModel):
     prompt_has_digits: bool = False
     prompt_has_address_tokens: bool = False
     average_candidate_confidence: float = Field(ge=0.0, le=1.0, default=0.0)
+    min_candidate_confidence: float = Field(ge=0.0, le=1.0, default=0.0)
+    high_confidence_candidate_ratio: float = Field(ge=0.0, le=1.0, default=0.0)
+    low_confidence_candidate_ratio: float = Field(ge=0.0, le=1.0, default=0.0)
+    prompt_candidate_count: int = Field(ge=0, default=0)
+    ocr_candidate_count: int = Field(ge=0, default=0)
+    average_ocr_block_score: float = Field(ge=0.0, le=1.0, default=0.0)
+    min_ocr_block_score: float = Field(ge=0.0, le=1.0, default=0.0)
+    low_confidence_ocr_block_ratio: float = Field(ge=0.0, le=1.0, default=0.0)
 
 
 class CandidateDecisionFeatures(BaseModel):
@@ -48,6 +56,9 @@ class CandidateDecisionFeatures(BaseModel):
     aspect_ratio: float = Field(ge=0.0, default=0.0)
     center_x: float = Field(ge=0.0, le=1.0, default=0.0)
     center_y: float = Field(ge=0.0, le=1.0, default=0.0)
+    ocr_block_score: float = Field(ge=0.0, le=1.0, default=0.0)
+    ocr_block_rotation_degrees: float = 0.0
+    is_low_ocr_confidence: bool = False
     is_prompt_source: bool = False
     is_ocr_source: bool = False
 
@@ -67,12 +78,14 @@ class PersonaDecisionFeatures(BaseModel):
     slots: dict[PIIAttributeType, str] = Field(default_factory=dict)
 
 
-class DecisionModelContext(BaseModel):
-    """提供给 de_model 运行时的完整上下文。"""
+class DecisionContext(BaseModel):
+    """提供给所有决策引擎的统一上下文。"""
 
     session_id: str
     turn_id: int = Field(ge=0)
     prompt_text: str = ""
+    protection_level: ProtectionLevel = ProtectionLevel.BALANCED
+    detector_overrides: dict[PIIAttributeType, float] = Field(default_factory=dict)
     ocr_blocks: list[OCRTextBlock] = Field(default_factory=list)
     candidates: list[PIICandidate] = Field(default_factory=list)
     session_binding: SessionBinding | None = None

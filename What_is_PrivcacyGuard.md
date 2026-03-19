@@ -458,12 +458,12 @@ q_\phi(p \mid \tilde{X}_{1:T}) \approx \pi^\star(p)
 
 > **如果真实 `de_model` 想落实 5.2.1 中“使用 prompt 与 OCR 页面上下文”的设计目标，就不能只停留在当前 `plan(...)` 的裸输入形态。**
 
-#### 5.3.3 推荐新增的内部输入对象：`DecisionModelContext`
+#### 5.3.3 推荐新增的内部输入对象：`DecisionContext`
 
-建议在 application 层新增一个仅供 `de_model` 使用的内部上下文对象，例如：
+建议在 application 层新增一个统一供 Decision 层使用的上下文对象，例如：
 
 ```python
-class DecisionModelContext(BaseModel):
+class DecisionContext(BaseModel):
     session_id: str
     turn_id: int
     prompt_text: str
@@ -478,13 +478,13 @@ class DecisionModelContext(BaseModel):
 
 这样做的好处是：
 
-1. `label_only` 和 `label_persona_mixed` 仍可沿用旧接口；
+1. 所有 decision engine 都走同一个 `plan(context)` 边界；
 2. `de_model` 能获得真正需要的页面级上下文；
 3. 输出仍然保持 `DecisionPlan` 不变，兼容现有渲染与恢复。
 
 #### 5.3.4 推荐给模型的实际输入张量
 
-在 `DecisionModelContext` 基础上，建议将输入整理为三层：
+在 `DecisionContext` 基础上，建议将输入整理为三层：
 
 1. **页面级输入**
    - prompt 压缩表示
@@ -640,7 +640,7 @@ class DecisionModelContext(BaseModel):
 目标：
 
 - 明确 `DecisionPlan` 输出保持不变；
-- 引入 `DecisionModelContext`；
+- 引入 `DecisionContext`；
 - 明确 `sanitize` 流程如何把 `prompt_text / ocr_blocks / history / persona` 送入 `de_model`。
 
 交付物：

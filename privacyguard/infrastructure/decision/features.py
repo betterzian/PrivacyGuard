@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.domain.models.decision_context import DecisionModelContext
+from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
+from privacyguard.domain.models.decision_context import DecisionContext
 
 PAGE_FEATURE_NAMES: tuple[str, ...] = (
     "prompt_length",
@@ -17,14 +17,26 @@ PAGE_FEATURE_NAMES: tuple[str, ...] = (
     "prompt_has_digits",
     "prompt_has_address_tokens",
     "average_candidate_confidence",
+    "min_candidate_confidence",
+    "high_confidence_candidate_ratio",
+    "low_confidence_candidate_ratio",
+    "prompt_candidate_count",
+    "ocr_candidate_count",
+    "average_ocr_block_score",
+    "min_ocr_block_score",
+    "low_confidence_ocr_block_ratio",
+    "protection_level_weak",
+    "protection_level_balanced",
+    "protection_level_strong",
 )
 ATTR_FEATURE_ORDER: tuple[str, ...] = tuple(attr.value for attr in PIIAttributeType)
 SOURCE_FEATURE_ORDER: tuple[str, ...] = ("prompt", "ocr")
+PROTECTION_LEVEL_ORDER: tuple[str, ...] = tuple(level.value for level in ProtectionLevel)
 TEXT_SIGNATURE_DIM = 5
 PAGE_FEATURE_DIM = len(PAGE_FEATURE_NAMES)
 ATTR_ONE_HOT_DIM = len(ATTR_FEATURE_ORDER)
 SOURCE_ONE_HOT_DIM = len(SOURCE_FEATURE_ORDER)
-CANDIDATE_FEATURE_DIM = ATTR_ONE_HOT_DIM + SOURCE_ONE_HOT_DIM + 1 + 4 + 4 + TEXT_SIGNATURE_DIM * 3
+CANDIDATE_FEATURE_DIM = ATTR_ONE_HOT_DIM + SOURCE_ONE_HOT_DIM + 1 + 4 + 4 + 3 + TEXT_SIGNATURE_DIM * 3
 PERSONA_FEATURE_DIM = 4 + ATTR_ONE_HOT_DIM + TEXT_SIGNATURE_DIM * 2
 
 
@@ -40,9 +52,9 @@ class PackedDecisionFeatures:
 
 
 class DecisionFeatureExtractor:
-    """将 DecisionModelContext 压缩为轻量数值特征。"""
+    """将 DecisionContext 压缩为轻量数值特征。"""
 
-    def pack(self, context: DecisionModelContext) -> PackedDecisionFeatures:
+    def pack(self, context: DecisionContext) -> PackedDecisionFeatures:
         page_vector = self._page_vector(context)
         candidate_ids: list[str] = []
         candidate_vectors: list[list[float]] = []
@@ -62,8 +74,9 @@ class DecisionFeatureExtractor:
             persona_vectors=persona_vectors,
         )
 
-    def _page_vector(self, context: DecisionModelContext) -> list[float]:
+    def _page_vector(self, context: DecisionContext) -> list[float]:
         item = context.page_features
+        protection_level = context.protection_level.value
         return [
             min(1.0, item.prompt_length / 256.0),
             min(1.0, item.ocr_block_count / 64.0),
@@ -74,6 +87,15 @@ class DecisionFeatureExtractor:
             1.0 if item.prompt_has_digits else 0.0,
             1.0 if item.prompt_has_address_tokens else 0.0,
             item.average_candidate_confidence,
+            item.min_candidate_confidence,
+            item.high_confidence_candidate_ratio,
+            item.low_confidence_candidate_ratio,
+            min(1.0, item.prompt_candidate_count / 32.0),
+            min(1.0, item.ocr_candidate_count / 32.0),
+            item.average_ocr_block_score,
+            item.min_ocr_block_score,
+            item.low_confidence_ocr_block_ratio,
+            *self._one_hot(protection_level, ordered_values=PROTECTION_LEVEL_ORDER),
         ]
 
     def _candidate_vector(self, item) -> list[float]:
@@ -94,6 +116,9 @@ class DecisionFeatureExtractor:
             min(1.0, item.aspect_ratio / 6.0),
             item.center_x,
             item.center_y,
+            item.ocr_block_score,
+            min(1.0, abs(item.ocr_block_rotation_degrees) / 180.0),
+            1.0 if item.is_low_ocr_confidence else 0.0,
             *text_stats,
             *prompt_stats,
             *ocr_stats,
@@ -114,8 +139,11 @@ class DecisionFeatureExtractor:
         ]
 
     def _attr_one_hot(self, *names: str) -> list[float]:
+        return self._one_hot(*names, ordered_values=ATTR_FEATURE_ORDER)
+
+    def _one_hot(self, *names: str, ordered_values: tuple[str, ...]) -> list[float]:
         values = set(names)
-        return [1.0 if name in values else 0.0 for name in ATTR_FEATURE_ORDER]
+        return [1.0 if name in values else 0.0 for name in ordered_values]
 
     def _text_signature(self, text: str) -> list[float]:
         if not text:

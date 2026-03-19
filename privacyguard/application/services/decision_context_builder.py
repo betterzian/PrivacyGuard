@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from collections import Counter
 
+from privacyguard.domain.enums import PIISourceType, ProtectionLevel
+from privacyguard.domain.interfaces.mapping_store import MappingStore
+from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.models.decision_context import (
     CandidateDecisionFeatures,
-    DecisionModelContext,
+    DecisionContext,
     PageDecisionFeatures,
     PersonaDecisionFeatures,
 )
@@ -14,14 +17,15 @@ from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.domain.models.pii import PIICandidate
-from privacyguard.domain.interfaces.mapping_store import MappingStore
-from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 
 _ADDRESS_HINT_TOKENS = ("省", "市", "区", "县", "路", "街", "道", "号", "小区", "公寓")
+_HIGH_CANDIDATE_CONFIDENCE = 0.85
+_LOW_CANDIDATE_CONFIDENCE = 0.5
+_LOW_OCR_BLOCK_SCORE = 0.75
 
 
 class DecisionContextBuilder:
-    """从 sanitize 主链路已有信息构建 de_model 上下文。"""
+    """从 sanitize 主链路已有信息构建统一决策上下文。"""
 
     def __init__(self, mapping_store: MappingStore, persona_repository: PersonaRepository) -> None:
         self.mapping_store = mapping_store
@@ -33,19 +37,26 @@ class DecisionContextBuilder:
         session_id: str,
         turn_id: int,
         prompt_text: str = "",
+        protection_level: ProtectionLevel | str = ProtectionLevel.BALANCED,
+        detector_overrides: dict[object, float] | None = None,
         ocr_blocks: list[OCRTextBlock] | None = None,
         candidates: list[PIICandidate] | None = None,
         session_binding: SessionBinding | None = None,
-    ) -> DecisionModelContext:
-        """构建供 de_model 使用的完整上下文。"""
+    ) -> DecisionContext:
+        """构建供所有决策引擎使用的统一上下文。"""
         ocr_items = list(ocr_blocks or [])
         candidate_items = list(candidates or [])
+        normalized_protection_level = self._normalize_protection_level(protection_level)
+        normalized_detector_overrides = self._normalize_detector_overrides(detector_overrides)
         history_records = self._history_records(session_id=session_id)
         persona_profiles = self._persona_profiles()
         block_map = {block.block_id: block for block in ocr_items if block.block_id}
         geometry_bounds = self._page_geometry_bounds(ocr_items=ocr_items, candidates=candidate_items)
         attr_counter = Counter(candidate.attr_type for candidate in candidate_items)
         text_counter = Counter((candidate.normalized_text or candidate.text) for candidate in candidate_items)
+        source_counter = Counter(candidate.source for candidate in candidate_items)
+        candidate_confidences = [candidate.confidence for candidate in candidate_items]
+        ocr_scores = [block.score for block in ocr_items]
         candidate_features = [
             self._candidate_features(
                 candidate=candidate,
@@ -76,15 +87,33 @@ class DecisionContextBuilder:
             prompt_has_digits=any(char.isdigit() for char in prompt_text),
             prompt_has_address_tokens=any(token in prompt_text for token in _ADDRESS_HINT_TOKENS),
             average_candidate_confidence=(
-                sum(candidate.confidence for candidate in candidate_items) / len(candidate_items)
-                if candidate_items
+                sum(candidate_confidences) / len(candidate_confidences) if candidate_confidences else 0.0
+            ),
+            min_candidate_confidence=min(candidate_confidences) if candidate_confidences else 0.0,
+            high_confidence_candidate_ratio=(
+                sum(score >= _HIGH_CANDIDATE_CONFIDENCE for score in candidate_confidences) / len(candidate_confidences)
+                if candidate_confidences
                 else 0.0
             ),
+            low_confidence_candidate_ratio=(
+                sum(score < _LOW_CANDIDATE_CONFIDENCE for score in candidate_confidences) / len(candidate_confidences)
+                if candidate_confidences
+                else 0.0
+            ),
+            prompt_candidate_count=source_counter[PIISourceType.PROMPT],
+            ocr_candidate_count=source_counter[PIISourceType.OCR],
+            average_ocr_block_score=(sum(ocr_scores) / len(ocr_scores) if ocr_scores else 0.0),
+            min_ocr_block_score=min(ocr_scores) if ocr_scores else 0.0,
+            low_confidence_ocr_block_ratio=(
+                sum(score < _LOW_OCR_BLOCK_SCORE for score in ocr_scores) / len(ocr_scores) if ocr_scores else 0.0
+            ),
         )
-        return DecisionModelContext(
+        return DecisionContext(
             session_id=session_id,
             turn_id=turn_id,
             prompt_text=prompt_text,
+            protection_level=normalized_protection_level,
+            detector_overrides=normalized_detector_overrides,
             ocr_blocks=ocr_items,
             candidates=candidate_items,
             session_binding=session_binding,
@@ -126,20 +155,19 @@ class DecisionContextBuilder:
             if (record.canonical_source_text or record.source_text) in candidate_source_texts
             or record.source_text in candidate_source_texts
         )
-        block_text = ""
-        if candidate.block_id and candidate.block_id in block_map:
-            block_text = block_map[candidate.block_id].text
+        block = block_map.get(candidate.block_id) if candidate.block_id else None
+        block_text = block.text if block is not None else ""
         prompt_context = self._text_window(
             text=prompt_text,
             source_text=candidate.text,
-            start=candidate.span_start if candidate.source.value == "prompt" else None,
-            end=candidate.span_end if candidate.source.value == "prompt" else None,
+            start=candidate.span_start if candidate.source == PIISourceType.PROMPT else None,
+            end=candidate.span_end if candidate.source == PIISourceType.PROMPT else None,
         )
         ocr_context = self._text_window(
             text=block_text,
             source_text=candidate.text,
-            start=candidate.span_start if candidate.source.value == "ocr" else None,
-            end=candidate.span_end if candidate.source.value == "ocr" else None,
+            start=candidate.span_start if candidate.source == PIISourceType.OCR else None,
+            end=candidate.span_end if candidate.source == PIISourceType.OCR else None,
         )
         relative_area, aspect_ratio, center_x, center_y = self._geometry_features(candidate.bbox, geometry_bounds)
         key_text = candidate.normalized_text or candidate.text
@@ -164,8 +192,11 @@ class DecisionContextBuilder:
             aspect_ratio=aspect_ratio,
             center_x=center_x,
             center_y=center_y,
-            is_prompt_source=candidate.source.value == "prompt",
-            is_ocr_source=candidate.source.value == "ocr",
+            ocr_block_score=block.score if block is not None else 0.0,
+            ocr_block_rotation_degrees=block.rotation_degrees if block is not None else 0.0,
+            is_low_ocr_confidence=bool(block is not None and block.score < _LOW_OCR_BLOCK_SCORE),
+            is_prompt_source=candidate.source == PIISourceType.PROMPT,
+            is_ocr_source=candidate.source == PIISourceType.OCR,
         )
 
     def _persona_features(
@@ -253,3 +284,18 @@ class DecisionContextBuilder:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    def _normalize_protection_level(self, protection_level: ProtectionLevel | str) -> ProtectionLevel:
+        if isinstance(protection_level, ProtectionLevel):
+            return protection_level
+        normalized = str(protection_level or ProtectionLevel.BALANCED.value).strip().lower()
+        return ProtectionLevel(normalized)
+
+    def _normalize_detector_overrides(
+        self,
+        detector_overrides: dict[object, float] | None,
+    ) -> dict[object, float]:
+        normalized: dict[object, float] = {}
+        for key, value in (detector_overrides or {}).items():
+            normalized[key] = value
+        return normalized

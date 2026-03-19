@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from privacyguard.domain.models.decision import DecisionPlan
-from privacyguard.domain.models.decision_context import DecisionModelContext
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.features import DecisionFeatureExtractor, PackedDecisionFeatures
 from training.types import RenderedTurnObservation, SupervisedTurnLabels, TrainingTurnExample
 
 
 def pack_training_turn(
-    context: DecisionModelContext,
+    context: DecisionContext,
     extractor: DecisionFeatureExtractor | None = None,
 ) -> tuple[TrainingTurnExample, PackedDecisionFeatures]:
     """把运行时上下文转成训练侧单轮样本。"""

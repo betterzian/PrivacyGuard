@@ -35,7 +35,7 @@ class _PersonaRepository:
         return persona.slots.get(attr_type)
 
 
-def test_de_model_engine_plan_with_context_selects_persona_and_preserves_geometry() -> None:
+def test_de_model_engine_plan_selects_persona_and_preserves_geometry() -> None:
     mapping_store = InMemoryMappingStore()
     mapping_store.save_replacements(
         session_id="session-2",
@@ -108,11 +108,12 @@ def test_de_model_engine_plan_with_context_selects_persona_and_preserves_geometr
     )
     engine = DEModelEngine(persona_repository=persona_repo, mapping_store=mapping_store)
 
-    plan = engine.plan_with_context(context)
+    plan = engine.plan(context)
 
     assert plan.active_persona_id == "persona-b"
     assert plan.metadata["mode"] == "de_model"
     assert plan.metadata["engine_type"] == "tiny_policy_skeleton"
+    assert plan.metadata["protection_level"] == "balanced"
 
     action_map = {item.candidate_id: item for item in plan.actions}
     name_action = action_map["cand-name"]
@@ -129,7 +130,7 @@ def test_de_model_engine_plan_with_context_selects_persona_and_preserves_geometr
     assert other_action.replacement_text == "@敏感信息1"
 
 
-def test_de_model_engine_plan_keeps_legacy_interface_available() -> None:
+def test_de_model_engine_plan_accepts_unified_context() -> None:
     persona_repo = _PersonaRepository(
         [
             PersonaProfile(
@@ -141,10 +142,13 @@ def test_de_model_engine_plan_keeps_legacy_interface_available() -> None:
         ]
     )
     engine = DEModelEngine(persona_repository=persona_repo, mapping_store=InMemoryMappingStore())
-
-    plan = engine.plan(
-        session_id="session-legacy",
+    context = DecisionContextBuilder(
+        mapping_store=InMemoryMappingStore(),
+        persona_repository=persona_repo,
+    ).build(
+        session_id="session-unified",
         turn_id=0,
+        prompt_text="张三",
         candidates=[
             PIICandidate(
                 entity_id="cand-name",
@@ -155,11 +159,12 @@ def test_de_model_engine_plan_keeps_legacy_interface_available() -> None:
                 confidence=0.9,
             )
         ],
-        session_binding=None,
     )
 
-    assert plan.metadata["context_mode"] == "minimal_fallback"
+    plan = engine.plan(context)
+
     assert plan.actions[0].candidate_id == "cand-name"
+    assert plan.metadata["page_vector_dim"].isdigit()
 
 
 def test_de_model_engine_accepts_explicit_runtime_config() -> None:
@@ -258,7 +263,7 @@ def test_de_model_engine_torch_runtime_runs_checkpoint_inference(tmp_path) -> No
         checkpoint_path=str(checkpoint_path),
     )
 
-    plan = engine.plan_with_context(context)
+    plan = engine.plan(context)
 
     assert plan.active_persona_id == "persona-torch"
     assert plan.metadata["runtime_type"] == "torch_runtime"

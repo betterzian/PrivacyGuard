@@ -107,7 +107,7 @@ def test_supervised_finetune_outputs_checkpoint_loadable_by_torch_runtime(tmp_pa
             ],
         ),
     ]
-    plans = [heuristic_engine.plan_with_context(context) for context in contexts]
+    plans = [heuristic_engine.plan(context) for context in contexts]
     dataset_path = build_supervised_jsonl_dataset(zip(contexts, plans), tmp_path / "train.jsonl")
 
     payload = json.loads(dataset_path.read_text(encoding="utf-8").splitlines()[0])
@@ -137,7 +137,7 @@ def test_supervised_finetune_outputs_checkpoint_loadable_by_torch_runtime(tmp_pa
         runtime_type="torch",
         checkpoint_path=str(result.checkpoint_path),
     )
-    torch_plan = torch_engine.plan_with_context(contexts[0])
+    torch_plan = torch_engine.plan(contexts[0])
 
     assert torch_plan.metadata["runtime_type"] == "torch_runtime"
     assert len(torch_plan.actions) == len(contexts[0].candidates)

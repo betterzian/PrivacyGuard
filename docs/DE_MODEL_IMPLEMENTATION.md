@@ -31,8 +31,8 @@ flowchart TD
 
 1. OCR 提取 `ocr_blocks`
 2. detector 产出 `PIICandidate`
-3. `DecisionContextBuilder` 构造 `DecisionModelContext`
-4. `DEModelEngine.plan_with_context()` 调用 runtime
+3. `DecisionContextBuilder` 构造统一的 `DecisionContext`
+4. `DecisionEngine.plan(context)` 调用当前决策引擎
 5. runtime 产出 `DEModelRuntimeOutput`
 6. engine 把 runtime 输出转成 `DecisionAction`
 7. `ConstraintResolver` 做合法性修正和降级
@@ -42,21 +42,23 @@ flowchart TD
 
 ### 2.1 决策接口层
 
-`DecisionEngine` 保留了旧接口：
+`DecisionEngine` 现在已经统一为单一上下文输入：
 
-- `plan(session_id, turn_id, candidates, session_binding)`
+- `plan(context)`
 
-同时 `de_model` 走的是扩展接口：
+这意味着：
 
-- `plan_with_context(context)`
-
-也就是说，`de_model` 不是只看 candidate 列表，而是吃完整上下文。
+- `label_only` 和 `label_persona_mixed` 也收到完整上下文，但只读取自己关心的字段；
+- `de_model` 可以直接消费 prompt、OCR、history、persona、protection level 等完整信号；
+- `sanitize_pipeline` 不再需要根据 engine 类型做双分支分派。
 
 ### 2.2 上下文构造
 
-`DecisionContextBuilder` 已经把以下信息统一收敛到 `DecisionModelContext`：
+`DecisionContextBuilder` 已经把以下信息统一收敛到 `DecisionContext`：
 
 - 当前轮 prompt 文本
+- 当前 detector `protection_level`
+- 当前 detector overrides
 - OCR blocks
 - detector 产出的 PII candidates
 - 当前 session binding
@@ -68,7 +70,7 @@ flowchart TD
 
 #### Page 级特征
 
-当前 page 特征共 9 维：
+当前 page 特征共 20 维，除了原有摘要外，还补进了 detector/OCR 汇总信号：
 
 1. `prompt_length`
 2. `ocr_block_count`
@@ -79,6 +81,17 @@ flowchart TD
 7. `prompt_has_digits`
 8. `prompt_has_address_tokens`
 9. `average_candidate_confidence`
+10. `min_candidate_confidence`
+11. `high_confidence_candidate_ratio`
+12. `low_confidence_candidate_ratio`
+13. `prompt_candidate_count`
+14. `ocr_candidate_count`
+15. `average_ocr_block_score`
+16. `min_ocr_block_score`
+17. `low_confidence_ocr_block_ratio`
+18. `protection_level_weak`
+19. `protection_level_balanced`
+20. `protection_level_strong`
 
 #### Candidate 级特征
 
@@ -90,6 +103,7 @@ flowchart TD
 - 历史统计：`history_attr_exposure_count / history_exact_match_count`
 - 页内统计：`same_attr_page_count / same_text_page_count`
 - 几何特征：`relative_area / aspect_ratio / center_x / center_y`
+- OCR 局部质量：`ocr_block_score / ocr_block_rotation_degrees / is_low_ocr_confidence`
 - 来源标记：`is_prompt_source / is_ocr_source`
 
 #### Persona 级特征
@@ -113,8 +127,8 @@ flowchart TD
 
 | 向量 | 维度 | 说明 |
 | --- | ---: | --- |
-| `page_vector` | 9 | page 级归一化统计 |
-| `candidate_vector` | 37 | attr/source/confidence/history/geometry/text signature |
+| `page_vector` | 20 | page 级归一化统计 + protection level + detector/OCR 汇总信号 |
+| `candidate_vector` | 40 | attr/source/confidence/history/geometry/OCR 局部质量/text signature |
 | `persona_vector` | 25 | slot/exposure/active/match/attr coverage/text signature |
 
 #### Candidate 向量 37 维组成
@@ -465,9 +479,9 @@ Linear(384 -> 128) -> GELU -> Linear(128 -> 1)
 
 ## 4. 输入结构
 
-### 4.1 Runtime 输入：`DecisionModelContext`
+### 4.1 Runtime 输入：`DecisionContext`
 
-`de_model` 在运行时真正的上游输入是 `DecisionModelContext`，而不是直接的 tensor。
+`de_model` 在运行时真正的上游输入是 `DecisionContext`，而不是直接的 tensor。
 
 它包含：
 
