@@ -8,6 +8,7 @@ from privacyguard.application.services.decision_context_builder import DecisionC
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.infrastructure.decision.features import CANDIDATE_FEATURE_DIM, PAGE_FEATURE_DIM, PERSONA_FEATURE_DIM
 from privacyguard.infrastructure.decision.tiny_policy_net import TinyPolicyNet, TinyPolicyNetConfig
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 from training.torch_batch import TinyPolicyBatchBuilder
@@ -81,6 +82,14 @@ def test_tiny_policy_net_forward_shapes_and_parameter_budget() -> None:
 
     batch = TinyPolicyBatchBuilder(max_candidates=4, max_personas=4, max_text_length=24).build([context])
     model = TinyPolicyNet(TinyPolicyNetConfig(max_text_length=24))
+
+    assert batch.page_features.shape == (1, PAGE_FEATURE_DIM)
+    assert batch.page_features.shape[-1] == PAGE_FEATURE_DIM
+    assert batch.candidate_features.shape[-1] == CANDIDATE_FEATURE_DIM
+    assert batch.persona_features.shape[-1] == PERSONA_FEATURE_DIM
+    assert model.config.page_feature_dim == PAGE_FEATURE_DIM
+    assert model.config.candidate_feature_dim == CANDIDATE_FEATURE_DIM
+    assert model.config.persona_feature_dim == PERSONA_FEATURE_DIM
 
     output = model(batch)
 

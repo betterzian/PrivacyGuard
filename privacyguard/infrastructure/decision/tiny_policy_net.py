@@ -9,6 +9,11 @@ from torch import nn
 from torch.nn import functional as F
 
 from privacyguard.domain.enums import ActionType
+from privacyguard.infrastructure.decision.features import (
+    CANDIDATE_FEATURE_DIM,
+    PAGE_FEATURE_DIM,
+    PERSONA_FEATURE_DIM,
+)
 
 ACTION_ORDER: tuple[ActionType, ActionType, ActionType] = (
     ActionType.KEEP,
@@ -23,9 +28,9 @@ class TinyPolicyNetConfig:
 
     vocab_size: int = 2048
     max_text_length: int = 48
-    page_feature_dim: int = 9
-    candidate_feature_dim: int = 33
-    persona_feature_dim: int = 21
+    page_feature_dim: int = PAGE_FEATURE_DIM
+    candidate_feature_dim: int = CANDIDATE_FEATURE_DIM
+    persona_feature_dim: int = PERSONA_FEATURE_DIM
     char_embedding_dim: int = 64
     text_hidden_dim: int = 96
     text_encoder_layers: int = 3

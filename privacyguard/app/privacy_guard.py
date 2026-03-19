@@ -43,6 +43,7 @@ class PrivacyGuard:
         registry: ComponentRegistry | None = None,
         screenshot_fill_mode: str | None = None,
         detector_config: dict[str, Any] | None = None,
+        decision_config: dict[str, Any] | None = None,
     ) -> None:
         """初始化核心依赖并构建 sanitize/restore 两条流水线。screenshot_fill_mode: ring（纯色）、gradient（渐变）、cv（OpenCV inpaint）、mix（三段式自动选择，默认）。"""
         self.registry = get_or_create_registry(registry)
@@ -86,6 +87,7 @@ class PrivacyGuard:
             self.registry,
             self.persona_repo,
             self.mapping_table,
+            decision_config=decision_config,
         )
         self.sanitize_pipeline = SanitizePipeline(
             ocr=self.ocr,

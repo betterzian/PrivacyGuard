@@ -22,6 +22,7 @@ training/
   export.py
   pipelines/
     build_dataset.py
+    run_supervised_finetune.py
     run_adversarial_finetune.py
     export_runtime_bundle.py
 ```
@@ -43,7 +44,9 @@ training/
 - `export.py`
   定义从训练 checkpoint 到运行时 bundle 的导出描述。
 - `pipelines/build_dataset.py`
-  从上下文样本构建训练数据集。
+  从上下文样本构建训练数据集，也支持导出带监督标签的 JSONL。
+- `pipelines/run_supervised_finetune.py`
+  跑最小 supervised / behavior cloning 训练，并导出可被运行时直接加载的 checkpoint。
 - `pipelines/run_adversarial_finetune.py`
   跑 policy vs adversary 的对抗式后训练。
 - `pipelines/export_runtime_bundle.py`
@@ -73,4 +76,4 @@ DecisionModelContext
 - `DecisionModelContext` 与 `DecisionFeatureExtractor` 是训练和推理共享边界，尽量不要各自定义两套输入。
 - 若要使用模型原型，推荐安装 `python -m pip install -e '.[train]'`。
 
-当前这些文件只是工程骨架，还没有实现真正的训练循环。
+当前已经实现了最小 supervised finetune 闭环；对抗训练和移动端导出仍然是后续工作。

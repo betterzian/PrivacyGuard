@@ -4,7 +4,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.models.decision_context import DecisionModelContext
+
+PAGE_FEATURE_NAMES: tuple[str, ...] = (
+    "prompt_length",
+    "ocr_block_count",
+    "candidate_count",
+    "unique_attr_count",
+    "history_record_count",
+    "active_persona_bound",
+    "prompt_has_digits",
+    "prompt_has_address_tokens",
+    "average_candidate_confidence",
+)
+ATTR_FEATURE_ORDER: tuple[str, ...] = tuple(attr.value for attr in PIIAttributeType)
+SOURCE_FEATURE_ORDER: tuple[str, ...] = ("prompt", "ocr")
+TEXT_SIGNATURE_DIM = 5
+PAGE_FEATURE_DIM = len(PAGE_FEATURE_NAMES)
+ATTR_ONE_HOT_DIM = len(ATTR_FEATURE_ORDER)
+SOURCE_ONE_HOT_DIM = len(SOURCE_FEATURE_ORDER)
+CANDIDATE_FEATURE_DIM = ATTR_ONE_HOT_DIM + SOURCE_ONE_HOT_DIM + 1 + 4 + 4 + TEXT_SIGNATURE_DIM * 3
+PERSONA_FEATURE_DIM = 4 + ATTR_ONE_HOT_DIM + TEXT_SIGNATURE_DIM * 2
 
 
 @dataclass(slots=True)
@@ -93,9 +114,8 @@ class DecisionFeatureExtractor:
         ]
 
     def _attr_one_hot(self, *names: str) -> list[float]:
-        order = ["name", "phone", "email", "address", "id_number", "organization", "other"]
         values = set(names)
-        return [1.0 if name in values else 0.0 for name in order]
+        return [1.0 if name in values else 0.0 for name in ATTR_FEATURE_ORDER]
 
     def _text_signature(self, text: str) -> list[float]:
         if not text:

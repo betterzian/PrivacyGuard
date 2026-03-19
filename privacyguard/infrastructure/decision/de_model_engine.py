@@ -1,5 +1,7 @@
 """DEModel 上下文感知占位决策引擎。"""
 
+from pathlib import Path
+
 from privacyguard.application.services.decision_context_builder import DecisionContextBuilder
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.mapping_store import MappingStore
@@ -9,7 +11,12 @@ from privacyguard.domain.models.decision_context import DecisionModelContext
 from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
-from privacyguard.infrastructure.decision.de_model_runtime import DEModelRuntimeOutput, TinyPolicyRuntime
+from privacyguard.infrastructure.decision.de_model_runtime import (
+    DEModelRuntimeOutput,
+    DecisionPolicyRuntime,
+    TinyPolicyRuntime,
+    TorchTinyPolicyRuntime,
+)
 from privacyguard.infrastructure.decision.features import DecisionFeatureExtractor
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
@@ -23,20 +30,66 @@ class DEModelEngine:
         persona_repository: PersonaRepository | None = None,
         mapping_store: MappingStore | None = None,
         keep_threshold: float = 0.25,
+        persona_score_threshold: float = 0.0,
+        action_tie_tolerance: float = 1e-6,
+        runtime_type: str = "heuristic",
+        checkpoint_path: str | None = None,
+        bundle_path: str | None = None,
+        device: str = "cpu",
         feature_extractor: DecisionFeatureExtractor | None = None,
-        runtime: TinyPolicyRuntime | None = None,
+        runtime: DecisionPolicyRuntime | None = None,
     ) -> None:
         """初始化依赖、特征提取器与占位运行时。"""
         self.persona_repository = persona_repository or JsonPersonaRepository()
         self.mapping_store = mapping_store or InMemoryMappingStore()
         self.keep_threshold = keep_threshold
+        self.persona_score_threshold = persona_score_threshold
+        self.action_tie_tolerance = action_tie_tolerance
+        self.runtime_type = self._normalize_runtime_type(runtime_type)
+        self.checkpoint_path = str(Path(checkpoint_path)) if checkpoint_path else None
+        self.bundle_path = str(Path(bundle_path)) if bundle_path else None
+        self.device = str(device).strip() or "cpu"
         self.constraint_resolver = ConstraintResolver(self.persona_repository)
         self.context_builder = DecisionContextBuilder(
             mapping_store=self.mapping_store,
             persona_repository=self.persona_repository,
         )
         self.feature_extractor = feature_extractor or DecisionFeatureExtractor()
-        self.runtime = runtime or TinyPolicyRuntime(keep_threshold=keep_threshold)
+        self.runtime = runtime or self._build_runtime()
+
+    def _normalize_runtime_type(self, runtime_type: str) -> str:
+        """将 de_model runtime 类型归一化为内部标准键。"""
+        normalized = str(runtime_type).strip().lower()
+        aliases = {
+            "heuristic": "heuristic",
+            "tiny_policy_heuristic": "heuristic",
+            "torch": "torch",
+            "bundle": "bundle",
+            "onnx": "bundle",
+        }
+        if normalized not in aliases:
+            raise ValueError(f"不支持的 de_model runtime_type: {runtime_type}")
+        return aliases[normalized]
+
+    def _build_runtime(self) -> DecisionPolicyRuntime:
+        """按 runtime_type 构建运行时。"""
+        if self.runtime_type == "heuristic":
+            return TinyPolicyRuntime(keep_threshold=self.keep_threshold)
+        if self.runtime_type == "torch":
+            if not self.checkpoint_path:
+                raise ValueError("de_model runtime_type='torch' 时必须提供 checkpoint_path。")
+            return TorchTinyPolicyRuntime(
+                checkpoint_path=self.checkpoint_path,
+                device=self.device,
+                keep_threshold=self.keep_threshold,
+                persona_score_threshold=self.persona_score_threshold,
+                action_tie_tolerance=self.action_tie_tolerance,
+            )
+        if self.runtime_type == "bundle":
+            if not self.bundle_path:
+                raise ValueError("de_model runtime_type='bundle' 时必须提供 bundle_path。")
+            raise NotImplementedError("de_model bundle runtime 尚未实现；当前请使用 runtime_type='heuristic'。")
+        raise ValueError(f"不支持的 de_model runtime_type: {self.runtime_type}")
 
     def plan(
         self,
@@ -87,7 +140,8 @@ class DEModelEngine:
             metadata={
                 "mode": "de_model",
                 "engine_type": "tiny_policy_skeleton",
-                "runtime_type": "context_runtime",
+                "runtime_type": f"{self.runtime_type}_runtime",
+                "runtime_device": self.device,
                 "selected_persona_id": binding.active_persona_id or "",
                 "candidate_count": str(len(context.candidates)),
                 "persona_count": str(len(context.persona_profiles)),

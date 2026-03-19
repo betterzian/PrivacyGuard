@@ -16,11 +16,25 @@ class TrainingTurnExample:
     prompt_text: str
     ocr_texts: list[str]
     candidate_ids: list[str]
+    candidate_texts: list[str]
+    candidate_prompt_contexts: list[str]
+    candidate_ocr_contexts: list[str]
     candidate_attr_types: list[PIIAttributeType]
+    persona_ids: list[str]
+    persona_texts: list[str]
     active_persona_id: str | None
     page_vector: list[float]
     candidate_vectors: list[list[float]]
     persona_vectors: list[list[float]]
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SupervisedTurnLabels:
+    """表示单轮 supervised finetune 的目标标签。"""
+
+    target_persona_id: str | None
+    candidate_actions: dict[str, ActionType]
     metadata: dict[str, str] = field(default_factory=dict)
 
 

@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.models.decision_context import CandidateDecisionFeatures, DecisionModelContext, PersonaDecisionFeatures
 from privacyguard.infrastructure.decision.features import PackedDecisionFeatures
+
+RUNTIME_ACTION_ORDER: tuple[ActionType, ActionType, ActionType] = (
+    ActionType.KEEP,
+    ActionType.GENERICIZE,
+    ActionType.PERSONA_SLOT,
+)
 
 
 @dataclass(slots=True)
@@ -26,6 +34,112 @@ class DEModelRuntimeOutput:
     active_persona_id: str | None
     persona_scores: dict[str, float] = field(default_factory=dict)
     candidate_decisions: list[RuntimeCandidateDecision] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class TinyPolicyOutputDecoder:
+    """将 TinyPolicyNet 前向输出解码为统一 de_model runtime 输出。"""
+
+    keep_threshold: float = 0.25
+    persona_score_threshold: float = 0.0
+    action_tie_tolerance: float = 1e-6
+    _tie_priority: dict[ActionType, int] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._tie_priority = {action: index for index, action in enumerate(RUNTIME_ACTION_ORDER)}
+
+    def decode(self, *, batch, output, torch_module) -> DEModelRuntimeOutput:
+        """将模型输出解码为 persona 选择与 candidate 动作。"""
+        persona_scores = self._persona_scores(batch=batch, output=output, torch_module=torch_module)
+        active_persona_id = self._active_persona_id(batch=batch, persona_scores=persona_scores)
+        candidate_decisions: list[RuntimeCandidateDecision] = []
+        for index, candidate_id in enumerate(batch.candidate_ids[0]):
+            if not candidate_id or not bool(batch.candidate_mask[0, index].item()):
+                continue
+            action_probs = torch_module.softmax(output.action_logits[0, index], dim=-1)
+            action_scores = {
+                action: float(action_probs[action_index].item())
+                for action_index, action in enumerate(RUNTIME_ACTION_ORDER)
+            }
+            preferred_action, decode_policy = self._decode_candidate_action(
+                action_scores=action_scores,
+                confidence_score=float(output.confidence_scores[0, index].item()),
+            )
+            candidate_decisions.append(
+                RuntimeCandidateDecision(
+                    candidate_id=candidate_id,
+                    preferred_action=preferred_action,
+                    action_scores=action_scores,
+                    reason=(
+                        f"torch_tiny_policy 选择 {preferred_action.value}；"
+                        f"decode={decode_policy}，"
+                        f"runtime_conf={float(output.confidence_scores[0, index].item()):.2f}，"
+                        f"utility={float(output.utility_scores[0, index].item()):.2f}，"
+                        f"scores={{KEEP:{action_scores[ActionType.KEEP]:.2f},"
+                        f"GENERIC:{action_scores[ActionType.GENERICIZE]:.2f},"
+                        f"PERSONA:{action_scores[ActionType.PERSONA_SLOT]:.2f}}}"
+                    ),
+                )
+            )
+        return DEModelRuntimeOutput(
+            active_persona_id=active_persona_id,
+            persona_scores=persona_scores,
+            candidate_decisions=candidate_decisions,
+        )
+
+    def _persona_scores(self, *, batch, output, torch_module) -> dict[str, float]:
+        if not bool(batch.persona_mask[0].any().item()):
+            return {}
+        probabilities = torch_module.softmax(output.persona_logits[0], dim=-1)
+        scores: dict[str, float] = {}
+        for index, persona_id in enumerate(batch.persona_ids[0]):
+            if not persona_id or not bool(batch.persona_mask[0, index].item()):
+                continue
+            scores[persona_id] = float(probabilities[index].item())
+        return scores
+
+    def _active_persona_id(self, *, batch, persona_scores: dict[str, float]) -> str | None:
+        if not persona_scores:
+            return None
+        valid_persona_ids = [persona_id for persona_id in batch.persona_ids[0] if persona_id]
+        if not valid_persona_ids:
+            return None
+        selected_persona_id = max(valid_persona_ids, key=lambda persona_id: (persona_scores.get(persona_id, 0.0), persona_id))
+        if persona_scores.get(selected_persona_id, 0.0) < self.persona_score_threshold:
+            return None
+        return selected_persona_id
+
+    def _decode_candidate_action(
+        self,
+        *,
+        action_scores: dict[ActionType, float],
+        confidence_score: float,
+    ) -> tuple[ActionType, str]:
+        if confidence_score < self.keep_threshold:
+            return (ActionType.KEEP, "low_conf_keep")
+        max_score = max(action_scores.values())
+        tied_actions = [
+            action
+            for action, score in action_scores.items()
+            if abs(score - max_score) <= self.action_tie_tolerance
+        ]
+        preferred_action = max(tied_actions, key=lambda action: self._tie_priority[action])
+        if len(tied_actions) > 1:
+            return (preferred_action, f"tie_break:{preferred_action.value}")
+        return (preferred_action, "argmax")
+
+
+@runtime_checkable
+class DecisionPolicyRuntime(Protocol):
+    """定义 de_model runtime 的最小推理协议。"""
+
+    def predict(
+        self,
+        *,
+        context: DecisionModelContext,
+        packed: PackedDecisionFeatures,
+    ) -> DEModelRuntimeOutput:
+        """根据完整上下文与压缩特征输出 runtime 决策。"""
 
 
 class TinyPolicyRuntime:
@@ -185,3 +299,90 @@ class TinyPolicyRuntime:
             f"scores={{KEEP:{scores[ActionType.KEEP]:.2f},GENERIC:{scores[ActionType.GENERICIZE]:.2f},"
             f"PERSONA:{scores[ActionType.PERSONA_SLOT]:.2f}}}"
         )
+
+
+class TorchTinyPolicyRuntime:
+    """使用 TinyPolicyNet checkpoint 执行真实前向推理的 runtime。"""
+
+    def __init__(
+        self,
+        checkpoint_path: str,
+        *,
+        device: str = "cpu",
+        keep_threshold: float = 0.25,
+        persona_score_threshold: float = 0.0,
+        action_tie_tolerance: float = 1e-6,
+        max_candidates: int = 32,
+        max_personas: int = 8,
+        max_text_length: int = 48,
+        vocab_size: int = 2048,
+        decoder: TinyPolicyOutputDecoder | None = None,
+    ) -> None:
+        self.checkpoint_path = Path(checkpoint_path)
+        if not self.checkpoint_path.exists():
+            raise ValueError(f"de_model checkpoint 不存在: {self.checkpoint_path}")
+        self.device = str(device).strip() or "cpu"
+        self.keep_threshold = keep_threshold
+        self.persona_score_threshold = persona_score_threshold
+        self.action_tie_tolerance = action_tie_tolerance
+        self.max_candidates = max_candidates
+        self.max_personas = max_personas
+        self.max_text_length = max_text_length
+        self.vocab_size = vocab_size
+        self.decoder = decoder or TinyPolicyOutputDecoder(
+            keep_threshold=self.keep_threshold,
+            persona_score_threshold=self.persona_score_threshold,
+            action_tie_tolerance=self.action_tie_tolerance,
+        )
+        self._torch, self._model, self._batch_builder = self._load_runtime_components()
+
+    def predict(
+        self,
+        *,
+        context: DecisionModelContext,
+        packed: PackedDecisionFeatures,
+    ) -> DEModelRuntimeOutput:
+        """执行 TinyPolicyNet 前向，并把 logits 解码为运行时输出。"""
+        _ = packed
+        batch = self._batch_builder.build([context]).to(self.device)
+        with self._torch.no_grad():
+            output = self._model(batch)
+        return self.decoder.decode(batch=batch, output=output, torch_module=self._torch)
+
+    def _load_runtime_components(self):
+        try:
+            import torch
+        except ImportError as exc:
+            raise RuntimeError("未安装 torch，无法启用 de_model torch runtime。") from exc
+
+        from privacyguard.infrastructure.decision.tiny_policy_net import TinyPolicyNet, TinyPolicyNetConfig
+        from training.torch_batch import TinyPolicyBatchBuilder
+
+        try:
+            payload = torch.load(self.checkpoint_path, map_location=self.device, weights_only=False)
+        except TypeError:
+            payload = torch.load(self.checkpoint_path, map_location=self.device)
+        checkpoint_config = payload.get("model_config") if isinstance(payload, dict) else None
+        state_dict = payload.get("state_dict", payload) if isinstance(payload, dict) else payload
+        model_config = self._resolve_model_config(checkpoint_config, TinyPolicyNetConfig)
+        model = TinyPolicyNet(model_config)
+        model.load_state_dict(state_dict)
+        model.to(self.device)
+        model.eval()
+
+        batch_builder = TinyPolicyBatchBuilder(
+            max_candidates=self.max_candidates,
+            max_personas=self.max_personas,
+            max_text_length=model_config.max_text_length,
+            vocab_size=model_config.vocab_size,
+        )
+        return (torch, model, batch_builder)
+
+    def _resolve_model_config(self, payload, config_cls):
+        if payload is None:
+            return config_cls(max_text_length=self.max_text_length, vocab_size=self.vocab_size)
+        if isinstance(payload, config_cls):
+            return payload
+        if isinstance(payload, dict):
+            return config_cls(**payload)
+        raise ValueError("de_model checkpoint 中的 model_config 格式非法。")
