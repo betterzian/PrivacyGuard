@@ -846,15 +846,15 @@ class RuleBasedPIIDetector:
 
     def __init__(
         self,
-        dictionary_path: str | Path | None = None,
+        privacy_repository_path: str | Path | None = None,
         detector_mode: str = "rule_based",
         mapping_store: MappingStore | None = None,
         min_confidence_by_attr: dict[PIIAttributeType | str, float] | None = None,
     ) -> None:
         """初始化规则、词典与候选解析服务。"""
         self.detector_mode = detector_mode
-        self.dictionary_path = self._resolve_dictionary_path(dictionary_path)
-        self.dictionary = self._load_dictionary(self.dictionary_path)
+        self.privacy_repository_path = self._resolve_privacy_repository_path(privacy_repository_path)
+        self.dictionary = self._load_dictionary(self.privacy_repository_path)
         self.dictionary_index = self._build_dictionary_index(self.dictionary)
         self.mapping_store = mapping_store
         self.min_confidence_by_attr = self._normalize_confidence_overrides(min_confidence_by_attr)
@@ -913,14 +913,14 @@ class RuleBasedPIIDetector:
         )
         return self.resolver.resolve_candidates(candidates)
 
-    def _resolve_dictionary_path(self, dictionary_path: str | Path | None) -> Path | None:
-        """解析词典路径；未提供时默认使用空词库。"""
-        if dictionary_path is None:
+    def _resolve_privacy_repository_path(self, privacy_repository_path: str | Path | None) -> Path | None:
+        """解析 privacy_repository 路径；未提供时默认使用空词库。"""
+        if privacy_repository_path is None:
             return None
-        return Path(dictionary_path)
+        return Path(privacy_repository_path)
 
     def _load_dictionary(self, dictionary_path: Path | None) -> dict[PIIAttributeType, list[_LocalDictionaryEntry]]:
-        """读取 JSON 字典并映射到属性类型。
+        """读取本地 privacy 词条并映射到属性类型。
 
         支持两种格式：
         1. 旧格式：{"name": ["张三"], "address": ["北京市海淀区XX路"]}
@@ -938,7 +938,7 @@ class RuleBasedPIIDetector:
         if dictionary_path is None:
             return {}
         if not dictionary_path.exists():
-            LOGGER.warning("rule_based dictionary not found; falling back to rules only: %s", dictionary_path)
+            LOGGER.warning("rule_based privacy_repository not found; falling back to rules only: %s", dictionary_path)
             return {}
         content = json.loads(dictionary_path.read_text(encoding="utf-8"))
         mapped: dict[PIIAttributeType, list[_LocalDictionaryEntry]] = {}

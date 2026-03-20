@@ -72,7 +72,7 @@ class RestorePayloadModel(BaseModel):
 
 
 class PersonaStatsPayloadModel(BaseModel):
-    """本地隐私仓库允许写入的 stats 字段。"""
+    """Persona 仓库允许写入的 stats 字段。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -93,8 +93,8 @@ class PersonaWritePayloadModel(BaseModel):
     stats: PersonaStatsPayloadModel | None = None
 
 
-class PrivacyRepositoryWritePayloadModel(BaseModel):
-    """本地隐私仓库写入入口载荷。"""
+class PersonaRepositoryWritePayloadModel(BaseModel):
+    """Persona 仓库写入入口载荷。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -187,8 +187,8 @@ class RestoreRequestModel:
 
 
 @dataclass(slots=True)
-class PrivacyRepositoryWriteItemModel:
-    """本地隐私仓库单条 upsert 请求。"""
+class PersonaRepositoryWriteItemModel:
+    """Persona 仓库单条 upsert 请求。"""
 
     persona_id: str
     display_name: str | None = None
@@ -234,21 +234,21 @@ class PrivacyRepositoryWriteItemModel:
 
 
 @dataclass(slots=True)
-class PrivacyRepositoryWriteRequestModel:
-    """本地隐私仓库批量写入请求。"""
+class PersonaRepositoryWriteRequestModel:
+    """Persona 仓库批量写入请求。"""
 
-    personas: list[PrivacyRepositoryWriteItemModel]
+    personas: list[PersonaRepositoryWriteItemModel]
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "PrivacyRepositoryWriteRequestModel":
-        """从边界 payload 创建本地仓库写入请求。"""
-        dto = PrivacyRepositoryWritePayloadModel.model_validate(payload)
-        return cls(personas=[_to_privacy_repository_item(item) for item in dto.personas])
+    def from_payload(cls, payload: dict[str, Any]) -> "PersonaRepositoryWriteRequestModel":
+        """从边界 payload 创建 persona 仓库写入请求。"""
+        dto = PersonaRepositoryWritePayloadModel.model_validate(payload)
+        return cls(personas=[_to_persona_repository_item(item) for item in dto.personas])
 
 
 @dataclass(slots=True)
-class PrivacyRepositoryWriteResponseModel:
-    """本地隐私仓库写入响应。"""
+class PersonaRepositoryWriteResponseModel:
+    """Persona 仓库写入响应。"""
 
     status: str
     repository_path: str
@@ -258,10 +258,10 @@ class PrivacyRepositoryWriteResponseModel:
     @classmethod
     def from_request(
         cls,
-        request: PrivacyRepositoryWriteRequestModel,
+        request: PersonaRepositoryWriteRequestModel,
         *,
         repository_path: str,
-    ) -> "PrivacyRepositoryWriteResponseModel":
+    ) -> "PersonaRepositoryWriteResponseModel":
         """根据写入请求生成响应。"""
         return cls(
             status="ok",
@@ -297,11 +297,11 @@ class RestoreResponseModel:
         return asdict(self)
 
 
-def _to_privacy_repository_item(dto: PersonaWritePayloadModel) -> PrivacyRepositoryWriteItemModel:
-    """将 payload 模型转换为内部写入请求项。"""
+def _to_persona_repository_item(dto: PersonaWritePayloadModel) -> PersonaRepositoryWriteItemModel:
+    """将 payload 模型转换为内部 persona 写入请求项。"""
     slot_updates = _normalize_persona_slot_map(dto.slots)
     stats_updates = dto.stats.model_dump(exclude_unset=True) if dto.stats else {}
-    return PrivacyRepositoryWriteItemModel(
+    return PersonaRepositoryWriteItemModel(
         persona_id=dto.persona_id,
         display_name=dto.display_name,
         slot_updates=slot_updates,

@@ -1,9 +1,9 @@
-"""本地隐私仓库写入入口测试。"""
+"""Persona 仓库写入入口测试。"""
 
 import json
 import os
 
-from privacyguard import PrivacyGuard, PrivacyRepository
+from privacyguard import PersonaRepository, PrivacyGuard
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.infrastructure.persona.json_persona_repository import (
@@ -69,9 +69,9 @@ def test_json_persona_repository_reads_sample_but_flushes_to_local_repo(tmp_path
     assert reloaded.get_slot_value("local-persona", PIIAttributeType.PHONE) == "13800138000"
 
 
-def test_privacy_repository_write_merges_updates_and_guard_reads_existing_repo(tmp_path, monkeypatch) -> None:
+def test_persona_repository_write_merges_updates_and_guard_reads_existing_repo(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    repository = PrivacyRepository()
+    repository = PersonaRepository()
 
     first_write = repository.write(
         {

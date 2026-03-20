@@ -226,10 +226,10 @@ plan(context: DecisionContext) -> DecisionPlan
 
 `JsonPersonaRepository` 的读取规则是：
 
-1. 优先读取 `data/privacy_repository.json`
+1. 优先读取 `data/persona_repository.json`
 2. 如果本地仓库不存在，则回退读取 `data/personas.sample.json`
 
-写入由 `PrivacyRepository.write()` 完成，支持：
+写入由 `PersonaRepository.write()` 完成，支持：
 
 - `slots`
 - `metadata`

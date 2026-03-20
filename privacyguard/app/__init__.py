@@ -1,4 +1,4 @@
 from privacyguard.app.privacy_guard import PrivacyGuard
-from privacyguard.app.privacy_repository import PrivacyRepository
+from privacyguard.app.persona_repository import PersonaRepository
 
-__all__ = ["PrivacyGuard", "PrivacyRepository"]
+__all__ = ["PrivacyGuard", "PersonaRepository"]

@@ -1,6 +1,6 @@
 """app schema 请求映射测试。"""
 
-from privacyguard.app.schemas import PrivacyRepositoryWriteRequestModel, SanitizeRequestModel
+from privacyguard.app.schemas import PersonaRepositoryWriteRequestModel, SanitizeRequestModel
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 
 
@@ -30,8 +30,8 @@ def test_sanitize_request_model_maps_detector_overrides_from_payload() -> None:
     }
 
 
-def test_privacy_repository_write_request_model_maps_profile_and_slots() -> None:
-    request = PrivacyRepositoryWriteRequestModel.from_payload(
+def test_persona_repository_write_request_model_maps_profile_and_slots() -> None:
+    request = PersonaRepositoryWriteRequestModel.from_payload(
         {
             "personas": [
                 {

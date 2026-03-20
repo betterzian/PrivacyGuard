@@ -1,13 +1,16 @@
-"""本地隐私仓库写入入口。"""
+"""Persona 仓库写入入口。"""
 
 from typing import Any
 
-from privacyguard.app.schemas import PrivacyRepositoryWriteRequestModel, PrivacyRepositoryWriteResponseModel
+from privacyguard.app.schemas import (
+    PersonaRepositoryWriteRequestModel,
+    PersonaRepositoryWriteResponseModel,
+)
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 
 
-class PrivacyRepository:
-    """面向应用层的本地隐私仓库写入入口。"""
+class PersonaRepository:
+    """面向应用层的 persona 仓库写入入口。"""
 
     def __init__(
         self,
@@ -20,13 +23,14 @@ class PrivacyRepository:
 
     def write(self, payload: dict[str, Any]) -> dict[str, Any]:
         """写入结构化 persona 数据，并返回写入摘要。"""
-        request = PrivacyRepositoryWriteRequestModel.from_payload(payload)
+        request = PersonaRepositoryWriteRequestModel.from_payload(payload)
         personas = [
             item.build_profile(existing=self.repository.get_persona(item.persona_id))
             for item in request.personas
         ]
         self.repository.upsert_personas(personas)
-        return PrivacyRepositoryWriteResponseModel.from_request(
+        return PersonaRepositoryWriteResponseModel.from_request(
             request,
             repository_path=str(self.repository.path),
         ).to_dict()
+

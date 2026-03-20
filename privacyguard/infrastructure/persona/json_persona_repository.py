@@ -6,7 +6,7 @@ from pathlib import Path
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.models.persona import PersonaProfile
 
-DEFAULT_PERSONA_REPOSITORY_PATH = "data/privacy_repository.json"
+DEFAULT_PERSONA_REPOSITORY_PATH = "data/persona_repository.json"
 DEFAULT_PERSONA_SAMPLE_PATH = "data/personas.sample.json"
 
 PROFILE_KEY_TO_ATTR_TYPE = {

@@ -1,11 +1,11 @@
-"""本地隐私仓库写入示例。"""
+"""Persona 仓库写入示例。"""
 
-from privacyguard import PrivacyGuard, PrivacyRepository
+from privacyguard import PersonaRepository, PrivacyGuard
 
 
 def main() -> None:
-    """先写本地隐私仓库，再让 PrivacyGuard 直接读取。"""
-    repository = PrivacyRepository()
+    """先写 persona 仓库，再让 PrivacyGuard 直接读取。"""
+    repository = PersonaRepository()
     repository.write(
         {
             "personas": [

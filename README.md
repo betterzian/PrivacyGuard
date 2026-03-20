@@ -14,14 +14,14 @@ PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私
 
 | 模块 | 当前实现 | 备注 |
 | --- | --- | --- |
-| 顶层 API | `PrivacyGuard` / `PrivacyRepository` | 已实现 |
+| 顶层 API | `PrivacyGuard` / `PersonaRepository` | 已实现 |
 | OCR | `PPOCREngineAdapter` | 支持本地路径、`PIL.Image`、`numpy.ndarray`、`http(s)` URL；缺少 `paddleocr` 时会在真正跑截图 OCR 时显式报错 |
 | PII 检测 | `rule_based` | 当前唯一公开 detector mode |
 | 决策 | `de_model` / `label_only` / `label_persona_mixed` | 默认模式是 `de_model`，默认 runtime 是 heuristic |
 | 文本渲染 | `PromptRenderer` | prompt 优先按 span 替换，缺失 span 时回退保守正则替换 |
 | 截图渲染 | `ScreenshotRenderer` | 支持 OCR block 局部重建、跨 block 处理、polygon/rotation 感知和 `ring / gradient / cv / mix` 填充策略 |
 | 映射与恢复 | `InMemoryMappingStore` / `JsonMappingStore` + `ActionRestorer` | `restore` 只使用当前 turn 的映射记录 |
-| 本地隐私仓库 | `JsonPersonaRepository` | 默认读 `data/privacy_repository.json`，缺省时回退 `data/personas.sample.json` |
+| Persona 仓库 | `JsonPersonaRepository` | 默认读 `data/persona_repository.json`，缺省时回退 `data/personas.sample.json` |
 | 训练 | `training/` | 已有 supervised JSONL 导出、层级标签、最小 supervised finetune、torch runtime 回接；对抗训练和真实 bundle 导出仍未完成 |
 
 ## 当前架构边界
@@ -347,7 +347,7 @@ guard = PrivacyGuard(decision_mode="label_persona_mixed")
 ```python
 guard = PrivacyGuard(
     screenshot_fill_mode="mix",
-    detector_config={"dictionary_path": "data/pii_dictionary.sample.json"},
+    detector_config={"privacy_repository_path": "data/privacy_repository.sample.json"},
 )
 
 response = guard.sanitize(
@@ -378,12 +378,12 @@ guard = PrivacyGuard(
 
 当前 `torch` runtime 依赖已有 checkpoint；如果只想跑默认可用路径，继续用 `runtime_type="heuristic"` 即可。
 
-### 写入本地隐私仓库
+### 写入 persona 仓库
 
 ```python
-from privacyguard import PrivacyGuard, PrivacyRepository
+from privacyguard import PrivacyGuard, PersonaRepository
 
-repository = PrivacyRepository()
+repository = PersonaRepository()
 repository.write(
     {
         "personas": [
@@ -411,7 +411,7 @@ guard = PrivacyGuard(decision_mode="label_persona_mixed")
 print(guard.persona_repo.get_persona("owner"))
 ```
 
-`PrivacyRepository.write()` 支持按 `persona_id` 合并写入：
+`PersonaRepository.write()` 支持按 `persona_id` 合并写入：
 
 - `slots`
 - `metadata`
@@ -460,7 +460,7 @@ print(guard.persona_repo.get_persona("owner"))
 - `restored_text`
 - `session_id`
 
-### `PrivacyRepository.write(payload)`
+### `PersonaRepository.write(payload)`
 
 输入字段：
 
@@ -499,20 +499,20 @@ print(guard.persona_repo.get_persona("owner"))
 
 ## 数据与配置文件
 
-- `data/privacy_repository.json`
+- `data/persona_repository.json`
   本地 persona 仓库默认落盘位置
 - `data/personas.sample.json`
   当本地仓库不存在时的只读回退样例
-- `data/pii_dictionary.sample.json`
-  `RuleBasedPIIDetector` 示例词典
+- `data/privacy_repository.sample.json`
+  `RuleBasedPIIDetector` 示例词库
 - `data/china_geo_lexicon.json`
   内置地理词汇表，供地址和 location clue 规则使用
 
 补充说明：
 
-- 词典不会自动启用，需要显式传入 `detector_config={"dictionary_path": ...}`
+- 词库不会自动启用，需要显式传入 `detector_config={"privacy_repository_path": ...}`
 - `JsonPersonaRepository` 读取时兼容 `{"personas": [...]}` 和直接的列表格式
-- 实际持久化到 `data/privacy_repository.json` 时会写成列表格式
+- 实际持久化到 `data/persona_repository.json` 时会写成列表格式
 
 ## 仓库结构
 
