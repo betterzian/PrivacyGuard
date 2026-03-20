@@ -63,9 +63,8 @@ class JsonPersonaRepository:
             persona_id = str(item.get("persona_id", "")).strip()
             if not persona_id:
                 continue
-            profile_data = item.get("profile", {})
             raw_slots = item.get("slots", {})
-            slots = self._to_slots(profile_data, raw_slots)
+            slots = self._to_slots(raw_slots)
             display_name = str(item.get("display_name") or slots.get(PIIAttributeType.NAME) or persona_id)
             stats_data = item.get("stats", {})
             metadata = self._to_metadata(item.get("metadata", {}))
@@ -80,19 +79,17 @@ class JsonPersonaRepository:
 
     def _to_slots(
         self,
-        profile_data: dict[str, object] | object,
-        raw_slots: dict[str, object] | object | None = None,
+        raw_slots: dict[str, object] | object,
     ) -> dict[PIIAttributeType, str]:
-        """将 profile 文本键映射为统一 attr_type 槽位。"""
+        """将 slots 文本键映射为统一 attr_type 槽位。"""
         slots: dict[PIIAttributeType, str] = {}
-        for mapping in (profile_data, raw_slots or {}):
-            if not isinstance(mapping, dict):
+        if not isinstance(raw_slots, dict):
+            return slots
+        for key, value in raw_slots.items():
+            attr_type = PROFILE_KEY_TO_ATTR_TYPE.get(str(key).strip().lower())
+            if attr_type is None or value is None:
                 continue
-            for key, value in mapping.items():
-                attr_type = PROFILE_KEY_TO_ATTR_TYPE.get(str(key).strip().lower())
-                if attr_type is None or value is None:
-                    continue
-                slots[attr_type] = str(value)
+            slots[attr_type] = str(value)
         return slots
 
     def _to_metadata(self, metadata_data: dict[str, object] | object) -> dict[str, str]:
@@ -141,7 +138,7 @@ class JsonPersonaRepository:
         """将 PersonaProfile 转换为稳定的 JSON 结构。"""
         item: dict[str, object] = {
             "persona_id": persona.persona_id,
-            "profile": self._serialize_profile(persona),
+            "slots": self._serialize_profile(persona),
             "stats": self._to_stats(persona.stats),
         }
         if persona.display_name and persona.display_name != persona.persona_id:
@@ -151,14 +148,14 @@ class JsonPersonaRepository:
         return item
 
     def _serialize_profile(self, persona: PersonaProfile) -> dict[str, str]:
-        """将 persona 槽位转换为对外 profile 字段。"""
-        profile: dict[str, str] = {}
+        """将 persona 槽位转换为对外 slots 字段。"""
+        slots: dict[str, str] = {}
         for attr_type, key in ATTR_TYPE_TO_PROFILE_KEY.items():
             value = persona.slots.get(attr_type)
             if value is None:
                 continue
-            profile[key] = value
-        return profile
+            slots[key] = value
+        return slots
 
     def get_persona(self, persona_id: str) -> PersonaProfile | None:
         """按 persona_id 读取 persona。"""

@@ -22,7 +22,7 @@ def test_json_persona_repository_reads_sample_but_flushes_to_local_repo(tmp_path
             [
                 {
                     "persona_id": "sample-persona",
-                    "profile": {
+                        "slots": {
                         "name": "样例用户",
                     },
                     "stats": {
@@ -55,7 +55,7 @@ def test_json_persona_repository_reads_sample_but_flushes_to_local_repo(tmp_path
     assert json.loads(sample_path.read_text(encoding="utf-8")) == [
         {
             "persona_id": "sample-persona",
-            "profile": {
+            "slots": {
                 "name": "样例用户",
             },
             "stats": {
@@ -117,7 +117,7 @@ def test_privacy_repository_write_merges_updates_and_guard_reads_existing_repo(t
     assert os.path.normpath(second_write["repository_path"]) == os.path.normpath(DEFAULT_PERSONA_REPOSITORY_PATH)
     stored_payload = json.loads((tmp_path / DEFAULT_PERSONA_REPOSITORY_PATH).read_text(encoding="utf-8"))
     assert stored_payload[0]["persona_id"] == "owner"
-    assert stored_payload[0]["profile"] == {
+    assert stored_payload[0]["slots"] == {
         "name": "张三",
         "phone": "13800138000",
         "email": "zhangsan@example.com",

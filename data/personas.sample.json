@@ -1,7 +1,7 @@
 [
   {
     "persona_id": "zhangsan",
-    "profile": {
+    "slots": {
       "name": "张三",
       "phone": "13900001111",
       "card_number": "4111111111111111",
@@ -21,7 +21,7 @@
   },
   {
     "persona_id": "lisi",
-    "profile": {
+    "slots": {
       "name": "李四",
       "phone": "13600002222",
       "card_number": "5555555555554444",

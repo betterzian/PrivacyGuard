@@ -187,7 +187,7 @@ plan(context: DecisionContext) -> DecisionPlan
 - detector 输出的候选
 - 当前 session binding
 - 当前 session 历史替换记录
-- persona repository 中的 persona profiles
+- persona repository 中的 persona slots（替换槽位值）与统计
 - page / candidate / persona 三层摘要特征
 
 这意味着当前代码已经不再是“只把 candidates 直接丢给 decision engine”的老形态。
@@ -231,7 +231,6 @@ plan(context: DecisionContext) -> DecisionPlan
 
 写入由 `PrivacyRepository.write()` 完成，支持：
 
-- `profile`
 - `slots`
 - `metadata`
 - `stats`

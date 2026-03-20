@@ -13,7 +13,7 @@ def test_json_persona_repository_loads_all_supported_non_other_slots(tmp_path) -
             [
                 {
                     "persona_id": "persona-all",
-                    "profile": {
+                    "slots": {
                         "name": "李四",
                         "phone": "13900001111",
                         "card_number": "4111111111111111",

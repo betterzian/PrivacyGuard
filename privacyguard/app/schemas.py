@@ -311,7 +311,7 @@ def _to_privacy_repository_item(dto: PersonaWritePayloadModel) -> PrivacyReposit
 
 
 def _normalize_persona_slot_map(raw_mapping: dict[str, str]) -> dict[PIIAttributeType, str]:
-    """将 profile/slots 键归一化为 attr_type 映射。"""
+    """将 persona slots 的 key 归一化为 attr_type 映射。"""
     normalized: dict[PIIAttributeType, str] = {}
     for key, value in raw_mapping.items():
         attr_type = PERSONA_SLOT_KEY_TO_ATTR_TYPE.get(str(key).strip().lower())
