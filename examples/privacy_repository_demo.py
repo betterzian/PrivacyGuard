@@ -12,7 +12,7 @@ def main() -> None:
                 {
                     "persona_id": "owner",
                     "display_name": "主身份",
-                    "profile": {
+                    "slots": {
                         "name": "张三",
                         "phone": "13800138000",
                         "email": "zhangsan@example.com",

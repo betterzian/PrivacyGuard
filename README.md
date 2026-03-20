@@ -103,9 +103,9 @@ payload
 
 如果按当前代码展开，真实顺序是：
 
-1. 校验 `session_id / turn_id / prompt / image / protection_level / detector_overrides`
+1. 校验 `session_id / turn_id / prompt_text / screenshot / protection_level / detector_overrides`
 2. 若有截图，则先做 OCR；否则 `ocr_blocks=[]`
-3. `rule_based` 检测 prompt 与 OCR 中的 PII 候选
+3. `rule_based` 检测 prompt_text 与 OCR 中的 PII 候选
 4. 读取或创建当前 session 的 `SessionBinding`
 5. `DecisionContextBuilder` 组装 `DecisionModelContext`
 6. 调用具体 `decision_engine.plan(...)`
@@ -151,7 +151,6 @@ payload
 - `KEEP` 不参与 restore
 - `GENERICIZE` 可恢复
 - `PERSONA_SLOT` 可恢复
-- 旧别名 `LABEL` 按 `GENERICIZE` 兼容
 
 ## 决策模式与分流
 
@@ -304,8 +303,8 @@ sanitize_resp = guard.sanitize(
     {
         "session_id": "demo-session",
         "turn_id": 1,
-        "prompt": "我叫张三，电话是13800138000。",
-        "image": None,
+        "prompt_text": "我叫张三，电话是13800138000。",
+        "screenshot": None,
         "protection_level": "balanced",
     }
 )
@@ -336,7 +335,7 @@ guard = PrivacyGuard(decision_mode="label_persona_mixed")
 
 ### 使用截图 OCR
 
-当 `image` 不为 `None` 时，`PPOCREngineAdapter.extract()` 支持：
+当 `screenshot` 不为 `None` 时，`PPOCREngineAdapter.extract()` 支持：
 
 - 本地文件路径
 - `PIL.Image.Image`
@@ -355,8 +354,8 @@ response = guard.sanitize(
     {
         "session_id": "image-demo",
         "turn_id": 1,
-        "prompt": "帮我总结截图内容",
-        "image": "test.PNG",
+        "prompt_text": "帮我总结截图内容",
+        "screenshot": "test.PNG",
     }
 )
 ```
@@ -391,12 +390,11 @@ repository.write(
             {
                 "persona_id": "owner",
                 "display_name": "主身份",
-                "profile": {
+                "slots": {
                     "name": "张三",
                     "phone": "13800138000",
-                },
-                "slots": {
                     "email": "zhangsan@example.com",
+                    "address": "上海市浦东新区世纪大道100号",
                 },
                 "metadata": {
                     "source": "manual_import",
@@ -415,7 +413,6 @@ print(guard.persona_repo.get_persona("owner"))
 
 `PrivacyRepository.write()` 支持按 `persona_id` 合并写入：
 
-- `profile`
 - `slots`
 - `metadata`
 - `stats`
@@ -428,8 +425,8 @@ print(guard.persona_repo.get_persona("owner"))
 
 - `session_id: str`
 - `turn_id: int = 0`
-- `prompt: str`
-- `image: Any | None = None`
+- `prompt_text: str`
+- `screenshot: Any | None = None`
 - `protection_level: "weak" | "balanced" | "strong" = "balanced"`
 - `detector_overrides`
   当前请求层只允许覆盖 `name / location_clue / address / organization / other`
