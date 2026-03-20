@@ -98,8 +98,9 @@ class TinyPolicyBatchBuilder:
         if not contexts:
             raise ValueError("contexts 不能为空。")
         batch_size = len(contexts)
-        max_candidates = max(1, min(self.max_candidates, max(len(context.candidate_features) for context in contexts)))
-        max_personas = max(1, min(self.max_personas, max(len(context.persona_features) for context in contexts)))
+        packed_features = [self.feature_extractor.pack(context) for context in contexts]
+        max_candidates = max(1, min(self.max_candidates, max(len(packed.candidate_ids) for packed in packed_features)))
+        max_personas = max(1, min(self.max_personas, max(len(packed.persona_ids) for packed in packed_features)))
 
         page_features = torch.zeros((batch_size, PAGE_FEATURE_DIM), dtype=torch.float32)
         candidate_features = torch.zeros((batch_size, max_candidates, CANDIDATE_FEATURE_DIM), dtype=torch.float32)
@@ -119,18 +120,31 @@ class TinyPolicyBatchBuilder:
         persona_ids = [["" for _ in range(max_personas)] for _ in range(batch_size)]
 
         for batch_index, context in enumerate(contexts):
-            packed = self.feature_extractor.pack(context)
+            packed = packed_features[batch_index]
+            candidate_views = _candidate_policy_views(context)
+            candidate_view_by_id = {
+                str(view.get("candidate_id", "")).strip(): view
+                for view in candidate_views
+                if str(view.get("candidate_id", "")).strip()
+            }
+            persona_states = _persona_policy_states(context)
+            persona_state_by_id = {
+                str(state.get("persona_id", "")).strip(): state
+                for state in persona_states
+                if str(state.get("persona_id", "")).strip()
+            }
             page_features[batch_index, : len(packed.page_vector)] = torch.tensor(packed.page_vector, dtype=torch.float32)
 
-            for candidate_index, feature in enumerate(context.candidate_features[:max_candidates]):
+            for candidate_index, candidate_id in enumerate(packed.candidate_ids[:max_candidates]):
                 candidate_vector = packed.candidate_vectors[candidate_index]
                 candidate_features[batch_index, candidate_index, : len(candidate_vector)] = torch.tensor(candidate_vector, dtype=torch.float32)
                 candidate_mask[batch_index, candidate_index] = True
-                candidate_ids[batch_index][candidate_index] = feature.candidate_id
+                candidate_ids[batch_index][candidate_index] = candidate_id
+                candidate_view = candidate_view_by_id.get(candidate_id, {})
 
-                encoded_text = self.tokenizer.encode(feature.text, max_length=self.max_text_length)
-                encoded_prompt = self.tokenizer.encode(feature.prompt_context, max_length=self.max_text_length)
-                encoded_ocr = self.tokenizer.encode(feature.ocr_context, max_length=self.max_text_length)
+                encoded_text = self.tokenizer.encode(self._candidate_text(context, candidate_id), max_length=self.max_text_length)
+                encoded_prompt = self.tokenizer.encode(str(candidate_view.get("_prompt_context", "")), max_length=self.max_text_length)
+                encoded_ocr = self.tokenizer.encode(str(candidate_view.get("_ocr_context", "")), max_length=self.max_text_length)
                 candidate_text_ids[batch_index, candidate_index] = torch.tensor(encoded_text.input_ids, dtype=torch.long)
                 candidate_text_mask[batch_index, candidate_index] = torch.tensor(encoded_text.attention_mask, dtype=torch.long)
                 candidate_prompt_ids[batch_index, candidate_index] = torch.tensor(encoded_prompt.input_ids, dtype=torch.long)
@@ -138,13 +152,14 @@ class TinyPolicyBatchBuilder:
                 candidate_ocr_ids[batch_index, candidate_index] = torch.tensor(encoded_ocr.input_ids, dtype=torch.long)
                 candidate_ocr_mask[batch_index, candidate_index] = torch.tensor(encoded_ocr.attention_mask, dtype=torch.long)
 
-            for persona_index, feature in enumerate(context.persona_features[:max_personas]):
+            for persona_index, persona_id in enumerate(packed.persona_ids[:max_personas]):
                 persona_vector = packed.persona_vectors[persona_index]
                 persona_features[batch_index, persona_index, : len(persona_vector)] = torch.tensor(persona_vector, dtype=torch.float32)
                 persona_mask[batch_index, persona_index] = True
-                persona_ids[batch_index][persona_index] = feature.persona_id
+                persona_ids[batch_index][persona_index] = persona_id
+                persona_state = persona_state_by_id.get(persona_id, {})
 
-                encoded_persona = self.tokenizer.encode(self._persona_text(feature), max_length=self.max_text_length)
+                encoded_persona = self.tokenizer.encode(self._persona_text(context, persona_state), max_length=self.max_text_length)
                 persona_text_ids[batch_index, persona_index] = torch.tensor(encoded_persona.input_ids, dtype=torch.long)
                 persona_text_mask[batch_index, persona_index] = torch.tensor(encoded_persona.attention_mask, dtype=torch.long)
 
@@ -328,6 +343,44 @@ class TinyPolicyBatchBuilder:
             final_action_targets=final_action_targets,
         )
 
-    def _persona_text(self, feature) -> str:
-        slot_text = " ".join(str(value) for _key, value in sorted(feature.slots.items(), key=lambda item: item[0].value))
-        return f"{feature.display_name} {slot_text}".strip()
+    def _candidate_text(self, context: DecisionContext, candidate_id: str) -> str:
+        raw_refs = getattr(context, "raw_refs", {})
+        if isinstance(raw_refs, dict):
+            candidate_by_id = raw_refs.get("candidate_by_id")
+            if isinstance(candidate_by_id, dict):
+                candidate = candidate_by_id.get(candidate_id)
+                if candidate is not None:
+                    return str(getattr(candidate, "text", "") or "")
+        for candidate in context.candidates:
+            if candidate.entity_id == candidate_id:
+                return candidate.text
+        return ""
+
+    def _persona_text(self, context: DecisionContext, state: dict[str, object]) -> str:
+        display_name = str(state.get("_display_name", "") or "")
+        slots = state.get("_slots", {})
+        if not isinstance(slots, dict):
+            slots = {}
+        slot_text = " ".join(str(value) for value in slots.values())
+        if not display_name:
+            persona_id = str(state.get("persona_id", "")).strip()
+            for persona in context.persona_profiles:
+                if persona.persona_id == persona_id:
+                    display_name = persona.display_name
+                    slot_text = " ".join(str(value) for value in persona.slots.values())
+                    break
+        return f"{display_name} {slot_text}".strip()
+
+
+def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
+    views = getattr(context, "candidate_policy_views", None)
+    if not isinstance(views, list):
+        return []
+    return [view for view in views if isinstance(view, dict)]
+
+
+def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
+    states = getattr(context, "persona_policy_states", None)
+    if not isinstance(states, list):
+        return []
+    return [state for state in states if isinstance(state, dict)]

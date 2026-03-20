@@ -14,8 +14,8 @@
 - `page_policy_state`
 - `persona_policy_states`
 
-为保持现有 `DecisionFeatureExtractor` / `DEModelEngine` / runtime 的导入和调用不变，
-旧字段 `page_features` / `candidate_features` / `persona_features` 继续保留为兼容层。
+该 builder 直接输出正式策略字段（`raw_refs` / `candidate_policy_views` /
+`page_policy_state` / `persona_policy_states`）。
 """
 
 from __future__ import annotations
@@ -27,12 +27,7 @@ from pydantic import Field
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
-from privacyguard.domain.models.decision_context import (
-    CandidateDecisionFeatures,
-    DecisionContext,
-    PageDecisionFeatures,
-    PersonaDecisionFeatures,
-)
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
@@ -63,8 +58,7 @@ _ATTR_LABELS = {
 class DecisionModelContext(DecisionContext):
     """正式策略上下文。
 
-    这是对现有 `DecisionContext` 的收敛扩展：新增四块正式策略视图，同时保留旧字段，
-    以便现有 engine / feature extractor / runtime 可以无缝继续工作。
+    这是对 `DecisionContext` 的收敛扩展：新增四块正式策略视图。
     """
 
     # 原始工程对象引用层。
@@ -79,25 +73,24 @@ class DecisionModelContext(DecisionContext):
     raw_refs: dict[str, object] = Field(default_factory=dict)
     # 候选级轻量策略视图。
     # 用途：提供 de_model 真正应消费的 candidate 级策略字段。
-    # 不能整体被旧顶层字段直接替代，但其中一部分字段可以从旧顶层或兼容层直接读取：
+    # 不能整体被旧顶层字段直接替代，但其中一部分字段可以从旧顶层直接读取：
     # - `candidate_id` ~= `candidates[*].entity_id`
     # - `attr_type` / `source` ~= `candidates[*].attr_type` / `candidates[*].source`
-    # - `prompt_local_context_labelized` / `ocr_local_context_labelized`
-    #   可退回参考旧兼容层 `candidate_features[*].prompt_context` / `ocr_context`
-    # - `low_ocr_flag` 可退回参考 `candidate_features[*].is_low_ocr_confidence`
+    # - `prompt_local_context_labelized` / `ocr_local_context_labelized` 由 context/candidate 重建
+    # - `low_ocr_flag` 由 OCR block 质量重建
     candidate_policy_views: list[dict[str, object]] = Field(default_factory=list)
     # 页面级策略状态。
     # 用途：把 protection level、检测质量、OCR 质量等收敛为页面级输入。
-    # 这里的大多数字段都能从旧兼容层 `page_features` 推导或直接读取：
+    # 这里的大多数字段都能从基础上下文字段推导：
     # - `protection_level` 可直接用旧顶层 `protection_level`
-    # - 其余 bucket 字段可由 `page_features` 中的对应数值字段再离散化得到
+    # - 其余 bucket 字段由 candidates / OCR / history 统计离散化得到
     page_policy_state: dict[str, object] = Field(default_factory=dict)
     # persona 级策略状态。
     # 用途：表达 persona 是否激活、支持哪些属性、槽位是否可用、暴露统计等。
-    # 其中部分字段可由旧顶层或兼容层直接取得：
+    # 其中部分字段可由旧顶层直接取得：
     # - `persona_id` 可直接用 `persona_profiles[*].persona_id`
-    # - `is_active` 可直接用 `session_binding.active_persona_id` 或 `persona_features[*].is_active`
-    # - `matched_candidate_attr_count` 可直接用 `persona_features[*].matched_candidate_attr_count`
+    # - `is_active` 可直接用 `session_binding.active_persona_id`
+    # - `matched_candidate_attr_count` 可由 persona slots 与当前 candidates 重建
     persona_policy_states: list[dict[str, object]] = Field(default_factory=list)
 
 
@@ -120,7 +113,7 @@ class DecisionContextBuilder:
         candidates: list[PIICandidate] | None = None,
         session_binding: SessionBinding | None = None,
     ) -> DecisionModelContext:
-        """构建正式策略上下文，并兼容回填旧字段。"""
+        """构建正式策略上下文。"""
         ocr_items = list(ocr_blocks or [])
         candidate_items = list(candidates or [])
         normalized_protection_level = self._normalize_protection_level(protection_level)
@@ -146,7 +139,6 @@ class DecisionContextBuilder:
         history_attr_counter = Counter(record.attr_type for record in history_records)
 
         candidate_policy_views: list[dict[str, object]] = []
-        candidate_features: list[CandidateDecisionFeatures] = []
         for candidate in candidate_items:
             policy_view = self._build_candidate_policy_view(
                 candidate=candidate,
@@ -163,13 +155,6 @@ class DecisionContextBuilder:
                 alias_sources=alias_sources,
             )
             candidate_policy_views.append(policy_view)
-            candidate_features.append(
-                self._build_legacy_candidate_features(
-                    candidate=candidate,
-                    policy_view=policy_view,
-                    geometry_bounds=geometry_bounds,
-                )
-            )
 
         page_policy_state = self._build_page_policy_state(
             prompt_text=prompt_text,
@@ -180,10 +165,7 @@ class DecisionContextBuilder:
             session_binding=session_binding,
             source_counter=source_counter,
         )
-        page_features = self._build_legacy_page_features(page_policy_state=page_policy_state)
-
         persona_policy_states: list[dict[str, object]] = []
-        persona_features: list[PersonaDecisionFeatures] = []
         for persona in persona_profiles:
             persona_view = self._build_persona_view(
                 persona=persona,
@@ -191,12 +173,6 @@ class DecisionContextBuilder:
                 active_persona_id=session_binding.active_persona_id if session_binding else None,
             )
             persona_policy_states.append(persona_view)
-            persona_features.append(
-                self._build_legacy_persona_features(
-                    persona=persona,
-                    persona_view=persona_view,
-                )
-            )
 
         return DecisionModelContext(
             session_id=session_id,
@@ -209,9 +185,6 @@ class DecisionContextBuilder:
             session_binding=session_binding,
             history_records=history_records,
             persona_profiles=persona_profiles,
-            page_features=page_features,
-            candidate_features=candidate_features,
-            persona_features=persona_features,
             raw_refs=self._build_raw_refs(
                 prompt_text=prompt_text,
                 ocr_items=ocr_items,
@@ -553,6 +526,7 @@ class DecisionContextBuilder:
             "_aspect_ratio": aspect_ratio,
             "_center_x": center_x,
             "_center_y": center_y,
+            "_confidence": candidate.confidence,
             "_ocr_block_score": quality_view["_ocr_block_score"],
             "_ocr_block_rotation_degrees": quality_view["_ocr_block_rotation_degrees"],
             "_ocr_local_conf": quality_view["_ocr_local_conf"],
@@ -646,82 +620,6 @@ class DecisionContextBuilder:
             "_min_ocr_block_score": min_ocr_conf,
             "_low_confidence_ocr_block_ratio": low_ocr_ratio,
         }
-
-    def _build_legacy_candidate_features(
-        self,
-        *,
-        candidate: PIICandidate,
-        policy_view: dict[str, object],
-        geometry_bounds: tuple[int, int],
-    ) -> CandidateDecisionFeatures:
-        relative_area, aspect_ratio, center_x, center_y = self._geometry_features(candidate.bbox, geometry_bounds)
-        return CandidateDecisionFeatures(
-            candidate_id=candidate.entity_id,
-            text=candidate.text,
-            normalized_text=candidate.normalized_text,
-            attr_type=candidate.attr_type,
-            source=candidate.source,
-            confidence=candidate.confidence,
-            bbox=candidate.bbox,
-            block_id=candidate.block_id,
-            span_start=candidate.span_start,
-            span_end=candidate.span_end,
-            prompt_context=str(policy_view.get("_prompt_context", "")),
-            ocr_context=str(policy_view.get("_ocr_context", "")),
-            history_attr_exposure_count=int(policy_view.get("_history_attr_exposure_count", 0)),
-            history_exact_match_count=int(policy_view.get("_history_exact_match_count", 0)),
-            same_attr_page_count=int(policy_view.get("_same_attr_page_count", 0)),
-            same_text_page_count=int(policy_view.get("_same_text_page_count", 0)),
-            relative_area=relative_area,
-            aspect_ratio=aspect_ratio,
-            center_x=center_x,
-            center_y=center_y,
-            ocr_block_score=float(policy_view.get("_ocr_block_score", 0.0)),
-            ocr_block_rotation_degrees=float(policy_view.get("_ocr_block_rotation_degrees", 0.0)),
-            is_low_ocr_confidence=bool(policy_view.get("low_ocr_flag", False)),
-            is_prompt_source=candidate.source == PIISourceType.PROMPT,
-            is_ocr_source=candidate.source == PIISourceType.OCR,
-        )
-
-    def _build_legacy_page_features(self, *, page_policy_state: dict[str, object]) -> PageDecisionFeatures:
-        return PageDecisionFeatures(
-            prompt_length=int(page_policy_state.get("_prompt_length", 0)),
-            ocr_block_count=int(page_policy_state.get("_ocr_block_count", 0)),
-            candidate_count=int(page_policy_state.get("_candidate_count", 0)),
-            unique_attr_count=int(page_policy_state.get("_unique_attr_count", 0)),
-            history_record_count=int(page_policy_state.get("_history_record_count", 0)),
-            active_persona_bound=bool(page_policy_state.get("_active_persona_bound", False)),
-            prompt_has_digits=bool(page_policy_state.get("_prompt_has_digits", False)),
-            prompt_has_address_tokens=bool(page_policy_state.get("_prompt_has_address_tokens", False)),
-            average_candidate_confidence=float(page_policy_state.get("_average_candidate_confidence", 0.0)),
-            min_candidate_confidence=float(page_policy_state.get("_min_candidate_confidence", 0.0)),
-            high_confidence_candidate_ratio=float(page_policy_state.get("_high_confidence_candidate_ratio", 0.0)),
-            low_confidence_candidate_ratio=float(page_policy_state.get("_low_confidence_candidate_ratio", 0.0)),
-            prompt_candidate_count=int(page_policy_state.get("_prompt_candidate_count", 0)),
-            ocr_candidate_count=int(page_policy_state.get("_ocr_candidate_count", 0)),
-            average_ocr_block_score=float(page_policy_state.get("_average_ocr_block_score", 0.0)),
-            min_ocr_block_score=float(page_policy_state.get("_min_ocr_block_score", 0.0)),
-            low_confidence_ocr_block_ratio=float(page_policy_state.get("_low_confidence_ocr_block_ratio", 0.0)),
-        )
-
-    def _build_legacy_persona_features(
-        self,
-        *,
-        persona: PersonaProfile,
-        persona_view: dict[str, object],
-    ) -> PersonaDecisionFeatures:
-        return PersonaDecisionFeatures(
-            persona_id=persona.persona_id,
-            display_name=str(persona_view.get("_display_name", persona.display_name)),
-            slot_count=int(persona_view.get("_slot_count", len(persona.slots))),
-            exposure_count=int(persona_view.get("_exposure_count", 0)),
-            last_exposed_session_id=self._stats_value_as_str(persona_view.get("_last_exposed_session_id")),
-            last_exposed_turn_id=self._stats_value_as_int(persona_view.get("_last_exposed_turn_id")),
-            is_active=bool(persona_view.get("is_active", False)),
-            supported_attr_types=list(persona_view.get("_supported_attr_types", [])),
-            matched_candidate_attr_count=int(persona_view.get("matched_candidate_attr_count", 0)),
-            slots=dict(persona_view.get("_slots", persona.slots)),
-        )
 
     def _history_records(self, session_id: str) -> list[ReplacementRecord]:
         records = self.mapping_store.get_replacements(session_id=session_id)

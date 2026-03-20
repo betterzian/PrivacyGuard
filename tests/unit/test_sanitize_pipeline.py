@@ -228,8 +228,8 @@ def test_sanitize_pipeline_builds_unified_decision_context() -> None:
     assert spy_engine.received_context.candidates == candidates
     assert spy_engine.received_context.protection_level == ProtectionLevel.BALANCED
     assert spy_engine.received_context.session_binding.session_id == "session-pipeline"
-    assert spy_engine.received_context.page_features.average_ocr_block_score == 1.0
-    assert spy_engine.received_context.page_features.ocr_candidate_count == 1
+    assert spy_engine.received_context.page_policy_state["_average_ocr_block_score"] == 1.0
+    assert spy_engine.received_context.page_policy_state["_ocr_candidate_count"] == 1
     assert response.sanitized_prompt_text == "@姓名1去吃饭"
     assert response.active_persona_id == "persona-1"
     assert mapping_store.get_session_binding("session-pipeline").active_persona_id == "persona-1"

@@ -4,7 +4,6 @@ import pytest
 
 from privacyguard.application.services.decision_context_builder import DecisionContextBuilder, DecisionModelContext
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType, ProtectionLevel
-from privacyguard.domain.models.decision_context import PageDecisionFeatures
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
@@ -229,13 +228,7 @@ def _build_policy_context() -> DecisionModelContext:
         ],
         session_binding=SessionBinding(session_id="session-feature-policy", active_persona_id="persona-active"),
     )
-    return context.model_copy(
-        update={
-            "page_features": PageDecisionFeatures(),
-            "candidate_features": [],
-            "persona_features": [],
-        }
-    )
+    return context
 
 
 def _candidate_views_by_id(context: DecisionModelContext) -> dict[str, dict[str, object]]:

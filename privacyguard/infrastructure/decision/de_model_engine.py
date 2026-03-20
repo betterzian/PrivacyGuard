@@ -119,8 +119,8 @@ class DEModelEngine:
                 "candidate_count": str(len(context.candidates)),
                 "persona_count": str(len(context.persona_profiles)),
                 "page_vector_dim": str(len(packed.page_vector)),
-                "average_ocr_block_score": f"{context.page_features.average_ocr_block_score:.4f}",
-                "average_candidate_confidence": f"{context.page_features.average_candidate_confidence:.4f}",
+                "average_ocr_block_score": f"{float(getattr(context, 'page_policy_state', {}).get('_average_ocr_block_score', 0.0)):.4f}",
+                "average_candidate_confidence": f"{float(getattr(context, 'page_policy_state', {}).get('_average_candidate_confidence', 0.0)):.4f}",
             },
         )
 

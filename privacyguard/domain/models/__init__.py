@@ -2,12 +2,7 @@
 
 from privacyguard.domain.models.action import RestoredSlot
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
-from privacyguard.domain.models.decision_context import (
-    CandidateDecisionFeatures,
-    DecisionContext,
-    PageDecisionFeatures,
-    PersonaDecisionFeatures,
-)
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding, TurnMappingSnapshot
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock, PolygonPoint
 from privacyguard.domain.models.persona import PersonaProfile, PersonaSlotValue
@@ -25,9 +20,6 @@ __all__ = [
     "TurnMappingSnapshot",
     "DecisionAction",
     "DecisionPlan",
-    "PageDecisionFeatures",
-    "CandidateDecisionFeatures",
-    "PersonaDecisionFeatures",
     "DecisionContext",
     "RestoredSlot",
 ]

@@ -6,11 +6,11 @@
 - `page_policy_state -> page features`
 - `persona_policy_states -> persona features`
 
-同时保留旧 `DecisionContext` 读取路径兼容：
+当前仅读取新的 `DecisionModelContext` 结构：
 
-- 优先读取新结构
-- 兼容读取旧 `candidate_features / page_features / persona_features`
-- TODO: 当全部调用方都切到新结构后，删除旧路径兼容
+- `candidate_policy_views`
+- `page_policy_state`
+- `persona_policy_states`
 
 注意：
 
@@ -25,7 +25,6 @@ from dataclasses import dataclass
 
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.domain.models.decision_context import DecisionContext
-from privacyguard.utils.pii_value import canonicalize_pii_value
 
 PAGE_FEATURE_NAMES: tuple[str, ...] = (
     "prompt_length",
@@ -130,11 +129,7 @@ def build_page_features(context: DecisionContext) -> list[float]:
 
     向量布局保持兼容旧模型，但取值来源优先来自新页面状态。
 
-    字段映射意图：
-
-    - 新 `page_policy_state` 是正式输入
-    - 旧 `page_features` 仅作为兼容回退
-    - 页面向量中的 protection one-hot 继续保持在尾部，避免影响 runtime / TinyPolicyNet
+    页面向量中的 protection one-hot 继续保持在尾部，避免影响 runtime / TinyPolicyNet。
     """
     state = _page_policy_state(context)
     candidate_views = _candidate_policy_views(context)
@@ -381,49 +376,38 @@ def build_persona_features(
 
 def build_text_inputs(context: DecisionContext) -> dict[str, dict[str, dict[str, str]]]:
     """构建辅助文本通道输入。
-
-    文本输入优先来自新的策略视图；旧路径仅作为兼容。
-    TODO: 当训练侧完成迁移后，删除对旧 `candidate_features / persona_features` 的依赖。
     """
     candidate_inputs: dict[str, dict[str, str]] = {}
     candidate_by_id = _candidate_by_id(context)
-    legacy_candidate_features = {feature.candidate_id: feature for feature in getattr(context, "candidate_features", [])}
     for view in _candidate_policy_views(context):
         candidate_id = str(view.get("candidate_id", "")).strip()
         if not candidate_id:
             continue
         candidate = candidate_by_id.get(candidate_id)
-        legacy_feature = legacy_candidate_features.get(candidate_id)
         candidate_inputs[candidate_id] = {
             "candidate_text": str(
                 getattr(candidate, "text", "")
-                or getattr(legacy_feature, "text", "")
                 or ""
             ),
             "prompt_context": str(
                 view.get("prompt_local_context_labelized")
                 or view.get("_prompt_context")
-                or getattr(legacy_feature, "prompt_context", "")
                 or ""
             ),
             "ocr_context": str(
                 view.get("ocr_local_context_labelized")
                 or view.get("_ocr_context")
-                or getattr(legacy_feature, "ocr_context", "")
                 or ""
             ),
         }
 
     persona_inputs: dict[str, dict[str, str]] = {}
-    legacy_persona_features = {feature.persona_id: feature for feature in getattr(context, "persona_features", [])}
     for state in _persona_policy_states(context):
         persona_id = str(state.get("persona_id", "")).strip()
         if not persona_id:
             continue
-        legacy_feature = legacy_persona_features.get(persona_id)
         display_name = str(
             state.get("_display_name")
-            or getattr(legacy_feature, "display_name", "")
             or _persona_display_name(context, persona_id)
             or ""
         ).strip()
@@ -447,142 +431,25 @@ class DecisionFeatureExtractor:
 
 def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
     views = getattr(context, "candidate_policy_views", None)
-    if isinstance(views, list) and views:
-        return [view for view in views if isinstance(view, dict)]
-
-    # TODO: 当全部生产者都输出 DecisionModelContext.candidate_policy_views 后，删除旧路径兼容。
-    return [_legacy_candidate_policy_view(context, feature) for feature in getattr(context, "candidate_features", [])]
+    if not isinstance(views, list):
+        return []
+    return [view for view in views if isinstance(view, dict)]
 
 
 def _page_policy_state(context: DecisionContext) -> dict[str, object]:
     state = getattr(context, "page_policy_state", None)
-    if isinstance(state, dict) and state:
+    if isinstance(state, dict):
         return state
-
-    # TODO: 当全部生产者都输出 DecisionModelContext.page_policy_state 后，删除旧路径兼容。
-    return _legacy_page_policy_state(context)
+    return {
+        "protection_level": getattr(getattr(context, "protection_level", None), "value", ProtectionLevel.BALANCED.value),
+    }
 
 
 def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
     states = getattr(context, "persona_policy_states", None)
-    if isinstance(states, list) and states:
-        return [state for state in states if isinstance(state, dict)]
-
-    # TODO: 当全部生产者都输出 DecisionModelContext.persona_policy_states 后，删除旧路径兼容。
-    return [_legacy_persona_policy_state(context, feature) for feature in getattr(context, "persona_features", [])]
-
-
-def _legacy_candidate_policy_view(context: DecisionContext, feature) -> dict[str, object]:
-    candidate = _candidate_by_id(context).get(feature.candidate_id)
-    covered_block_ids = []
-    if candidate is not None:
-        covered_block_ids = [str(item) for item in candidate.metadata.get("ocr_block_ids", []) if str(item).strip()]
-        if candidate.block_id and candidate.block_id not in covered_block_ids:
-            covered_block_ids.append(candidate.block_id)
-
-    normalized_text = getattr(feature, "normalized_text", "") or getattr(feature, "text", "") or ""
-    digit_ratio = _digit_ratio(normalized_text)
-    session_alias = _fallback_session_alias(candidate, feature)
-    return {
-        "candidate_id": feature.candidate_id,
-        "attr_type": getattr(feature, "attr_type", None),
-        "attr_id": getattr(getattr(feature, "attr_type", None), "value", ""),
-        "source": getattr(feature, "source", None),
-        "session_alias": session_alias,
-        "same_alias_count_in_turn": max(1, int(getattr(feature, "same_text_page_count", 1) or 1)),
-        "cross_source_same_alias_flag": False,
-        "history_alias_exposure_bucket": _bucket_count(getattr(feature, "history_attr_exposure_count", 0)),
-        "_history_alias_exposure_count": getattr(feature, "history_attr_exposure_count", 0),
-        "history_exact_match_bucket": _bucket_count(getattr(feature, "history_exact_match_count", 0)),
-        "det_conf_bucket": _bucket_confidence(getattr(feature, "confidence", 0.0)),
-        "ocr_local_conf_bucket": _bucket_confidence(getattr(feature, "ocr_block_score", 0.0)),
-        "low_ocr_flag": bool(getattr(feature, "is_low_ocr_confidence", False)),
-        "cross_block_flag": len(covered_block_ids) > 1,
-        "covered_block_count_bucket": _bucket_count(len(covered_block_ids)),
-        "same_attr_page_bucket": _bucket_count(getattr(feature, "same_attr_page_count", 0)),
-        "normalized_len_bucket": _bucket_text_length(len(normalized_text)),
-        "digit_ratio_bucket": _bucket_ratio(digit_ratio),
-        "mask_char_flag": _contains_mask_char(getattr(feature, "text", "") or ""),
-        "prompt_local_context_labelized": getattr(feature, "prompt_context", "") or "",
-        "ocr_local_context_labelized": getattr(feature, "ocr_context", "") or "",
-        "_prompt_context": getattr(feature, "prompt_context", "") or "",
-        "_ocr_context": getattr(feature, "ocr_context", "") or "",
-        "_history_attr_exposure_count": getattr(feature, "history_attr_exposure_count", 0),
-        "_history_exact_match_count": getattr(feature, "history_exact_match_count", 0),
-        "_same_attr_page_count": getattr(feature, "same_attr_page_count", 0),
-        "_same_text_page_count": getattr(feature, "same_text_page_count", 0),
-        "_relative_area": getattr(feature, "relative_area", 0.0),
-        "_aspect_ratio": getattr(feature, "aspect_ratio", 0.0),
-        "_center_x": getattr(feature, "center_x", 0.0),
-        "_center_y": getattr(feature, "center_y", 0.0),
-        "_ocr_block_score": getattr(feature, "ocr_block_score", 0.0),
-        "_ocr_block_rotation_degrees": getattr(feature, "ocr_block_rotation_degrees", 0.0),
-        "_confidence": getattr(feature, "confidence", 0.0),
-    }
-
-
-def _legacy_page_policy_state(context: DecisionContext) -> dict[str, object]:
-    feature = getattr(context, "page_features", None)
-    if feature is None:
-        return {
-            "protection_level": getattr(getattr(context, "protection_level", None), "value", ProtectionLevel.BALANCED.value),
-        }
-    return {
-        "protection_level": getattr(getattr(context, "protection_level", None), "value", ProtectionLevel.BALANCED.value),
-        "candidate_count_bucket": _bucket_count(getattr(feature, "candidate_count", 0)),
-        "unique_attr_count_bucket": _bucket_count(getattr(feature, "unique_attr_count", 0)),
-        "avg_det_conf_bucket": _bucket_confidence(getattr(feature, "average_candidate_confidence", 0.0)),
-        "min_det_conf_bucket": _bucket_confidence(getattr(feature, "min_candidate_confidence", 0.0)),
-        "avg_ocr_conf_bucket": _bucket_confidence(getattr(feature, "average_ocr_block_score", 0.0)),
-        "low_ocr_ratio_bucket": _bucket_ratio(getattr(feature, "low_confidence_ocr_block_ratio", 0.0)),
-        "page_quality_state": _legacy_quality_state_from_page_feature(feature),
-        "_prompt_length": getattr(feature, "prompt_length", 0),
-        "_ocr_block_count": getattr(feature, "ocr_block_count", 0),
-        "_candidate_count": getattr(feature, "candidate_count", 0),
-        "_unique_attr_count": getattr(feature, "unique_attr_count", 0),
-        "_history_record_count": getattr(feature, "history_record_count", 0),
-        "_active_persona_bound": getattr(feature, "active_persona_bound", False),
-        "_prompt_has_digits": getattr(feature, "prompt_has_digits", False),
-        "_prompt_has_address_tokens": getattr(feature, "prompt_has_address_tokens", False),
-        "_average_candidate_confidence": getattr(feature, "average_candidate_confidence", 0.0),
-        "_min_candidate_confidence": getattr(feature, "min_candidate_confidence", 0.0),
-        "_high_confidence_candidate_ratio": getattr(feature, "high_confidence_candidate_ratio", 0.0),
-        "_low_confidence_candidate_ratio": getattr(feature, "low_confidence_candidate_ratio", 0.0),
-        "_prompt_candidate_count": getattr(feature, "prompt_candidate_count", 0),
-        "_ocr_candidate_count": getattr(feature, "ocr_candidate_count", 0),
-        "_average_ocr_block_score": getattr(feature, "average_ocr_block_score", 0.0),
-        "_min_ocr_block_score": getattr(feature, "min_ocr_block_score", 0.0),
-        "_low_confidence_ocr_block_ratio": getattr(feature, "low_confidence_ocr_block_ratio", 0.0),
-    }
-
-
-def _legacy_persona_policy_state(context: DecisionContext, feature) -> dict[str, object]:
-    supported_attr_mask = {attr_name: False for attr_name in ATTR_FEATURE_ORDER}
-    available_slot_mask = {attr_name: False for attr_name in ATTR_FEATURE_ORDER}
-    for attr in getattr(feature, "supported_attr_types", []) or []:
-        attr_name = getattr(attr, "value", str(attr))
-        supported_attr_mask[attr_name] = True
-    for attr, value in (getattr(feature, "slots", {}) or {}).items():
-        attr_name = getattr(attr, "value", str(attr))
-        supported_attr_mask[attr_name] = True
-        available_slot_mask[attr_name] = bool(str(value).strip())
-    exposure_bucket = _bucket_count(getattr(feature, "exposure_count", 0))
-    return {
-        "persona_id": feature.persona_id,
-        "is_active": getattr(feature, "is_active", False),
-        "supported_attr_mask": supported_attr_mask,
-        "available_slot_mask": available_slot_mask,
-        "attr_exposure_buckets": {
-            attr_name: exposure_bucket if supported_attr_mask[attr_name] else "0"
-            for attr_name in ATTR_FEATURE_ORDER
-        },
-        "matched_candidate_attr_count": getattr(feature, "matched_candidate_attr_count", 0),
-        "_slot_count": getattr(feature, "slot_count", 0),
-        "_display_name": getattr(feature, "display_name", ""),
-        "_exposure_count": getattr(feature, "exposure_count", 0),
-        "_supported_attr_types": getattr(feature, "supported_attr_types", []),
-        "_slots": getattr(feature, "slots", {}),
-    }
+    if not isinstance(states, list):
+        return []
+    return [state for state in states if isinstance(state, dict)]
 
 
 def _candidate_by_id(context: DecisionContext) -> dict[str, object]:
@@ -657,38 +524,6 @@ def _geometry_features(
 
 def _confidence_from_candidate_view(view: dict[str, object]) -> float:
     return _safe_float(view.get("_confidence"), _confidence_from_bucket(view.get("det_conf_bucket")))
-
-
-def _legacy_quality_state_from_page_feature(feature) -> str:
-    avg_det_conf = float(getattr(feature, "average_candidate_confidence", 0.0) or 0.0)
-    avg_ocr_conf = float(getattr(feature, "average_ocr_block_score", 0.0) or 0.0)
-    low_ocr_ratio = float(getattr(feature, "low_confidence_ocr_block_ratio", 0.0) or 0.0)
-    has_ocr = int(getattr(feature, "ocr_block_count", 0) or 0) > 0
-    if avg_det_conf < _LOW_CANDIDATE_CONFIDENCE:
-        return "poor"
-    if has_ocr and (avg_ocr_conf < _LOW_OCR_BLOCK_SCORE or low_ocr_ratio > 0.5):
-        return "poor"
-    if avg_det_conf >= _HIGH_CANDIDATE_CONFIDENCE and (not has_ocr or avg_ocr_conf >= _HIGH_CANDIDATE_CONFIDENCE):
-        return "good"
-    return "mixed"
-
-
-def _fallback_session_alias(candidate, feature) -> str:
-    attr_name = getattr(getattr(feature, "attr_type", None), "value", "")
-    source_text = (
-        getattr(candidate, "canonical_source_text", None)
-        or getattr(feature, "normalized_text", "")
-        or getattr(feature, "text", "")
-        or getattr(candidate, "text", "")
-    )
-    canonical = source_text
-    try:
-        attr_type = getattr(feature, "attr_type", None)
-        if attr_type is not None and source_text:
-            canonical = canonicalize_pii_value(attr_type, source_text)
-    except Exception:
-        canonical = source_text
-    return f"{attr_name}:{canonical or source_text}".strip(":")
 
 
 def _candidate_attr_name(candidate) -> str:

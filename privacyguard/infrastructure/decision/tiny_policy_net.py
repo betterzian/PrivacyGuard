@@ -335,9 +335,9 @@ class TinyPolicyNet(nn.Module):
 
         def _super_load(strict_value: bool):
             try:
-                return super().load_state_dict(state_dict, strict=strict_value, assign=assign)
+                return nn.Module.load_state_dict(self, state_dict, strict=strict_value, assign=assign)
             except TypeError:
-                return super().load_state_dict(state_dict, strict=strict_value)
+                return nn.Module.load_state_dict(self, state_dict, strict=strict_value)
 
         if not strict:
             return _super_load(False)

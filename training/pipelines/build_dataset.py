@@ -137,84 +137,33 @@ def _labels_payload(labels: SupervisedTurnLabels) -> dict[str, object]:
 
 def _candidate_policy_view_payload(context: DecisionContext) -> dict[str, dict[str, object]]:
     views = getattr(context, "candidate_policy_views", None)
-    if isinstance(views, list) and views:
-        payload: dict[str, dict[str, object]] = {}
-        for view in views:
-            if not isinstance(view, dict):
-                continue
-            candidate_id = str(view.get("candidate_id", "")).strip()
-            if not candidate_id:
-                continue
-            payload[candidate_id] = _json_ready(view)
-        if payload:
-            return payload
-
-    # 兼容旧上下文：当尚未切到 `candidate_policy_views` 时，导出可读的简化策略视图。
-    fallback: dict[str, dict[str, object]] = {}
-    for feature in getattr(context, "candidate_features", []):
-        fallback[feature.candidate_id] = {
-            "candidate_id": feature.candidate_id,
-            "attr_type": _json_ready(feature.attr_type),
-            "source": _json_ready(feature.source),
-            "det_conf_bucket": _bucket_confidence(float(getattr(feature, "confidence", 0.0) or 0.0)),
-            "ocr_local_conf_bucket": _bucket_confidence(float(getattr(feature, "ocr_block_score", 0.0) or 0.0)),
-            "low_ocr_flag": bool(getattr(feature, "is_low_ocr_confidence", False)),
-            "history_exact_match_bucket": _bucket_count(int(getattr(feature, "history_exact_match_count", 0) or 0)),
-            "same_attr_page_bucket": _bucket_count(int(getattr(feature, "same_attr_page_count", 0) or 0)),
-            "prompt_local_context_labelized": getattr(feature, "prompt_context", ""),
-            "ocr_local_context_labelized": getattr(feature, "ocr_context", ""),
-        }
-    return fallback
+    payload: dict[str, dict[str, object]] = {}
+    if not isinstance(views, list):
+        return payload
+    for view in views:
+        if not isinstance(view, dict):
+            continue
+        candidate_id = str(view.get("candidate_id", "")).strip()
+        if not candidate_id:
+            continue
+        payload[candidate_id] = _json_ready(view)
+    return payload
 
 
 def _page_policy_state_payload(context: DecisionContext) -> dict[str, object]:
     state = getattr(context, "page_policy_state", None)
-    if isinstance(state, dict) and state:
+    if isinstance(state, dict):
         return _json_ready(state)
-
-    feature = getattr(context, "page_features", None)
-    if feature is None:
-        return {
-            "protection_level": _json_ready(getattr(context, "protection_level", "")),
-        }
     return {
         "protection_level": _json_ready(getattr(context, "protection_level", "")),
-        "candidate_count_bucket": _bucket_count(int(getattr(feature, "candidate_count", 0) or 0)),
-        "unique_attr_count_bucket": _bucket_count(int(getattr(feature, "unique_attr_count", 0) or 0)),
-        "avg_det_conf_bucket": _bucket_confidence(float(getattr(feature, "average_candidate_confidence", 0.0) or 0.0)),
-        "min_det_conf_bucket": _bucket_confidence(float(getattr(feature, "min_candidate_confidence", 0.0) or 0.0)),
-        "avg_ocr_conf_bucket": _bucket_confidence(float(getattr(feature, "average_ocr_block_score", 0.0) or 0.0)),
-        "low_ocr_ratio_bucket": _bucket_ratio(float(getattr(feature, "low_confidence_ocr_block_ratio", 0.0) or 0.0)),
-        "page_quality_state": _legacy_page_quality_state(feature),
     }
 
 
 def _persona_policy_states_payload(context: DecisionContext) -> list[dict[str, object]]:
     states = getattr(context, "persona_policy_states", None)
-    if isinstance(states, list) and states:
-        return _json_ready(states)
-
-    fallback: list[dict[str, object]] = []
-    for feature in getattr(context, "persona_features", []):
-        supported_attr_mask = {str(item.value): True for item in getattr(feature, "supported_attr_types", [])}
-        available_slot_mask = {
-            str(attr.value): bool(str(value).strip())
-            for attr, value in (getattr(feature, "slots", {}) or {}).items()
-        }
-        fallback.append(
-            {
-                "persona_id": feature.persona_id,
-                "is_active": bool(getattr(feature, "is_active", False)),
-                "supported_attr_mask": supported_attr_mask,
-                "available_slot_mask": available_slot_mask,
-                "attr_exposure_buckets": {
-                    attr_name: _bucket_count(int(getattr(feature, "exposure_count", 0) or 0))
-                    for attr_name in set(supported_attr_mask) | set(available_slot_mask)
-                },
-                "matched_candidate_attr_count": int(getattr(feature, "matched_candidate_attr_count", 0) or 0),
-            }
-        )
-    return fallback
+    if not isinstance(states, list):
+        return []
+    return _json_ready(states)
 
 
 def _final_action_payload(labels: SupervisedTurnLabels) -> dict[str, str]:
@@ -257,48 +206,3 @@ def _json_ready(value):
         return [_json_ready(item) for item in value]
     return value
 
-
-def _bucket_count(value: int) -> str:
-    if value <= 0:
-        return "0"
-    if value == 1:
-        return "1"
-    if value <= 3:
-        return "2-3"
-    if value <= 7:
-        return "4-7"
-    return "8+"
-
-
-def _bucket_confidence(value: float) -> str:
-    if value <= 0.0:
-        return "none"
-    if value < 0.5:
-        return "low"
-    if value < 0.85:
-        return "medium"
-    return "high"
-
-
-def _bucket_ratio(value: float) -> str:
-    if value <= 0.0:
-        return "none"
-    if value < 0.34:
-        return "low"
-    if value < 0.67:
-        return "medium"
-    return "high"
-
-
-def _legacy_page_quality_state(feature) -> str:
-    avg_det_conf = float(getattr(feature, "average_candidate_confidence", 0.0) or 0.0)
-    avg_ocr_conf = float(getattr(feature, "average_ocr_block_score", 0.0) or 0.0)
-    low_ocr_ratio = float(getattr(feature, "low_confidence_ocr_block_ratio", 0.0) or 0.0)
-    has_ocr = int(getattr(feature, "ocr_block_count", 0) or 0) > 0
-    if avg_det_conf < 0.5:
-        return "poor"
-    if has_ocr and (avg_ocr_conf < 0.75 or low_ocr_ratio > 0.5):
-        return "poor"
-    if avg_det_conf >= 0.85 and (not has_ocr or avg_ocr_conf >= 0.85):
-        return "good"
-    return "mixed"

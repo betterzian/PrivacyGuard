@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
-from privacyguard.domain.models.decision_context import CandidateDecisionFeatures, DecisionContext, PersonaDecisionFeatures
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.features import PackedDecisionFeatures
 
 RUNTIME_ACTION_ORDER: tuple[ActionType, ActionType, ActionType] = (
@@ -217,7 +217,7 @@ class TinyPolicyRuntime:
                 persona_slots = item.slots
                 break
         candidate_decisions: list[RuntimeCandidateDecision] = []
-        for feature in context.candidate_features:
+        for feature in _candidate_policy_views(context):
             scores = self._candidate_scores(
                 feature=feature,
                 active_persona_id=active_persona_id,
@@ -225,13 +225,14 @@ class TinyPolicyRuntime:
                 page_vector=packed.page_vector,
             )
             final_action = max(scores, key=lambda key: (scores[key], self._tie_priority[key]))
-            has_persona_slot = feature.attr_type in persona_slots
+            attr_type = _attr_type_from_view(feature)
+            has_persona_slot = attr_type in persona_slots
             candidate_decisions.append(
                 _build_runtime_candidate_decision(
-                    candidate_id=feature.candidate_id,
+                    candidate_id=str(feature.get("candidate_id", "")),
                     final_action=final_action,
                     persona_id=active_persona_id if final_action == ActionType.PERSONA_SLOT else None,
-                    confidence=feature.confidence,
+                    confidence=_confidence_from_view(feature),
                     reasons=self._reasons_for(
                         feature=feature,
                         final_action=final_action,
@@ -240,7 +241,7 @@ class TinyPolicyRuntime:
                     ),
                     fallback_reason=(
                         "candidate_conf_below_keep_threshold，启发式 runtime 对 KEEP 更保守。"
-                        if final_action == ActionType.KEEP and feature.confidence < self.keep_threshold
+                        if final_action == ActionType.KEEP and _confidence_from_view(feature) < self.keep_threshold
                         else None
                     ),
                     action_scores=scores,
@@ -253,51 +254,63 @@ class TinyPolicyRuntime:
         )
 
     def _select_persona(self, context: DecisionContext) -> tuple[str | None, dict[str, float]]:
-        if not context.persona_features:
+        persona_states = _persona_policy_states(context)
+        if not persona_states:
             return (None, {})
         active_persona_id = context.session_binding.active_persona_id if context.session_binding else None
         persona_scores = {
-            feature.persona_id: self._persona_score(feature=feature, force_active=feature.persona_id == active_persona_id)
-            for feature in context.persona_features
+            str(state.get("persona_id", "")): self._persona_score(
+                state=state,
+                force_active=str(state.get("persona_id", "")) == active_persona_id,
+            )
+            for state in persona_states
+            if str(state.get("persona_id", "")).strip()
         }
         if active_persona_id:
             return (active_persona_id, persona_scores)
         selected = max(
-            context.persona_features,
-            key=lambda feature: (
-                persona_scores[feature.persona_id],
-                -feature.exposure_count,
-                feature.persona_id,
+            persona_states,
+            key=lambda state: (
+                persona_scores[str(state.get("persona_id", ""))],
+                -_exposure_count_from_state(state),
+                str(state.get("persona_id", "")),
             ),
         )
-        return (selected.persona_id, persona_scores)
+        return (str(selected.get("persona_id", "")), persona_scores)
 
-    def _persona_score(self, *, feature: PersonaDecisionFeatures, force_active: bool) -> float:
-        matched_score = min(1.0, feature.matched_candidate_attr_count / 4.0)
-        coverage_score = min(1.0, feature.slot_count / 6.0)
-        freshness_score = 1.0 - min(1.0, feature.exposure_count / 32.0)
+    def _persona_score(self, *, state: dict[str, object], force_active: bool) -> float:
+        matched_score = min(1.0, _matched_candidate_attr_count_from_state(state) / 4.0)
+        coverage_score = min(1.0, _slot_count_from_state(state) / 6.0)
+        freshness_score = 1.0 - min(1.0, _exposure_count_from_state(state) / 32.0)
         active_bonus = 1.0 if force_active else 0.0
         return round(0.45 * matched_score + 0.3 * coverage_score + 0.25 * freshness_score + active_bonus, 4)
 
     def _candidate_scores(
         self,
         *,
-        feature: CandidateDecisionFeatures,
+        feature: dict[str, object],
         active_persona_id: str | None,
         persona_slots: dict[PIIAttributeType, str],
         page_vector: list[float],
     ) -> dict[ActionType, float]:
         prompt_digit_bias = page_vector[6] if len(page_vector) > 6 else 0.0
-        has_persona_slot = bool(active_persona_id) and feature.attr_type in persona_slots
-        keep_score = 0.12 + max(0.0, (self.keep_threshold - feature.confidence) * 1.8)
-        if feature.confidence < 0.2:
+        attr_type = _attr_type_from_view(feature)
+        confidence = _confidence_from_view(feature)
+        history_attr_exposure_count = _history_attr_exposure_count_from_view(feature)
+        history_exact_match_count = _history_exact_match_count_from_view(feature)
+        same_text_page_count = _same_text_page_count_from_view(feature)
+        same_attr_page_count = _same_attr_page_count_from_view(feature)
+        is_ocr_source = _is_ocr_source(feature)
+        has_persona_slot = bool(active_persona_id) and attr_type in persona_slots
+        keep_score = 0.12 + max(0.0, (self.keep_threshold - confidence) * 1.8)
+        if confidence < 0.2:
             keep_score += 0.18
-        if feature.history_exact_match_count == 0 and feature.same_text_page_count <= 1:
+        if history_exact_match_count == 0 and same_text_page_count <= 1:
             keep_score += 0.04
 
-        generic_score = 0.24 + feature.confidence * 0.52
-        generic_score += min(0.16, feature.history_attr_exposure_count * 0.025)
-        if feature.attr_type in {
+        generic_score = 0.24 + confidence * 0.52
+        generic_score += min(0.16, history_attr_exposure_count * 0.025)
+        if attr_type in {
             PIIAttributeType.LOCATION_CLUE,
             PIIAttributeType.ID_NUMBER,
             PIIAttributeType.CARD_NUMBER,
@@ -308,18 +321,18 @@ class TinyPolicyRuntime:
             PIIAttributeType.OTHER,
         }:
             generic_score += 0.12
-        if feature.attr_type == PIIAttributeType.PHONE and prompt_digit_bias > 0:
+        if attr_type == PIIAttributeType.PHONE and prompt_digit_bias > 0:
             generic_score += 0.04
         if has_persona_slot:
             generic_score -= 0.08
 
         persona_score = 0.0
-        if has_persona_slot and feature.attr_type in self.persona_attr_types:
-            persona_score = 0.39 + feature.confidence * 0.38
-            persona_score += min(0.12, feature.history_attr_exposure_count * 0.02)
-            persona_score += 0.05 if feature.same_attr_page_count > 1 else 0.0
-            persona_score += 0.04 if feature.is_ocr_source else 0.0
-        if feature.confidence < self.keep_threshold:
+        if has_persona_slot and attr_type in self.persona_attr_types:
+            persona_score = 0.39 + confidence * 0.38
+            persona_score += min(0.12, history_attr_exposure_count * 0.02)
+            persona_score += 0.05 if same_attr_page_count > 1 else 0.0
+            persona_score += 0.04 if is_ocr_source else 0.0
+        if confidence < self.keep_threshold:
             generic_score *= 0.82
             persona_score *= 0.7
 
@@ -332,16 +345,17 @@ class TinyPolicyRuntime:
     def _reasons_for(
         self,
         *,
-        feature: CandidateDecisionFeatures,
+        feature: dict[str, object],
         final_action: ActionType,
         scores: dict[ActionType, float],
         has_persona_slot: bool,
     ) -> list[str]:
+        confidence = _confidence_from_view(feature)
         return [
             f"tiny_policy final_action={final_action.value}",
-            f"candidate_conf={feature.confidence:.2f}",
-            f"history_attr={feature.history_attr_exposure_count}",
-            f"history_exact={feature.history_exact_match_count}",
+            f"candidate_conf={confidence:.2f}",
+            f"history_attr={_history_attr_exposure_count_from_view(feature)}",
+            f"history_exact={_history_exact_match_count_from_view(feature)}",
             f"persona_slot={'yes' if has_persona_slot else 'no'}",
             _scores_summary(scores),
         ]
@@ -449,7 +463,7 @@ def _build_runtime_candidate_decision(
         candidate_id=candidate_id,
         final_action=final_action,
         persona_id=persona_id,
-        confidence=float(confidence),
+        confidence=round(float(confidence), 4),
         reasons=reasons,
         fallback_reason=fallback_reason,
         action_scores=action_scores,
@@ -498,6 +512,93 @@ def _compose_reason(reasons: list[str], fallback_reason: str | None) -> str:
     if fallback and fallback not in parts:
         parts.append(fallback)
     return "；".join(parts)
+
+
+def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
+    views = getattr(context, "candidate_policy_views", None)
+    if not isinstance(views, list):
+        return []
+    return [view for view in views if isinstance(view, dict)]
+
+
+def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
+    states = getattr(context, "persona_policy_states", None)
+    if not isinstance(states, list):
+        return []
+    return [state for state in states if isinstance(state, dict)]
+
+
+def _attr_type_from_view(view: dict[str, object]) -> PIIAttributeType:
+    attr = view.get("attr_type")
+    if isinstance(attr, PIIAttributeType):
+        return attr
+    try:
+        return PIIAttributeType(str(view.get("attr_id") or "").strip().lower())
+    except Exception:
+        return PIIAttributeType.OTHER
+
+
+def _confidence_from_view(view: dict[str, object]) -> float:
+    value = view.get("_confidence", 0.0)
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _history_attr_exposure_count_from_view(view: dict[str, object]) -> int:
+    try:
+        return int(view.get("_history_attr_exposure_count", 0))
+    except Exception:
+        return 0
+
+
+def _history_exact_match_count_from_view(view: dict[str, object]) -> int:
+    try:
+        return int(view.get("_history_exact_match_count", 0))
+    except Exception:
+        return 0
+
+
+def _same_text_page_count_from_view(view: dict[str, object]) -> int:
+    try:
+        return int(view.get("_same_text_page_count", 0))
+    except Exception:
+        return 0
+
+
+def _same_attr_page_count_from_view(view: dict[str, object]) -> int:
+    try:
+        return int(view.get("_same_attr_page_count", 0))
+    except Exception:
+        return 0
+
+
+def _is_ocr_source(view: dict[str, object]) -> bool:
+    source = view.get("source")
+    value = getattr(source, "value", source)
+    return str(value or "").strip().lower() == "ocr"
+
+
+def _slot_count_from_state(state: dict[str, object]) -> int:
+    try:
+        return int(state.get("_slot_count", 0))
+    except Exception:
+        return 0
+
+
+def _exposure_count_from_state(state: dict[str, object]) -> int:
+    try:
+        return int(state.get("_exposure_count", 0))
+    except Exception:
+        return 0
+
+
+def _matched_candidate_attr_count_from_state(state: dict[str, object]) -> int:
+    try:
+        return int(state.get("matched_candidate_attr_count", 0))
+    except Exception:
+        return 0
 
 
 def _scores_summary(action_scores: dict[ActionType | str, float]) -> str:

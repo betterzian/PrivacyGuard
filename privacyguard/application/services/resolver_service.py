@@ -435,55 +435,19 @@ class CandidateResolverService:
 
     def _candidate_view_map(self, context: DecisionContext) -> dict[str, dict[str, object]]:
         views = getattr(context, "candidate_policy_views", None)
-        if isinstance(views, list) and views:
-            return {
-                str(view.get("candidate_id")): view
-                for view in views
-                if isinstance(view, dict) and view.get("candidate_id")
-            }
-
-        fallback: dict[str, dict[str, object]] = {}
-        feature_by_id = {feature.candidate_id: feature for feature in getattr(context, "candidate_features", [])}
-        candidate_by_id = {candidate.entity_id: candidate for candidate in getattr(context, "candidates", [])}
-        for candidate_id, feature in feature_by_id.items():
-            candidate = candidate_by_id.get(candidate_id)
-            covered_block_ids = []
-            if candidate is not None:
-                covered_block_ids = [str(item) for item in candidate.metadata.get("ocr_block_ids", []) if str(item).strip()]
-                if candidate.block_id and candidate.block_id not in covered_block_ids:
-                    covered_block_ids.append(candidate.block_id)
-            fallback[candidate_id] = {
-                "candidate_id": candidate_id,
-                "cross_block_flag": len(covered_block_ids) > 1,
-                "ocr_local_conf_bucket": self._bucket_confidence(feature.ocr_block_score),
-                "low_ocr_flag": feature.is_low_ocr_confidence,
-            }
-        return fallback
+        if not isinstance(views, list):
+            return {}
+        return {
+            str(view.get("candidate_id")): view
+            for view in views
+            if isinstance(view, dict) and view.get("candidate_id")
+        }
 
     def _page_policy_state(self, context: DecisionContext) -> dict[str, object]:
         state = getattr(context, "page_policy_state", None)
-        if isinstance(state, dict) and state:
+        if isinstance(state, dict):
             return state
-
-        features = getattr(context, "page_features", None)
-        if features is None:
-            return {"protection_level": context.protection_level.value, "page_quality_state": "mixed"}
-
-        return {
-            "protection_level": context.protection_level.value,
-            "candidate_count_bucket": self._bucket_count(features.candidate_count),
-            "unique_attr_count_bucket": self._bucket_count(features.unique_attr_count),
-            "avg_det_conf_bucket": self._bucket_confidence(features.average_candidate_confidence),
-            "min_det_conf_bucket": self._bucket_confidence(features.min_candidate_confidence),
-            "avg_ocr_conf_bucket": self._bucket_confidence(features.average_ocr_block_score),
-            "low_ocr_ratio_bucket": self._bucket_ratio(features.low_confidence_ocr_block_ratio),
-            "page_quality_state": self._legacy_page_quality_state(
-                avg_det_conf=features.average_candidate_confidence,
-                avg_ocr_conf=features.average_ocr_block_score,
-                low_ocr_ratio=features.low_confidence_ocr_block_ratio,
-                has_ocr=features.ocr_block_count > 0,
-            ),
-        }
+        return {"protection_level": context.protection_level.value, "page_quality_state": "mixed"}
 
     def _legacy_page_quality_state(
         self,
