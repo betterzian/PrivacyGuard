@@ -10,8 +10,8 @@ def main() -> None:
         {
             "session_id": "demo-session",
             "turn_id": 1,
-            "prompt": "我叫张三，电话是13800138000。",
-            "image": None,
+            "prompt_text": "我叫张三，电话是13800138000。",
+            "screenshot": None,
         }
     )
     print("Sanitized:", sanitize_response["masked_prompt"])

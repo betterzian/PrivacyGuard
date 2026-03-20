@@ -467,17 +467,14 @@ def _hierarchical_view(final_action: ActionType) -> tuple[str, str]:
 
 
 def _normalized_action_type(action_type: ActionType | str) -> ActionType:
-    """归一化动作名，并兼容旧别名 LABEL -> GENERICIZE。"""
+    """归一化动作名：只保留工程动作（KEEP/GENERICIZE/PERSONA_SLOT）。"""
     if isinstance(action_type, ActionType):
         return action_type
     normalized = str(action_type or "").strip().upper()
     aliases = {
         "KEEP": ActionType.KEEP,
         "GENERICIZE": ActionType.GENERICIZE,
-        "GENERIC": ActionType.GENERICIZE,
-        "LABEL": ActionType.GENERICIZE,
         "PERSONA_SLOT": ActionType.PERSONA_SLOT,
-        "PERSONA": ActionType.PERSONA_SLOT,
     }
     return aliases.get(normalized, ActionType.KEEP)
 

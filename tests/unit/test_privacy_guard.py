@@ -208,8 +208,8 @@ def test_privacy_guard_sanitize_and_restore_preserve_external_dto_boundary() -> 
         {
             "session_id": "session-facade",
             "turn_id": 1,
-            "prompt": "张三的电话是13800138000普通文本",
-            "image": None,
+            "prompt_text": "张三的电话是13800138000普通文本",
+            "screenshot": None,
         }
     )
 

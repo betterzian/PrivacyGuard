@@ -502,7 +502,7 @@ class CandidateResolverService:
         return "mixed"
 
     def _normalized_action_type(self, action_type: object) -> tuple[ActionType | None, str | None]:
-        """兼容旧动作别名，并统一收敛到工程动作名。"""
+        """只识别工程动作名；未知值交由回退（KEEP）。"""
         raw = action_type.value if isinstance(action_type, ActionType) else str(action_type).strip()
         normalized_name = self._normalized_action_name(action_type)
         if normalized_name is None:
@@ -510,8 +510,6 @@ class CandidateResolverService:
         if normalized_name == ActionType.KEEP.value:
             return (ActionType.KEEP, None)
         if normalized_name == ActionType.GENERICIZE.value:
-            if raw.upper() == "LABEL":
-                return (ActionType.GENERICIZE, "检测到旧动作别名 LABEL，已归一化为 GENERICIZE。")
             return (ActionType.GENERICIZE, None)
         if normalized_name == ActionType.PERSONA_SLOT.value:
             return (ActionType.PERSONA_SLOT, None)
@@ -524,9 +522,8 @@ class CandidateResolverService:
         if not raw:
             return None
         normalized = raw.upper()
-        if normalized == "LABEL":
-            return ActionType.GENERICIZE.value
-        return normalized
+        allowed = {ActionType.KEEP.value, ActionType.GENERICIZE.value, ActionType.PERSONA_SLOT.value}
+        return normalized if normalized in allowed else None
 
     def _annotate_action(
         self,

@@ -154,10 +154,7 @@ def normalize_action_type(action: ActionType | str | None) -> ActionType:
     aliases = {
         "KEEP": ActionType.KEEP,
         "GENERICIZE": ActionType.GENERICIZE,
-        "GENERIC": ActionType.GENERICIZE,
-        "LABEL": ActionType.GENERICIZE,
         "PERSONA_SLOT": ActionType.PERSONA_SLOT,
-        "PERSONA": ActionType.PERSONA_SLOT,
     }
     return aliases.get(normalized, ActionType.KEEP)
 
@@ -177,10 +174,7 @@ def normalize_rewrite_mode(mode: str | None) -> str | None:
         "": None,
         REWRITE_MODE_NONE: REWRITE_MODE_NONE,
         "GENERICIZE": REWRITE_MODE_GENERICIZE,
-        "GENERIC": REWRITE_MODE_GENERICIZE,
-        "LABEL": REWRITE_MODE_GENERICIZE,
         "PERSONA_SLOT": REWRITE_MODE_PERSONA_SLOT,
-        "PERSONA": REWRITE_MODE_PERSONA_SLOT,
     }
     return aliases.get(normalized)
 

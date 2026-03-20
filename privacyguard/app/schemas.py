@@ -55,8 +55,8 @@ class SanitizePayloadModel(BaseModel):
 
     session_id: str
     turn_id: int = Field(default=0, ge=0)
-    prompt: str
-    image: Any | None = None
+    prompt_text: str
+    screenshot: Any | None = None
     protection_level: ProtectionLevel = ProtectionLevel.BALANCED
     detector_overrides: DetectorOverridesModel | None = None
 
@@ -88,7 +88,6 @@ class PersonaWritePayloadModel(BaseModel):
 
     persona_id: str
     display_name: str | None = None
-    profile: dict[str, str] = Field(default_factory=dict)
     slots: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, str] = Field(default_factory=dict)
     stats: PersonaStatsPayloadModel | None = None
@@ -108,8 +107,8 @@ class SanitizeRequestModel:
 
     session_id: str
     turn_id: int
-    prompt: str
-    image: Any | None = None
+    prompt_text: str
+    screenshot: Any | None = None
     protection_level: ProtectionLevel = ProtectionLevel.BALANCED
     detector_overrides: dict[PIIAttributeType, float] = field(default_factory=dict)
 
@@ -120,8 +119,8 @@ class SanitizeRequestModel:
         return cls(
             session_id=dto.session_id,
             turn_id=dto.turn_id,
-            prompt=dto.prompt,
-            image=dto.image,
+            prompt_text=dto.prompt_text,
+            screenshot=dto.screenshot,
             protection_level=dto.protection_level,
             detector_overrides=dto.detector_overrides.to_attr_map() if dto.detector_overrides else {},
         )
@@ -131,8 +130,8 @@ class SanitizeRequestModel:
         return SanitizeRequest(
             session_id=self.session_id,
             turn_id=self.turn_id,
-            prompt_text=self.prompt,
-            screenshot=self.image,
+            prompt_text=self.prompt_text,
+            screenshot=self.screenshot,
             protection_level=self.protection_level,
             detector_overrides=self.detector_overrides,
         )
@@ -300,8 +299,7 @@ class RestoreResponseModel:
 
 def _to_privacy_repository_item(dto: PersonaWritePayloadModel) -> PrivacyRepositoryWriteItemModel:
     """将 payload 模型转换为内部写入请求项。"""
-    slot_updates = _normalize_persona_slot_map(dto.profile)
-    slot_updates.update(_normalize_persona_slot_map(dto.slots))
+    slot_updates = _normalize_persona_slot_map(dto.slots)
     stats_updates = dto.stats.model_dump(exclude_unset=True) if dto.stats else {}
     return PrivacyRepositoryWriteItemModel(
         persona_id=dto.persona_id,

@@ -9,7 +9,7 @@ def test_sanitize_request_model_maps_detector_overrides_from_payload() -> None:
         {
             "session_id": "session-schema",
             "turn_id": 2,
-            "prompt": "腾讯科技",
+            "prompt_text": "腾讯科技",
             "protection_level": "balanced",
             "detector_overrides": {
                 "organization": 0.61,
@@ -37,11 +37,9 @@ def test_privacy_repository_write_request_model_maps_profile_and_slots() -> None
                 {
                     "persona_id": "persona-owner",
                     "display_name": "主身份",
-                    "profile": {
+                    "slots": {
                         "name": "张三",
                         "phone": "13800138000",
-                    },
-                    "slots": {
                         "email": "zhangsan@example.com",
                     },
                     "metadata": {

@@ -56,10 +56,8 @@ class DEModelEngine:
         normalized = str(runtime_type).strip().lower()
         aliases = {
             "heuristic": "heuristic",
-            "tiny_policy_heuristic": "heuristic",
             "torch": "torch",
             "bundle": "bundle",
-            "onnx": "bundle",
         }
         if normalized not in aliases:
             raise ValueError(f"不支持的 de_model runtime_type: {runtime_type}")

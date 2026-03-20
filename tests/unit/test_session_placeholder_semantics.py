@@ -406,8 +406,8 @@ def test_sanitize_payload_forbids_extra_fields() -> None:
             {
                 "session_id": "session-d",
                 "turn_id": 1,
-                "prompt": "张三",
-                "image": None,
+                "prompt_text": "张三",
+                "screenshot": None,
                 "decision_mode": "label_only",
             }
         )

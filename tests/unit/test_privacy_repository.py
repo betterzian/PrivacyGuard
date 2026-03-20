@@ -1,6 +1,7 @@
 """本地隐私仓库写入入口测试。"""
 
 import json
+import os
 
 from privacyguard import PrivacyGuard, PrivacyRepository
 from privacyguard.domain.enums import PIIAttributeType
@@ -78,7 +79,7 @@ def test_privacy_repository_write_merges_updates_and_guard_reads_existing_repo(t
                 {
                     "persona_id": "owner",
                     "display_name": "主身份",
-                    "profile": {
+                    "slots": {
                         "name": "张三",
                         "phone": "13800138000",
                     },
@@ -113,7 +114,7 @@ def test_privacy_repository_write_merges_updates_and_guard_reads_existing_repo(t
     )
 
     assert first_write["status"] == "ok"
-    assert second_write["repository_path"] == DEFAULT_PERSONA_REPOSITORY_PATH
+    assert os.path.normpath(second_write["repository_path"]) == os.path.normpath(DEFAULT_PERSONA_REPOSITORY_PATH)
     stored_payload = json.loads((tmp_path / DEFAULT_PERSONA_REPOSITORY_PATH).read_text(encoding="utf-8"))
     assert stored_payload[0]["persona_id"] == "owner"
     assert stored_payload[0]["profile"] == {

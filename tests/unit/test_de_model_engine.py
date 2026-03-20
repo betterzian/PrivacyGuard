@@ -286,7 +286,7 @@ def test_de_model_engine_accepts_explicit_runtime_config() -> None:
         keep_threshold=0.4,
         persona_score_threshold=0.55,
         action_tie_tolerance=1e-4,
-        runtime_type="tiny_policy_heuristic",
+        runtime_type="heuristic",
         device="mps",
     )
 
