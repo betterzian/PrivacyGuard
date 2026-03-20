@@ -16,6 +16,7 @@ from privacyguard.infrastructure.decision.de_model_runtime import (
     TorchTinyPolicyRuntime,
 )
 from privacyguard.infrastructure.decision.features import DecisionFeatureExtractor
+from privacyguard.infrastructure.decision.policy_context import page_policy_state
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 
@@ -87,6 +88,7 @@ class DEModelEngine:
         """使用统一上下文生成 de_model 占位计划。"""
         packed = self.feature_extractor.pack(context)
         runtime_output = self.runtime.predict(context=context, packed=packed)
+        derived_page_policy_state = page_policy_state(context)
         binding = context.session_binding or SessionBinding(
             session_id=context.session_id,
             active_persona_id=runtime_output.active_persona_id,
@@ -119,8 +121,8 @@ class DEModelEngine:
                 "candidate_count": str(len(context.candidates)),
                 "persona_count": str(len(context.persona_profiles)),
                 "page_vector_dim": str(len(packed.page_vector)),
-                "average_ocr_block_score": f"{float(getattr(context, 'page_policy_state', {}).get('_average_ocr_block_score', 0.0)):.4f}",
-                "average_candidate_confidence": f"{float(getattr(context, 'page_policy_state', {}).get('_average_candidate_confidence', 0.0)):.4f}",
+                "average_ocr_block_score": f"{float(derived_page_policy_state.get('_average_ocr_block_score', 0.0)):.4f}",
+                "average_candidate_confidence": f"{float(derived_page_policy_state.get('_average_candidate_confidence', 0.0)):.4f}",
             },
         )
 

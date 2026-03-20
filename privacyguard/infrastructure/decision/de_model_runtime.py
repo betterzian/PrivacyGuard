@@ -9,6 +9,7 @@ from typing import Protocol, runtime_checkable
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.features import PackedDecisionFeatures
+from privacyguard.infrastructure.decision.policy_context import derive_policy_context
 
 RUNTIME_ACTION_ORDER: tuple[ActionType, ActionType, ActionType] = (
     ActionType.KEEP,
@@ -515,17 +516,11 @@ def _compose_reason(reasons: list[str], fallback_reason: str | None) -> str:
 
 
 def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
-    views = getattr(context, "candidate_policy_views", None)
-    if not isinstance(views, list):
-        return []
-    return [view for view in views if isinstance(view, dict)]
+    return derive_policy_context(context).candidate_policy_views
 
 
 def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
-    states = getattr(context, "persona_policy_states", None)
-    if not isinstance(states, list):
-        return []
-    return [state for state in states if isinstance(state, dict)]
+    return derive_policy_context(context).persona_policy_states
 
 
 def _attr_type_from_view(view: dict[str, object]) -> PIIAttributeType:

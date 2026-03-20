@@ -25,6 +25,11 @@ from dataclasses import dataclass
 
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.domain.models.decision_context import DecisionContext
+from privacyguard.infrastructure.decision.policy_context import (
+    candidate_by_id as derived_candidate_by_id,
+    derive_policy_context,
+    persona_by_id as derived_persona_by_id,
+)
 
 PAGE_FEATURE_NAMES: tuple[str, ...] = (
     "prompt_length",
@@ -82,12 +87,13 @@ def pack_decision_features(context: DecisionContext) -> PackedDecisionFeatures:
 
     优先读取新的 `DecisionModelContext` 字段；旧路径仅作为兼容。
     """
+    policy = derive_policy_context(context)
     page_vector = build_page_features(context)
     text_inputs = build_text_inputs(context)
 
     candidate_ids: list[str] = []
     candidate_vectors: list[list[float]] = []
-    for candidate_policy_view in _candidate_policy_views(context):
+    for candidate_policy_view in policy.candidate_policy_views:
         candidate_id = str(candidate_policy_view.get("candidate_id", "")).strip()
         if not candidate_id:
             continue
@@ -102,7 +108,7 @@ def pack_decision_features(context: DecisionContext) -> PackedDecisionFeatures:
 
     persona_ids: list[str] = []
     persona_vectors: list[list[float]] = []
-    for persona_policy_state in _persona_policy_states(context):
+    for persona_policy_state in policy.persona_policy_states:
         persona_id = str(persona_policy_state.get("persona_id", "")).strip()
         if not persona_id:
             continue
@@ -131,8 +137,9 @@ def build_page_features(context: DecisionContext) -> list[float]:
 
     页面向量中的 protection one-hot 继续保持在尾部，避免影响 runtime / TinyPolicyNet。
     """
-    state = _page_policy_state(context)
-    candidate_views = _candidate_policy_views(context)
+    policy = derive_policy_context(context)
+    state = policy.page_policy_state
+    candidate_views = policy.candidate_policy_views
     prompt_text = getattr(context, "prompt_text", "") or ""
     ocr_blocks = list(getattr(context, "ocr_blocks", []) or [])
 
@@ -377,9 +384,10 @@ def build_persona_features(
 def build_text_inputs(context: DecisionContext) -> dict[str, dict[str, dict[str, str]]]:
     """构建辅助文本通道输入。
     """
+    policy = derive_policy_context(context)
     candidate_inputs: dict[str, dict[str, str]] = {}
     candidate_by_id = _candidate_by_id(context)
-    for view in _candidate_policy_views(context):
+    for view in policy.candidate_policy_views:
         candidate_id = str(view.get("candidate_id", "")).strip()
         if not candidate_id:
             continue
@@ -402,7 +410,7 @@ def build_text_inputs(context: DecisionContext) -> dict[str, dict[str, dict[str,
         }
 
     persona_inputs: dict[str, dict[str, str]] = {}
-    for state in _persona_policy_states(context):
+    for state in policy.persona_policy_states:
         persona_id = str(state.get("persona_id", "")).strip()
         if not persona_id:
             continue
@@ -430,44 +438,23 @@ class DecisionFeatureExtractor:
 
 
 def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
-    views = getattr(context, "candidate_policy_views", None)
-    if not isinstance(views, list):
-        return []
-    return [view for view in views if isinstance(view, dict)]
+    return derive_policy_context(context).candidate_policy_views
 
 
 def _page_policy_state(context: DecisionContext) -> dict[str, object]:
-    state = getattr(context, "page_policy_state", None)
-    if isinstance(state, dict):
-        return state
-    return {
-        "protection_level": getattr(getattr(context, "protection_level", None), "value", ProtectionLevel.BALANCED.value),
-    }
+    return derive_policy_context(context).page_policy_state
 
 
 def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
-    states = getattr(context, "persona_policy_states", None)
-    if not isinstance(states, list):
-        return []
-    return [state for state in states if isinstance(state, dict)]
+    return derive_policy_context(context).persona_policy_states
 
 
 def _candidate_by_id(context: DecisionContext) -> dict[str, object]:
-    raw_refs = getattr(context, "raw_refs", None)
-    if isinstance(raw_refs, dict):
-        candidate_by_id = raw_refs.get("candidate_by_id")
-        if isinstance(candidate_by_id, dict):
-            return candidate_by_id
-    return {candidate.entity_id: candidate for candidate in getattr(context, "candidates", [])}
+    return derived_candidate_by_id(context)
 
 
 def _persona_by_id(context: DecisionContext) -> dict[str, object]:
-    raw_refs = getattr(context, "raw_refs", None)
-    if isinstance(raw_refs, dict):
-        persona_by_id = raw_refs.get("persona_by_id")
-        if isinstance(persona_by_id, dict):
-            return persona_by_id
-    return {persona.persona_id: persona for persona in getattr(context, "persona_profiles", [])}
+    return derived_persona_by_id(context)
 
 
 def _persona_display_name(context: DecisionContext, persona_id: str) -> str:

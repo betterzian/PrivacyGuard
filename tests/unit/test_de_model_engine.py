@@ -1,11 +1,15 @@
 """de_model 决策引擎边界测试。"""
 
+from contextlib import contextmanager
 from dataclasses import asdict
+from pathlib import Path
+import shutil
+from uuid import uuid4
 
 import pytest
 
-from privacyguard.application.services.decision_context_builder import DecisionModelContext
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType, ProtectionLevel
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.models.ocr import BoundingBox
 from privacyguard.domain.models.persona import PersonaProfile
@@ -13,6 +17,7 @@ from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.decision.de_model_engine import DEModelEngine
 from privacyguard.infrastructure.decision.de_model_runtime import DEModelRuntimeOutput, RuntimeCandidateDecision
 from privacyguard.infrastructure.decision.features import PROTECTION_LEVEL_ORDER
+from privacyguard.infrastructure.decision.policy_context import derive_policy_context
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 
 
@@ -45,6 +50,18 @@ class _SpyRuntime:
         self.last_context = context
         self.last_packed = packed
         return self.response_factory(context=context, packed=packed)
+
+
+@contextmanager
+def _workspace_temp_dir(prefix: str):
+    root = Path("artifacts") / "test_tmp"
+    root.mkdir(parents=True, exist_ok=True)
+    directory = root / f"{prefix}-{uuid4().hex}"
+    directory.mkdir()
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 def test_de_model_engine_uses_runtime_and_constraint_resolution_without_building_context() -> None:
@@ -219,8 +236,9 @@ def test_de_model_engine_passes_high_risk_page_signals_to_runtime_for_keep_polic
 
     def _risk_runtime(*, context, packed):
         protection_start = len(packed.page_vector) - len(PROTECTION_LEVEL_ORDER)
-        assert context.page_policy_state["protection_level"] == ProtectionLevel.STRONG.value
-        assert context.page_policy_state["page_quality_state"] == "poor"
+        policy = derive_policy_context(context)
+        assert policy.page_policy_state["protection_level"] == ProtectionLevel.STRONG.value
+        assert policy.page_policy_state["page_quality_state"] == "poor"
         assert packed.page_vector[protection_start + PROTECTION_LEVEL_ORDER.index(ProtectionLevel.STRONG.value)] == 1.0
         assert packed.page_vector[14] < 0.75
         assert packed.page_vector[16] == 1.0
@@ -323,72 +341,73 @@ def test_de_model_engine_torch_runtime_requires_checkpoint() -> None:
         raise AssertionError("torch runtime 缺少 checkpoint_path 时应该报错。")
 
 
-def test_de_model_engine_torch_runtime_runs_checkpoint_inference(tmp_path) -> None:
+def test_de_model_engine_torch_runtime_runs_checkpoint_inference() -> None:
     torch = pytest.importorskip("torch")
     from privacyguard.infrastructure.decision.tiny_policy_net import TinyPolicyNet, TinyPolicyNetConfig
 
-    checkpoint_path = tmp_path / "tiny_policy.pt"
-    model = TinyPolicyNet(TinyPolicyNetConfig(max_text_length=24))
-    with torch.no_grad():
-        for parameter in model.parameters():
-            parameter.zero_()
-        model.action_head[-1].bias.copy_(torch.tensor([0.0, 0.2, 1.5], dtype=torch.float32))
-    torch.save(
-        {
-            "state_dict": model.state_dict(),
-            "model_config": asdict(model.config),
-        },
-        checkpoint_path,
-    )
+    with _workspace_temp_dir("torch-runtime") as temp_dir:
+        checkpoint_path = temp_dir / "tiny_policy.pt"
+        model = TinyPolicyNet(TinyPolicyNetConfig(max_text_length=24))
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.zero_()
+            model.action_head[-1].bias.copy_(torch.tensor([0.0, 0.2, 1.5], dtype=torch.float32))
+        torch.save(
+            {
+                "state_dict": model.state_dict(),
+                "model_config": asdict(model.config),
+            },
+            checkpoint_path,
+        )
 
-    persona_repo = _PersonaRepository(
-        [
-            PersonaProfile(
-                persona_id="persona-torch",
-                display_name="角色Torch",
-                slots={PIIAttributeType.NAME: "李四"},
-                stats={"exposure_count": 0},
-            )
-        ]
-    )
-    context = _make_context(
-        session_id="session-torch-runtime",
-        protection_level=ProtectionLevel.BALANCED,
-        page_quality_state="mixed",
-        candidates=[
-            PIICandidate(
-                entity_id="cand-name",
-                text="张三",
-                normalized_text="张三",
-                attr_type=PIIAttributeType.NAME,
-                source=PIISourceType.PROMPT,
-                span_start=3,
-                span_end=5,
-                confidence=0.98,
-            )
-        ],
-        personas=persona_repo.list_personas(),
-        session_binding=None,
-    )
+        persona_repo = _PersonaRepository(
+            [
+                PersonaProfile(
+                    persona_id="persona-torch",
+                    display_name="角色Torch",
+                    slots={PIIAttributeType.NAME: "李四"},
+                    stats={"exposure_count": 0},
+                )
+            ]
+        )
+        context = _make_context(
+            session_id="session-torch-runtime",
+            protection_level=ProtectionLevel.BALANCED,
+            page_quality_state="mixed",
+            candidates=[
+                PIICandidate(
+                    entity_id="cand-name",
+                    text="张三",
+                    normalized_text="张三",
+                    attr_type=PIIAttributeType.NAME,
+                    source=PIISourceType.PROMPT,
+                    span_start=3,
+                    span_end=5,
+                    confidence=0.98,
+                )
+            ],
+            personas=persona_repo.list_personas(),
+            session_binding=None,
+        )
 
-    engine = DEModelEngine(
-        persona_repository=persona_repo,
-        mapping_store=InMemoryMappingStore(),
-        runtime_type="torch",
-        checkpoint_path=str(checkpoint_path),
-    )
+        engine = DEModelEngine(
+            persona_repository=persona_repo,
+            mapping_store=InMemoryMappingStore(),
+            runtime_type="torch",
+            checkpoint_path=str(checkpoint_path),
+        )
 
-    plan = engine.plan(context)
+        plan = engine.plan(context)
 
-    assert plan.active_persona_id == "persona-torch"
-    assert plan.metadata["runtime_type"] == "torch_runtime"
-    assert plan.metadata["runtime_device"] == "cpu"
-    assert len(plan.actions) == 1
-    assert plan.actions[0].candidate_id == "cand-name"
-    assert plan.actions[0].action_type == ActionType.PERSONA_SLOT
-    assert plan.actions[0].persona_id == "persona-torch"
-    assert plan.actions[0].replacement_text == "李四"
-    assert "torch_tiny_policy" in plan.actions[0].reason
+        assert plan.active_persona_id == "persona-torch"
+        assert plan.metadata["runtime_type"] == "torch_runtime"
+        assert plan.metadata["runtime_device"] == "cpu"
+        assert len(plan.actions) == 1
+        assert plan.actions[0].candidate_id == "cand-name"
+        assert plan.actions[0].action_type == ActionType.PERSONA_SLOT
+        assert plan.actions[0].persona_id == "persona-torch"
+        assert plan.actions[0].replacement_text == "李四"
+        assert "torch_tiny_policy" in plan.actions[0].reason
 
 
 def _make_context(
@@ -400,8 +419,8 @@ def _make_context(
     personas: list[PersonaProfile],
     session_binding: SessionBinding | None,
     ocr_blocks: list[dict[str, object]] | None = None,
-) -> DecisionModelContext:
-    candidate_by_id = {candidate.entity_id: candidate for candidate in candidates}
+) -> DecisionContext:
+    _ = page_quality_state
     ocr_items = []
     for item in ocr_blocks or []:
         from privacyguard.domain.models.ocr import OCRTextBlock
@@ -414,89 +433,7 @@ def _make_context(
                 score=float(item["score"]),
             )
         )
-    persona_by_id = {persona.persona_id: persona for persona in personas}
-    candidate_policy_views = []
-    for candidate in candidates:
-        is_ocr = candidate.source == PIISourceType.OCR
-        covered_block_ids = [str(item) for item in candidate.metadata.get("ocr_block_ids", []) if str(item).strip()]
-        if candidate.block_id and candidate.block_id not in covered_block_ids:
-            covered_block_ids.append(candidate.block_id)
-        candidate_policy_views.append(
-            {
-                "candidate_id": candidate.entity_id,
-                "attr_type": candidate.attr_type,
-                "attr_id": candidate.attr_type.value,
-                "source": candidate.source,
-                "session_alias": f"{candidate.attr_type.value}:{candidate.normalized_text or candidate.text}",
-                "same_alias_count_in_turn": 1,
-                "cross_source_same_alias_flag": False,
-                "history_alias_exposure_bucket": "0",
-                "history_exact_match_bucket": "0",
-                "det_conf_bucket": "high" if candidate.confidence >= 0.85 else "low",
-                "ocr_local_conf_bucket": "low" if is_ocr and page_quality_state == "poor" else "high",
-                "low_ocr_flag": bool(is_ocr and page_quality_state == "poor"),
-                "cross_block_flag": len(covered_block_ids) > 1,
-                "covered_block_count_bucket": "2-3" if len(covered_block_ids) > 1 else ("1" if covered_block_ids else "0"),
-                "same_attr_page_bucket": "1",
-                "normalized_len_bucket": "3-4",
-                "digit_ratio_bucket": "none",
-                "mask_char_flag": False,
-                "prompt_local_context_labelized": f"[{candidate.attr_type.value}]上下文" if candidate.source == PIISourceType.PROMPT else "",
-                "ocr_local_context_labelized": f"[{candidate.attr_type.value}]上下文" if is_ocr else "",
-            }
-        )
-    persona_policy_states = []
-    active_persona_id = session_binding.active_persona_id if session_binding else None
-    candidate_attr_types = {candidate.attr_type for candidate in candidates}
-    for persona in personas:
-        supported_attr_mask = {attr.value: attr in persona.slots for attr in PIIAttributeType}
-        available_slot_mask = {attr.value: bool(str(persona.slots.get(attr, "")).strip()) for attr in PIIAttributeType}
-        persona_policy_states.append(
-            {
-                "persona_id": persona.persona_id,
-                "is_active": persona.persona_id == active_persona_id,
-                "supported_attr_mask": supported_attr_mask,
-                "available_slot_mask": available_slot_mask,
-                "attr_exposure_buckets": {
-                    attr.value: ("1" if attr in persona.slots else "0")
-                    for attr in PIIAttributeType
-                },
-                "matched_candidate_attr_count": len(candidate_attr_types.intersection(set(persona.slots.keys()))),
-                "_slot_count": len(persona.slots),
-                "_display_name": persona.display_name,
-                "_exposure_count": int(persona.stats.get("exposure_count", 0) or 0),
-                "_supported_attr_types": sorted(persona.slots.keys(), key=lambda item: item.value),
-                "_slots": persona.slots,
-            }
-        )
-    page_policy_state = {
-        "protection_level": protection_level.value,
-        "candidate_count_bucket": "2-3" if len(candidates) >= 2 else "1",
-        "unique_attr_count_bucket": "2-3" if len({candidate.attr_type for candidate in candidates}) >= 2 else "1",
-        "avg_det_conf_bucket": "high",
-        "min_det_conf_bucket": "high",
-        "avg_ocr_conf_bucket": "low" if page_quality_state == "poor" else "high",
-        "low_ocr_ratio_bucket": "high" if page_quality_state == "poor" else "none",
-        "page_quality_state": page_quality_state,
-        "_prompt_length": 16,
-        "_ocr_block_count": len(ocr_items),
-        "_candidate_count": len(candidates),
-        "_unique_attr_count": len({candidate.attr_type for candidate in candidates}),
-        "_history_record_count": 0,
-        "_active_persona_bound": bool(active_persona_id),
-        "_prompt_has_digits": False,
-        "_prompt_has_address_tokens": False,
-        "_average_candidate_confidence": 0.9,
-        "_min_candidate_confidence": min((candidate.confidence for candidate in candidates), default=0.0),
-        "_high_confidence_candidate_ratio": 1.0,
-        "_low_confidence_candidate_ratio": 0.0,
-        "_prompt_candidate_count": sum(1 for candidate in candidates if candidate.source == PIISourceType.PROMPT),
-        "_ocr_candidate_count": sum(1 for candidate in candidates if candidate.source == PIISourceType.OCR),
-        "_average_ocr_block_score": 0.4 if page_quality_state == "poor" else 0.9,
-        "_min_ocr_block_score": 0.4 if page_quality_state == "poor" else 0.9,
-        "_low_confidence_ocr_block_ratio": 1.0 if page_quality_state == "poor" else 0.0,
-    }
-    return DecisionModelContext(
+    return DecisionContext(
         session_id=session_id,
         turn_id=1,
         prompt_text="测试输入",
@@ -506,15 +443,4 @@ def _make_context(
         session_binding=session_binding,
         history_records=[],
         persona_profiles=personas,
-        raw_refs={
-            "prompt_text": "测试输入",
-            "candidate_by_id": candidate_by_id,
-            "ocr_block_by_id": {item.block_id: item for item in ocr_items if item.block_id},
-            "history_records": [],
-            "persona_by_id": persona_by_id,
-            "session_binding": session_binding,
-        },
-        candidate_policy_views=candidate_policy_views,
-        page_policy_state=page_policy_state,
-        persona_policy_states=persona_policy_states,
     )

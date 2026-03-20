@@ -1,11 +1,13 @@
 """de_model 上下文构造测试。"""
 
-from privacyguard.application.services.decision_context_builder import DecisionContextBuilder, DecisionModelContext
+from privacyguard.application.services.decision_context_builder import DecisionContextBuilder
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType, ProtectionLevel
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.infrastructure.decision.policy_context import DerivedDecisionPolicyContext, derive_policy_context
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 
 
@@ -111,19 +113,21 @@ def test_decision_context_builder_builds_new_policy_views_for_prompt_and_single_
         session_binding=SessionBinding(session_id="session-1", active_persona_id="persona-b"),
     )
 
-    assert isinstance(context, DecisionModelContext)
-    assert len(context.candidate_policy_views) == 2
-    assert len(context.persona_policy_states) == 2
+    policy = derive_policy_context(context)
+
+    assert isinstance(context, DecisionContext)
+    assert len(policy.candidate_policy_views) == 2
+    assert len(policy.persona_policy_states) == 2
 
     # raw_refs: 只重排索引现有对象，不引入新的 detector/linking 真值对象。
-    assert context.raw_refs["prompt_text"] == "姓名：张三，电话 13800138000"
-    assert context.raw_refs["candidate_by_id"]["cand-name"].text == "张三"
-    assert context.raw_refs["ocr_block_by_id"]["ocr-1"].text == "北京市海淀区中关村"
-    assert context.raw_refs["persona_by_id"]["persona-b"].display_name == "角色B"
-    assert context.raw_refs["history_records"][0].candidate_id == "old-name"
-    assert context.raw_refs["session_binding"].active_persona_id == "persona-b"
+    assert policy.raw_refs["prompt_text"] == "姓名：张三，电话 13800138000"
+    assert policy.raw_refs["candidate_by_id"]["cand-name"].text == "张三"
+    assert policy.raw_refs["ocr_block_by_id"]["ocr-1"].text == "北京市海淀区中关村"
+    assert policy.raw_refs["persona_by_id"]["persona-b"].display_name == "角色B"
+    assert policy.raw_refs["history_records"][0].candidate_id == "old-name"
+    assert policy.raw_refs["session_binding"].active_persona_id == "persona-b"
 
-    candidate_views = _candidate_views_by_id(context)
+    candidate_views = _candidate_views_by_id(policy)
     name_view = candidate_views["cand-name"]
     assert name_view["source"] == PIISourceType.PROMPT
     assert name_view["session_alias"].startswith(f"{PIIAttributeType.NAME.value}:")
@@ -144,14 +148,14 @@ def test_decision_context_builder_builds_new_policy_views_for_prompt_and_single_
     assert "[地址]" in address_view["ocr_local_context_labelized"]
 
     # page_policy_state: 页面级策略状态直接服务 runtime / 训练，不再以旧 page_features 为主断言对象。
-    assert context.page_policy_state["protection_level"] == ProtectionLevel.STRONG.value
-    assert context.page_policy_state["candidate_count_bucket"] == "2-3"
-    assert context.page_policy_state["unique_attr_count_bucket"] == "2-3"
-    assert context.page_policy_state["avg_det_conf_bucket"] == "high"
-    assert context.page_policy_state["avg_ocr_conf_bucket"] == "high"
-    assert context.page_policy_state["page_quality_state"] == "good"
+    assert policy.page_policy_state["protection_level"] == ProtectionLevel.STRONG.value
+    assert policy.page_policy_state["candidate_count_bucket"] == "2-3"
+    assert policy.page_policy_state["unique_attr_count_bucket"] == "2-3"
+    assert policy.page_policy_state["avg_det_conf_bucket"] == "high"
+    assert policy.page_policy_state["avg_ocr_conf_bucket"] == "high"
+    assert policy.page_policy_state["page_quality_state"] == "good"
 
-    persona_states = _persona_states_by_id(context)
+    persona_states = _persona_states_by_id(policy)
     assert persona_states["persona-b"]["is_active"] is True
     assert persona_states["persona-b"]["matched_candidate_attr_count"] == 2
     assert persona_states["persona-b"]["supported_attr_mask"][PIIAttributeType.NAME.value] is True
@@ -209,11 +213,13 @@ def test_decision_context_builder_marks_cross_block_and_low_ocr_quality_candidat
         ],
     )
 
-    assert isinstance(context, DecisionModelContext)
-    assert context.raw_refs["session_binding"] is None
-    assert set(context.raw_refs["ocr_block_by_id"]) == {"ocr-1", "ocr-2"}
+    policy = derive_policy_context(context)
 
-    phone_view = _candidate_views_by_id(context)["cand-phone"]
+    assert isinstance(context, DecisionContext)
+    assert policy.raw_refs["session_binding"] is None
+    assert set(policy.raw_refs["ocr_block_by_id"]) == {"ocr-1", "ocr-2"}
+
+    phone_view = _candidate_views_by_id(policy)["cand-phone"]
     assert phone_view["source"] == PIISourceType.OCR
     assert phone_view["cross_block_flag"] is True
     assert phone_view["covered_block_count_bucket"] == "2-3"
@@ -221,13 +227,13 @@ def test_decision_context_builder_marks_cross_block_and_low_ocr_quality_candidat
     assert phone_view["ocr_local_conf_bucket"] == "medium"
     assert phone_view["digit_ratio_bucket"] == "high"
 
-    assert context.page_policy_state["protection_level"] == ProtectionLevel.BALANCED.value
-    assert context.page_policy_state["candidate_count_bucket"] == "1"
-    assert context.page_policy_state["avg_ocr_conf_bucket"] == "medium"
-    assert context.page_policy_state["low_ocr_ratio_bucket"] == "high"
-    assert context.page_policy_state["page_quality_state"] == "poor"
+    assert policy.page_policy_state["protection_level"] == ProtectionLevel.BALANCED.value
+    assert policy.page_policy_state["candidate_count_bucket"] == "1"
+    assert policy.page_policy_state["avg_ocr_conf_bucket"] == "medium"
+    assert policy.page_policy_state["low_ocr_ratio_bucket"] == "high"
+    assert policy.page_policy_state["page_quality_state"] == "poor"
 
-    persona_states = _persona_states_by_id(context)
+    persona_states = _persona_states_by_id(policy)
     assert persona_states["persona-phone"]["is_active"] is False
     assert persona_states["persona-phone"]["matched_candidate_attr_count"] == 1
 
@@ -274,25 +280,27 @@ def test_decision_context_builder_handles_active_persona_absence_without_mutatin
         session_binding=SessionBinding(session_id="session-no-active-persona", active_persona_id=None),
     )
 
-    assert context.raw_refs["session_binding"] is not None
-    assert context.raw_refs["session_binding"].active_persona_id is None
-    persona_states = _persona_states_by_id(context)
+    policy = derive_policy_context(context)
+
+    assert policy.raw_refs["session_binding"] is not None
+    assert policy.raw_refs["session_binding"].active_persona_id is None
+    persona_states = _persona_states_by_id(policy)
     assert persona_states["persona-a"]["is_active"] is False
     assert persona_states["persona-b"]["is_active"] is False
     assert persona_states["persona-a"]["matched_candidate_attr_count"] == 1
     assert persona_states["persona-b"]["matched_candidate_attr_count"] == 0
-    assert context.page_policy_state["protection_level"] == ProtectionLevel.WEAK.value
+    assert policy.page_policy_state["protection_level"] == ProtectionLevel.WEAK.value
 
 
-def _candidate_views_by_id(context: DecisionModelContext) -> dict[str, dict[str, object]]:
+def _candidate_views_by_id(policy: DerivedDecisionPolicyContext) -> dict[str, dict[str, object]]:
     return {
         str(view["candidate_id"]): view
-        for view in context.candidate_policy_views
+        for view in policy.candidate_policy_views
     }
 
 
-def _persona_states_by_id(context: DecisionModelContext) -> dict[str, dict[str, object]]:
+def _persona_states_by_id(policy: DerivedDecisionPolicyContext) -> dict[str, dict[str, object]]:
     return {
         str(state["persona_id"]): state
-        for state in context.persona_policy_states
+        for state in policy.persona_policy_states
     }

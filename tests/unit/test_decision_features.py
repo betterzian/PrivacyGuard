@@ -2,8 +2,9 @@
 
 import pytest
 
-from privacyguard.application.services.decision_context_builder import DecisionContextBuilder, DecisionModelContext
+from privacyguard.application.services.decision_context_builder import DecisionContextBuilder
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType, ProtectionLevel
+from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
@@ -22,6 +23,7 @@ from privacyguard.infrastructure.decision.features import (
     build_persona_features,
     build_text_inputs,
 )
+from privacyguard.infrastructure.decision.policy_context import DerivedDecisionPolicyContext, derive_policy_context
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 
 
@@ -45,7 +47,8 @@ class _PersonaRepository:
 def test_decision_feature_extractor_maps_candidate_policy_views_to_dense_features() -> None:
     """candidate dense feature 应优先来自新的 candidate_policy_views。"""
     context = _build_policy_context()
-    candidate_views = _candidate_views_by_id(context)
+    policy = derive_policy_context(context)
+    candidate_views = _candidate_views_by_id(policy)
     text_inputs = build_text_inputs(context)
     packed = DecisionFeatureExtractor().pack(context)
 
@@ -89,9 +92,10 @@ def test_decision_feature_extractor_maps_candidate_policy_views_to_dense_feature
 def test_decision_feature_extractor_builds_page_features_from_page_policy_state() -> None:
     """page feature 应反映 page_policy_state 的质量与保护级别语义。"""
     context = _build_policy_context()
+    policy = derive_policy_context(context)
     page_vector = build_page_features(context)
 
-    assert context.page_policy_state["page_quality_state"] == "poor"
+    assert policy.page_policy_state["page_quality_state"] == "poor"
     assert len(page_vector) == PAGE_FEATURE_DIM
 
     avg_ocr_index = PAGE_FEATURE_NAMES.index("average_ocr_block_score")
@@ -114,7 +118,8 @@ def test_decision_feature_extractor_builds_persona_features_from_persona_policy_
     """persona feature 应反映 available_slot_mask 与 active persona 状态。"""
     context = _build_policy_context()
     text_inputs = build_text_inputs(context)
-    persona_states = _persona_states_by_id(context)
+    policy = derive_policy_context(context)
+    persona_states = _persona_states_by_id(policy)
     active_state = persona_states["persona-active"]
 
     assert active_state["available_slot_mask"][PIIAttributeType.PHONE.value] is True
@@ -142,7 +147,7 @@ def test_decision_feature_extractor_builds_persona_features_from_persona_policy_
     assert "13900001111" in text_inputs["personas"]["persona-active"]["persona_text"]
 
 
-def _build_policy_context() -> DecisionModelContext:
+def _build_policy_context() -> DecisionContext:
     mapping_store = InMemoryMappingStore()
     mapping_store.save_replacements(
         session_id="session-feature-policy",
@@ -231,15 +236,15 @@ def _build_policy_context() -> DecisionModelContext:
     return context
 
 
-def _candidate_views_by_id(context: DecisionModelContext) -> dict[str, dict[str, object]]:
+def _candidate_views_by_id(policy: DerivedDecisionPolicyContext) -> dict[str, dict[str, object]]:
     return {
         str(view["candidate_id"]): view
-        for view in context.candidate_policy_views
+        for view in policy.candidate_policy_views
     }
 
 
-def _persona_states_by_id(context: DecisionModelContext) -> dict[str, dict[str, object]]:
+def _persona_states_by_id(policy: DerivedDecisionPolicyContext) -> dict[str, dict[str, object]]:
     return {
         str(state["persona_id"]): state
-        for state in context.persona_policy_states
+        for state in policy.persona_policy_states
     }

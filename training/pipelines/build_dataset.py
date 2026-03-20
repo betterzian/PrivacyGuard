@@ -30,6 +30,7 @@ from typing import Iterable
 from privacyguard.domain.models.decision import DecisionPlan
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.features import DecisionFeatureExtractor
+from privacyguard.infrastructure.decision.policy_context import derive_policy_context
 from training.runtime_bridge import pack_training_turn, plan_to_supervision
 from training.types import (
     SupervisedTurnLabels,
@@ -136,11 +137,8 @@ def _labels_payload(labels: SupervisedTurnLabels) -> dict[str, object]:
 
 
 def _candidate_policy_view_payload(context: DecisionContext) -> dict[str, dict[str, object]]:
-    views = getattr(context, "candidate_policy_views", None)
     payload: dict[str, dict[str, object]] = {}
-    if not isinstance(views, list):
-        return payload
-    for view in views:
+    for view in derive_policy_context(context).candidate_policy_views:
         if not isinstance(view, dict):
             continue
         candidate_id = str(view.get("candidate_id", "")).strip()
@@ -151,19 +149,11 @@ def _candidate_policy_view_payload(context: DecisionContext) -> dict[str, dict[s
 
 
 def _page_policy_state_payload(context: DecisionContext) -> dict[str, object]:
-    state = getattr(context, "page_policy_state", None)
-    if isinstance(state, dict):
-        return _json_ready(state)
-    return {
-        "protection_level": _json_ready(getattr(context, "protection_level", "")),
-    }
+    return _json_ready(derive_policy_context(context).page_policy_state)
 
 
 def _persona_policy_states_payload(context: DecisionContext) -> list[dict[str, object]]:
-    states = getattr(context, "persona_policy_states", None)
-    if not isinstance(states, list):
-        return []
-    return _json_ready(states)
+    return _json_ready(derive_policy_context(context).persona_policy_states)
 
 
 def _final_action_payload(labels: SupervisedTurnLabels) -> dict[str, str]:

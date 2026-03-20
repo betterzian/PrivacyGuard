@@ -1,6 +1,10 @@
-"""supervised finetune 最小闭环测试。"""
+"""Minimal supervised finetune integration test."""
 
+from contextlib import contextmanager
 import json
+from pathlib import Path
+import shutil
+from uuid import uuid4
 
 import pytest
 
@@ -33,14 +37,26 @@ class _PersonaRepository:
         return persona.slots.get(attr_type)
 
 
-def test_supervised_finetune_outputs_checkpoint_loadable_by_torch_runtime(tmp_path) -> None:
+@contextmanager
+def _workspace_temp_dir(prefix: str):
+    root = Path("artifacts") / "test_tmp"
+    root.mkdir(parents=True, exist_ok=True)
+    directory = root / f"{prefix}-{uuid4().hex}"
+    directory.mkdir()
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_supervised_finetune_outputs_checkpoint_loadable_by_torch_runtime() -> None:
     persona_repo = _PersonaRepository(
         [
             PersonaProfile(
                 persona_id="persona-train",
-                display_name="训练角色",
+                display_name="Training Persona",
                 slots={
-                    PIIAttributeType.NAME: "李四",
+                    PIIAttributeType.NAME: "Li Si",
                     PIIAttributeType.PHONE: "13900001111",
                 },
                 stats={"exposure_count": 0},
@@ -55,16 +71,16 @@ def test_supervised_finetune_outputs_checkpoint_loadable_by_torch_runtime(tmp_pa
         context_builder.build(
             session_id="session-supervised",
             turn_id=1,
-            prompt_text="请联系张三，电话 13800138000",
+            prompt_text="Contact Zhang San at 13800138000",
             candidates=[
                 PIICandidate(
                     entity_id="cand-name",
-                    text="张三",
-                    normalized_text="张三",
+                    text="Zhang San",
+                    normalized_text="zhang san",
                     attr_type=PIIAttributeType.NAME,
                     source=PIISourceType.PROMPT,
-                    span_start=3,
-                    span_end=5,
+                    span_start=8,
+                    span_end=17,
                     confidence=0.96,
                 ),
                 PIICandidate(
@@ -73,8 +89,8 @@ def test_supervised_finetune_outputs_checkpoint_loadable_by_torch_runtime(tmp_pa
                     normalized_text="13800138000",
                     attr_type=PIIAttributeType.PHONE,
                     source=PIISourceType.PROMPT,
-                    span_start=9,
-                    span_end=20,
+                    span_start=21,
+                    span_end=32,
                     confidence=0.95,
                 ),
             ],
@@ -82,62 +98,64 @@ def test_supervised_finetune_outputs_checkpoint_loadable_by_torch_runtime(tmp_pa
         context_builder.build(
             session_id="session-supervised",
             turn_id=2,
-            prompt_text="张三来自某机构",
+            prompt_text="Zhang San works at Example Labs",
             candidates=[
                 PIICandidate(
                     entity_id="cand-name-2",
-                    text="张三",
-                    normalized_text="张三",
+                    text="Zhang San",
+                    normalized_text="zhang san",
                     attr_type=PIIAttributeType.NAME,
                     source=PIISourceType.PROMPT,
                     span_start=0,
-                    span_end=2,
+                    span_end=9,
                     confidence=0.94,
                 ),
                 PIICandidate(
                     entity_id="cand-org",
-                    text="某机构",
-                    normalized_text="某机构",
+                    text="Example Labs",
+                    normalized_text="example labs",
                     attr_type=PIIAttributeType.ORGANIZATION,
                     source=PIISourceType.PROMPT,
-                    span_start=4,
-                    span_end=7,
+                    span_start=19,
+                    span_end=31,
                     confidence=0.91,
                 ),
             ],
         ),
     ]
-    plans = [heuristic_engine.plan(context) for context in contexts]
-    dataset_path = build_supervised_jsonl_dataset(zip(contexts, plans), tmp_path / "train.jsonl")
 
-    payload = json.loads(dataset_path.read_text(encoding="utf-8").splitlines()[0])
-    assert payload["candidate_texts"] == ["张三", "13800138000"]
-    assert payload["persona_ids"] == ["persona-train"]
-    assert payload["labels"]["target_persona_id"] == "persona-train"
-    assert payload["labels"]["candidate_actions"]["cand-name"] == "PERSONA_SLOT"
+    with _workspace_temp_dir("supervised-finetune") as temp_dir:
+        plans = [heuristic_engine.plan(context) for context in contexts]
+        dataset_path = build_supervised_jsonl_dataset(zip(contexts, plans), temp_dir / "train.jsonl")
 
-    result = run_supervised_finetune(
-        SupervisedFinetuneConfig(
-            train_jsonl=dataset_path,
-            output_dir=tmp_path / "artifacts",
-            epochs=1,
-            batch_size=2,
-            learning_rate=1e-3,
-            device="cpu",
-            seed=7,
+        payload = json.loads(dataset_path.read_text(encoding="utf-8").splitlines()[0])
+        assert payload["candidate_texts"] == ["Zhang San", "13800138000"]
+        assert payload["persona_ids"] == ["persona-train"]
+        assert payload["labels"]["target_persona_id"] == "persona-train"
+        assert payload["labels"]["candidate_actions"]["cand-name"] == "PERSONA_SLOT"
+
+        result = run_supervised_finetune(
+            SupervisedFinetuneConfig(
+                train_jsonl=dataset_path,
+                output_dir=temp_dir / "artifacts",
+                epochs=1,
+                batch_size=2,
+                learning_rate=1e-3,
+                device="cpu",
+                seed=7,
+            )
         )
-    )
 
-    assert result.checkpoint_path.exists()
-    assert result.metrics_path.exists()
+        assert result.checkpoint_path.exists()
+        assert result.metrics_path.exists()
 
-    torch_engine = DEModelEngine(
-        persona_repository=persona_repo,
-        mapping_store=InMemoryMappingStore(),
-        runtime_type="torch",
-        checkpoint_path=str(result.checkpoint_path),
-    )
-    torch_plan = torch_engine.plan(contexts[0])
+        torch_engine = DEModelEngine(
+            persona_repository=persona_repo,
+            mapping_store=InMemoryMappingStore(),
+            runtime_type="torch",
+            checkpoint_path=str(result.checkpoint_path),
+        )
+        torch_plan = torch_engine.plan(contexts[0])
 
-    assert torch_plan.metadata["runtime_type"] == "torch_runtime"
-    assert len(torch_plan.actions) == len(contexts[0].candidates)
+        assert torch_plan.metadata["runtime_type"] == "torch_runtime"
+        assert len(torch_plan.actions) == len(contexts[0].candidates)

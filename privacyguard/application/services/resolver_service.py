@@ -26,6 +26,7 @@ from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, cl
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.infrastructure.decision.policy_context import derive_policy_context
 from privacyguard.utils.pii_value import canonicalize_pii_value, persona_slot_replacement
 
 _LOW_CANDIDATE_CONFIDENCE = 0.5
@@ -434,9 +435,7 @@ class CandidateResolverService:
         return self._label_for_attr(attr_type, 1)
 
     def _candidate_view_map(self, context: DecisionContext) -> dict[str, dict[str, object]]:
-        views = getattr(context, "candidate_policy_views", None)
-        if not isinstance(views, list):
-            return {}
+        views = derive_policy_context(context).candidate_policy_views
         return {
             str(view.get("candidate_id")): view
             for view in views
@@ -444,10 +443,7 @@ class CandidateResolverService:
         }
 
     def _page_policy_state(self, context: DecisionContext) -> dict[str, object]:
-        state = getattr(context, "page_policy_state", None)
-        if isinstance(state, dict):
-            return state
-        return {"protection_level": context.protection_level.value, "page_quality_state": "mixed"}
+        return derive_policy_context(context).page_policy_state
 
     def _legacy_page_quality_state(
         self,

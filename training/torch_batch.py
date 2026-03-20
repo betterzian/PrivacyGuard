@@ -13,6 +13,10 @@ from privacyguard.infrastructure.decision.features import (
     PERSONA_FEATURE_DIM,
     DecisionFeatureExtractor,
 )
+from privacyguard.infrastructure.decision.policy_context import (
+    candidate_by_id as derived_candidate_by_id,
+    derive_policy_context,
+)
 from privacyguard.infrastructure.decision.tiny_policy_net import ACTION_ORDER, PROTECT_ORDER, REWRITE_MODE_ORDER, TinyPolicyBatch
 from privacyguard.infrastructure.decision.tokenizer import CharacterHashTokenizer
 from training.types import (
@@ -344,13 +348,9 @@ class TinyPolicyBatchBuilder:
         )
 
     def _candidate_text(self, context: DecisionContext, candidate_id: str) -> str:
-        raw_refs = getattr(context, "raw_refs", {})
-        if isinstance(raw_refs, dict):
-            candidate_by_id = raw_refs.get("candidate_by_id")
-            if isinstance(candidate_by_id, dict):
-                candidate = candidate_by_id.get(candidate_id)
-                if candidate is not None:
-                    return str(getattr(candidate, "text", "") or "")
+        candidate = derived_candidate_by_id(context).get(candidate_id)
+        if candidate is not None:
+            return str(getattr(candidate, "text", "") or "")
         for candidate in context.candidates:
             if candidate.entity_id == candidate_id:
                 return candidate.text
@@ -373,14 +373,8 @@ class TinyPolicyBatchBuilder:
 
 
 def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
-    views = getattr(context, "candidate_policy_views", None)
-    if not isinstance(views, list):
-        return []
-    return [view for view in views if isinstance(view, dict)]
+    return derive_policy_context(context).candidate_policy_views
 
 
 def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
-    states = getattr(context, "persona_policy_states", None)
-    if not isinstance(states, list):
-        return []
-    return [state for state in states if isinstance(state, dict)]
+    return derive_policy_context(context).persona_policy_states

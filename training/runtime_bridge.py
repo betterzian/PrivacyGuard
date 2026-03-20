@@ -5,6 +5,10 @@ from __future__ import annotations
 from privacyguard.domain.models.decision import DecisionPlan
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.features import DecisionFeatureExtractor, PackedDecisionFeatures
+from privacyguard.infrastructure.decision.policy_context import (
+    candidate_by_id as derived_candidate_by_id,
+    derive_policy_context,
+)
 from training.types import RenderedTurnObservation, SupervisedTurnLabels, TrainingTurnExample
 
 
@@ -15,18 +19,19 @@ def pack_training_turn(
     """把运行时上下文转成训练侧单轮样本。"""
     feature_extractor = extractor or DecisionFeatureExtractor()
     packed = feature_extractor.pack(context)
+    policy = derive_policy_context(context)
     example = TrainingTurnExample(
         session_id=context.session_id,
         turn_id=context.turn_id,
         prompt_text=context.prompt_text,
         ocr_texts=[block.text for block in context.ocr_blocks],
-        candidate_ids=[str(view.get("candidate_id", "")) for view in _candidate_policy_views(context)],
-        candidate_texts=[_candidate_text(context, view) for view in _candidate_policy_views(context)],
-        candidate_prompt_contexts=[str(view.get("_prompt_context", "")) for view in _candidate_policy_views(context)],
-        candidate_ocr_contexts=[str(view.get("_ocr_context", "")) for view in _candidate_policy_views(context)],
-        candidate_attr_types=[view.get("attr_type") for view in _candidate_policy_views(context)],
-        persona_ids=[str(state.get("persona_id", "")) for state in _persona_policy_states(context)],
-        persona_texts=[_persona_text(context, state) for state in _persona_policy_states(context)],
+        candidate_ids=[str(view.get("candidate_id", "")) for view in policy.candidate_policy_views],
+        candidate_texts=[_candidate_text(context, view) for view in policy.candidate_policy_views],
+        candidate_prompt_contexts=[str(view.get("_prompt_context", "")) for view in policy.candidate_policy_views],
+        candidate_ocr_contexts=[str(view.get("_ocr_context", "")) for view in policy.candidate_policy_views],
+        candidate_attr_types=[view.get("attr_type") for view in policy.candidate_policy_views],
+        persona_ids=[str(state.get("persona_id", "")) for state in policy.persona_policy_states],
+        persona_texts=[_persona_text(context, state) for state in policy.persona_policy_states],
         active_persona_id=context.session_binding.active_persona_id if context.session_binding else None,
         page_vector=packed.page_vector,
         candidate_vectors=packed.candidate_vectors,
@@ -69,28 +74,18 @@ def plan_to_observation(
 
 
 def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
-    views = getattr(context, "candidate_policy_views", None)
-    if not isinstance(views, list):
-        return []
-    return [view for view in views if isinstance(view, dict)]
+    return derive_policy_context(context).candidate_policy_views
 
 
 def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
-    states = getattr(context, "persona_policy_states", None)
-    if not isinstance(states, list):
-        return []
-    return [state for state in states if isinstance(state, dict)]
+    return derive_policy_context(context).persona_policy_states
 
 
 def _candidate_text(context: DecisionContext, view: dict[str, object]) -> str:
     candidate_id = str(view.get("candidate_id", "")).strip()
-    raw_refs = getattr(context, "raw_refs", {})
-    if isinstance(raw_refs, dict):
-        candidate_by_id = raw_refs.get("candidate_by_id", {})
-        if isinstance(candidate_by_id, dict):
-            candidate = candidate_by_id.get(candidate_id)
-            if candidate is not None:
-                return str(getattr(candidate, "text", "") or "")
+    candidate = derived_candidate_by_id(context).get(candidate_id)
+    if candidate is not None:
+        return str(getattr(candidate, "text", "") or "")
     for candidate in context.candidates:
         if candidate.entity_id == candidate_id:
             return candidate.text
