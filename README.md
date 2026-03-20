@@ -1,116 +1,90 @@
 # PrivacyGuard
 
-PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私保护框架，核心思路是：
+PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私保护框架。它在图片和文本上传到云端前执行 `sanitize`，在云端返回文本后执行 `restore`，尽量减少真实 PII 直接暴露给云端的机会，同时保留任务可执行性。
 
-1. 在图文请求上传云端前先做 `sanitize`；
-2. 云端只看到脱敏后的 prompt 与截图；
-3. 云端返回文本后在本地执行 `restore`。
+当前仓库已经具备可运行的 `sanitize -> restore` 闭环、可替换的模块边界、较完整的单元测试，以及 `de_model` 的最小训练与 checkpoint 回接链路；但它仍然是研究型工程底座，不是已经完成移动端部署与指标闭环的成品 SDK。
 
-当前仓库已经不是纯概念原型，而是具备可运行的 `sanitize -> restore` 闭环、可替换模块边界、单测覆盖和 `de_model` 训练/导出骨架的工程化版本；但它仍然不是一个已经完成端侧部署、指标闭环和模型化决策的成品系统。
+## 项目现状
 
-## 1. 项目定位
-
-PrivacyGuard 要解决的问题不是“把所有隐私都糊掉”，而是面向 GUI Agent 的真实调用链，在尽量不破坏任务可执行性的前提下，减少云端看到原始 PII 的机会。
-
-典型调用场景如下：
-
-1. 端侧采集当前页面截图；
-2. 用户输入 prompt；
-3. 图文一起发给云端多模态模型；
-4. 云端返回文本指令或动作建议；
-5. 端侧执行层继续消费结果。
-
-PrivacyGuard 放在第 2 步和第 4 步之间，承担：
-
-- 上传前脱敏：prompt + screenshot
-- 返回后还原：当前以文本结果为主
-- 会话级 persona / mapping 管理
-
-## 2. 当前代码状态
-
-| 模块 | 当前状态 | 说明 |
+| 模块 | 当前实现 | 备注 |
 | --- | --- | --- |
-| 顶层 API | 已实现 | 统一入口为 `PrivacyGuard.sanitize()` / `PrivacyGuard.restore()` |
-| OCR | 已实现 | `PPOCREngineAdapter` 对接 PP-OCRv5，支持本地路径、PIL、numpy、URL 输入 |
-| PII 检测 | 已实现基线 | 主链路为 `rule_based`；`GLiNERAdapter` 仅是预留扩展位，未接入默认流程 |
-| 决策引擎 | 已实现三种模式 | `label_only`、`label_persona_mixed` 可直接使用；`de_model` 已有上下文、特征、heuristic runtime、可加载 checkpoint 的 torch runtime、TinyPolicyNet 与最小 supervised 训练闭环 |
-| 文本渲染 | 已实现 | prompt 优先按字符级 span 替换，兼容旧式保守替换 |
-| 截图渲染 | 已实现最小闭环 | 支持 OCR block 局部重绘、polygon/rotation 感知，以及 `ring / gradient / cv / mix` 填充策略 |
-| 映射与恢复 | 已实现 | 当前 `restore` 只基于当前 turn 的 `ReplacementRecord` 恢复云端返回文本 |
-| 训练与导出 | 已实现最小训练闭环 | `training/` 目录已经支持 supervised JSONL 导出、TinyPolicyNet 行为克隆训练和 checkpoint 回接；adversarial finetune 与 runtime bundle 导出仍未完成 |
-| 测试 | 覆盖较完整 | 已覆盖 detector、pipeline、renderer、fill strategy、`de_model` 上下文和 TinyPolicyNet 原型等关键环节 |
+| 顶层 API | `PrivacyGuard` / `PrivacyRepository` | 已实现 |
+| OCR | `PPOCREngineAdapter` | 支持本地路径、`PIL.Image`、`numpy.ndarray`、`http(s)` URL；缺少 `paddleocr` 时会在真正跑截图 OCR 时显式报错 |
+| PII 检测 | `rule_based` | 当前唯一注册到主链路的 detector |
+| 决策 | `de_model` / `label_only` / `label_persona_mixed` | 默认模式是 `de_model`，默认 runtime 是 heuristic |
+| 文本渲染 | `PromptRenderer` | prompt 优先按 span 替换，缺失 span 时回退保守正则替换 |
+| 截图渲染 | `ScreenshotRenderer` | 支持 OCR block 局部重建、跨 block 处理、polygon/rotation 感知和 `ring / gradient / cv / mix` 填充策略 |
+| 映射与恢复 | `InMemoryMappingStore` / `JsonMappingStore` + `ActionRestorer` | `restore` 只使用当前 turn 的映射记录 |
+| 本地隐私仓库 | `JsonPersonaRepository` | 默认读 `data/privacy_repository.json`，缺省时回退 `data/personas.sample.json` |
+| 训练 | `training/` | 已有 supervised JSONL 导出、最小行为克隆训练、torch runtime 回接；对抗训练和真实 bundle 导出仍未完成 |
 
-一句话概括当前成熟度：这是一个“骨架扎实、主链路真实可跑、核心算法仍在迭代”的仓库。
-
-## 3. 威胁模型与非目标
-
-PrivacyGuard 当前默认云端是 `honest-but-curious`：
-
-- 云端会正常处理上传图文；
-- 云端可能记录、关联和分析会话中的隐私线索；
-- 云端不知道本地 persona 仓库和映射表的真实内容。
-
-当前项目主要防御：
-
-- 原始 PII 直接上传云端
-- 多轮会话下的身份推断风险
-
-当前项目不直接承诺解决：
-
-- prompt injection
-- 恶意 GUI 诱导
-- 系统级权限隔离
-- 非文本视觉隐私的完整防护
-- 云端结构化动作规划安全
-
-## 4. 核心工作流
+## 核心流程
 
 ### `sanitize`
 
-1. 接收 `session_id / turn_id / prompt / image`
+1. 校验 `session_id / turn_id / prompt / image / protection_level / detector_overrides`
 2. 若有截图，则先做 OCR
-3. 用本地 detector 识别 prompt 与 OCR 中的 PII 候选
-4. 决策引擎对每个候选输出 `KEEP / GENERICIZE / PERSONA_SLOT`
-5. 渲染 prompt 与截图
-6. 把本轮替换记录写入 mapping store
+3. `rule_based` 检测 prompt 与 OCR 中的 PII 候选
+4. `DecisionContextBuilder` 构造统一 `DecisionContext`
+5. 决策引擎输出 `DecisionPlan`
+6. `SessionPlaceholderAllocator` 为 `GENERICIZE` 动作分配会话级稳定占位符
+7. 渲染 prompt 与截图，并写入当前 turn 的替换记录
 
 ### `restore`
 
-1. 接收 `session_id / turn_id / agent_text`
-2. 读取当前 turn 的替换记录
-3. 把云端返回文本中的占位值恢复为真实值
+1. 校验 `session_id / turn_id / agent_text`
+2. 只读取当前 turn 的替换记录
+3. 用 `replacement_text -> source_text` 映射恢复云端返回文本
 
-当前 `restore` 处理的是“云端返回文本”，不是完整结构化动作 DSL；也不会自动回溯整段会话历史。
+需要特别注意：
 
-## 5. 当前支持的模式
+- `restore` 当前不回溯整个会话历史
+- `restore` 不处理结构化动作 DSL，只处理云端返回文本
+- 占位符是 session 级稳定的，但恢复时只认当前 `turn_id`
 
-### Detector
+## 默认行为与可选模式
+
+### 默认值
+
+| 配置 | 默认值 |
+| --- | --- |
+| `detector_mode` | `rule_based` |
+| `decision_mode` | `de_model` |
+| `de_model.runtime_type` | `heuristic` |
+| `screenshot_fill_mode` | `mix` |
+| `mapping_store` | `in_memory` |
+| `persona_repository` | `json` |
+| `ocr provider` | `ppocr_v5` |
+
+### 当前支持的模式
+
+#### Detector
 
 - `rule_based`
 
-### Decision Engine
+#### Decision
 
+- `de_model`
 - `label_only`
 - `label_persona_mixed`
-- `de_model`
 
-### Mapping Store
+#### Mapping Store
 
 - `in_memory`
 - `json`
 
-### Persona Repository
+#### Persona Repository
 
 - `json`
 
-### Screenshot Fill Strategy
+#### Screenshot Fill Strategy
 
 - `ring`
 - `gradient`
 - `cv`
 - `mix`
 
-## 6. 安装
+## 安装
 
 要求：
 
@@ -128,42 +102,46 @@ python3 -m pip install -e .
 python3 -m pip install -e '.[dev]'
 ```
 
-如果需要真实 OCR：
+截图 OCR 依赖：
 
 ```bash
-python3 -m pip install -e '.[dev,ocr]'
+python3 -m pip install -e '.[ocr]'
 ```
 
-如果需要训练侧原型依赖：
+训练依赖：
 
 ```bash
 python3 -m pip install -e '.[train]'
 ```
 
-## 7. 快速开始
+一次装齐常用依赖：
 
-最小示例：
+```bash
+python3 -m pip install -e '.[dev,ocr,train]'
+```
+
+## 快速开始
+
+### 最小 `sanitize -> restore`
+
+下面这个例子不依赖 OCR，因为 `image=None` 时不会触发截图识别：
 
 ```python
 from privacyguard import PrivacyGuard
 
 guard = PrivacyGuard(
     detector_mode="rule_based",
-    decision_mode="label_persona_mixed",
-    screenshot_fill_mode="mix",
-    detector_config={"dictionary_path": "data/pii_dictionary.sample.json"},
+    decision_mode="de_model",
+    decision_config={"runtime_type": "heuristic"},
 )
 
 sanitize_resp = guard.sanitize(
     {
         "session_id": "demo-session",
         "turn_id": 1,
-        "prompt": "我叫张三，电话是13800138000，地址是北京市海淀区中关村。",
+        "prompt": "我叫张三，电话是13800138000。",
         "image": None,
         "protection_level": "balanced",
-        "detector_overrides": {
-            "organization": 0.55,
-        },
     }
 )
 
@@ -179,7 +157,42 @@ print(sanitize_resp["masked_prompt"])
 print(restore_resp["restored_text"])
 ```
 
-写入本地隐私仓库并在后续运行时直接复用：
+如果你想要一个更保守、可预测的基线，也可以显式指定：
+
+```python
+guard = PrivacyGuard(decision_mode="label_only")
+```
+
+### 使用截图 OCR
+
+当 `image` 不为 `None` 时，`PPOCREngineAdapter.extract()` 支持：
+
+- 本地文件路径
+- `PIL.Image.Image`
+- `numpy.ndarray`
+- `http(s)` 图片 URL
+
+示例：
+
+```python
+guard = PrivacyGuard(
+    screenshot_fill_mode="mix",
+    detector_config={"dictionary_path": "data/pii_dictionary.sample.json"},
+)
+
+response = guard.sanitize(
+    {
+        "session_id": "image-demo",
+        "turn_id": 1,
+        "prompt": "帮我总结截图内容",
+        "image": "test.PNG",
+    }
+)
+```
+
+如果未安装 `paddleocr`，只有在真正处理截图时才会报错，并提示执行 `python -m pip install -e '.[ocr]'`。
+
+### 写入本地隐私仓库
 
 ```python
 from privacyguard import PrivacyGuard, PrivacyRepository
@@ -194,6 +207,8 @@ repository.write(
                 "profile": {
                     "name": "张三",
                     "phone": "13800138000",
+                },
+                "slots": {
                     "email": "zhangsan@example.com",
                 },
                 "metadata": {
@@ -207,105 +222,125 @@ repository.write(
     }
 )
 
-guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_persona_mixed")
+guard = PrivacyGuard(decision_mode="label_persona_mixed")
 print(guard.persona_repo.get_persona("owner"))
 ```
 
-运行仓库内示例：
+`PrivacyRepository.write()` 支持按 `persona_id` 合并写入：
 
-```bash
-python3 examples/minimal_demo.py
-```
+- `profile`
+- `slots`
+- `metadata`
+- `stats`
 
-如果想单独验证本地隐私仓库写入：
+## 顶层 API
 
-```bash
-python3 examples/privacy_repository_demo.py
-```
+### `PrivacyGuard.sanitize(payload)`
 
-如果想单独验证 PP-OCRv5 的官方 `import` 用法：
+输入字段：
 
-```bash
-python3 examples/paddleocr_import_demo.py
-```
+- `session_id: str`
+- `turn_id: int = 0`
+- `prompt: str`
+- `image: Any | None = None`
+- `protection_level: "weak" | "balanced" | "strong" = "balanced"`
+- `detector_overrides`
+  当前请求层只允许覆盖 `name / location_clue / address / organization / other`
 
-## 8. 示例数据与配置说明
+返回字段：
+
+- `status`
+- `masked_prompt`
+- `masked_image`
+- `session_id`
+- `turn_id`
+- `mapping_count`
+- `active_persona_id`
+
+### `PrivacyGuard.restore(payload)`
+
+输入字段：
+
+- `session_id: str`
+- `turn_id: int = 0`
+- `agent_text: str`
+
+返回字段：
+
+- `status`
+- `restored_text`
+- `session_id`
+
+### `PrivacyRepository.write(payload)`
+
+输入字段：
+
+- `personas: list[...]`
+
+返回字段：
+
+- `status`
+- `repository_path`
+- `written_count`
+- `persona_ids`
+
+## 数据与配置文件
 
 - `data/privacy_repository.json`
-  本地隐私仓库默认落盘位置；`PrivacyRepository()` 会写到这里，`PrivacyGuard()` 会优先读取这里。
+  本地 persona 仓库默认落盘位置
 - `data/personas.sample.json`
-  当本地隐私仓库不存在时，`JsonPersonaRepository` 会回退读取这份示例 persona 数据。
+  当本地仓库不存在时的只读回退样例
 - `data/pii_dictionary.sample.json`
-  用于 `RuleBasedPIIDetector` 的示例本地词典。
+  `RuleBasedPIIDetector` 示例词典
+- `data/china_geo_lexicon.json`
+  内置地理词汇表，供地址和 location clue 规则使用
 
-需要注意：
+补充说明：
 
-- 示例词典不会自动加载；如果需要启用，必须显式传入 `detector_config={"dictionary_path": ...}`。
-- 本地隐私仓库写入口为 `PrivacyRepository.write(...)`，支持按 `persona_id` 合并写入 `profile / slots / metadata / stats`。
-- persona JSON 当前兼容旧格式和实体列表格式。
-- 如果未安装 `paddleocr`，截图 OCR 不会静默降级，而会明确报错提示安装依赖。
+- 词典不会自动启用，需要显式传入 `detector_config={"dictionary_path": ...}`
+- `JsonPersonaRepository` 读取时兼容 `{"personas": [...]}` 和直接的列表格式
+- 实际持久化到 `data/privacy_repository.json` 时会写成列表格式
 
-## 9. 仓库结构
+## 仓库结构
 
 ```text
 PrivacyGuard/
 ├─ privacyguard/
 │  ├─ app/                # 顶层 API、payload schema、pipeline 包装
-│  ├─ application/        # sanitize / restore 编排与服务
+│  ├─ application/        # sanitize / restore 编排与上下文服务
 │  ├─ bootstrap/          # 注册表、工厂、模式归一化
-│  ├─ domain/             # 枚举、接口、领域模型、约束策略
-│  ├─ infrastructure/     # detector / decision / ocr / rendering / mapping 等实现
+│  ├─ domain/             # 枚举、接口、领域模型、约束解析
+│  ├─ infrastructure/     # detector / decision / ocr / rendering / mapping / persona 等实现
 │  └─ utils/
-├─ training/              # de_model 训练、导出与 runtime bundle 骨架
-├─ tests/                 # unit + integration tests
-├─ docs/                  # 请求流与补充说明
-├─ data/                  # 示例 persona / dictionary
-└─ examples/              # 最小运行示例
+├─ training/              # de_model 训练与导出相关代码
+├─ tests/
+├─ docs/
+├─ data/
+└─ examples/
 ```
 
-## 10. 当前限制
+## 当前限制
 
-- `rule_based` 仍是当前检测主线，没有真正接入 NER 模型补召回。
-- 已支持相邻 OCR block 的页面级聚合检测与 remap，但在更复杂版面、远距离关联和更强页面语义联合判断上仍有提升空间。
-- `de_model` 现在既支持默认 heuristic runtime，也支持显式加载 checkpoint 的 torch runtime；但默认策略仍未切换到训练模型，bundle/ONNX/TFLite runtime 也还没落地。
-- `restore` 当前只处理云端返回文本，只看当前 turn 映射，不处理结构化动作 DSL，也不做跨 turn 自动回溯。
-- 截图重绘目标是“可用闭环”，不是最终视觉保真；复杂背景下仍可能出现可见痕迹。
-- 当前主要是 Python API 仓库，还没有 CLI、服务化接口和移动端集成层。
-- README、设计文档与实现会持续收敛，阅读时应优先以 `privacyguard/` 下实际代码为准。
+- `rule_based` 是当前唯一注册到主链路的 detector，`GLiNERAdapter` 仍只是预留扩展位
+- `de_model` 默认仍是 heuristic runtime；torch runtime 需要显式提供 checkpoint
+- `runtime_type="bundle"` 目前只保留接口，实际会抛出 `NotImplementedError`
+- `run_adversarial_finetune()` 尚未实现
+- `export_runtime_bundle()` 目前只写 metadata，不负责真实 ONNX/TFLite 导出
+- `restore` 只看当前 turn，不做跨 turn 自动恢复
+- 顶层对外仍是 Python API，没有 CLI、服务化接口和移动端接线层
 
-## 11. 依据 `What_is_PrivcacyGuard.md` 的优先改进方向
+## 文档索引
 
-最值得继续推进的方向，不是继续堆更多概念，而是把已经存在的工程骨架补成真正可评估的系统：
+- [What_is_PrivcacyGuard.md](What_is_PrivcacyGuard.md)
+- [docs/REQUEST_FLOW.md](docs/REQUEST_FLOW.md)
+- [docs/DE_MODEL_IMPLEMENTATION.md](docs/DE_MODEL_IMPLEMENTATION.md)
+- [docs/DE_MODEL_TRAINING_LAYOUT.md](docs/DE_MODEL_TRAINING_LAYOUT.md)
+- [training/README.md](training/README.md)
 
-1. `de_model` 从启发式 runtime 升级为真实模型位点  
-   已有上下文、特征、TinyPolicyNet、训练与导出骨架，下一步应把 `DEModelEngine` 接到可加载权重的 runtime，并保留失败回退机制。
+## 仓库内示例
 
-2. detector 从高召回规则基线升级为“规则 + 模型”双路体系  
-   当前规则能力已经不弱，也已支持相邻 OCR block 聚合；但弱上下文短词、复杂页面和更强语义联合判断仍会成为瓶颈。
-
-3. restore 从“文本替换”升级为“结构化动作恢复”  
-   如果未来云端返回的是 action DSL、参数列表或坐标化指令，当前恢复能力是不够的。
-
-4. 引入真实评估指标  
-   包括检测精度、任务成功率、persona 一致性、身份推断难度、端侧时延和内存占用，而不只是“能不能跑通”。
-
-5. 补齐移动端部署路径  
-   当前 `training/` 已经考虑了 runtime bundle 与导出 metadata，但还缺少实际的 ONNX/TFLite 推理接线、定长输入约束验证和真机 benchmark。
-
-## 12. 文档索引
-
-- [What_is_PrivcacyGuard.md](What_is_PrivcacyGuard.md)：项目定位、威胁模型与 `de_model` 设计目标
-- [docs/REQUEST_FLOW.md](docs/REQUEST_FLOW.md)：当前代码调用链与请求流说明
-- [docs/DE_MODEL_IMPLEMENTATION.md](docs/DE_MODEL_IMPLEMENTATION.md)：当前 `de_model` 的实现细节、模型结构、输入输出和训练/推理链路
-- [training/README.md](training/README.md)：训练与导出目录说明
-
-## 13. 当前适合用它做什么
-
-PrivacyGuard 当前最适合：
-
-- 作为 GUI Agent 隐私保护链路的研究型工程底座
-- 验证 `sanitize -> cloud -> restore` 的完整闭环
-- 试验不同 detector / decision / rendering 策略
-- 为后续端侧小模型决策和 Android 集成准备边界与数据结构
-
-如果目标是直接拿来做生产级移动端 SDK，当前仓库还差真实模型权重、指标验证、真机部署和工程集成层。
+```bash
+python3 examples/minimal_demo.py
+python3 examples/privacy_repository_demo.py
+python3 examples/paddleocr_import_demo.py
+```
