@@ -67,6 +67,3 @@ class DecisionContextBuilder:
             normalized[key] = value
         return normalized
 
-
-# Backward-compatible alias: policy views are now derived inside the decision module.
-DecisionModelContext = DecisionContext

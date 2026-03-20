@@ -46,12 +46,12 @@ PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私
 
 这也是为什么内部即使已经有：
 
-- `DecisionModelContext`
+- `DecisionContext`
+- 派生后的 `page_policy_state`
 - `protect_decision`
 - `rewrite_mode`
-- `page_policy_state`
 
-这些字段也不会直接暴露到 facade 的稳定对外返回里。
+这些内部上下文或字段也不会直接暴露到 facade 的稳定对外返回里。
 
 ### `de_model` 是策略决策层，不是 detector
 
@@ -107,7 +107,7 @@ payload
 2. 若有截图，则先做 OCR；否则 `ocr_blocks=[]`
 3. `rule_based` 检测 prompt_text 与 OCR 中的 PII 候选
 4. 读取或创建当前 session 的 `SessionBinding`
-5. `DecisionContextBuilder` 组装 `DecisionModelContext`
+5. `DecisionContextBuilder` 组装 `DecisionContext`
 6. 调用具体 `decision_engine.plan(...)`
 7. `SessionPlaceholderAllocator` 为 `GENERICIZE` 分配 session 级稳定占位符
 8. `PromptRenderer` 渲染 prompt；若有截图则再渲染 screenshot
@@ -116,14 +116,14 @@ payload
 
 #### 当前的 context 组织
 
-`DecisionContextBuilder` 当前正式收敛为 `DecisionModelContext`，其核心组织是：
+`DecisionContextBuilder` 当前正式产出 `DecisionContext`，decision 模块再在内部派生出：
 
 - `raw_refs`
 - `candidate_policy_views`
 - `page_policy_state`
 - `persona_policy_states`
 
-旧字段 `page_features / candidate_features / persona_features` 仍保留为兼容层，但新的正式组织已经是上面四块。
+旧字段 `page_features / candidate_features / persona_features` 仍保留为兼容层；若上下文上已预构建同名策略字段，decision 模块也会兼容读取。
 
 ### `restore`
 
@@ -169,7 +169,7 @@ payload
 特点：
 
 - 仍然走统一 sanitize 主链
-- 仍然会构建 `DecisionModelContext`
+- 仍然会构建 `DecisionContext`
 - 但不走 `de_model` 的 features / runtime 推理链
 
 ### `label_persona_mixed`
@@ -189,7 +189,7 @@ payload
 
 行为：
 
-- 读取 `DecisionModelContext`
+- 读取 `DecisionContext` 并内部派生策略视图
 - `DecisionFeatureExtractor.pack(context)`
 - 调用 runtime
 - 构造 `DecisionAction`

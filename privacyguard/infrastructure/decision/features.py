@@ -1,12 +1,12 @@
 """de_model 特征提取与张量打包。
 
-本模块已对齐新的 `DecisionModelContext` 组织方式：
+本模块已对齐当前 `DecisionContext -> policy_context` 的组织方式：
 
 - `candidate_policy_views -> candidate dense features`
 - `page_policy_state -> page features`
 - `persona_policy_states -> persona features`
 
-当前仅读取新的 `DecisionModelContext` 结构：
+当前仅读取从 `DecisionContext` 内部派生出的策略视图结构：
 
 - `candidate_policy_views`
 - `page_policy_state`
@@ -85,7 +85,7 @@ class PackedDecisionFeatures:
 def pack_decision_features(context: DecisionContext) -> PackedDecisionFeatures:
     """把上下文打包为当前 runtime 可消费的定长特征。
 
-    优先读取新的 `DecisionModelContext` 字段；旧路径仅作为兼容。
+    优先从 `DecisionContext` 派生策略视图；若上下文已预构建同名字段则兼容读取。
     """
     policy = derive_policy_context(context)
     page_vector = build_page_features(context)

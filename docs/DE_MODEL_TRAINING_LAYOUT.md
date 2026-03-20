@@ -26,7 +26,7 @@
 
 runtime 侧负责：
 
-- 读取 `DecisionModelContext`
+- 读取 `DecisionContext` 并在内部派生策略视图
 - 提取轻量特征
 - 通过 heuristic runtime 或 torch runtime 做策略推理
 - 输出统一 runtime 协议
@@ -64,9 +64,9 @@ training 侧负责：
 
 ## 2. 当前运行时输入边界
 
-### 2.1 正式上下文：`DecisionModelContext`
+### 2.1 正式上下文：`DecisionContext`
 
-当前 runtime 的正式上下文已经收敛为 `DecisionModelContext`，核心组织为四块：
+当前 runtime 的正式上下文已经收敛为 `DecisionContext`，并在 decision 模块内部派生出四块策略视图：
 
 - `raw_refs`
 - `candidate_policy_views`
@@ -334,7 +334,7 @@ candidate 级最终动作标签，当前作为：
 ### 8.1 runtime 到训练
 
 ```text
-DecisionModelContext
+DecisionContext
 -> DecisionFeatureExtractor
 -> DecisionPlan
 -> runtime_bridge / dataset export
@@ -381,7 +381,7 @@ supervised JSONL
 
 当前文档和代码的直接对应关系如下：
 
-- `DecisionModelContext`：`privacyguard/application/services/decision_context_builder.py`
+- `DecisionContext`：`privacyguard/application/services/decision_context_builder.py`
 - 特征映射：`privacyguard/infrastructure/decision/features.py`
 - runtime 协议：`privacyguard/infrastructure/decision/de_model_runtime.py`
 - 网络头：`privacyguard/infrastructure/decision/tiny_policy_net.py`

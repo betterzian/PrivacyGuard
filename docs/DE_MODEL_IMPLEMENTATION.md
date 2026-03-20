@@ -11,7 +11,7 @@
 - `de_model` **不是 detector**
 - `de_model` **不是 OCR 纠错器**
 - 当前正式运行时**不引入 `EntityTruth`**
-- 当前正式上下文统一收敛到 `DecisionModelContext`
+- 当前正式上下文统一收敛到 `DecisionContext`，策略视图在 decision 模块内部派生
 - 当前最终执行动作统一为：
   - `KEEP`
   - `GENERICIZE`
@@ -70,10 +70,10 @@ OCR / prompt parse
 - `SessionPlaceholderAllocator` 负责为 `GENERICIZE` 分配 session-stable placeholder
 - `render + mapping store` 负责执行与闭环
 
-### 2.3 正式运行时上下文：`DecisionModelContext`
+### 2.3 正式运行时上下文：`DecisionContext`
 
-当前正式上下文对象是 `DecisionModelContext`。  
-它在工程上扩展了旧 `DecisionContext`，但新的正式组织结构已经收敛为四块：
+当前正式上下文对象是 `DecisionContext`。  
+`privacyguard/infrastructure/decision/policy_context.py` 会在 decision 模块内部从它派生出四块策略视图：
 
 - `raw_refs`
 - `candidate_policy_views`
@@ -152,7 +152,7 @@ persona 级状态用于表达当前 persona 集合对本轮候选的支持情况
 当前实现采用的是：
 
 - 原始真实对象：`PIICandidate`、`OCRTextBlock`、`ReplacementRecord`、`PersonaProfile`
-- 正式策略上下文：`DecisionModelContext`
+- 正式策略上下文：`DecisionContext` + 内部派生策略视图
 - 轻量特征边界：`PackedDecisionFeatures`
 - runtime 输出协议：`RuntimeCandidateDecision`
 - 最终执行动作：`DecisionAction`
@@ -223,21 +223,21 @@ persona 级状态用于表达当前 persona 集合对本轮候选的支持情况
 
 它负责：
 
-- 把候选、OCR、历史记录、persona、session binding 收敛为 `DecisionModelContext`
-- 生成 `candidate_policy_views`
-- 生成 `page_policy_state`
-- 生成 `persona_policy_states`
+- 把候选、OCR、历史记录、persona、session binding 收敛为 `DecisionContext`
+- 读取并归一化 protection level / detector overrides
+- 补齐 history records 与 persona profiles
 
 它不负责：
 
 - detector
+- 直接派生策略视图
 - 最终策略推理
 - restore
 - placeholder 分配
 
 ### 3.2 `privacyguard/infrastructure/decision/features.py`
 
-`features.py` 负责把 `DecisionModelContext` 映射为 runtime 可消费的轻量特征。
+`features.py` 负责把 `DecisionContext` 内部派生出的策略视图映射为 runtime 可消费的轻量特征。
 
 当前正式映射关系是：
 
@@ -507,6 +507,6 @@ runtime
 
 当前 PrivacyGuard 中的 `de_model` 已经收敛为：
 
-> 一个基于已有 `PIICandidate` 的策略决策层，以 `DecisionModelContext` 为正式上下文，以 `PackedDecisionFeatures` 为特征边界，以 `KEEP / GENERICIZE / PERSONA_SLOT` 为统一执行动作，并通过 mapping / restore 维持可恢复闭环。
+> 一个基于已有 `PIICandidate` 的策略决策层，以 `DecisionContext` 为正式上下文，在内部派生 policy context，以 `PackedDecisionFeatures` 为特征边界，以 `KEEP / GENERICIZE / PERSONA_SLOT` 为统一执行动作，并通过 mapping / restore 维持可恢复闭环。
 
 它不是 detector，不是 OCR 纠错器，也不依赖 `EntityTruth` 之类的重型运行时对象。

@@ -40,7 +40,7 @@ bbox 修复
 
 理论上可以继续说“真相层 / 关系层 / 策略层”，
 但代码里不再新增 EntityTruth -> EntityGroup -> ... 这种正式主链对象。
-正式运行时边界仍以 DecisionModelContext 及其轻量特征对象为主。这个方向与当前仓库的 DecisionContextBuilder -> DecisionFeatureExtractor 结构是一致的。
+正式运行时边界仍以 DecisionContext 及其内部派生策略视图、轻量特征对象为主。这个方向与当前仓库的 DecisionContextBuilder -> DecisionFeatureExtractor 结构是一致的。
 
 2.4 动作枚举统一到工程动作
 
@@ -81,7 +81,7 @@ QualityAggregator
 
 PersonaStateBuilder
 
-3.3 DecisionModelContext 内部改为 4 块
+3.3 decision 模块内部派生 4 块策略视图
 
 raw_refs
 
@@ -232,7 +232,7 @@ quality_aggregator 模块
 
 persona_state_builder 模块
 
-Phase 2：重构 DecisionModelContext
+Phase 2：收敛 DecisionContext 与内部派生策略视图
 目标
 
 在不引入 EntityTruth 的前提下，把模型输入上下文正式收束。
@@ -334,7 +334,7 @@ matched_candidate_attr_count
 
 验收标准
 
-DecisionModelContext 成为唯一正式策略上下文
+DecisionContext 成为唯一正式策略上下文
 
 不再出现引入 EntityTruth 的计划残留
 
@@ -342,7 +342,7 @@ DecisionModelContext 成为唯一正式策略上下文
 
 产出
 
-新版 DecisionModelContext
+新版 DecisionContext / policy_context
 
 context 构造单测
 

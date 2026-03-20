@@ -145,7 +145,7 @@ OCR / detector
 - `SessionService.get_or_create_binding(session_id)`
 - `DecisionContextBuilder.build(...)`
 
-`DecisionContextBuilder` 当前会把数据收敛为 `DecisionModelContext`，核心四块为：
+`DecisionContextBuilder` 当前会把数据收敛为 `DecisionContext`，随后 decision 模块内部派生出核心四块：
 
 - `raw_refs`
 - `candidate_policy_views`
@@ -154,7 +154,7 @@ OCR / detector
 
 ### 3.3.3 features
 
-`DecisionFeatureExtractor` 当前负责把 `DecisionModelContext` 映射为 runtime 可消费的特征：
+`DecisionFeatureExtractor` 当前负责把内部派生的策略视图映射为 runtime 可消费的特征：
 
 - `candidate_policy_views -> candidate features`
 - `page_policy_state -> page features`

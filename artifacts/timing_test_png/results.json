@@ -1,0 +1,1025 @@
+{
+  "image": "D:\\GitHub\\PrivacyGuard\\test.PNG",
+  "ocr": {
+    "engine_init_ms": 12465.636,
+    "extract_ms": 706.584,
+    "ocr_block_count": 40,
+    "sample_blocks": [
+      {
+        "text": "14:07",
+        "score": 0.9716,
+        "block_id": "ocr-0-0-104-49-125-48"
+      },
+      {
+        "text": ".15G",
+        "score": 0.6886,
+        "block_id": "ocr-1-1-833-63-144-50"
+      },
+      {
+        "text": "100",
+        "score": 0.9982,
+        "block_id": "ocr-2-2-981-63-88-49"
+      },
+      {
+        "text": "微信",
+        "score": 0.9997,
+        "block_id": "ocr-3-3-502-182-118-66"
+      },
+      {
+        "text": "+",
+        "score": 0.8811,
+        "block_id": "ocr-4-4-1016-190-47-48"
+      },
+      {
+        "text": "马局的书童丫鬟群",
+        "score": 0.9905,
+        "block_id": "ocr-5-5-223-299-413-64"
+      },
+      {
+        "text": "14:06",
+        "score": 0.9974,
+        "block_id": "ocr-6-6-975-300-107-41"
+      },
+      {
+        "text": "[捂脸]",
+        "score": 0.9993,
+        "block_id": "ocr-7-7-223-375-123-59"
+      },
+      {
+        "text": "李恩慧-哈尔滨滑雪",
+        "score": 0.999,
+        "block_id": "ocr-8-8-221-516-436-63"
+      },
+      {
+        "text": "14:02",
+        "score": 0.9962,
+        "block_id": "ocr-9-9-976-517-105-40"
+      },
+      {
+        "text": "[旺柴]",
+        "score": 0.9985,
+        "block_id": "ocr-10-10-223-592-122-55"
+      },
+      {
+        "text": "2024-26澳洲PhD(500)快快...",
+        "score": 0.9904,
+        "block_id": "ocr-11-11-223-733-705-59"
+      }
+    ]
+  },
+  "detector_results": [
+    {
+      "protection_level": "weak",
+      "timing_ms": 14.484,
+      "candidate_count": 8,
+      "candidates": [
+        {
+          "candidate_id": "85be4a4d18e292abd9a9499efe67e8a1",
+          "text": "李恩慧",
+          "attr_type": "name",
+          "source": "ocr",
+          "confidence": 0.96,
+          "block_id": "ocr-8-8-221-516-436-63",
+          "span_start": 0,
+          "span_end": 3
+        },
+        {
+          "candidate_id": "559d7bf611fb0f499f0a7cb550f37794",
+          "text": "李晓红",
+          "attr_type": "name",
+          "source": "ocr",
+          "confidence": 0.96,
+          "block_id": "ocr-29-29-224-1813-718-55",
+          "span_start": 6,
+          "span_end": 9
+        },
+        {
+          "candidate_id": "07a5749419b71f7acbe74a24f70c69b2",
+          "text": "哈尔滨",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-8-8-221-516-436-63",
+          "span_start": 4,
+          "span_end": 7
+        },
+        {
+          "candidate_id": "c61701300e8f7a02697ea1b9f1f37df5",
+          "text": "江宁区",
+          "attr_type": "address",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-28-28-225-1673-800-47",
+          "span_start": 10,
+          "span_end": 13
+        },
+        {
+          "candidate_id": "7ba37a221624c6840dee1d7899b59a9a",
+          "text": "2024-26",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-11-11-223-733-705-59",
+          "span_start": 0,
+          "span_end": 7
+        },
+        {
+          "candidate_id": "56fdc6a0d75025f4c3680cb434f00526",
+          "text": "25.12.4",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-13-13-226-812-721-47",
+          "span_start": 5,
+          "span_end": 12
+        },
+        {
+          "candidate_id": "d4911f2a42bd9768863cb4177d3e73db",
+          "text": "2025",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-28-28-225-1673-800-47",
+          "span_start": 5,
+          "span_end": 9
+        },
+        {
+          "candidate_id": "97a4ae74b25b766843cfe1c1224941e6",
+          "text": "15951169",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.98,
+          "block_id": "ocr-29-29-224-1813-718-55",
+          "span_start": 9,
+          "span_end": 17
+        }
+      ]
+    },
+    {
+      "protection_level": "balanced",
+      "timing_ms": 9.945,
+      "candidate_count": 9,
+      "candidates": [
+        {
+          "candidate_id": "85be4a4d18e292abd9a9499efe67e8a1",
+          "text": "李恩慧",
+          "attr_type": "name",
+          "source": "ocr",
+          "confidence": 0.92,
+          "block_id": "ocr-8-8-221-516-436-63",
+          "span_start": 0,
+          "span_end": 3
+        },
+        {
+          "candidate_id": "559d7bf611fb0f499f0a7cb550f37794",
+          "text": "李晓红",
+          "attr_type": "name",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-29-29-224-1813-718-55",
+          "span_start": 6,
+          "span_end": 9
+        },
+        {
+          "candidate_id": "07a5749419b71f7acbe74a24f70c69b2",
+          "text": "哈尔滨",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-8-8-221-516-436-63",
+          "span_start": 4,
+          "span_end": 7
+        },
+        {
+          "candidate_id": "c61701300e8f7a02697ea1b9f1f37df5",
+          "text": "江宁区",
+          "attr_type": "address",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-28-28-225-1673-800-47",
+          "span_start": 10,
+          "span_end": 13
+        },
+        {
+          "candidate_id": "f8ab0cec0c4ae1a7fa8dc219e1978bb9",
+          "text": "泰州",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "confidence": 0.86,
+          "block_id": "ocr-33-33-228-2107-822-45",
+          "span_start": 0,
+          "span_end": 2
+        },
+        {
+          "candidate_id": "7ba37a221624c6840dee1d7899b59a9a",
+          "text": "2024-26",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-11-11-223-733-705-59",
+          "span_start": 0,
+          "span_end": 7
+        },
+        {
+          "candidate_id": "56fdc6a0d75025f4c3680cb434f00526",
+          "text": "25.12.4",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-13-13-226-812-721-47",
+          "span_start": 5,
+          "span_end": 12
+        },
+        {
+          "candidate_id": "d4911f2a42bd9768863cb4177d3e73db",
+          "text": "2025",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-28-28-225-1673-800-47",
+          "span_start": 5,
+          "span_end": 9
+        },
+        {
+          "candidate_id": "97a4ae74b25b766843cfe1c1224941e6",
+          "text": "15951169",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.98,
+          "block_id": "ocr-29-29-224-1813-718-55",
+          "span_start": 9,
+          "span_end": 17
+        }
+      ]
+    },
+    {
+      "protection_level": "strong",
+      "timing_ms": 10.102,
+      "candidate_count": 9,
+      "candidates": [
+        {
+          "candidate_id": "85be4a4d18e292abd9a9499efe67e8a1",
+          "text": "李恩慧",
+          "attr_type": "name",
+          "source": "ocr",
+          "confidence": 0.92,
+          "block_id": "ocr-8-8-221-516-436-63",
+          "span_start": 0,
+          "span_end": 3
+        },
+        {
+          "candidate_id": "559d7bf611fb0f499f0a7cb550f37794",
+          "text": "李晓红",
+          "attr_type": "name",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-29-29-224-1813-718-55",
+          "span_start": 6,
+          "span_end": 9
+        },
+        {
+          "candidate_id": "07a5749419b71f7acbe74a24f70c69b2",
+          "text": "哈尔滨",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-8-8-221-516-436-63",
+          "span_start": 4,
+          "span_end": 7
+        },
+        {
+          "candidate_id": "c61701300e8f7a02697ea1b9f1f37df5",
+          "text": "江宁区",
+          "attr_type": "address",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-28-28-225-1673-800-47",
+          "span_start": 10,
+          "span_end": 13
+        },
+        {
+          "candidate_id": "f8ab0cec0c4ae1a7fa8dc219e1978bb9",
+          "text": "泰州",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "confidence": 0.86,
+          "block_id": "ocr-33-33-228-2107-822-45",
+          "span_start": 0,
+          "span_end": 2
+        },
+        {
+          "candidate_id": "7ba37a221624c6840dee1d7899b59a9a",
+          "text": "2024-26",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-11-11-223-733-705-59",
+          "span_start": 0,
+          "span_end": 7
+        },
+        {
+          "candidate_id": "56fdc6a0d75025f4c3680cb434f00526",
+          "text": "25.12.4",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-13-13-226-812-721-47",
+          "span_start": 5,
+          "span_end": 12
+        },
+        {
+          "candidate_id": "d4911f2a42bd9768863cb4177d3e73db",
+          "text": "2025",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.94,
+          "block_id": "ocr-28-28-225-1673-800-47",
+          "span_start": 5,
+          "span_end": 9
+        },
+        {
+          "candidate_id": "97a4ae74b25b766843cfe1c1224941e6",
+          "text": "15951169",
+          "attr_type": "other",
+          "source": "ocr",
+          "confidence": 0.98,
+          "block_id": "ocr-29-29-224-1813-718-55",
+          "span_start": 9,
+          "span_end": 17
+        }
+      ]
+    }
+  ],
+  "flow_results": [
+    {
+      "protection_level": "weak",
+      "decision_mode": "label_only",
+      "candidate_count": 8,
+      "action_count": 8,
+      "non_keep_action_count": 8,
+      "applied_replacement_count": 8,
+      "active_persona_id": null,
+      "timings_ms": {
+        "detector": 14.484,
+        "session_prepare": 0.04,
+        "context_build": 0.035,
+        "decision_plan": 0.083,
+        "placeholder_assign": 0.346,
+        "render_text": 0.067,
+        "render_image": 202.668,
+        "render_total": 202.735,
+        "total_pipeline_excluding_ocr": 217.723,
+        "total_pipeline_including_shared_ocr": 924.307
+      },
+      "actions": [
+        {
+          "candidate_id": "85be4a4d18e292abd9a9499efe67e8a1",
+          "action_type": "GENERICIZE",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "@姓名1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "559d7bf611fb0f499f0a7cb550f37794",
+          "action_type": "GENERICIZE",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "@姓名2",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        },
+        {
+          "candidate_id": "07a5749419b71f7acbe74a24f70c69b2",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "c61701300e8f7a02697ea1b9f1f37df5",
+          "action_type": "GENERICIZE",
+          "attr_type": "address",
+          "source": "ocr",
+          "replacement_text": "@地址1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "7ba37a221624c6840dee1d7899b59a9a",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-11-11-223-733-705-59"
+        },
+        {
+          "candidate_id": "56fdc6a0d75025f4c3680cb434f00526",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息2",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-13-13-226-812-721-47"
+        },
+        {
+          "candidate_id": "d4911f2a42bd9768863cb4177d3e73db",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息3",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "97a4ae74b25b766843cfe1c1224941e6",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息4",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        }
+      ],
+      "rendered_image": "D:\\GitHub\\PrivacyGuard\\artifacts\\timing_test_png\\weak_label_only.png",
+      "sanitized_prompt_text": ""
+    },
+    {
+      "protection_level": "weak",
+      "decision_mode": "label_persona_mixed",
+      "candidate_count": 8,
+      "action_count": 8,
+      "non_keep_action_count": 8,
+      "applied_replacement_count": 8,
+      "active_persona_id": "zhangsan",
+      "timings_ms": {
+        "detector": 14.484,
+        "session_prepare": 0.022,
+        "context_build": 0.042,
+        "decision_plan": 0.161,
+        "placeholder_assign": 0.309,
+        "render_text": 0.074,
+        "render_image": 172.829,
+        "render_total": 172.903,
+        "total_pipeline_excluding_ocr": 187.921,
+        "total_pipeline_including_shared_ocr": 894.505
+      },
+      "actions": [
+        {
+          "candidate_id": "85be4a4d18e292abd9a9499efe67e8a1",
+          "action_type": "PERSONA_SLOT",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "张三",
+          "persona_id": "zhangsan",
+          "reason": "高风险字段优先使用 persona 槽位。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "559d7bf611fb0f499f0a7cb550f37794",
+          "action_type": "PERSONA_SLOT",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "张三",
+          "persona_id": "zhangsan",
+          "reason": "高风险字段优先使用 persona 槽位。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        },
+        {
+          "candidate_id": "07a5749419b71f7acbe74a24f70c69b2",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置1",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "c61701300e8f7a02697ea1b9f1f37df5",
+          "action_type": "PERSONA_SLOT",
+          "attr_type": "address",
+          "source": "ocr",
+          "replacement_text": "上海市浦东新区",
+          "persona_id": "zhangsan",
+          "reason": "高风险字段优先使用 persona 槽位。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "7ba37a221624c6840dee1d7899b59a9a",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息1",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-11-11-223-733-705-59"
+        },
+        {
+          "candidate_id": "56fdc6a0d75025f4c3680cb434f00526",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息2",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-13-13-226-812-721-47"
+        },
+        {
+          "candidate_id": "d4911f2a42bd9768863cb4177d3e73db",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息3",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "97a4ae74b25b766843cfe1c1224941e6",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息4",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        }
+      ],
+      "rendered_image": "D:\\GitHub\\PrivacyGuard\\artifacts\\timing_test_png\\weak_label_persona_mixed.png",
+      "sanitized_prompt_text": ""
+    },
+    {
+      "protection_level": "balanced",
+      "decision_mode": "label_only",
+      "candidate_count": 9,
+      "action_count": 9,
+      "non_keep_action_count": 9,
+      "applied_replacement_count": 9,
+      "active_persona_id": null,
+      "timings_ms": {
+        "detector": 9.945,
+        "session_prepare": 0.02,
+        "context_build": 0.037,
+        "decision_plan": 0.074,
+        "placeholder_assign": 0.414,
+        "render_text": 0.068,
+        "render_image": 212.457,
+        "render_total": 212.525,
+        "total_pipeline_excluding_ocr": 223.015,
+        "total_pipeline_including_shared_ocr": 929.599
+      },
+      "actions": [
+        {
+          "candidate_id": "85be4a4d18e292abd9a9499efe67e8a1",
+          "action_type": "GENERICIZE",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "@姓名1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "559d7bf611fb0f499f0a7cb550f37794",
+          "action_type": "GENERICIZE",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "@姓名2",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        },
+        {
+          "candidate_id": "07a5749419b71f7acbe74a24f70c69b2",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "c61701300e8f7a02697ea1b9f1f37df5",
+          "action_type": "GENERICIZE",
+          "attr_type": "address",
+          "source": "ocr",
+          "replacement_text": "@地址1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "f8ab0cec0c4ae1a7fa8dc219e1978bb9",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置2",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-33-33-228-2107-822-45"
+        },
+        {
+          "candidate_id": "7ba37a221624c6840dee1d7899b59a9a",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-11-11-223-733-705-59"
+        },
+        {
+          "candidate_id": "56fdc6a0d75025f4c3680cb434f00526",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息2",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-13-13-226-812-721-47"
+        },
+        {
+          "candidate_id": "d4911f2a42bd9768863cb4177d3e73db",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息3",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "97a4ae74b25b766843cfe1c1224941e6",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息4",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        }
+      ],
+      "rendered_image": "D:\\GitHub\\PrivacyGuard\\artifacts\\timing_test_png\\balanced_label_only.png",
+      "sanitized_prompt_text": ""
+    },
+    {
+      "protection_level": "balanced",
+      "decision_mode": "label_persona_mixed",
+      "candidate_count": 9,
+      "action_count": 9,
+      "non_keep_action_count": 9,
+      "applied_replacement_count": 9,
+      "active_persona_id": "zhangsan",
+      "timings_ms": {
+        "detector": 9.945,
+        "session_prepare": 0.019,
+        "context_build": 0.037,
+        "decision_plan": 0.143,
+        "placeholder_assign": 0.349,
+        "render_text": 0.064,
+        "render_image": 209.996,
+        "render_total": 210.06,
+        "total_pipeline_excluding_ocr": 220.553,
+        "total_pipeline_including_shared_ocr": 927.137
+      },
+      "actions": [
+        {
+          "candidate_id": "85be4a4d18e292abd9a9499efe67e8a1",
+          "action_type": "PERSONA_SLOT",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "张三",
+          "persona_id": "zhangsan",
+          "reason": "高风险字段优先使用 persona 槽位。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "559d7bf611fb0f499f0a7cb550f37794",
+          "action_type": "PERSONA_SLOT",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "张三",
+          "persona_id": "zhangsan",
+          "reason": "高风险字段优先使用 persona 槽位。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        },
+        {
+          "candidate_id": "07a5749419b71f7acbe74a24f70c69b2",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置1",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "c61701300e8f7a02697ea1b9f1f37df5",
+          "action_type": "PERSONA_SLOT",
+          "attr_type": "address",
+          "source": "ocr",
+          "replacement_text": "上海市浦东新区",
+          "persona_id": "zhangsan",
+          "reason": "高风险字段优先使用 persona 槽位。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "f8ab0cec0c4ae1a7fa8dc219e1978bb9",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置2",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-33-33-228-2107-822-45"
+        },
+        {
+          "candidate_id": "7ba37a221624c6840dee1d7899b59a9a",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息1",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-11-11-223-733-705-59"
+        },
+        {
+          "candidate_id": "56fdc6a0d75025f4c3680cb434f00526",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息2",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-13-13-226-812-721-47"
+        },
+        {
+          "candidate_id": "d4911f2a42bd9768863cb4177d3e73db",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息3",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "97a4ae74b25b766843cfe1c1224941e6",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息4",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        }
+      ],
+      "rendered_image": "D:\\GitHub\\PrivacyGuard\\artifacts\\timing_test_png\\balanced_label_persona_mixed.png",
+      "sanitized_prompt_text": ""
+    },
+    {
+      "protection_level": "strong",
+      "decision_mode": "label_only",
+      "candidate_count": 9,
+      "action_count": 9,
+      "non_keep_action_count": 9,
+      "applied_replacement_count": 9,
+      "active_persona_id": null,
+      "timings_ms": {
+        "detector": 10.102,
+        "session_prepare": 0.019,
+        "context_build": 0.037,
+        "decision_plan": 0.075,
+        "placeholder_assign": 0.402,
+        "render_text": 0.063,
+        "render_image": 207.698,
+        "render_total": 207.761,
+        "total_pipeline_excluding_ocr": 218.396,
+        "total_pipeline_including_shared_ocr": 924.98
+      },
+      "actions": [
+        {
+          "candidate_id": "85be4a4d18e292abd9a9499efe67e8a1",
+          "action_type": "GENERICIZE",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "@姓名1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "559d7bf611fb0f499f0a7cb550f37794",
+          "action_type": "GENERICIZE",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "@姓名2",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        },
+        {
+          "candidate_id": "07a5749419b71f7acbe74a24f70c69b2",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "c61701300e8f7a02697ea1b9f1f37df5",
+          "action_type": "GENERICIZE",
+          "attr_type": "address",
+          "source": "ocr",
+          "replacement_text": "@地址1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "f8ab0cec0c4ae1a7fa8dc219e1978bb9",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置2",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-33-33-228-2107-822-45"
+        },
+        {
+          "candidate_id": "7ba37a221624c6840dee1d7899b59a9a",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息1",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-11-11-223-733-705-59"
+        },
+        {
+          "candidate_id": "56fdc6a0d75025f4c3680cb434f00526",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息2",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-13-13-226-812-721-47"
+        },
+        {
+          "candidate_id": "d4911f2a42bd9768863cb4177d3e73db",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息3",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "97a4ae74b25b766843cfe1c1224941e6",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息4",
+          "persona_id": null,
+          "reason": "label_only 统一使用标准标签。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        }
+      ],
+      "rendered_image": "D:\\GitHub\\PrivacyGuard\\artifacts\\timing_test_png\\strong_label_only.png",
+      "sanitized_prompt_text": ""
+    },
+    {
+      "protection_level": "strong",
+      "decision_mode": "label_persona_mixed",
+      "candidate_count": 9,
+      "action_count": 9,
+      "non_keep_action_count": 9,
+      "applied_replacement_count": 9,
+      "active_persona_id": "zhangsan",
+      "timings_ms": {
+        "detector": 10.102,
+        "session_prepare": 0.019,
+        "context_build": 0.038,
+        "decision_plan": 0.13,
+        "placeholder_assign": 0.364,
+        "render_text": 0.067,
+        "render_image": 205.519,
+        "render_total": 205.586,
+        "total_pipeline_excluding_ocr": 216.239,
+        "total_pipeline_including_shared_ocr": 922.823
+      },
+      "actions": [
+        {
+          "candidate_id": "85be4a4d18e292abd9a9499efe67e8a1",
+          "action_type": "PERSONA_SLOT",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "张三",
+          "persona_id": "zhangsan",
+          "reason": "高风险字段优先使用 persona 槽位。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "559d7bf611fb0f499f0a7cb550f37794",
+          "action_type": "PERSONA_SLOT",
+          "attr_type": "name",
+          "source": "ocr",
+          "replacement_text": "张三",
+          "persona_id": "zhangsan",
+          "reason": "高风险字段优先使用 persona 槽位。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        },
+        {
+          "candidate_id": "07a5749419b71f7acbe74a24f70c69b2",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置1",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-8-8-221-516-436-63"
+        },
+        {
+          "candidate_id": "c61701300e8f7a02697ea1b9f1f37df5",
+          "action_type": "PERSONA_SLOT",
+          "attr_type": "address",
+          "source": "ocr",
+          "replacement_text": "上海市浦东新区",
+          "persona_id": "zhangsan",
+          "reason": "高风险字段优先使用 persona 槽位。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "f8ab0cec0c4ae1a7fa8dc219e1978bb9",
+          "action_type": "GENERICIZE",
+          "attr_type": "location_clue",
+          "source": "ocr",
+          "replacement_text": "@位置2",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-33-33-228-2107-822-45"
+        },
+        {
+          "candidate_id": "7ba37a221624c6840dee1d7899b59a9a",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息1",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-11-11-223-733-705-59"
+        },
+        {
+          "candidate_id": "56fdc6a0d75025f4c3680cb434f00526",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息2",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-13-13-226-812-721-47"
+        },
+        {
+          "candidate_id": "d4911f2a42bd9768863cb4177d3e73db",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息3",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-28-28-225-1673-800-47"
+        },
+        {
+          "candidate_id": "97a4ae74b25b766843cfe1c1224941e6",
+          "action_type": "GENERICIZE",
+          "attr_type": "other",
+          "source": "ocr",
+          "replacement_text": "@敏感信息4",
+          "persona_id": null,
+          "reason": "非 persona 优先字段使用通用标签。",
+          "block_id": "ocr-29-29-224-1813-718-55"
+        }
+      ],
+      "rendered_image": "D:\\GitHub\\PrivacyGuard\\artifacts\\timing_test_png\\strong_label_persona_mixed.png",
+      "sanitized_prompt_text": ""
+    }
+  ]
+}
