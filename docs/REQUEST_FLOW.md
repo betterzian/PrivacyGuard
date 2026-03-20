@@ -1,6 +1,21 @@
-# PrivacyGuard 请求全流程说明
+# PrivacyGuard 请求流程
 
-本文档按当前代码梳理一次完整的 `sanitize -> restore` 调用链，目标是帮助你从顶层 API 一路跳到实际实现。
+本文档按当前代码说明 `sanitize` 与 `restore` 的真实请求链路。
+
+需要先明确：
+
+- `de_model` 是**策略决策层**
+- `de_model` **不是 detector**
+- `de_model` **不是 OCR 清洗主逻辑**
+- `de_model` **不负责复杂 linking**
+
+当前内部动作术语统一为：
+
+- `KEEP`
+- `GENERICIZE`
+- `PERSONA_SLOT`
+
+---
 
 ## 1. 顶层入口
 
@@ -10,85 +25,45 @@
 from privacyguard import PrivacyGuard
 ```
 
-包导出位于：
-
-- `privacyguard/__init__.py`
-
 实际类位于：
 
 - `privacyguard/app/privacy_guard.py`
 
-另一个顶层入口是：
+`PrivacyGuard` 的职责是：
 
-```python
-from privacyguard import PrivacyRepository
-```
+- 接收外部 payload
+- 转为边界层 request model / DTO
+- 调用 sanitize / restore pipeline
+- 返回外部响应字典
 
-它负责写入本地 persona 仓库，位于：
+它不承担 detector、OCR、runtime、restore 规则的内部细节。
 
-- `privacyguard/app/privacy_repository.py`
+---
 
-## 2. `PrivacyGuard.__init__` 的真实装配顺序
+## 2. `PrivacyGuard.__init__` 的装配
 
-### 2.1 注册表与默认模式
-
-`PrivacyGuard.__init__()` 先做三件事：
-
-1. `get_or_create_registry()`
-2. `normalize_detector_mode()`
-3. `normalize_decision_mode()`
-
-当前默认值来自 `privacyguard/bootstrap/mode_config.py`：
-
-- `DEFAULT_DETECTOR_MODE = "rule_based"`
-- `DEFAULT_DECISION_MODE = "de_model"`
-- `DEFAULT_FILL_MODE = "mix"`
-
-### 2.2 注册到默认 registry 的组件
-
-默认 registry 会注册这些实现：
-
-| 类别 | 注册键 |
-| --- | --- |
-| OCR | `placeholder`、`ppocr_v5` |
-| detector | `placeholder`、`rule_based` |
-| decision | `placeholder`、`label_only`、`label_persona_mixed`、`de_model` |
-| mapping store | `placeholder`、`in_memory`、`json` |
-| persona repository | `placeholder`、`in_memory`、`json` |
-| rendering | `placeholder`、`prompt_renderer` |
-| restoration | `placeholder`、`action_restorer` |
-| screenshot fill | `ring`、`gradient`、`cv`、`mix` |
-
-### 2.3 依赖构建顺序
-
-如果调用方没有显式注入依赖，`PrivacyGuard` 会依次构建：
+如果调用方没有显式注入依赖，`PrivacyGuard` 当前会装配：
 
 1. `persona_repo`
-   默认 `JsonPersonaRepository`
 2. `mapping_table`
-   默认 `InMemoryMappingStore`
 3. `ocr`
-   默认 `PPOCREngineAdapter`
 4. `renderer`
-   默认 `PromptRenderer`
-   如果显式传了 `screenshot_fill_mode`，会先构建对应 `ScreenshotFillStrategy`
 5. `restoration`
-   默认 `ActionRestorer`
 6. `detector`
-   通过 `build_detector(...)`
 7. `decision_engine`
-   通过 `build_decision(...)`
 8. `SanitizePipeline`
 9. `RestorePipeline`
 
-补充两点：
+也就是说：
 
-- `PPOCREngineAdapter` 会尝试自动加载 PaddleOCR；如果当前环境没有 `paddleocr`，构造阶段不会报错，而是回退到 `MissingDependencyOCRBackend`
-- 真正处理截图时，缺失 OCR 依赖才会显式报错
+- 顶层 facade 负责装配
+- 具体 sanitize / restore 主链交给 pipeline
+
+---
 
 ## 3. `sanitize` 请求流
 
-### 3.1 边界层
+## 3.1 外部 payload
 
 调用入口：
 
@@ -96,14 +71,7 @@ from privacyguard import PrivacyRepository
 guard.sanitize(payload)
 ```
 
-边界层顺序如下：
-
-1. `SanitizeRequestModel.from_payload(payload)`
-2. `SanitizePayloadModel.model_validate(payload)`
-3. `SanitizeRequestModel.to_dto()`
-4. `SanitizePipeline.run(request)`
-
-当前 payload 字段为：
+当前外部 payload 主要字段是：
 
 - `session_id`
 - `turn_id`
@@ -112,132 +80,154 @@ guard.sanitize(payload)
 - `protection_level`
 - `detector_overrides`
 
-其中 `detector_overrides` 只接受：
+## 3.2 边界层转换
 
-- `name`
-- `location_clue`
-- `address`
-- `organization`
-- `other`
+当前边界层顺序是：
 
-### 3.2 application 层主流程
+1. `SanitizeRequestModel.from_payload(payload)`
+2. `SanitizePayloadModel.model_validate(payload)`
+3. `SanitizeRequestModel.to_dto()`
+4. `SanitizePipeline.run(request)`
 
-`SanitizePipeline.run()` 最终调用：
+这里完成的是：
 
-```python
-run_sanitize_pipeline(
-    request=request.to_dto(),
-    ocr_engine=...,
-    pii_detector=...,
-    persona_repository=...,
-    mapping_store=...,
-    decision_engine=...,
-    rendering_engine=...,
-)
+- 外部 payload 校验
+- DTO 转换
+
+不是策略推理。
+
+## 3.3 当前 sanitize 主链
+
+`SanitizePipeline.run()` 最终调用 `run_sanitize_pipeline(...)`。  
+当前真实链路可以收敛为：
+
+```text
+OCR / detector
+-> context build
+-> features
+-> runtime
+-> resolver
+-> render
+-> mapping
 ```
 
-`run_sanitize_pipeline()` 当前的实际顺序是：
+展开到当前代码，对应顺序是：
 
-1. 创建 `DecisionContextBuilder`
-2. 若 `request.screenshot is not None`，执行 `ocr_engine.extract(request.screenshot)`；否则 `ocr_blocks = []`
-3. 调用 detector
-4. 创建 `SessionService`
-5. `get_or_create_binding(session_id)`
-6. `DecisionContextBuilder.build(...)`
-7. `decision_engine.plan(decision_context)`
-8. `SessionPlaceholderAllocator.assign(plan)`
-9. `rendering_engine.render_text(request.prompt_text, plan)`
-10. 若有截图，执行 `rendering_engine.render_image(request.screenshot, plan, ocr_blocks=ocr_blocks)`
-11. `session_service.append_turn_replacements(...)`
-12. 如果 `plan.active_persona_id` 存在，则 `session_service.bind_active_persona(...)`
-13. 返回 `SanitizeResponse`
+1. OCR / prompt parse
+2. detector
+3. alias / session context preparation
+4. local context / quality / persona state preparation
+5. `DecisionContextBuilder`
+6. `DecisionFeatureExtractor`
+7. `DEModelEngine / runtime`
+8. `ConstraintResolver`
+9. placeholder allocation / replacement planning
+10. render
+11. mapping store
 
-### 3.3 detector 调用方式
+### 3.3.1 OCR / detector
 
-`run_sanitize_pipeline()` 不会假定 detector 一定支持全部上下文字段，而是用 `inspect.signature()` 做兼容调用。
+当前主链先做：
 
-固定会传：
+- 如果有截图，`ocr_engine.extract(request.screenshot)`
+- 调用 detector 生成 `PIICandidate`
 
-- `prompt_text`
-- `ocr_blocks`
+这里 detector 负责：
 
-如果 detector 的签名里包含这些参数，则还会补传：
+- 候选发现
 
-- `session_id`
-- `turn_id`
-- `protection_level`
-- `detector_overrides`
+而不是 `de_model` 负责。
 
-因此：
+### 3.3.2 context build
 
-- 老 detector 只实现 `detect(prompt_text, ocr_blocks)` 也能工作
-- `RuleBasedPIIDetector` 这类上下文感知实现可以拿到完整请求信息
+在当前链路里，context build 包括：
 
-### 3.4 `DecisionContextBuilder` 构造了什么
+- `SessionService.get_or_create_binding(session_id)`
+- `DecisionContextBuilder.build(...)`
 
-当前 `DecisionContextBuilder` 会把这些信息统一装进 `DecisionContext`：
+`DecisionContextBuilder` 当前会把数据收敛为 `DecisionModelContext`，核心四块为：
 
-- `session_id`
-- `turn_id`
-- `prompt_text`
-- `protection_level`
-- `detector_overrides`
-- `ocr_blocks`
-- `candidates`
-- `session_binding`
-- `history_records`
-  当前 session 的全部历史替换记录
-- `persona_profiles`
-- `page_features`
-- `candidate_features`
-- `persona_features`
+- `raw_refs`
+- `candidate_policy_views`
+- `page_policy_state`
+- `persona_policy_states`
 
-这一步是 `de_model`、`label_only`、`label_persona_mixed` 共享的决策边界。
+### 3.3.3 features
 
-### 3.5 占位符分配
+`DecisionFeatureExtractor` 当前负责把 `DecisionModelContext` 映射为 runtime 可消费的特征：
 
-`decision_engine.plan()` 返回后，`SessionPlaceholderAllocator` 会继续处理 `DecisionPlan`：
+- `candidate_policy_views -> candidate features`
+- `page_policy_state -> page features`
+- `persona_policy_states -> persona features`
 
-- 只处理 `GENERICIZE`
-- 按 `(attr_type, canonical_source_text/source_text)` 复用 session 内已有占位符
-- 否则生成新的 `@姓名1`、`@地址2` 这类标签
+文本通道仍存在，但定位为辅助输入：
 
-这一步发生在渲染之前，所以最终写入 mapping store 的已经是稳定占位符。
+- `candidate_text`
+- `prompt_context`
+- `ocr_context`
 
-### 3.6 渲染
+### 3.3.4 runtime
 
-`PromptRenderer.render_text()`：
+`DEModelEngine.plan(...)` 内部会：
 
-- 先把 `DecisionAction` 转成 `ReplacementRecord`
-- 对 prompt 来源记录优先按 `span_start / span_end` 重建文本
-- 对缺 span 的旧记录再做保守替换
+1. `DecisionFeatureExtractor.pack(context)`
+2. 调用 heuristic runtime 或 torch runtime
+3. 得到统一 runtime 输出协议
 
-`PromptRenderer.render_image()`：
+当前 runtime 输出会整理为两级视角：
 
-- 实际委托给 `ScreenshotRenderer.render()`
-- 依赖 `DecisionPlan + ocr_blocks`
-- 可处理同 block 局部替换、跨 block 替换、地址语义切分和不同填充策略
+- `protect_decision`
+- `rewrite_mode`
 
-### 3.7 写入 mapping 和 session binding
+但最终执行动作仍统一为：
 
-渲染完成后，`SessionService` 会：
+- `KEEP`
+- `GENERICIZE`
+- `PERSONA_SLOT`
 
-1. `save_replacements(session_id, turn_id, records)`
-2. 更新 `SessionBinding.last_turn_id`
-3. 更新 `SessionBinding.updated_at`
-4. 如果本轮选中了 persona，则更新 `active_persona_id`
+### 3.3.5 resolver
 
-### 3.8 对外响应
+当前默认引擎路径中，runtime 之后会进入 `ConstraintResolver`。
 
-application 层返回的 `SanitizeResponse` 包含：
+它当前负责：
 
-- `sanitized_prompt_text`
-- `sanitized_screenshot`
-- `active_persona_id`
-- `replacements`
-- `metadata`
+- 规范 `KEEP`
+- 检查 `PERSONA_SLOT` 的 persona 可用性
+- persona 缺失时回退为 `GENERICIZE`
+- 为缺失 replacement 的 `GENERICIZE` 补标准 placeholder
 
-但顶层 `PrivacyGuard.sanitize()` 经过 `SanitizeResponseModel` 转换后，对外只返回：
+也就是说：
+
+- runtime 给出策略倾向
+- resolver 收敛为当前可执行动作
+
+### 3.3.6 render
+
+当前 render 包括：
+
+- `rendering_engine.render_text(...)`
+- 如果有截图，`rendering_engine.render_image(...)`
+
+render 阶段使用的是已经收敛好的动作计划，而不是再去做 detector 或策略判断。
+
+### 3.3.7 mapping
+
+渲染完成后，当前主链会：
+
+- 写入当前 turn 的 replacement records
+- 更新 session binding
+
+这里的关键闭环是：
+
+- `KEEP` 不进入有效 replacement record
+- `GENERICIZE` 会进入 mapping
+- `PERSONA_SLOT` 会进入 mapping
+
+因此后续 restore 仍然建立在 replacement-record 驱动模型上。
+
+## 3.4 sanitize 对外响应
+
+application 层内部返回的是 `SanitizeResponse`，但顶层 facade 最终对外返回的稳定字段是：
 
 - `status`
 - `masked_prompt`
@@ -247,9 +237,19 @@ application 层返回的 `SanitizeResponse` 包含：
 - `mapping_count`
 - `active_persona_id`
 
+内部字段例如：
+
+- `protect_decision`
+- `rewrite_mode`
+- `page_policy_state`
+
+不会直接暴露到外部 facade 响应里。
+
+---
+
 ## 4. `restore` 请求流
 
-### 4.1 边界层
+## 4.1 外部 payload
 
 调用入口：
 
@@ -257,103 +257,104 @@ application 层返回的 `SanitizeResponse` 包含：
 guard.restore(payload)
 ```
 
-顺序如下：
+当前外部 payload 主要字段是：
+
+- `session_id`
+- `turn_id`
+- `agent_text`
+
+## 4.2 边界层转换
+
+当前顺序是：
 
 1. `RestoreRequestModel.from_payload(payload)`
 2. `RestorePayloadModel.model_validate(payload)`
 3. `RestoreRequestModel.to_dto()`
 4. `RestorePipeline.run(request)`
 
-payload 字段只有：
+## 4.3 当前 restore 主链
 
-- `session_id`
-- `turn_id`
-- `agent_text`
+当前 restore 主链非常收敛：
 
-### 4.2 application 层主流程
-
-`RestorePipeline.run()` 最终调用：
-
-```python
-run_restore_pipeline(
-    request=request.to_dto(),
-    mapping_store=...,
-    restoration_module=...,
-)
+```text
+current turn replacement record
+-> text restore
 ```
 
-`run_restore_pipeline()` 当前只做四步：
+具体来说：
 
-1. `mapping_store.get_replacements(session_id, turn_id)`
-2. `_merge_records(current_turn_records)`
-3. `restoration_module.restore(request.cloud_text, combined_records)`
+1. 从 `mapping_store` 读取当前 `session_id + turn_id` 的 replacement records
+2. 只保留可恢复记录
+3. 调用 `restoration_module.restore(cloud_text, records)`
 4. 返回 `RestoreResponse`
 
-### 4.3 `_merge_records()` 的语义
+### 4.3.1 当前 turn replacement record
 
-当前 `_merge_records()` 只对当前 turn 记录去重：
+restore 当前明确只使用：
 
-- key 是 `replacement_text`
-- 长 placeholder 优先
-- 不会把历史 turn 记录合并进来
+- 当前 turn 的 `ReplacementRecord`
 
-这也是当前 restore 只恢复当前轮文本的原因。
+不做：
 
-### 4.4 `ActionRestorer.restore()` 的语义
+- 全会话 restore
+- DSL restore
+- 对 de_model 决策做逆向推理
 
-`ActionRestorer` 会：
+### 4.3.2 动作兼容规则
 
-1. 按 `(turn_id, len(replacement_text))` 倒序处理记录
-2. 对每个 placeholder 只恢复一次
-3. 使用 `canonical_source_text` 优先，否则回退 `source_text`
-4. 产出 `restored_text` 和 `restored_slots`
+当前 restore 对动作语义的兼容规则是：
 
-但顶层 `PrivacyGuard.restore()` 最终只把这三个字段暴露给调用方：
+- `KEEP` 不参与 restore
+- `GENERICIZE` 可以通过 replacement record 恢复
+- `PERSONA_SLOT` 可以通过 replacement record 恢复
+- 旧别名 `LABEL` 视作 `GENERICIZE`
+
+因此 restore 的边界很清楚：
+
+- 它不关心内部 runtime 怎么得出策略
+- 它只依赖 replacement record
+
+## 4.4 restore 对外响应
+
+顶层 facade 当前对外返回：
 
 - `status`
 - `restored_text`
 - `session_id`
 
-## 5. 模块对照
+restore 内部的 `restored_slots` 和 metadata 当前不作为 facade 稳定响应的主要字段暴露。
 
-| 层次 | 路径 | 当前职责 |
-| --- | --- | --- |
-| 顶层 API | `privacyguard/app/privacy_guard.py` | `PrivacyGuard` 装配与对外入口 |
-| 顶层仓库写入 | `privacyguard/app/privacy_repository.py` | `PrivacyRepository.write()` |
-| Schema/DTO | `privacyguard/app/schemas.py`、`privacyguard/api/dto.py` | 请求响应校验与模型转换 |
-| Pipeline 包装 | `privacyguard/app/pipelines.py` | app 层与 application 层之间的胶水 |
-| 应用编排 | `privacyguard/application/pipelines/` | sanitize / restore 固定步骤 |
-| 应用服务 | `privacyguard/application/services/` | session、placeholder、decision context 等 |
-| 领域层 | `privacyguard/domain/` | 枚举、接口、模型、约束解析 |
-| 基础设施 | `privacyguard/infrastructure/` | detector / decision / ocr / rendering / mapping / restoration / persona |
-| 启动配置 | `privacyguard/bootstrap/` | registry、工厂、模式归一化 |
+---
 
-## 6. 简化数据流
+## 5. 当前代码对应关系
 
-```text
-sanitize payload
-  -> SanitizeRequestModel
-  -> SanitizeRequest DTO
-  -> OCR (optional)
-  -> detector.detect(...)
-  -> SessionService.get_or_create_binding(...)
-  -> DecisionContextBuilder.build(...)
-  -> decision_engine.plan(context)
-  -> SessionPlaceholderAllocator.assign(...)
-  -> PromptRenderer.render_text(...)
-  -> ScreenshotRenderer.render(...) (optional)
-  -> mapping_store.save_replacements(...)
-  -> SanitizeResponse DTO
-  -> SanitizeResponseModel
-  -> dict
+### sanitize
 
-restore payload
-  -> RestoreRequestModel
-  -> RestoreRequest DTO
-  -> mapping_store.get_replacements(session_id, turn_id)
-  -> _merge_records(current_turn_records)
-  -> ActionRestorer.restore(...)
-  -> RestoreResponse DTO
-  -> RestoreResponseModel
-  -> dict
-```
+- 顶层入口：`privacyguard/app/privacy_guard.py`
+- pipeline 封装：`privacyguard/app/pipelines.py`
+- application 主链：`privacyguard/application/pipelines/sanitize_pipeline.py`
+- 上下文组装：`privacyguard/application/services/decision_context_builder.py`
+- 特征提取：`privacyguard/infrastructure/decision/features.py`
+- runtime：`privacyguard/infrastructure/decision/de_model_runtime.py`
+- 引擎：`privacyguard/infrastructure/decision/de_model_engine.py`
+- 默认约束收敛：`privacyguard/domain/policies/constraint_resolver.py`
+- placeholder 分配：`privacyguard/application/services/placeholder_allocator.py`
+
+### restore
+
+- 顶层入口：`privacyguard/app/privacy_guard.py`
+- pipeline 封装：`privacyguard/app/pipelines.py`
+- application 主链：`privacyguard/application/pipelines/restore_pipeline.py`
+- mapping store：`privacyguard/domain/interfaces/mapping_store.py` 及其实现
+- restoration module：`privacyguard/domain/interfaces/restoration_module.py` 及其实现
+
+---
+
+## 6. 当前实现一句话总结
+
+当前请求链路可以概括为：
+
+- `sanitize`: `OCR/detector -> context build -> features -> runtime -> resolver -> render -> mapping`
+- `restore`: `current turn replacement record -> text restore`
+
+其中 `de_model` 只是中间的策略决策层，不负责检测、OCR 清洗主逻辑或复杂 linking。

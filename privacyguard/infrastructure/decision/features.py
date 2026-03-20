@@ -1,11 +1,31 @@
-"""de_model 特征提取与张量打包骨架。"""
+"""de_model 特征提取与张量打包。
+
+本模块已对齐新的 `DecisionModelContext` 组织方式：
+
+- `candidate_policy_views -> candidate dense features`
+- `page_policy_state -> page features`
+- `persona_policy_states -> persona features`
+
+同时保留旧 `DecisionContext` 读取路径兼容：
+
+- 优先读取新结构
+- 兼容读取旧 `candidate_features / page_features / persona_features`
+- TODO: 当全部调用方都切到新结构后，删除旧路径兼容
+
+注意：
+
+- 文本通道只保留为辅助信号；dense vector 中仅编码轻量 text signature
+- 真正的文本序列仍由上游/训练侧按现有链路消费
+- 本模块不做策略推理
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
+from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.domain.models.decision_context import DecisionContext
+from privacyguard.utils.pii_value import canonicalize_pii_value
 
 PAGE_FEATURE_NAMES: tuple[str, ...] = (
     "prompt_length",
@@ -36,8 +56,15 @@ TEXT_SIGNATURE_DIM = 5
 PAGE_FEATURE_DIM = len(PAGE_FEATURE_NAMES)
 ATTR_ONE_HOT_DIM = len(ATTR_FEATURE_ORDER)
 SOURCE_ONE_HOT_DIM = len(SOURCE_FEATURE_ORDER)
+# 维度保持兼容，避免影响当前 TinyPolicyNet / runtime / 训练 batch。
 CANDIDATE_FEATURE_DIM = ATTR_ONE_HOT_DIM + SOURCE_ONE_HOT_DIM + 1 + 4 + 4 + 3 + TEXT_SIGNATURE_DIM * 3
 PERSONA_FEATURE_DIM = 4 + ATTR_ONE_HOT_DIM + TEXT_SIGNATURE_DIM * 2
+
+_ADDRESS_HINT_TOKENS = ("省", "市", "区", "县", "路", "街", "道", "号", "小区", "公寓")
+_LOW_CANDIDATE_CONFIDENCE = 0.5
+_HIGH_CANDIDATE_CONFIDENCE = 0.85
+_LOW_OCR_BLOCK_SCORE = 0.75
+_MASK_CHARS = set("*＊xX×#＃•●○◦◯_＿?？")
 
 
 @dataclass(slots=True)
@@ -51,117 +78,807 @@ class PackedDecisionFeatures:
     persona_vectors: list[list[float]]
 
 
+def pack_decision_features(context: DecisionContext) -> PackedDecisionFeatures:
+    """把上下文打包为当前 runtime 可消费的定长特征。
+
+    优先读取新的 `DecisionModelContext` 字段；旧路径仅作为兼容。
+    """
+    page_vector = build_page_features(context)
+    text_inputs = build_text_inputs(context)
+
+    candidate_ids: list[str] = []
+    candidate_vectors: list[list[float]] = []
+    for candidate_policy_view in _candidate_policy_views(context):
+        candidate_id = str(candidate_policy_view.get("candidate_id", "")).strip()
+        if not candidate_id:
+            continue
+        candidate_ids.append(candidate_id)
+        candidate_vectors.append(
+            build_candidate_dense_features(
+                context=context,
+                candidate_policy_view=candidate_policy_view,
+                text_inputs=text_inputs,
+            )
+        )
+
+    persona_ids: list[str] = []
+    persona_vectors: list[list[float]] = []
+    for persona_policy_state in _persona_policy_states(context):
+        persona_id = str(persona_policy_state.get("persona_id", "")).strip()
+        if not persona_id:
+            continue
+        persona_ids.append(persona_id)
+        persona_vectors.append(
+            build_persona_features(
+                context=context,
+                persona_policy_state=persona_policy_state,
+                text_inputs=text_inputs,
+            )
+        )
+
+    return PackedDecisionFeatures(
+        page_vector=page_vector,
+        candidate_ids=candidate_ids,
+        candidate_vectors=candidate_vectors,
+        persona_ids=persona_ids,
+        persona_vectors=persona_vectors,
+    )
+
+
+def build_page_features(context: DecisionContext) -> list[float]:
+    """从 `page_policy_state` 构造 page vector。
+
+    向量布局保持兼容旧模型，但取值来源优先来自新页面状态。
+
+    字段映射意图：
+
+    - 新 `page_policy_state` 是正式输入
+    - 旧 `page_features` 仅作为兼容回退
+    - 页面向量中的 protection one-hot 继续保持在尾部，避免影响 runtime / TinyPolicyNet
+    """
+    state = _page_policy_state(context)
+    candidate_views = _candidate_policy_views(context)
+    prompt_text = getattr(context, "prompt_text", "") or ""
+    ocr_blocks = list(getattr(context, "ocr_blocks", []) or [])
+
+    protection_level = str(
+        state.get("protection_level")
+        or getattr(getattr(context, "protection_level", None), "value", getattr(context, "protection_level", ""))
+    ).strip().lower()
+
+    prompt_length = _safe_float(state.get("_prompt_length"), len(prompt_text))
+    ocr_block_count = _safe_float(state.get("_ocr_block_count"), len(ocr_blocks))
+    candidate_count = _safe_float(state.get("_candidate_count"), len(candidate_views))
+    unique_attr_count = _safe_float(
+        state.get("_unique_attr_count"),
+        len({str(view.get("attr_id") or _attr_name(view)) for view in candidate_views if (view.get("attr_id") or _attr_name(view))}),
+    )
+    history_record_count = _safe_float(state.get("_history_record_count"), len(getattr(context, "history_records", []) or []))
+    active_persona_bound = _safe_bool(
+        state.get("_active_persona_bound"),
+        bool(getattr(getattr(context, "session_binding", None), "active_persona_id", None)),
+    )
+    prompt_has_digits = _safe_bool(state.get("_prompt_has_digits"), any(char.isdigit() for char in prompt_text))
+    prompt_has_address_tokens = _safe_bool(
+        state.get("_prompt_has_address_tokens"),
+        any(token in prompt_text for token in _ADDRESS_HINT_TOKENS),
+    )
+
+    average_candidate_confidence = _safe_float(
+        state.get("_average_candidate_confidence"),
+        _average(
+            [_confidence_from_candidate_view(view) for view in candidate_views],
+            default=_confidence_from_bucket(state.get("avg_det_conf_bucket")),
+        ),
+    )
+    min_candidate_confidence = _safe_float(
+        state.get("_min_candidate_confidence"),
+        _minimum(
+            [_confidence_from_candidate_view(view) for view in candidate_views],
+            default=_confidence_from_bucket(state.get("min_det_conf_bucket")),
+        ),
+    )
+    high_confidence_candidate_ratio = _safe_float(
+        state.get("_high_confidence_candidate_ratio"),
+        _ratio_of(
+            candidate_views,
+            lambda view: str(view.get("det_conf_bucket", "")).strip().lower() == "high",
+        ),
+    )
+    low_confidence_candidate_ratio = _safe_float(
+        state.get("_low_confidence_candidate_ratio"),
+        _ratio_of(
+            candidate_views,
+            lambda view: str(view.get("det_conf_bucket", "")).strip().lower() in {"low", "none"},
+        ),
+    )
+    prompt_candidate_count = _safe_float(
+        state.get("_prompt_candidate_count"),
+        sum(1 for view in candidate_views if _source_name(view) == PIISourceType.PROMPT.value),
+    )
+    ocr_candidate_count = _safe_float(
+        state.get("_ocr_candidate_count"),
+        sum(1 for view in candidate_views if _source_name(view) == PIISourceType.OCR.value),
+    )
+    average_ocr_block_score = _safe_float(
+        state.get("_average_ocr_block_score"),
+        _average(
+            [float(getattr(block, "score", 0.0) or 0.0) for block in ocr_blocks],
+            default=_confidence_from_bucket(state.get("avg_ocr_conf_bucket")),
+        ),
+    )
+    min_ocr_block_score = _safe_float(
+        state.get("_min_ocr_block_score"),
+        _minimum(
+            [float(getattr(block, "score", 0.0) or 0.0) for block in ocr_blocks],
+            default=_confidence_from_bucket(state.get("min_ocr_conf_bucket")),
+        ),
+    )
+    low_confidence_ocr_block_ratio = _safe_float(
+        state.get("_low_confidence_ocr_block_ratio"),
+        _ratio_of(
+            ocr_blocks,
+            lambda block: float(getattr(block, "score", 0.0) or 0.0) < _LOW_OCR_BLOCK_SCORE,
+            default=_ratio_from_bucket(state.get("low_ocr_ratio_bucket")),
+        ),
+    )
+
+    return [
+        min(1.0, prompt_length / 256.0),
+        min(1.0, ocr_block_count / 64.0),
+        min(1.0, candidate_count / 32.0),
+        min(1.0, unique_attr_count / 8.0),
+        min(1.0, history_record_count / 64.0),
+        1.0 if active_persona_bound else 0.0,
+        1.0 if prompt_has_digits else 0.0,
+        1.0 if prompt_has_address_tokens else 0.0,
+        average_candidate_confidence,
+        min_candidate_confidence,
+        high_confidence_candidate_ratio,
+        low_confidence_candidate_ratio,
+        min(1.0, prompt_candidate_count / 32.0),
+        min(1.0, ocr_candidate_count / 32.0),
+        average_ocr_block_score,
+        min_ocr_block_score,
+        low_confidence_ocr_block_ratio,
+        *_one_hot(protection_level, ordered_values=PROTECTION_LEVEL_ORDER),
+    ]
+
+
+def build_candidate_dense_features(
+    *,
+    context: DecisionContext,
+    candidate_policy_view: dict[str, object],
+    text_inputs: dict[str, dict[str, dict[str, str]]],
+) -> list[float]:
+    """从 `candidate_policy_views` 构造 candidate dense feature。
+
+    结构化信号是主通道；文本只编码为轻量 signature，避免压过 alias/history/quality。
+
+    映射顺序仍沿用旧 candidate vector 版式：
+
+    - attr/source/confidence
+    - history / page-level count
+    - geometry / OCR quality
+    - candidate_text / prompt_context / ocr_context 的轻量 text signature
+    """
+    candidate_id = str(candidate_policy_view.get("candidate_id", "")).strip()
+    candidate_by_id = _candidate_by_id(context)
+    candidate = candidate_by_id.get(candidate_id)
+
+    attr_name = str(candidate_policy_view.get("attr_id") or _attr_name(candidate_policy_view) or _candidate_attr_name(candidate)).strip()
+    source_name = str(_source_name(candidate_policy_view) or _candidate_source_name(candidate)).strip().lower()
+
+    candidate_text_inputs = text_inputs["candidates"].get(candidate_id, {})
+    candidate_text = candidate_text_inputs.get("candidate_text", "")
+    prompt_context = candidate_text_inputs.get("prompt_context", "")
+    ocr_context = candidate_text_inputs.get("ocr_context", "")
+
+    confidence = _safe_float(
+        candidate_policy_view.get("_confidence"),
+        float(getattr(candidate, "confidence", 0.0) if candidate is not None else _confidence_from_bucket(candidate_policy_view.get("det_conf_bucket"))),
+    )
+    history_attr_exposure_count = _safe_float(
+        candidate_policy_view.get("_history_attr_exposure_count"),
+        max(
+            _count_from_bucket(candidate_policy_view.get("history_alias_exposure_bucket")),
+            _safe_float(candidate_policy_view.get("_history_alias_exposure_count"), 0.0),
+        ),
+    )
+    history_exact_match_count = _safe_float(
+        candidate_policy_view.get("_history_exact_match_count"),
+        _count_from_bucket(candidate_policy_view.get("history_exact_match_bucket")),
+    )
+    same_attr_page_count = _safe_float(
+        candidate_policy_view.get("_same_attr_page_count"),
+        _count_from_bucket(candidate_policy_view.get("same_attr_page_bucket")),
+    )
+    same_text_page_or_alias_count = max(
+        _safe_float(candidate_policy_view.get("_same_text_page_count"), 0.0),
+        _safe_float(candidate_policy_view.get("same_alias_count_in_turn"), 0.0),
+    )
+
+    relative_area, aspect_ratio, center_x, center_y = _geometry_features(
+        context=context,
+        candidate_id=candidate_id,
+        candidate_policy_view=candidate_policy_view,
+    )
+    ocr_block_score = _safe_float(
+        candidate_policy_view.get("_ocr_block_score"),
+        _confidence_from_bucket(candidate_policy_view.get("ocr_local_conf_bucket")),
+    )
+    ocr_block_rotation_degrees = _safe_float(candidate_policy_view.get("_ocr_block_rotation_degrees"), 0.0)
+    low_ocr_flag = bool(candidate_policy_view.get("low_ocr_flag", False))
+
+    return [
+        *_attr_one_hot(attr_name),
+        *_source_one_hot(source_name),
+        confidence,
+        min(1.0, history_attr_exposure_count / 16.0),
+        min(1.0, history_exact_match_count / 8.0),
+        min(1.0, same_attr_page_count / 8.0),
+        min(1.0, same_text_page_or_alias_count / 8.0),
+        relative_area,
+        min(1.0, aspect_ratio / 6.0),
+        center_x,
+        center_y,
+        ocr_block_score,
+        min(1.0, abs(ocr_block_rotation_degrees) / 180.0),
+        1.0 if low_ocr_flag else 0.0,
+        *_text_signature(candidate_text),
+        *_text_signature(prompt_context),
+        *_text_signature(ocr_context),
+    ]
+
+
+def build_persona_features(
+    *,
+    context: DecisionContext,
+    persona_policy_state: dict[str, object],
+    text_inputs: dict[str, dict[str, dict[str, str]]],
+) -> list[float]:
+    """从 `persona_policy_states` 构造 persona dense feature。
+
+    persona vector 继续维持旧布局：
+
+    - slot_count / exposure_count / is_active / matched_candidate_attr_count
+    - supported attr one-hot
+    - display_name 与 slot text 的辅助 text signature
+    """
+    persona_id = str(persona_policy_state.get("persona_id", "")).strip()
+    persona_text = text_inputs["personas"].get(persona_id, {}).get("persona_text", "")
+    supported_attr_mask = persona_policy_state.get("supported_attr_mask", {})
+    available_slot_mask = persona_policy_state.get("available_slot_mask", {})
+
+    supported_attr_names = [
+        attr_name
+        for attr_name in ATTR_FEATURE_ORDER
+        if bool(available_slot_mask.get(attr_name, supported_attr_mask.get(attr_name, False)))
+    ]
+    slot_count = _safe_float(
+        persona_policy_state.get("_slot_count"),
+        sum(1 for attr_name in ATTR_FEATURE_ORDER if bool(available_slot_mask.get(attr_name, False))),
+    )
+    exposure_count = _safe_float(
+        persona_policy_state.get("_exposure_count"),
+        _max_bucket_count(persona_policy_state.get("attr_exposure_buckets", {})),
+    )
+    is_active = bool(persona_policy_state.get("is_active", False))
+    matched_candidate_attr_count = _safe_float(persona_policy_state.get("matched_candidate_attr_count"), 0.0)
+    display_name = str(persona_policy_state.get("_display_name", "")).strip()
+    slot_text = " ".join(str(value) for value in _persona_slots(persona_policy_state, context).values())
+
+    return [
+        min(1.0, slot_count / 8.0),
+        min(1.0, exposure_count / 32.0),
+        1.0 if is_active else 0.0,
+        min(1.0, matched_candidate_attr_count / 8.0),
+        *_attr_one_hot(*supported_attr_names),
+        *_text_signature(display_name),
+        *_text_signature(slot_text or persona_text),
+    ]
+
+
+def build_text_inputs(context: DecisionContext) -> dict[str, dict[str, dict[str, str]]]:
+    """构建辅助文本通道输入。
+
+    文本输入优先来自新的策略视图；旧路径仅作为兼容。
+    TODO: 当训练侧完成迁移后，删除对旧 `candidate_features / persona_features` 的依赖。
+    """
+    candidate_inputs: dict[str, dict[str, str]] = {}
+    candidate_by_id = _candidate_by_id(context)
+    legacy_candidate_features = {feature.candidate_id: feature for feature in getattr(context, "candidate_features", [])}
+    for view in _candidate_policy_views(context):
+        candidate_id = str(view.get("candidate_id", "")).strip()
+        if not candidate_id:
+            continue
+        candidate = candidate_by_id.get(candidate_id)
+        legacy_feature = legacy_candidate_features.get(candidate_id)
+        candidate_inputs[candidate_id] = {
+            "candidate_text": str(
+                getattr(candidate, "text", "")
+                or getattr(legacy_feature, "text", "")
+                or ""
+            ),
+            "prompt_context": str(
+                view.get("prompt_local_context_labelized")
+                or view.get("_prompt_context")
+                or getattr(legacy_feature, "prompt_context", "")
+                or ""
+            ),
+            "ocr_context": str(
+                view.get("ocr_local_context_labelized")
+                or view.get("_ocr_context")
+                or getattr(legacy_feature, "ocr_context", "")
+                or ""
+            ),
+        }
+
+    persona_inputs: dict[str, dict[str, str]] = {}
+    legacy_persona_features = {feature.persona_id: feature for feature in getattr(context, "persona_features", [])}
+    for state in _persona_policy_states(context):
+        persona_id = str(state.get("persona_id", "")).strip()
+        if not persona_id:
+            continue
+        legacy_feature = legacy_persona_features.get(persona_id)
+        display_name = str(
+            state.get("_display_name")
+            or getattr(legacy_feature, "display_name", "")
+            or _persona_display_name(context, persona_id)
+            or ""
+        ).strip()
+        slot_text = " ".join(str(value) for value in _persona_slots(state, context).values())
+        persona_inputs[persona_id] = {
+            "persona_text": f"{display_name} {slot_text}".strip(),
+        }
+
+    return {
+        "candidates": candidate_inputs,
+        "personas": persona_inputs,
+    }
+
+
 class DecisionFeatureExtractor:
     """将 DecisionContext 压缩为轻量数值特征。"""
 
     def pack(self, context: DecisionContext) -> PackedDecisionFeatures:
-        page_vector = self._page_vector(context)
-        candidate_ids: list[str] = []
-        candidate_vectors: list[list[float]] = []
-        for item in context.candidate_features:
-            candidate_ids.append(item.candidate_id)
-            candidate_vectors.append(self._candidate_vector(item))
-        persona_ids: list[str] = []
-        persona_vectors: list[list[float]] = []
-        for item in context.persona_features:
-            persona_ids.append(item.persona_id)
-            persona_vectors.append(self._persona_vector(item))
-        return PackedDecisionFeatures(
-            page_vector=page_vector,
-            candidate_ids=candidate_ids,
-            candidate_vectors=candidate_vectors,
-            persona_ids=persona_ids,
-            persona_vectors=persona_vectors,
+        return pack_decision_features(context)
+
+
+def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
+    views = getattr(context, "candidate_policy_views", None)
+    if isinstance(views, list) and views:
+        return [view for view in views if isinstance(view, dict)]
+
+    # TODO: 当全部生产者都输出 DecisionModelContext.candidate_policy_views 后，删除旧路径兼容。
+    return [_legacy_candidate_policy_view(context, feature) for feature in getattr(context, "candidate_features", [])]
+
+
+def _page_policy_state(context: DecisionContext) -> dict[str, object]:
+    state = getattr(context, "page_policy_state", None)
+    if isinstance(state, dict) and state:
+        return state
+
+    # TODO: 当全部生产者都输出 DecisionModelContext.page_policy_state 后，删除旧路径兼容。
+    return _legacy_page_policy_state(context)
+
+
+def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
+    states = getattr(context, "persona_policy_states", None)
+    if isinstance(states, list) and states:
+        return [state for state in states if isinstance(state, dict)]
+
+    # TODO: 当全部生产者都输出 DecisionModelContext.persona_policy_states 后，删除旧路径兼容。
+    return [_legacy_persona_policy_state(context, feature) for feature in getattr(context, "persona_features", [])]
+
+
+def _legacy_candidate_policy_view(context: DecisionContext, feature) -> dict[str, object]:
+    candidate = _candidate_by_id(context).get(feature.candidate_id)
+    covered_block_ids = []
+    if candidate is not None:
+        covered_block_ids = [str(item) for item in candidate.metadata.get("ocr_block_ids", []) if str(item).strip()]
+        if candidate.block_id and candidate.block_id not in covered_block_ids:
+            covered_block_ids.append(candidate.block_id)
+
+    normalized_text = getattr(feature, "normalized_text", "") or getattr(feature, "text", "") or ""
+    digit_ratio = _digit_ratio(normalized_text)
+    session_alias = _fallback_session_alias(candidate, feature)
+    return {
+        "candidate_id": feature.candidate_id,
+        "attr_type": getattr(feature, "attr_type", None),
+        "attr_id": getattr(getattr(feature, "attr_type", None), "value", ""),
+        "source": getattr(feature, "source", None),
+        "session_alias": session_alias,
+        "same_alias_count_in_turn": max(1, int(getattr(feature, "same_text_page_count", 1) or 1)),
+        "cross_source_same_alias_flag": False,
+        "history_alias_exposure_bucket": _bucket_count(getattr(feature, "history_attr_exposure_count", 0)),
+        "_history_alias_exposure_count": getattr(feature, "history_attr_exposure_count", 0),
+        "history_exact_match_bucket": _bucket_count(getattr(feature, "history_exact_match_count", 0)),
+        "det_conf_bucket": _bucket_confidence(getattr(feature, "confidence", 0.0)),
+        "ocr_local_conf_bucket": _bucket_confidence(getattr(feature, "ocr_block_score", 0.0)),
+        "low_ocr_flag": bool(getattr(feature, "is_low_ocr_confidence", False)),
+        "cross_block_flag": len(covered_block_ids) > 1,
+        "covered_block_count_bucket": _bucket_count(len(covered_block_ids)),
+        "same_attr_page_bucket": _bucket_count(getattr(feature, "same_attr_page_count", 0)),
+        "normalized_len_bucket": _bucket_text_length(len(normalized_text)),
+        "digit_ratio_bucket": _bucket_ratio(digit_ratio),
+        "mask_char_flag": _contains_mask_char(getattr(feature, "text", "") or ""),
+        "prompt_local_context_labelized": getattr(feature, "prompt_context", "") or "",
+        "ocr_local_context_labelized": getattr(feature, "ocr_context", "") or "",
+        "_prompt_context": getattr(feature, "prompt_context", "") or "",
+        "_ocr_context": getattr(feature, "ocr_context", "") or "",
+        "_history_attr_exposure_count": getattr(feature, "history_attr_exposure_count", 0),
+        "_history_exact_match_count": getattr(feature, "history_exact_match_count", 0),
+        "_same_attr_page_count": getattr(feature, "same_attr_page_count", 0),
+        "_same_text_page_count": getattr(feature, "same_text_page_count", 0),
+        "_relative_area": getattr(feature, "relative_area", 0.0),
+        "_aspect_ratio": getattr(feature, "aspect_ratio", 0.0),
+        "_center_x": getattr(feature, "center_x", 0.0),
+        "_center_y": getattr(feature, "center_y", 0.0),
+        "_ocr_block_score": getattr(feature, "ocr_block_score", 0.0),
+        "_ocr_block_rotation_degrees": getattr(feature, "ocr_block_rotation_degrees", 0.0),
+        "_confidence": getattr(feature, "confidence", 0.0),
+    }
+
+
+def _legacy_page_policy_state(context: DecisionContext) -> dict[str, object]:
+    feature = getattr(context, "page_features", None)
+    if feature is None:
+        return {
+            "protection_level": getattr(getattr(context, "protection_level", None), "value", ProtectionLevel.BALANCED.value),
+        }
+    return {
+        "protection_level": getattr(getattr(context, "protection_level", None), "value", ProtectionLevel.BALANCED.value),
+        "candidate_count_bucket": _bucket_count(getattr(feature, "candidate_count", 0)),
+        "unique_attr_count_bucket": _bucket_count(getattr(feature, "unique_attr_count", 0)),
+        "avg_det_conf_bucket": _bucket_confidence(getattr(feature, "average_candidate_confidence", 0.0)),
+        "min_det_conf_bucket": _bucket_confidence(getattr(feature, "min_candidate_confidence", 0.0)),
+        "avg_ocr_conf_bucket": _bucket_confidence(getattr(feature, "average_ocr_block_score", 0.0)),
+        "low_ocr_ratio_bucket": _bucket_ratio(getattr(feature, "low_confidence_ocr_block_ratio", 0.0)),
+        "page_quality_state": _legacy_quality_state_from_page_feature(feature),
+        "_prompt_length": getattr(feature, "prompt_length", 0),
+        "_ocr_block_count": getattr(feature, "ocr_block_count", 0),
+        "_candidate_count": getattr(feature, "candidate_count", 0),
+        "_unique_attr_count": getattr(feature, "unique_attr_count", 0),
+        "_history_record_count": getattr(feature, "history_record_count", 0),
+        "_active_persona_bound": getattr(feature, "active_persona_bound", False),
+        "_prompt_has_digits": getattr(feature, "prompt_has_digits", False),
+        "_prompt_has_address_tokens": getattr(feature, "prompt_has_address_tokens", False),
+        "_average_candidate_confidence": getattr(feature, "average_candidate_confidence", 0.0),
+        "_min_candidate_confidence": getattr(feature, "min_candidate_confidence", 0.0),
+        "_high_confidence_candidate_ratio": getattr(feature, "high_confidence_candidate_ratio", 0.0),
+        "_low_confidence_candidate_ratio": getattr(feature, "low_confidence_candidate_ratio", 0.0),
+        "_prompt_candidate_count": getattr(feature, "prompt_candidate_count", 0),
+        "_ocr_candidate_count": getattr(feature, "ocr_candidate_count", 0),
+        "_average_ocr_block_score": getattr(feature, "average_ocr_block_score", 0.0),
+        "_min_ocr_block_score": getattr(feature, "min_ocr_block_score", 0.0),
+        "_low_confidence_ocr_block_ratio": getattr(feature, "low_confidence_ocr_block_ratio", 0.0),
+    }
+
+
+def _legacy_persona_policy_state(context: DecisionContext, feature) -> dict[str, object]:
+    supported_attr_mask = {attr_name: False for attr_name in ATTR_FEATURE_ORDER}
+    available_slot_mask = {attr_name: False for attr_name in ATTR_FEATURE_ORDER}
+    for attr in getattr(feature, "supported_attr_types", []) or []:
+        attr_name = getattr(attr, "value", str(attr))
+        supported_attr_mask[attr_name] = True
+    for attr, value in (getattr(feature, "slots", {}) or {}).items():
+        attr_name = getattr(attr, "value", str(attr))
+        supported_attr_mask[attr_name] = True
+        available_slot_mask[attr_name] = bool(str(value).strip())
+    exposure_bucket = _bucket_count(getattr(feature, "exposure_count", 0))
+    return {
+        "persona_id": feature.persona_id,
+        "is_active": getattr(feature, "is_active", False),
+        "supported_attr_mask": supported_attr_mask,
+        "available_slot_mask": available_slot_mask,
+        "attr_exposure_buckets": {
+            attr_name: exposure_bucket if supported_attr_mask[attr_name] else "0"
+            for attr_name in ATTR_FEATURE_ORDER
+        },
+        "matched_candidate_attr_count": getattr(feature, "matched_candidate_attr_count", 0),
+        "_slot_count": getattr(feature, "slot_count", 0),
+        "_display_name": getattr(feature, "display_name", ""),
+        "_exposure_count": getattr(feature, "exposure_count", 0),
+        "_supported_attr_types": getattr(feature, "supported_attr_types", []),
+        "_slots": getattr(feature, "slots", {}),
+    }
+
+
+def _candidate_by_id(context: DecisionContext) -> dict[str, object]:
+    raw_refs = getattr(context, "raw_refs", None)
+    if isinstance(raw_refs, dict):
+        candidate_by_id = raw_refs.get("candidate_by_id")
+        if isinstance(candidate_by_id, dict):
+            return candidate_by_id
+    return {candidate.entity_id: candidate for candidate in getattr(context, "candidates", [])}
+
+
+def _persona_by_id(context: DecisionContext) -> dict[str, object]:
+    raw_refs = getattr(context, "raw_refs", None)
+    if isinstance(raw_refs, dict):
+        persona_by_id = raw_refs.get("persona_by_id")
+        if isinstance(persona_by_id, dict):
+            return persona_by_id
+    return {persona.persona_id: persona for persona in getattr(context, "persona_profiles", [])}
+
+
+def _persona_display_name(context: DecisionContext, persona_id: str) -> str:
+    persona = _persona_by_id(context).get(persona_id)
+    return str(getattr(persona, "display_name", "") or "")
+
+
+def _persona_slots(persona_policy_state: dict[str, object], context: DecisionContext) -> dict[object, object]:
+    slots = persona_policy_state.get("_slots")
+    if isinstance(slots, dict):
+        return slots
+    persona = _persona_by_id(context).get(str(persona_policy_state.get("persona_id", "")).strip())
+    return dict(getattr(persona, "slots", {}) or {})
+
+
+def _geometry_features(
+    *,
+    context: DecisionContext,
+    candidate_id: str,
+    candidate_policy_view: dict[str, object],
+) -> tuple[float, float, float, float]:
+    if all(key in candidate_policy_view for key in ("_relative_area", "_aspect_ratio", "_center_x", "_center_y")):
+        return (
+            _safe_float(candidate_policy_view.get("_relative_area"), 0.0),
+            _safe_float(candidate_policy_view.get("_aspect_ratio"), 0.0),
+            _safe_float(candidate_policy_view.get("_center_x"), 0.0),
+            _safe_float(candidate_policy_view.get("_center_y"), 0.0),
         )
+    candidate = _candidate_by_id(context).get(candidate_id)
+    bbox = getattr(candidate, "bbox", None)
+    if bbox is None:
+        return (0.0, 0.0, 0.0, 0.0)
+    max_right = 1
+    max_bottom = 1
+    for block in getattr(context, "ocr_blocks", []) or []:
+        block_bbox = getattr(block, "bbox", None)
+        if block_bbox is None:
+            continue
+        max_right = max(max_right, block_bbox.x + block_bbox.width)
+        max_bottom = max(max_bottom, block_bbox.y + block_bbox.height)
+    for item in getattr(context, "candidates", []) or []:
+        item_bbox = getattr(item, "bbox", None)
+        if item_bbox is None:
+            continue
+        max_right = max(max_right, item_bbox.x + item_bbox.width)
+        max_bottom = max(max_bottom, item_bbox.y + item_bbox.height)
+    page_area = max(1, max_right * max_bottom)
+    relative_area = min(1.0, (bbox.width * bbox.height) / page_area)
+    aspect_ratio = bbox.width / max(1, bbox.height)
+    center_x = min(1.0, max(0.0, (bbox.x + bbox.width / 2) / max_right))
+    center_y = min(1.0, max(0.0, (bbox.y + bbox.height / 2) / max_bottom))
+    return (relative_area, aspect_ratio, center_x, center_y)
 
-    def _page_vector(self, context: DecisionContext) -> list[float]:
-        item = context.page_features
-        protection_level = context.protection_level.value
-        return [
-            min(1.0, item.prompt_length / 256.0),
-            min(1.0, item.ocr_block_count / 64.0),
-            min(1.0, item.candidate_count / 32.0),
-            min(1.0, item.unique_attr_count / 8.0),
-            min(1.0, item.history_record_count / 64.0),
-            1.0 if item.active_persona_bound else 0.0,
-            1.0 if item.prompt_has_digits else 0.0,
-            1.0 if item.prompt_has_address_tokens else 0.0,
-            item.average_candidate_confidence,
-            item.min_candidate_confidence,
-            item.high_confidence_candidate_ratio,
-            item.low_confidence_candidate_ratio,
-            min(1.0, item.prompt_candidate_count / 32.0),
-            min(1.0, item.ocr_candidate_count / 32.0),
-            item.average_ocr_block_score,
-            item.min_ocr_block_score,
-            item.low_confidence_ocr_block_ratio,
-            *self._one_hot(protection_level, ordered_values=PROTECTION_LEVEL_ORDER),
-        ]
 
-    def _candidate_vector(self, item) -> list[float]:
-        attr_one_hot = self._attr_one_hot(item.attr_type.value)
-        source_one_hot = [1.0, 0.0] if item.is_prompt_source else [0.0, 1.0 if item.is_ocr_source else 0.0]
-        text_stats = self._text_signature(item.text)
-        prompt_stats = self._text_signature(item.prompt_context)
-        ocr_stats = self._text_signature(item.ocr_context)
-        return [
-            *attr_one_hot,
-            *source_one_hot,
-            item.confidence,
-            min(1.0, item.history_attr_exposure_count / 16.0),
-            min(1.0, item.history_exact_match_count / 8.0),
-            min(1.0, item.same_attr_page_count / 8.0),
-            min(1.0, item.same_text_page_count / 8.0),
-            item.relative_area,
-            min(1.0, item.aspect_ratio / 6.0),
-            item.center_x,
-            item.center_y,
-            item.ocr_block_score,
-            min(1.0, abs(item.ocr_block_rotation_degrees) / 180.0),
-            1.0 if item.is_low_ocr_confidence else 0.0,
-            *text_stats,
-            *prompt_stats,
-            *ocr_stats,
-        ]
+def _confidence_from_candidate_view(view: dict[str, object]) -> float:
+    return _safe_float(view.get("_confidence"), _confidence_from_bucket(view.get("det_conf_bucket")))
 
-    def _persona_vector(self, item) -> list[float]:
-        attr_coverage = self._attr_one_hot(*(attr.value for attr in item.supported_attr_types))
-        display_stats = self._text_signature(item.display_name)
-        slot_stats = self._text_signature(" ".join(item.slots.values()))
-        return [
-            min(1.0, item.slot_count / 8.0),
-            min(1.0, item.exposure_count / 32.0),
-            1.0 if item.is_active else 0.0,
-            min(1.0, item.matched_candidate_attr_count / 8.0),
-            *attr_coverage,
-            *display_stats,
-            *slot_stats,
-        ]
 
-    def _attr_one_hot(self, *names: str) -> list[float]:
-        return self._one_hot(*names, ordered_values=ATTR_FEATURE_ORDER)
+def _legacy_quality_state_from_page_feature(feature) -> str:
+    avg_det_conf = float(getattr(feature, "average_candidate_confidence", 0.0) or 0.0)
+    avg_ocr_conf = float(getattr(feature, "average_ocr_block_score", 0.0) or 0.0)
+    low_ocr_ratio = float(getattr(feature, "low_confidence_ocr_block_ratio", 0.0) or 0.0)
+    has_ocr = int(getattr(feature, "ocr_block_count", 0) or 0) > 0
+    if avg_det_conf < _LOW_CANDIDATE_CONFIDENCE:
+        return "poor"
+    if has_ocr and (avg_ocr_conf < _LOW_OCR_BLOCK_SCORE or low_ocr_ratio > 0.5):
+        return "poor"
+    if avg_det_conf >= _HIGH_CANDIDATE_CONFIDENCE and (not has_ocr or avg_ocr_conf >= _HIGH_CANDIDATE_CONFIDENCE):
+        return "good"
+    return "mixed"
 
-    def _one_hot(self, *names: str, ordered_values: tuple[str, ...]) -> list[float]:
-        values = set(names)
-        return [1.0 if name in values else 0.0 for name in ordered_values]
 
-    def _text_signature(self, text: str) -> list[float]:
-        if not text:
-            return [0.0, 0.0, 0.0, 0.0, 0.0]
-        total = max(1, len(text))
-        digit_count = sum(char.isdigit() for char in text)
-        ascii_count = sum(char.isascii() for char in text)
-        alpha_count = sum(char.isalpha() for char in text)
-        punctuation_count = sum(not char.isalnum() and not self._is_cjk(char) for char in text)
-        cjk_count = sum(self._is_cjk(char) for char in text)
-        return [
-            min(1.0, total / 32.0),
-            digit_count / total,
-            ascii_count / total,
-            alpha_count / total,
-            max(punctuation_count, cjk_count) / total,
-        ]
+def _fallback_session_alias(candidate, feature) -> str:
+    attr_name = getattr(getattr(feature, "attr_type", None), "value", "")
+    source_text = (
+        getattr(candidate, "canonical_source_text", None)
+        or getattr(feature, "normalized_text", "")
+        or getattr(feature, "text", "")
+        or getattr(candidate, "text", "")
+    )
+    canonical = source_text
+    try:
+        attr_type = getattr(feature, "attr_type", None)
+        if attr_type is not None and source_text:
+            canonical = canonicalize_pii_value(attr_type, source_text)
+    except Exception:
+        canonical = source_text
+    return f"{attr_name}:{canonical or source_text}".strip(":")
 
-    def _is_cjk(self, char: str) -> bool:
-        code = ord(char)
-        return 0x4E00 <= code <= 0x9FFF
+
+def _candidate_attr_name(candidate) -> str:
+    return str(getattr(getattr(candidate, "attr_type", None), "value", "")).strip()
+
+
+def _candidate_source_name(candidate) -> str:
+    return str(getattr(getattr(candidate, "source", None), "value", "")).strip().lower()
+
+
+def _attr_name(view: dict[str, object]) -> str:
+    attr_type = view.get("attr_type")
+    return str(getattr(attr_type, "value", attr_type or "")).strip()
+
+
+def _source_name(view: dict[str, object]) -> str:
+    source = view.get("source")
+    return str(getattr(source, "value", source or "")).strip().lower()
+
+
+def _attr_one_hot(*names: str) -> list[float]:
+    return _one_hot(*names, ordered_values=ATTR_FEATURE_ORDER)
+
+
+def _source_one_hot(source_name: str) -> list[float]:
+    return _one_hot(source_name, ordered_values=SOURCE_FEATURE_ORDER)
+
+
+def _one_hot(*names: str, ordered_values: tuple[str, ...]) -> list[float]:
+    values = {str(name).strip() for name in names if str(name).strip()}
+    return [1.0 if name in values else 0.0 for name in ordered_values]
+
+
+def _text_signature(text: str) -> list[float]:
+    if not text:
+        return [0.0, 0.0, 0.0, 0.0, 0.0]
+    total = max(1, len(text))
+    digit_count = sum(char.isdigit() for char in text)
+    ascii_count = sum(char.isascii() for char in text)
+    alpha_count = sum(char.isalpha() for char in text)
+    punctuation_count = sum(not char.isalnum() and not _is_cjk(char) for char in text)
+    cjk_count = sum(_is_cjk(char) for char in text)
+    return [
+        min(1.0, total / 32.0),
+        digit_count / total,
+        ascii_count / total,
+        alpha_count / total,
+        max(punctuation_count, cjk_count) / total,
+    ]
+
+
+def _is_cjk(char: str) -> bool:
+    code = ord(char)
+    return 0x4E00 <= code <= 0x9FFF
+
+
+def _digit_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    return sum(char.isdigit() for char in text) / max(1, len(text))
+
+
+def _contains_mask_char(text: str) -> bool:
+    return any(char in _MASK_CHARS for char in text)
+
+
+def _bucket_count(value: int) -> str:
+    if value <= 0:
+        return "0"
+    if value == 1:
+        return "1"
+    if value <= 3:
+        return "2-3"
+    if value <= 7:
+        return "4-7"
+    return "8+"
+
+
+def _bucket_text_length(value: int) -> str:
+    if value <= 0:
+        return "0"
+    if value <= 2:
+        return "1-2"
+    if value <= 4:
+        return "3-4"
+    if value <= 8:
+        return "5-8"
+    return "9+"
+
+
+def _bucket_confidence(value: float) -> str:
+    if value <= 0.0:
+        return "none"
+    if value < _LOW_CANDIDATE_CONFIDENCE:
+        return "low"
+    if value < _HIGH_CANDIDATE_CONFIDENCE:
+        return "medium"
+    return "high"
+
+
+def _bucket_ratio(value: float) -> str:
+    if value <= 0.0:
+        return "none"
+    if value < 0.34:
+        return "low"
+    if value < 0.67:
+        return "medium"
+    return "high"
+
+
+def _count_from_bucket(bucket: object) -> float:
+    name = str(bucket or "").strip()
+    mapping = {
+        "0": 0.0,
+        "1": 1.0,
+        "2-3": 3.0,
+        "4-7": 6.0,
+        "8+": 8.0,
+        "1-2": 2.0,
+        "3-4": 4.0,
+        "5-8": 8.0,
+        "9+": 9.0,
+    }
+    return mapping.get(name, 0.0)
+
+
+def _max_bucket_count(bucket_map: object) -> float:
+    if not isinstance(bucket_map, dict):
+        return 0.0
+    return max((_count_from_bucket(value) for value in bucket_map.values()), default=0.0)
+
+
+def _confidence_from_bucket(bucket: object) -> float:
+    name = str(bucket or "").strip().lower()
+    return {
+        "none": 0.0,
+        "low": 0.25,
+        "medium": 0.675,
+        "high": 0.925,
+    }.get(name, 0.0)
+
+
+def _ratio_from_bucket(bucket: object) -> float:
+    name = str(bucket or "").strip().lower()
+    return {
+        "none": 0.0,
+        "low": 0.17,
+        "medium": 0.5,
+        "high": 0.84,
+    }.get(name, 0.0)
+
+
+def _ratio_of(items, predicate, *, default: float = 0.0) -> float:
+    items = list(items)
+    if not items:
+        return default
+    return sum(1 for item in items if predicate(item)) / len(items)
+
+
+def _average(values: list[float], default: float = 0.0) -> float:
+    values = [float(value) for value in values if value is not None]
+    if not values:
+        return default
+    return sum(values) / len(values)
+
+
+def _minimum(values: list[float], default: float = 0.0) -> float:
+    values = [float(value) for value in values if value is not None]
+    if not values:
+        return default
+    return min(values)
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _safe_bool(value: object, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes"}:
+        return True
+    if text in {"false", "0", "no"}:
+        return False
+    return bool(default)

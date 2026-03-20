@@ -15,16 +15,48 @@ RUNTIME_ACTION_ORDER: tuple[ActionType, ActionType, ActionType] = (
     ActionType.GENERICIZE,
     ActionType.PERSONA_SLOT,
 )
+PROTECT_DECISION_KEEP = "KEEP"
+PROTECT_DECISION_REWRITE = "REWRITE"
+REWRITE_MODE_NONE = "NONE"
 
 
 @dataclass(slots=True)
 class RuntimeCandidateDecision:
-    """记录单个候选的动作偏好与评分。"""
+    """记录单个候选的统一 runtime 输出。
+
+    正式协议收敛为两级视图：
+
+    - `protect_decision`: `KEEP` / `REWRITE`
+    - `rewrite_mode`: `GENERICIZE` / `PERSONA_SLOT` / `NONE`
+
+    同时保留旧字段兼容：
+
+    - `preferred_action`: 兼容旧 consumer，等价于 `final_action`
+    - `reason`: 兼容旧 consumer，由 `reasons` + `fallback_reason` 汇总得到
+    - `action_scores`: 兼容旧平面 action score 输出
+    """
 
     candidate_id: str
-    preferred_action: ActionType
-    action_scores: dict[ActionType, float]
-    reason: str
+    final_action: ActionType | str
+    persona_id: str | None = None
+    confidence: float = 0.0
+    reasons: list[str] = field(default_factory=list)
+    fallback_reason: str | None = None
+    action_scores: dict[ActionType | str, float] = field(default_factory=dict)
+    protect_decision: str = field(init=False)
+    rewrite_mode: str = field(init=False)
+    preferred_action: ActionType = field(init=False)
+    reason: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.final_action = _normalized_action_type(self.final_action)
+        self.preferred_action = self.final_action
+        self.action_scores = _normalized_action_scores(self.action_scores)
+        self.protect_decision, self.rewrite_mode = _hierarchical_view(self.final_action)
+        self.reasons = [str(item).strip() for item in self.reasons if str(item).strip()]
+        fallback_reason = str(self.fallback_reason or "").strip()
+        self.fallback_reason = fallback_reason or None
+        self.reason = _compose_reason(self.reasons, self.fallback_reason)
 
 
 @dataclass(slots=True)
@@ -34,6 +66,7 @@ class DEModelRuntimeOutput:
     active_persona_id: str | None
     persona_scores: dict[str, float] = field(default_factory=dict)
     candidate_decisions: list[RuntimeCandidateDecision] = field(default_factory=list)
+    protocol_version: str = "hierarchical_runtime_v1"
 
 
 @dataclass(slots=True)
@@ -61,24 +94,25 @@ class TinyPolicyOutputDecoder:
                 action: float(action_probs[action_index].item())
                 for action_index, action in enumerate(RUNTIME_ACTION_ORDER)
             }
-            preferred_action, decode_policy = self._decode_candidate_action(
+            final_action, decode_policy, fallback_reason = self._decode_candidate_action(
                 action_scores=action_scores,
                 confidence_score=float(output.confidence_scores[0, index].item()),
             )
             candidate_decisions.append(
-                RuntimeCandidateDecision(
+                _build_runtime_candidate_decision(
                     candidate_id=candidate_id,
-                    preferred_action=preferred_action,
+                    final_action=final_action,
+                    persona_id=active_persona_id if final_action == ActionType.PERSONA_SLOT else None,
+                    confidence=float(output.confidence_scores[0, index].item()),
+                    reasons=[
+                        f"torch_tiny_policy final_action={final_action.value}",
+                        f"decode={decode_policy}",
+                        f"runtime_conf={float(output.confidence_scores[0, index].item()):.2f}",
+                        f"utility={float(output.utility_scores[0, index].item()):.2f}",
+                        _scores_summary(action_scores),
+                    ],
+                    fallback_reason=fallback_reason,
                     action_scores=action_scores,
-                    reason=(
-                        f"torch_tiny_policy 选择 {preferred_action.value}；"
-                        f"decode={decode_policy}，"
-                        f"runtime_conf={float(output.confidence_scores[0, index].item()):.2f}，"
-                        f"utility={float(output.utility_scores[0, index].item()):.2f}，"
-                        f"scores={{KEEP:{action_scores[ActionType.KEEP]:.2f},"
-                        f"GENERIC:{action_scores[ActionType.GENERICIZE]:.2f},"
-                        f"PERSONA:{action_scores[ActionType.PERSONA_SLOT]:.2f}}}"
-                    ),
                 )
             )
         return DEModelRuntimeOutput(
@@ -114,9 +148,13 @@ class TinyPolicyOutputDecoder:
         *,
         action_scores: dict[ActionType, float],
         confidence_score: float,
-    ) -> tuple[ActionType, str]:
+    ) -> tuple[ActionType, str, str | None]:
         if confidence_score < self.keep_threshold:
-            return (ActionType.KEEP, "low_conf_keep")
+            return (
+                ActionType.KEEP,
+                "low_conf_keep",
+                "runtime_conf_below_keep_threshold，已优先回退为 KEEP。",
+            )
         max_score = max(action_scores.values())
         tied_actions = [
             action
@@ -125,8 +163,8 @@ class TinyPolicyOutputDecoder:
         ]
         preferred_action = max(tied_actions, key=lambda action: self._tie_priority[action])
         if len(tied_actions) > 1:
-            return (preferred_action, f"tie_break:{preferred_action.value}")
-        return (preferred_action, "argmax")
+            return (preferred_action, f"tie_break:{preferred_action.value}", None)
+        return (preferred_action, "argmax", None)
 
 
 @runtime_checkable
@@ -186,18 +224,26 @@ class TinyPolicyRuntime:
                 persona_slots=persona_slots,
                 page_vector=packed.page_vector,
             )
-            preferred_action = max(scores, key=lambda key: (scores[key], self._tie_priority[key]))
+            final_action = max(scores, key=lambda key: (scores[key], self._tie_priority[key]))
+            has_persona_slot = feature.attr_type in persona_slots
             candidate_decisions.append(
-                RuntimeCandidateDecision(
+                _build_runtime_candidate_decision(
                     candidate_id=feature.candidate_id,
-                    preferred_action=preferred_action,
-                    action_scores=scores,
-                    reason=self._reason_for(
+                    final_action=final_action,
+                    persona_id=active_persona_id if final_action == ActionType.PERSONA_SLOT else None,
+                    confidence=feature.confidence,
+                    reasons=self._reasons_for(
                         feature=feature,
-                        preferred_action=preferred_action,
+                        final_action=final_action,
                         scores=scores,
-                        has_persona_slot=feature.attr_type in persona_slots,
+                        has_persona_slot=has_persona_slot,
                     ),
+                    fallback_reason=(
+                        "candidate_conf_below_keep_threshold，启发式 runtime 对 KEEP 更保守。"
+                        if final_action == ActionType.KEEP and feature.confidence < self.keep_threshold
+                        else None
+                    ),
+                    action_scores=scores,
                 )
             )
         return DEModelRuntimeOutput(
@@ -283,23 +329,22 @@ class TinyPolicyRuntime:
             ActionType.PERSONA_SLOT: round(min(1.0, persona_score), 4),
         }
 
-    def _reason_for(
+    def _reasons_for(
         self,
         *,
         feature: CandidateDecisionFeatures,
-        preferred_action: ActionType,
+        final_action: ActionType,
         scores: dict[ActionType, float],
         has_persona_slot: bool,
-    ) -> str:
-        return (
-            f"tiny_policy 选择 {preferred_action.value}；"
-            f"conf={feature.confidence:.2f}，"
-            f"history_attr={feature.history_attr_exposure_count}，"
-            f"history_exact={feature.history_exact_match_count}，"
-            f"persona_slot={'yes' if has_persona_slot else 'no'}，"
-            f"scores={{KEEP:{scores[ActionType.KEEP]:.2f},GENERIC:{scores[ActionType.GENERICIZE]:.2f},"
-            f"PERSONA:{scores[ActionType.PERSONA_SLOT]:.2f}}}"
-        )
+    ) -> list[str]:
+        return [
+            f"tiny_policy final_action={final_action.value}",
+            f"candidate_conf={feature.confidence:.2f}",
+            f"history_attr={feature.history_attr_exposure_count}",
+            f"history_exact={feature.history_exact_match_count}",
+            f"persona_slot={'yes' if has_persona_slot else 'no'}",
+            _scores_summary(scores),
+        ]
 
 
 class TorchTinyPolicyRuntime:
@@ -387,3 +432,81 @@ class TorchTinyPolicyRuntime:
         if isinstance(payload, dict):
             return config_cls(**payload)
         raise ValueError("de_model checkpoint 中的 model_config 格式非法。")
+
+
+def _build_runtime_candidate_decision(
+    *,
+    candidate_id: str,
+    final_action: ActionType | str,
+    persona_id: str | None,
+    confidence: float,
+    reasons: list[str],
+    fallback_reason: str | None,
+    action_scores: dict[ActionType | str, float],
+) -> RuntimeCandidateDecision:
+    """构造统一 candidate runtime 输出，并兼容旧字段。"""
+    return RuntimeCandidateDecision(
+        candidate_id=candidate_id,
+        final_action=final_action,
+        persona_id=persona_id,
+        confidence=float(confidence),
+        reasons=reasons,
+        fallback_reason=fallback_reason,
+        action_scores=action_scores,
+    )
+
+
+def _hierarchical_view(final_action: ActionType) -> tuple[str, str]:
+    """把平面动作整理为 protect_decision + rewrite_mode 两级视图。"""
+    normalized_action = _normalized_action_type(final_action)
+    if normalized_action == ActionType.KEEP:
+        return (PROTECT_DECISION_KEEP, REWRITE_MODE_NONE)
+    if normalized_action == ActionType.PERSONA_SLOT:
+        return (PROTECT_DECISION_REWRITE, ActionType.PERSONA_SLOT.value)
+    return (PROTECT_DECISION_REWRITE, ActionType.GENERICIZE.value)
+
+
+def _normalized_action_type(action_type: ActionType | str) -> ActionType:
+    """归一化动作名，并兼容旧别名 LABEL -> GENERICIZE。"""
+    if isinstance(action_type, ActionType):
+        return action_type
+    normalized = str(action_type or "").strip().upper()
+    aliases = {
+        "KEEP": ActionType.KEEP,
+        "GENERICIZE": ActionType.GENERICIZE,
+        "GENERIC": ActionType.GENERICIZE,
+        "LABEL": ActionType.GENERICIZE,
+        "PERSONA_SLOT": ActionType.PERSONA_SLOT,
+        "PERSONA": ActionType.PERSONA_SLOT,
+    }
+    return aliases.get(normalized, ActionType.KEEP)
+
+
+def _normalized_action_scores(action_scores: dict[ActionType | str, float]) -> dict[ActionType, float]:
+    """把旧 action score 键归一化到当前动作集合。"""
+    normalized: dict[ActionType, float] = {action: 0.0 for action in RUNTIME_ACTION_ORDER}
+    for action, score in (action_scores or {}).items():
+        normalized_action = _normalized_action_type(action)
+        normalized[normalized_action] = max(normalized.get(normalized_action, 0.0), float(score))
+    return normalized
+
+
+def _compose_reason(reasons: list[str], fallback_reason: str | None) -> str:
+    parts: list[str] = []
+    for item in reasons:
+        text = str(item).strip()
+        if text and text not in parts:
+            parts.append(text)
+    fallback = str(fallback_reason or "").strip()
+    if fallback and fallback not in parts:
+        parts.append(fallback)
+    return "；".join(parts)
+
+
+def _scores_summary(action_scores: dict[ActionType | str, float]) -> str:
+    normalized = _normalized_action_scores(action_scores)
+    return (
+        f"scores={{KEEP:{normalized[ActionType.KEEP]:.2f},"
+        f"GENERIC:{normalized[ActionType.GENERICIZE]:.2f},"
+        f"PERSONA:{normalized[ActionType.PERSONA_SLOT]:.2f}}}"
+    )

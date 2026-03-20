@@ -20,6 +20,11 @@ ACTION_ORDER: tuple[ActionType, ActionType, ActionType] = (
     ActionType.GENERICIZE,
     ActionType.PERSONA_SLOT,
 )
+PROTECT_ORDER: tuple[str, str] = ("KEEP", "REWRITE")
+REWRITE_MODE_ORDER: tuple[str, str] = (
+    ActionType.GENERICIZE.value,
+    ActionType.PERSONA_SLOT.value,
+)
 
 
 @dataclass(slots=True)
@@ -41,6 +46,8 @@ class TinyPolicyNetConfig:
     ff_dim: int = 256
     dropout: float = 0.1
     action_size: int = 3
+    protect_size: int = len(PROTECT_ORDER)
+    rewrite_mode_size: int = len(REWRITE_MODE_ORDER)
 
 
 @dataclass(slots=True)
@@ -93,6 +100,8 @@ class TinyPolicyOutput:
     utility_scores: torch.Tensor
     page_summary: torch.Tensor
     persona_context: torch.Tensor
+    protect_logits: torch.Tensor | None = None
+    rewrite_mode_logits: torch.Tensor | None = None
 
 
 class DepthwiseSeparableConvBlock(nn.Module):
@@ -209,17 +218,32 @@ class TinyPolicyNet(nn.Module):
         self.page_encoder = nn.TransformerEncoder(encoder_layer, num_layers=self.config.transformer_layers)
         self.page_token = nn.Parameter(torch.zeros(1, 1, self.config.d_model))
 
+        # persona_selector 继续承担 persona_head 角色：输出 persona_id logits。
         self.persona_selector = nn.Sequential(
             nn.Linear(self.config.d_model * 3, self.config.d_model),
             nn.GELU(),
             nn.Dropout(self.config.dropout),
             nn.Linear(self.config.d_model, 1),
         )
+        # 旧平面 action head 保留为过渡用途，供当前 runtime / 监督训练继续消费。
         self.action_head = nn.Sequential(
             nn.Linear(self.config.d_model * 3, self.config.d_model * 2),
             nn.GELU(),
             nn.Dropout(self.config.dropout),
             nn.Linear(self.config.d_model * 2, self.config.action_size),
+        )
+        # 新层级输出头：逐步收敛到 protect_decision + rewrite_mode 任务。
+        self.protect_head = nn.Sequential(
+            nn.Linear(self.config.d_model * 3, self.config.d_model),
+            nn.GELU(),
+            nn.Dropout(self.config.dropout),
+            nn.Linear(self.config.d_model, self.config.protect_size),
+        )
+        self.rewrite_mode_head = nn.Sequential(
+            nn.Linear(self.config.d_model * 3, self.config.d_model),
+            nn.GELU(),
+            nn.Dropout(self.config.dropout),
+            nn.Linear(self.config.d_model, self.config.rewrite_mode_size),
         )
         self.confidence_head = nn.Sequential(
             nn.Linear(self.config.d_model * 3, self.config.d_model),
@@ -235,6 +259,7 @@ class TinyPolicyNet(nn.Module):
     def forward(self, batch: TinyPolicyBatch) -> TinyPolicyOutput:
         page_hidden = self.page_projection(batch.page_features)
 
+        # 文本编码保持轻量共享主干，继续作为辅助通道，不引入更重 tokenizer 方案。
         candidate_text = self._encode_candidate_texts(batch)
         candidate_struct = self.candidate_struct_projection(batch.candidate_features)
         candidate_tokens = self.candidate_projection(torch.cat([candidate_text, candidate_struct], dim=-1))
@@ -275,10 +300,14 @@ class TinyPolicyNet(nn.Module):
         )
 
         action_logits = self.action_head(candidate_context)
+        protect_logits = self.protect_head(candidate_context)
+        rewrite_mode_logits = self.rewrite_mode_head(candidate_context)
         confidence_scores = torch.sigmoid(self.confidence_head(candidate_context)).squeeze(-1)
         utility_scores = self.utility_head(candidate_context).squeeze(-1)
 
         action_logits = action_logits.masked_fill(~batch.candidate_mask.unsqueeze(-1), 0.0)
+        protect_logits = protect_logits.masked_fill(~batch.candidate_mask.unsqueeze(-1), 0.0)
+        rewrite_mode_logits = rewrite_mode_logits.masked_fill(~batch.candidate_mask.unsqueeze(-1), 0.0)
         confidence_scores = confidence_scores * batch.candidate_mask.to(dtype=confidence_scores.dtype)
         utility_scores = utility_scores * batch.candidate_mask.to(dtype=utility_scores.dtype)
 
@@ -289,11 +318,43 @@ class TinyPolicyNet(nn.Module):
             utility_scores=utility_scores,
             page_summary=page_summary,
             persona_context=persona_context,
+            protect_logits=protect_logits,
+            rewrite_mode_logits=rewrite_mode_logits,
         )
 
     def parameter_count(self) -> int:
         """返回可训练参数总量。"""
         return sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)
+
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        """兼容旧 checkpoint。
+
+        旧 checkpoint 只有 `action_head`，缺少新增的 `protect_head` / `rewrite_mode_head`
+        时，仍允许按严格模式入口加载；新 head 将保持随机初始化。
+        """
+
+        def _super_load(strict_value: bool):
+            try:
+                return super().load_state_dict(state_dict, strict=strict_value, assign=assign)
+            except TypeError:
+                return super().load_state_dict(state_dict, strict=strict_value)
+
+        if not strict:
+            return _super_load(False)
+
+        incompatible = _super_load(False)
+        missing_keys = [
+            key
+            for key in incompatible.missing_keys
+            if not key.startswith(("protect_head.", "rewrite_mode_head."))
+        ]
+        unexpected_keys = list(incompatible.unexpected_keys)
+        if missing_keys or unexpected_keys:
+            raise RuntimeError(
+                "Error(s) in loading state_dict for TinyPolicyNet: "
+                f"missing_keys={missing_keys}, unexpected_keys={unexpected_keys}"
+            )
+        return incompatible
 
     def _encode_candidate_texts(self, batch: TinyPolicyBatch) -> torch.Tensor:
         text_repr = self._encode_text_tensor(batch.candidate_text_ids, batch.candidate_text_mask)

@@ -1,3 +1,17 @@
+"""PrivacyGuard app facade。
+
+`PrivacyGuard` 是对外应用层入口，职责边界保持收敛：
+
+- 接收外部 payload
+- 转换为边界层 request model / DTO
+- 调用 sanitize / restore pipeline
+- 返回外部响应字典
+
+这里不承载 detector、OCR、`de_model` runtime、restore 规则等内部实现细节。
+即使 `de_model` 在 application / infrastructure 层重构为新的 context、features、
+`protect_decision` 或 `rewrite_mode` 协议，这些变化也不应上浮到 app facade。
+"""
+
 from typing import Any
 
 from privacyguard.bootstrap.factories import _build_component
@@ -26,7 +40,11 @@ from privacyguard.app.schemas import RestoreRequestModel, SanitizeRequestModel
 
 
 class PrivacyGuard:
-    """项目顶层入口，负责依赖装配、模式选择与对外 API 暴露。"""
+    """项目顶层 facade，负责依赖装配并暴露稳定的 app 层入口。
+
+    该类本身不直接执行 detector、OCR、de_model 决策或 restore 规则；这些职责都
+    由下层 pipeline 与其依赖组件承担。app 层只负责接入外部请求并返回外部响应。
+    """
 
     def __init__(
         self,
@@ -45,11 +63,18 @@ class PrivacyGuard:
         detector_config: dict[str, Any] | None = None,
         decision_config: dict[str, Any] | None = None,
     ) -> None:
-        """初始化核心依赖并构建 sanitize/restore 两条流水线。screenshot_fill_mode: ring（纯色）、gradient（渐变）、cv（OpenCV inpaint）、mix（三段式自动选择，默认）。"""
+        """初始化核心依赖并装配 sanitize / restore 两条流水线。
+
+        `screenshot_fill_mode`:
+        `ring`（纯色）、`gradient`（渐变）、`cv`（OpenCV inpaint）、`mix`（三段式自动选择，默认）。
+
+        这里仅做组件装配与 pipeline 组装，不在 app 层展开具体策略逻辑。
+        """
         self.registry = get_or_create_registry(registry)
         self.detector_mode = normalize_detector_mode(detector_mode)
         self.decision_mode = normalize_decision_mode(decision_mode)
 
+        # 基础依赖由 registry 或显式注入提供；app 层不关心其内部实现细节。
         self.persona_repo = persona_repo or _build_component(
             self.registry.persona_repository_types,
             "json",
@@ -76,6 +101,8 @@ class PrivacyGuard:
             "action_restorer",
             "restoration mode",
         )
+        # detector / decision_engine 在 app 层只以统一接口接入。
+        # de_model 若发生内部重构，也应被封装在 decision_engine 之后。
         self.detector = detector or build_detector(
             self.detector_mode,
             self.registry,
@@ -89,6 +116,7 @@ class PrivacyGuard:
             self.mapping_table,
             decision_config=decision_config,
         )
+        # app facade 仅委托 pipeline 执行主链，不直接介入 sanitize / restore 内部步骤。
         self.sanitize_pipeline = SanitizePipeline(
             ocr=self.ocr,
             detector=self.detector,
@@ -100,11 +128,21 @@ class PrivacyGuard:
         self.restore_pipeline = RestorePipeline(mapping_table=self.mapping_table, restoration=self.restoration)
 
     def sanitize(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """接收脱敏请求字典并返回脱敏结果字典。"""
+        """接收外部脱敏 payload，委托 sanitize pipeline，并返回外部响应字典。
+
+        该入口保持公开行为稳定，不暴露内部 `de_model` 的 context、分层决策字段或
+        其他 pipeline 内部状态。
+        """
         request = SanitizeRequestModel.from_payload(payload)
-        return self.sanitize_pipeline.run(request=request).to_dict()
+        response = self.sanitize_pipeline.run(request=request)
+        return response.to_dict()
 
     def restore(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """接收还原请求字典并返回还原结果字典。"""
+        """接收外部还原 payload，委托 restore pipeline，并返回外部响应字典。
+
+        restore 的执行细节停留在 pipeline / restoration module 内部，不由 app facade
+        直接承担。
+        """
         request = RestoreRequestModel.from_payload(payload)
-        return self.restore_pipeline.run(request).to_dict()
+        response = self.restore_pipeline.run(request=request)
+        return response.to_dict()

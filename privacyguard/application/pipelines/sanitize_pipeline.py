@@ -1,4 +1,29 @@
-"""脱敏流程编排。"""
+"""sanitize 主链编排。
+
+当前 sanitize 主链的阶段边界保持为：
+
+OCR / prompt parse
+-> detector
+-> alias / session context preparation
+-> local context / quality / persona state preparation
+-> DecisionContextBuilder
+-> DecisionFeatureExtractor
+-> DEModelEngine / runtime
+-> ConstraintResolver
+-> placeholder allocation / replacement planning
+-> render
+-> mapping store
+
+说明：
+
+- 本文件只负责 application 层编排，不直接堆叠 de_model 内部细节
+- `DecisionFeatureExtractor`、runtime 与 `ConstraintResolver` 由 `decision_engine.plan(...)`
+  封装承担
+- 后续若抽出 `AliasLinker`、`LocalContextBuilder`、`QualityAggregator`、
+  `PersonaStateBuilder`，应接入本文件预留的准备阶段，而不是继续把细节写进主函数
+"""
+
+from __future__ import annotations
 
 import inspect
 import logging
@@ -96,6 +121,103 @@ def _trace_detector_output(session_id: str, turn_id: int, candidates: list) -> N
     )
 
 
+def _extract_ocr_blocks(request: SanitizeRequest, ocr_engine: OCREngine) -> list:
+    """阶段 1：执行 OCR；prompt 侧输入直接来自请求 DTO。"""
+    if request.screenshot is None:
+        return []
+    return ocr_engine.extract(request.screenshot)
+
+
+def _prepare_session_context(
+    *,
+    session_id: str,
+    mapping_store: MappingStore,
+    persona_repository: PersonaRepository,
+) -> tuple[SessionService, object]:
+    """阶段 3：准备会话级上下文。
+
+    当前阶段只显式处理 session binding。后续若引入 AliasLinker，应优先在这里或紧随其后的
+    决策前准备阶段接入，而不是把 alias 逻辑塞进 renderer 或 app facade。
+    """
+    session_service = SessionService(mapping_store=mapping_store, persona_repository=persona_repository)
+    session_binding = session_service.get_or_create_binding(session_id)
+    return (session_service, session_binding)
+
+
+def _build_decision_context(
+    *,
+    request: SanitizeRequest,
+    ocr_blocks: list,
+    detected_candidates: list,
+    session_binding,
+    mapping_store: MappingStore,
+    persona_repository: PersonaRepository,
+):
+    """阶段 4-5：准备决策上下文并交给 DecisionContextBuilder 组装。
+
+    当前仓库里，局部上下文、质量聚合与 persona 摘要仍主要由 `DecisionContextBuilder`
+    内部承接。后续若拆出 `LocalContextBuilder`、`QualityAggregator`、
+    `PersonaStateBuilder`，应在这里先完成准备，再统一汇入 `DecisionContextBuilder`。
+    """
+    context_builder = DecisionContextBuilder(mapping_store=mapping_store, persona_repository=persona_repository)
+    return context_builder.build(
+        session_id=request.session_id,
+        turn_id=request.turn_id,
+        prompt_text=request.prompt_text,
+        protection_level=request.protection_level,
+        detector_overrides=request.detector_overrides,
+        ocr_blocks=ocr_blocks,
+        candidates=detected_candidates,
+        session_binding=session_binding,
+    )
+
+
+def _plan_replacements(
+    *,
+    decision_context,
+    decision_engine: DecisionEngine,
+    mapping_store: MappingStore,
+):
+    """阶段 6-9：生成动作计划并完成 placeholder 级替换规划。
+
+    `decision_engine.plan(...)` 是 de_model 内部边界：其内部可继续封装
+    `DecisionFeatureExtractor`、runtime 执行与 `ConstraintResolver`，但这些细节不在
+    sanitize pipeline 中展开。
+    """
+    decision_plan = decision_engine.plan(decision_context)
+    return SessionPlaceholderAllocator(mapping_store=mapping_store).assign(decision_plan)
+
+
+def _render_sanitize_result(
+    *,
+    request: SanitizeRequest,
+    rendering_engine: RenderingEngine,
+    replacement_plan,
+    ocr_blocks: list,
+) -> tuple[str, object | None, list]:
+    """阶段 10：执行文本与截图渲染。"""
+    sanitized_prompt_text, applied_replacements = rendering_engine.render_text(request.prompt_text, replacement_plan)
+    sanitized_screenshot = (
+        rendering_engine.render_image(request.screenshot, replacement_plan, ocr_blocks=ocr_blocks)
+        if request.screenshot is not None
+        else None
+    )
+    return (sanitized_prompt_text, sanitized_screenshot, applied_replacements)
+
+
+def _persist_sanitize_result(
+    *,
+    request: SanitizeRequest,
+    session_service: SessionService,
+    replacement_plan,
+    applied_replacements: list,
+) -> None:
+    """阶段 11：写入 mapping store，并更新 session 绑定。"""
+    session_service.append_turn_replacements(request.session_id, request.turn_id, applied_replacements)
+    if replacement_plan.active_persona_id:
+        session_service.bind_active_persona(request.session_id, replacement_plan.active_persona_id, request.turn_id)
+
+
 def run_sanitize_pipeline(
     request: SanitizeRequest,
     ocr_engine: OCREngine,
@@ -106,44 +228,69 @@ def run_sanitize_pipeline(
     rendering_engine: RenderingEngine,
 ) -> SanitizeResponse:
     """按固定顺序执行 sanitize 编排并返回响应。"""
-    context_builder = DecisionContextBuilder(mapping_store=mapping_store, persona_repository=persona_repository)
-    ocr_blocks = ocr_engine.extract(request.screenshot) if request.screenshot is not None else []
+    # 1. OCR / prompt parse
+    # prompt 侧输入直接使用 request.prompt_text；截图存在时才执行 OCR。
+    ocr_blocks = _extract_ocr_blocks(request=request, ocr_engine=ocr_engine)
     _trace_ocr_blocks(request.session_id, request.turn_id, ocr_blocks)
+
+    # 2. detector
     _trace_detector_input(request.session_id, request.turn_id, request.prompt_text, ocr_blocks)
-    candidates = _detect_candidates(request=request, pii_detector=pii_detector, ocr_blocks=ocr_blocks)
-    _trace_detector_output(request.session_id, request.turn_id, candidates)
-    session_service = SessionService(mapping_store=mapping_store, persona_repository=persona_repository)
-    session_binding = session_service.get_or_create_binding(request.session_id)
-    decision_context = context_builder.build(
+    detected_candidates = _detect_candidates(request=request, pii_detector=pii_detector, ocr_blocks=ocr_blocks)
+    _trace_detector_output(request.session_id, request.turn_id, detected_candidates)
+
+    # 3. alias / session context preparation
+    session_service, session_binding = _prepare_session_context(
         session_id=request.session_id,
-        turn_id=request.turn_id,
-        prompt_text=request.prompt_text,
-        protection_level=request.protection_level,
-        detector_overrides=request.detector_overrides,
+        mapping_store=mapping_store,
+        persona_repository=persona_repository,
+    )
+
+    # 4. local context / quality / persona state preparation
+    # 5. DecisionContextBuilder
+    decision_context = _build_decision_context(
+        request=request,
         ocr_blocks=ocr_blocks,
-        candidates=candidates,
+        detected_candidates=detected_candidates,
         session_binding=session_binding,
+        mapping_store=mapping_store,
+        persona_repository=persona_repository,
     )
-    plan = decision_engine.plan(decision_context)
-    plan = SessionPlaceholderAllocator(mapping_store=mapping_store).assign(plan)
-    sanitized_prompt_text, applied_records = rendering_engine.render_text(request.prompt_text, plan)
-    sanitized_screenshot = (
-        rendering_engine.render_image(request.screenshot, plan, ocr_blocks=ocr_blocks)
-        if request.screenshot is not None
-        else None
+
+    # 6. DecisionFeatureExtractor
+    # 7. DEModelEngine / runtime
+    # 8. ConstraintResolver
+    # 9. placeholder allocation / replacement planning
+    replacement_plan = _plan_replacements(
+        decision_context=decision_context,
+        decision_engine=decision_engine,
+        mapping_store=mapping_store,
     )
-    session_service.append_turn_replacements(request.session_id, request.turn_id, applied_records)
-    if plan.active_persona_id:
-        session_service.bind_active_persona(request.session_id, plan.active_persona_id, request.turn_id)
+
+    # 10. render
+    sanitized_prompt_text, sanitized_screenshot, applied_replacements = _render_sanitize_result(
+        request=request,
+        rendering_engine=rendering_engine,
+        replacement_plan=replacement_plan,
+        ocr_blocks=ocr_blocks,
+    )
+
+    # 11. mapping store
+    _persist_sanitize_result(
+        request=request,
+        session_service=session_service,
+        replacement_plan=replacement_plan,
+        applied_replacements=applied_replacements,
+    )
+
     return SanitizeResponse(
         sanitized_prompt_text=sanitized_prompt_text,
         sanitized_screenshot=sanitized_screenshot,
-        active_persona_id=plan.active_persona_id,
-        replacements=applied_records,
+        active_persona_id=replacement_plan.active_persona_id,
+        replacements=applied_replacements,
         metadata={
-            "mode": plan.metadata.get("mode", ""),
+            "mode": replacement_plan.metadata.get("mode", ""),
             "protection_level": request.protection_level.value,
-            "candidate_count": str(len(candidates)),
-            "applied_count": str(len(applied_records)),
+            "candidate_count": str(len(detected_candidates)),
+            "applied_count": str(len(applied_replacements)),
         },
     )

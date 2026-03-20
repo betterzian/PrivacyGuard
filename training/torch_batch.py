@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import torch
 
@@ -13,9 +13,69 @@ from privacyguard.infrastructure.decision.features import (
     PERSONA_FEATURE_DIM,
     DecisionFeatureExtractor,
 )
-from privacyguard.infrastructure.decision.tiny_policy_net import TinyPolicyBatch
+from privacyguard.infrastructure.decision.tiny_policy_net import ACTION_ORDER, PROTECT_ORDER, REWRITE_MODE_ORDER, TinyPolicyBatch
 from privacyguard.infrastructure.decision.tokenizer import CharacterHashTokenizer
-from training.types import TrainingTurnExample
+from training.types import (
+    PROTECT_LABEL_REWRITE,
+    REWRITE_MODE_NONE,
+    SupervisedTurnLabels,
+    TrainingTurnExample,
+    normalize_action_type,
+    normalize_rewrite_mode,
+)
+
+IGNORE_INDEX = -100
+
+
+@dataclass(slots=True)
+class SupervisedTinyPolicyBatch(TinyPolicyBatch):
+    """在 `TinyPolicyBatch` 基础上附带层级监督标签。
+
+    结构化特征与文本辅助特征沿用 `TinyPolicyBatch`：
+
+    - `page_features`
+    - `candidate_features`
+    - `persona_features`
+    - `candidate_text_ids`
+    - `candidate_prompt_ids`
+    - `candidate_ocr_ids`
+    - `persona_text_ids`
+
+    新增监督标签：
+
+    - `target_protect_labels`: candidate 级 `KEEP / REWRITE`
+    - `target_rewrite_modes`: candidate 级 `GENERICIZE / PERSONA_SLOT`
+      `KEEP` 情况使用 `IGNORE_INDEX`
+    - `target_persona_indices`: turn 级 persona 目标；无目标为 `IGNORE_INDEX`
+    - `final_action_targets`: candidate 级 final_action 兼容/调试标签
+    """
+
+    target_protect_labels: torch.Tensor
+    target_rewrite_modes: torch.Tensor
+    target_persona_indices: torch.Tensor
+    final_action_targets: torch.Tensor
+
+    def to(self, device: torch.device | str) -> "SupervisedTinyPolicyBatch":
+        return replace(
+            self,
+            page_features=self.page_features.to(device),
+            candidate_features=self.candidate_features.to(device),
+            candidate_mask=self.candidate_mask.to(device),
+            candidate_text_ids=self.candidate_text_ids.to(device),
+            candidate_text_mask=self.candidate_text_mask.to(device),
+            candidate_prompt_ids=self.candidate_prompt_ids.to(device),
+            candidate_prompt_mask=self.candidate_prompt_mask.to(device),
+            candidate_ocr_ids=self.candidate_ocr_ids.to(device),
+            candidate_ocr_mask=self.candidate_ocr_mask.to(device),
+            persona_features=self.persona_features.to(device),
+            persona_mask=self.persona_mask.to(device),
+            persona_text_ids=self.persona_text_ids.to(device),
+            persona_text_mask=self.persona_text_mask.to(device),
+            target_protect_labels=self.target_protect_labels.to(device),
+            target_rewrite_modes=self.target_rewrite_modes.to(device),
+            target_persona_indices=self.target_persona_indices.to(device),
+            final_action_targets=self.final_action_targets.to(device),
+        )
 
 
 @dataclass(slots=True)
@@ -108,6 +168,19 @@ class TinyPolicyBatchBuilder:
 
     def build_examples(self, examples: list[TrainingTurnExample]) -> TinyPolicyBatch:
         """将序列化后的训练样本转换为 TinyPolicyBatch。"""
+        return self._build_example_batch(examples)
+
+    def build_supervised_examples(
+        self,
+        examples: list[TrainingTurnExample],
+        labels: list[SupervisedTurnLabels],
+    ) -> SupervisedTinyPolicyBatch:
+        """将训练样本与层级标签一起打包为 supervised batch。"""
+        base_batch = self._build_example_batch(examples)
+        return self._attach_supervised_targets(base_batch=base_batch, labels=labels)
+
+    def _build_example_batch(self, examples: list[TrainingTurnExample]) -> TinyPolicyBatch:
+        """将序列化后的训练样本转换为 TinyPolicyBatch。"""
         if not examples:
             raise ValueError("examples 不能为空。")
         batch_size = len(examples)
@@ -179,6 +252,80 @@ class TinyPolicyBatchBuilder:
             persona_text_mask=persona_text_mask,
             candidate_ids=candidate_ids,
             persona_ids=persona_ids,
+        )
+
+    def _attach_supervised_targets(
+        self,
+        *,
+        base_batch: TinyPolicyBatch,
+        labels: list[SupervisedTurnLabels],
+    ) -> SupervisedTinyPolicyBatch:
+        """把层级监督标签附着到训练 batch。"""
+        if len(labels) != len(base_batch.candidate_ids):
+            raise ValueError("labels 数量必须与 batch examples 数量一致。")
+
+        batch_size = len(base_batch.candidate_ids)
+        max_candidates = len(base_batch.candidate_ids[0]) if base_batch.candidate_ids else 1
+
+        target_protect_labels = torch.full((batch_size, max_candidates), IGNORE_INDEX, dtype=torch.long)
+        target_rewrite_modes = torch.full((batch_size, max_candidates), IGNORE_INDEX, dtype=torch.long)
+        final_action_targets = torch.full((batch_size, max_candidates), IGNORE_INDEX, dtype=torch.long)
+        target_persona_indices = torch.full((batch_size,), IGNORE_INDEX, dtype=torch.long)
+
+        for batch_index, label in enumerate(labels):
+            candidate_lookup = {
+                candidate_id: candidate_index
+                for candidate_index, candidate_id in enumerate(base_batch.candidate_ids[batch_index])
+                if candidate_id
+            }
+            persona_lookup = {
+                persona_id: persona_index
+                for persona_index, persona_id in enumerate(base_batch.persona_ids[batch_index])
+                if persona_id
+            }
+
+            if label.target_persona_id:
+                persona_index = persona_lookup.get(label.target_persona_id)
+                if persona_index is not None:
+                    target_persona_indices[batch_index] = persona_index
+
+            for candidate_id, candidate_index in candidate_lookup.items():
+                if (
+                    candidate_id not in label.final_actions
+                    and candidate_id not in label.target_protect_labels
+                    and candidate_id not in label.target_rewrite_modes
+                ):
+                    continue
+                final_action = normalize_action_type(label.final_actions.get(candidate_id))
+                protect_label = str(label.target_protect_labels.get(candidate_id, "KEEP")).strip().upper()
+                rewrite_mode = normalize_rewrite_mode(label.target_rewrite_modes.get(candidate_id)) or REWRITE_MODE_NONE
+
+                target_protect_labels[batch_index, candidate_index] = PROTECT_ORDER.index(protect_label)
+                final_action_targets[batch_index, candidate_index] = ACTION_ORDER.index(final_action)
+
+                if protect_label == PROTECT_LABEL_REWRITE and rewrite_mode != REWRITE_MODE_NONE:
+                    target_rewrite_modes[batch_index, candidate_index] = REWRITE_MODE_ORDER.index(rewrite_mode)
+
+        return SupervisedTinyPolicyBatch(
+            page_features=base_batch.page_features,
+            candidate_features=base_batch.candidate_features,
+            candidate_mask=base_batch.candidate_mask,
+            candidate_text_ids=base_batch.candidate_text_ids,
+            candidate_text_mask=base_batch.candidate_text_mask,
+            candidate_prompt_ids=base_batch.candidate_prompt_ids,
+            candidate_prompt_mask=base_batch.candidate_prompt_mask,
+            candidate_ocr_ids=base_batch.candidate_ocr_ids,
+            candidate_ocr_mask=base_batch.candidate_ocr_mask,
+            persona_features=base_batch.persona_features,
+            persona_mask=base_batch.persona_mask,
+            persona_text_ids=base_batch.persona_text_ids,
+            persona_text_mask=base_batch.persona_text_mask,
+            candidate_ids=base_batch.candidate_ids,
+            persona_ids=base_batch.persona_ids,
+            target_protect_labels=target_protect_labels,
+            target_rewrite_modes=target_rewrite_modes,
+            target_persona_indices=target_persona_indices,
+            final_action_targets=final_action_targets,
         )
 
     def _persona_text(self, feature) -> str:

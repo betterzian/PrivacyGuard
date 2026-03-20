@@ -2,7 +2,13 @@
 
 PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私保护框架。它在图片和文本上传到云端前执行 `sanitize`，在云端返回文本后执行 `restore`，尽量减少真实 PII 直接暴露给云端的机会，同时保留任务可执行性。
 
-当前仓库已经具备可运行的 `sanitize -> restore` 闭环、可替换的模块边界、较完整的单元测试，以及 `de_model` 的最小训练与 checkpoint 回接链路；但它仍然是研究型工程底座，不是已经完成移动端部署与指标闭环的成品 SDK。
+当前仓库已经具备：
+
+- 可运行的 `sanitize -> restore` 闭环
+- 可替换的 detector / decision / rendering / mapping / restoration 边界
+- `de_model` 的最小训练、checkpoint 回接和 torch runtime 路径
+
+但它仍然是研究型工程底座，不是已经完成移动端部署、端侧 bundle 导出和线上指标闭环的成品 SDK。
 
 ## 项目现状
 
@@ -10,37 +16,196 @@ PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私
 | --- | --- | --- |
 | 顶层 API | `PrivacyGuard` / `PrivacyRepository` | 已实现 |
 | OCR | `PPOCREngineAdapter` | 支持本地路径、`PIL.Image`、`numpy.ndarray`、`http(s)` URL；缺少 `paddleocr` 时会在真正跑截图 OCR 时显式报错 |
-| PII 检测 | `rule_based` | 当前唯一注册到主链路的 detector |
+| PII 检测 | `rule_based` | 当前唯一公开 detector mode |
 | 决策 | `de_model` / `label_only` / `label_persona_mixed` | 默认模式是 `de_model`，默认 runtime 是 heuristic |
 | 文本渲染 | `PromptRenderer` | prompt 优先按 span 替换，缺失 span 时回退保守正则替换 |
 | 截图渲染 | `ScreenshotRenderer` | 支持 OCR block 局部重建、跨 block 处理、polygon/rotation 感知和 `ring / gradient / cv / mix` 填充策略 |
 | 映射与恢复 | `InMemoryMappingStore` / `JsonMappingStore` + `ActionRestorer` | `restore` 只使用当前 turn 的映射记录 |
 | 本地隐私仓库 | `JsonPersonaRepository` | 默认读 `data/privacy_repository.json`，缺省时回退 `data/personas.sample.json` |
-| 训练 | `training/` | 已有 supervised JSONL 导出、最小行为克隆训练、torch runtime 回接；对抗训练和真实 bundle 导出仍未完成 |
+| 训练 | `training/` | 已有 supervised JSONL 导出、层级标签、最小 supervised finetune、torch runtime 回接；对抗训练和真实 bundle 导出仍未完成 |
 
-## 核心流程
+## 当前架构边界
+
+### `PrivacyGuard` 是 facade，不承载内部策略细节
+
+对外入口是 [`PrivacyGuard`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/app/privacy_guard.py)。
+
+它负责：
+
+- 接收外部 payload
+- 转换为 request model / DTO
+- 调用 sanitize / restore pipeline
+- 返回外部响应字典
+
+它不直接承担：
+
+- detector 规则
+- OCR 实现
+- `de_model` runtime
+- restore 规则
+
+这也是为什么内部即使已经有：
+
+- `DecisionModelContext`
+- `protect_decision`
+- `rewrite_mode`
+- `page_policy_state`
+
+这些字段也不会直接暴露到 facade 的稳定对外返回里。
+
+### `de_model` 是策略决策层，不是 detector
+
+当前代码里，`de_model` 的职责是：
+
+- 消费已有候选
+- 读取上下文、页面质量、persona 状态、session 历史
+- 输出动作计划
+
+它不是：
+
+- detector
+- OCR 清洗主逻辑
+- 复杂 linking 系统
+
+当前统一执行动作术语为：
+
+- `KEEP`
+- `GENERICIZE`
+- `PERSONA_SLOT`
+
+内部 runtime 可以使用两级视角：
+
+- `protect_decision`: `KEEP / REWRITE`
+- `rewrite_mode`: `GENERICIZE / PERSONA_SLOT / NONE`
+
+但最终执行边界仍然是上面三类动作。
+
+## sanitize / restore 主链
 
 ### `sanitize`
 
+当前 application 主链位于 [`privacyguard/application/pipelines/sanitize_pipeline.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/application/pipelines/sanitize_pipeline.py)。
+
+固定骨架是：
+
+```text
+payload
+-> request model / DTO
+-> OCR / detector
+-> session context prepare
+-> DecisionContextBuilder
+-> decision_engine.plan(...)
+-> SessionPlaceholderAllocator
+-> render
+-> mapping store
+-> response DTO
+```
+
+如果按当前代码展开，真实顺序是：
+
 1. 校验 `session_id / turn_id / prompt / image / protection_level / detector_overrides`
-2. 若有截图，则先做 OCR
+2. 若有截图，则先做 OCR；否则 `ocr_blocks=[]`
 3. `rule_based` 检测 prompt 与 OCR 中的 PII 候选
-4. `DecisionContextBuilder` 构造统一 `DecisionContext`
-5. 决策引擎输出 `DecisionPlan`
-6. `SessionPlaceholderAllocator` 为 `GENERICIZE` 动作分配会话级稳定占位符
-7. 渲染 prompt 与截图，并写入当前 turn 的替换记录
+4. 读取或创建当前 session 的 `SessionBinding`
+5. `DecisionContextBuilder` 组装 `DecisionModelContext`
+6. 调用具体 `decision_engine.plan(...)`
+7. `SessionPlaceholderAllocator` 为 `GENERICIZE` 分配 session 级稳定占位符
+8. `PromptRenderer` 渲染 prompt；若有截图则再渲染 screenshot
+9. 写入当前 turn 的 `ReplacementRecord`
+10. 如有 active persona，则更新 session binding
+
+#### 当前的 context 组织
+
+`DecisionContextBuilder` 当前正式收敛为 `DecisionModelContext`，其核心组织是：
+
+- `raw_refs`
+- `candidate_policy_views`
+- `page_policy_state`
+- `persona_policy_states`
+
+旧字段 `page_features / candidate_features / persona_features` 仍保留为兼容层，但新的正式组织已经是上面四块。
 
 ### `restore`
 
-1. 校验 `session_id / turn_id / agent_text`
-2. 只读取当前 turn 的替换记录
-3. 用 `replacement_text -> source_text` 映射恢复云端返回文本
+当前 application 主链位于 [`privacyguard/application/pipelines/restore_pipeline.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/application/pipelines/restore_pipeline.py)。
 
-需要特别注意：
+固定骨架是：
 
-- `restore` 当前不回溯整个会话历史
-- `restore` 不处理结构化动作 DSL，只处理云端返回文本
-- 占位符是 session 级稳定的，但恢复时只认当前 `turn_id`
+```text
+payload
+-> request model / DTO
+-> current turn replacement records
+-> text restore
+-> response DTO
+```
+
+当前 restore 明确保持收敛：
+
+- 只读取当前 `session_id + turn_id` 的替换记录
+- 不回溯整个会话历史
+- 不处理结构化动作 DSL
+- 不对 `de_model` 决策做逆向推理
+
+动作兼容原则是：
+
+- `KEEP` 不参与 restore
+- `GENERICIZE` 可恢复
+- `PERSONA_SLOT` 可恢复
+- 旧别名 `LABEL` 按 `GENERICIZE` 兼容
+
+## 决策模式与分流
+
+当前公开 decision mode 有 3 个。
+
+### `label_only`
+
+实现文件：[`privacyguard/infrastructure/decision/label_only_engine.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/infrastructure/decision/label_only_engine.py)
+
+行为：
+
+- 低于阈值的候选 -> `KEEP`
+- 其余候选 -> `GENERICIZE`
+- 最后进入 `ConstraintResolver`
+
+特点：
+
+- 仍然走统一 sanitize 主链
+- 仍然会构建 `DecisionModelContext`
+- 但不走 `de_model` 的 features / runtime 推理链
+
+### `label_persona_mixed`
+
+实现文件：[`privacyguard/infrastructure/decision/label_persona_mixed_engine.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/infrastructure/decision/label_persona_mixed_engine.py)
+
+行为：
+
+- 低于阈值的候选 -> `KEEP`
+- persona 优先属性 -> `PERSONA_SLOT`
+- 其余属性 -> `GENERICIZE`
+- 最后进入 `ConstraintResolver`
+
+### `de_model`
+
+实现文件：[`privacyguard/infrastructure/decision/de_model_engine.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/infrastructure/decision/de_model_engine.py)
+
+行为：
+
+- 读取 `DecisionModelContext`
+- `DecisionFeatureExtractor.pack(context)`
+- 调用 runtime
+- 构造 `DecisionAction`
+- 进入 `ConstraintResolver`
+
+当前 `de_model` runtime 支持：
+
+- `heuristic`
+- `torch`
+
+其中：
+
+- `heuristic` 是默认 runtime
+- `torch` 需要显式提供 `checkpoint_path`
+- `bundle` / `onnx` 当前尚未实现成功执行路径
 
 ## 默认行为与可选模式
 
@@ -157,10 +322,16 @@ print(sanitize_resp["masked_prompt"])
 print(restore_resp["restored_text"])
 ```
 
-如果你想要一个更保守、可预测的基线，也可以显式指定：
+如果你想要一个更保守、可预测的基线，可以显式指定：
 
 ```python
 guard = PrivacyGuard(decision_mode="label_only")
+```
+
+如果你想优先复用 persona 槽位：
+
+```python
+guard = PrivacyGuard(decision_mode="label_persona_mixed")
 ```
 
 ### 使用截图 OCR
@@ -191,6 +362,22 @@ response = guard.sanitize(
 ```
 
 如果未安装 `paddleocr`，只有在真正处理截图时才会报错，并提示执行 `python -m pip install -e '.[ocr]'`。
+
+### 使用 `de_model` torch runtime
+
+```python
+from privacyguard import PrivacyGuard
+
+guard = PrivacyGuard(
+    decision_mode="de_model",
+    decision_config={
+        "runtime_type": "torch",
+        "checkpoint_path": "artifacts/tiny_policy_supervised.pt",
+    },
+)
+```
+
+当前 `torch` runtime 依赖已有 checkpoint；如果只想跑默认可用路径，继续用 `runtime_type="heuristic"` 即可。
 
 ### 写入本地隐私仓库
 
@@ -257,6 +444,11 @@ print(guard.persona_repo.get_persona("owner"))
 - `mapping_count`
 - `active_persona_id`
 
+注意：
+
+- 这些是 facade 的稳定对外字段
+- 内部 `protect_decision / rewrite_mode / page_policy_state / candidate_policy_views` 不会直接出现在这里
+
 ### `PrivacyGuard.restore(payload)`
 
 输入字段：
@@ -283,6 +475,30 @@ print(guard.persona_repo.get_persona("owner"))
 - `repository_path`
 - `written_count`
 - `persona_ids`
+
+## 训练与 `de_model`
+
+当前 `training/` 已对齐新的层级标签组织。当前 supervised 数据导出至少包含：
+
+- `candidate_policy_view`
+- `page_policy_state`
+- `persona_policy_states`
+- `target_protect_label`
+- `target_rewrite_mode`
+- `target_persona_id`
+- `final_action`
+
+当前 supervised loss 已拆为：
+
+- `L_protect`
+- `L_rewrite_mode`
+- `L_persona`
+- 可选 `L_cost`
+
+其中 `L_cost` 当前至少支持：
+
+- 高 `protection_level` 下误判 `KEEP` 更高惩罚
+- 低 `page_quality_state` 下误判 `KEEP` 更高惩罚
 
 ## 数据与配置文件
 
@@ -317,30 +533,4 @@ PrivacyGuard/
 ├─ docs/
 ├─ data/
 └─ examples/
-```
-
-## 当前限制
-
-- `rule_based` 是当前唯一注册到主链路的 detector，`GLiNERAdapter` 仍只是预留扩展位
-- `de_model` 默认仍是 heuristic runtime；torch runtime 需要显式提供 checkpoint
-- `runtime_type="bundle"` 目前只保留接口，实际会抛出 `NotImplementedError`
-- `run_adversarial_finetune()` 尚未实现
-- `export_runtime_bundle()` 目前只写 metadata，不负责真实 ONNX/TFLite 导出
-- `restore` 只看当前 turn，不做跨 turn 自动恢复
-- 顶层对外仍是 Python API，没有 CLI、服务化接口和移动端接线层
-
-## 文档索引
-
-- [What_is_PrivcacyGuard.md](What_is_PrivcacyGuard.md)
-- [docs/REQUEST_FLOW.md](docs/REQUEST_FLOW.md)
-- [docs/DE_MODEL_IMPLEMENTATION.md](docs/DE_MODEL_IMPLEMENTATION.md)
-- [docs/DE_MODEL_TRAINING_LAYOUT.md](docs/DE_MODEL_TRAINING_LAYOUT.md)
-- [training/README.md](training/README.md)
-
-## 仓库内示例
-
-```bash
-python3 examples/minimal_demo.py
-python3 examples/privacy_repository_demo.py
-python3 examples/paddleocr_import_demo.py
 ```
