@@ -6,14 +6,16 @@
 - 转换为边界层 request model / DTO
 - 调用 sanitize / restore pipeline
 - 返回外部响应字典
+- `write_privacy_repository`：合并写入 `rule_based` 本地词库并刷新检测器（实现细节仍在 infrastructure）
 
-这里不承载 detector、OCR、`de_model` runtime、restore 规则等内部实现细节。
-即使 `de_model` 在 application / infrastructure 层重构为新的 context、features、
-`protect_decision` 或 `rewrite_mode` 协议，这些变化也不应上浮到 app facade。
+sanitize / restore 与 OCR、`de_model` runtime、restore 规则的具体策略仍由 pipeline 与下层模块承担；
+app facade 不展开 `protect_decision` / `rewrite_mode` 等内部字段。
 """
 
+from pathlib import Path
 from typing import Any
 
+from privacyguard.api.errors import InvalidConfigurationError
 from privacyguard.bootstrap.factories import _build_component
 from privacyguard.bootstrap.registry import ComponentRegistry
 from privacyguard.domain.interfaces.decision_engine import DecisionEngine
@@ -36,7 +38,14 @@ from privacyguard.app.factories import (
     normalize_fill_mode,
 )
 from privacyguard.app.pipelines import RestorePipeline, SanitizePipeline
-from privacyguard.app.schemas import RestoreRequestModel, SanitizeRequestModel
+from privacyguard.app.schemas import (
+    PrivacyRepositoryWritePayloadModel,
+    PrivacyRepositoryWriteResponseModel,
+    RestoreRequestModel,
+    SanitizeRequestModel,
+)
+from privacyguard.infrastructure.pii.json_privacy_repository import DEFAULT_PRIVACY_REPOSITORY_PATH, JsonPrivacyRepository
+from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector
 
 
 class PrivacyGuard:
@@ -126,6 +135,29 @@ class PrivacyGuard:
             renderer=self.renderer,
         )
         self.restore_pipeline = RestorePipeline(mapping_table=self.mapping_table, restoration=self.restoration)
+
+    def write_privacy_repository(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """合并写入 rule_based 本地隐私词库 JSON，并刷新当前 detector 词典。
+
+        若构造时未设置 `detector_config["privacy_repository_path"]`，则写入默认路径
+        `data/privacy_repository.json` 并令检测器从该路径加载。
+        仅支持 `rule_based` 检测器（`RuleBasedPIIDetector`）。
+        """
+        if not isinstance(self.detector, RuleBasedPIIDetector):
+            raise InvalidConfigurationError("write_privacy_repository 仅适用于 rule_based 检测器")
+
+        if self.detector.privacy_repository_path is None:
+            self.detector.privacy_repository_path = Path(DEFAULT_PRIVACY_REPOSITORY_PATH)
+        target_path = Path(self.detector.privacy_repository_path)
+
+        request = PrivacyRepositoryWritePayloadModel.model_validate(payload)
+        patch = request.model_dump(exclude_none=True)
+        JsonPrivacyRepository(path=str(target_path)).merge_and_write(patch)
+        self.detector.reload_privacy_dictionary()
+        return PrivacyRepositoryWriteResponseModel(
+            status="ok",
+            repository_path=str(target_path),
+        ).to_dict()
 
     def sanitize(self, payload: dict[str, Any]) -> dict[str, Any]:
         """接收外部脱敏 payload，委托 sanitize pipeline，并返回外部响应字典。

@@ -14,21 +14,20 @@ PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私
 
 | 模块 | 当前实现 | 备注 |
 | --- | --- | --- |
-| 顶层 API | `PrivacyGuard` / `PersonaRepository` | 已实现 |
+| 顶层 API | `PrivacyGuard`（`sanitize` / `restore` / `write_privacy_repository`） | 已实现 |
 | OCR | `PPOCREngineAdapter` | 支持本地路径、`PIL.Image`、`numpy.ndarray`、`http(s)` URL；缺少 `paddleocr` 时会在真正跑截图 OCR 时显式报错 |
-| PII 检测 | `rule_based` | 当前唯一公开 detector mode |
+| PII 检测 | `rule_based` | 当前注册表中唯一可用的 detector mode；`infrastructure/pii/gliner_adapter.py` 为实验性适配器，尚未接入默认注册 |
 | 决策 | `de_model` / `label_only` / `label_persona_mixed` | 默认模式是 `de_model`，默认 runtime 是 heuristic |
 | 文本渲染 | `PromptRenderer` | prompt 优先按 span 替换，缺失 span 时回退保守正则替换 |
 | 截图渲染 | `ScreenshotRenderer` | 支持 OCR block 局部重建、跨 block 处理、polygon/rotation 感知和 `ring / gradient / cv / mix` 填充策略 |
 | 映射与恢复 | `InMemoryMappingStore` / `JsonMappingStore` + `ActionRestorer` | `restore` 只使用当前 turn 的映射记录 |
-| Persona 仓库 | `JsonPersonaRepository` | 默认读 `data/persona_repository.json`，缺省时回退 `data/personas.sample.json` |
 | 训练 | `training/` | 已有 supervised JSONL 导出、层级标签、最小 supervised finetune、torch runtime 回接；对抗训练和真实 bundle 导出仍未完成 |
 
 ## 当前架构边界
 
 ### `PrivacyGuard` 是 facade，不承载内部策略细节
 
-对外入口是 [`PrivacyGuard`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/app/privacy_guard.py)。
+对外入口是 [`PrivacyGuard`](privacyguard/app/privacy_guard.py)。
 
 它负责：
 
@@ -84,7 +83,7 @@ PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私
 
 ### `sanitize`
 
-当前 application 主链位于 [`privacyguard/application/pipelines/sanitize_pipeline.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/application/pipelines/sanitize_pipeline.py)。
+当前 application 主链位于 [`privacyguard/application/pipelines/sanitize_pipeline.py`](privacyguard/application/pipelines/sanitize_pipeline.py)。
 
 固定骨架是：
 
@@ -116,18 +115,18 @@ payload
 
 #### 当前的 context 组织
 
-`DecisionContextBuilder` 当前正式产出 `DecisionContext`，decision 模块再在内部派生出：
+`DecisionContextBuilder` 产出 Pydantic 领域模型 `DecisionContext`（会话、候选、OCR、`history_records`、`persona_profiles` 等）。策略视图由 `privacyguard/infrastructure/decision/policy_context.py` 中的 `derive_policy_context` 派生为 `DerivedDecisionPolicyContext`，包含：
 
 - `raw_refs`
 - `candidate_policy_views`
 - `page_policy_state`
 - `persona_policy_states`
 
-旧字段 `page_features / candidate_features / persona_features` 仍保留为兼容层；若上下文上已预构建同名策略字段，decision 模块也会兼容读取。
+`DecisionFeatureExtractor` 通过 `derive_policy_context` 读取上述视图并打包为 `PackedDecisionFeatures`；若将来在上下文上预构建同名字段，`policy_context` 中的兼容分支会优先使用。
 
 ### `restore`
 
-当前 application 主链位于 [`privacyguard/application/pipelines/restore_pipeline.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/application/pipelines/restore_pipeline.py)。
+当前 application 主链位于 [`privacyguard/application/pipelines/restore_pipeline.py`](privacyguard/application/pipelines/restore_pipeline.py)。
 
 固定骨架是：
 
@@ -158,7 +157,7 @@ payload
 
 ### `label_only`
 
-实现文件：[`privacyguard/infrastructure/decision/label_only_engine.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/infrastructure/decision/label_only_engine.py)
+实现文件：[`privacyguard/infrastructure/decision/label_only_engine.py`](privacyguard/infrastructure/decision/label_only_engine.py)
 
 行为：
 
@@ -174,7 +173,7 @@ payload
 
 ### `label_persona_mixed`
 
-实现文件：[`privacyguard/infrastructure/decision/label_persona_mixed_engine.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/infrastructure/decision/label_persona_mixed_engine.py)
+实现文件：[`privacyguard/infrastructure/decision/label_persona_mixed_engine.py`](privacyguard/infrastructure/decision/label_persona_mixed_engine.py)
 
 行为：
 
@@ -185,7 +184,7 @@ payload
 
 ### `de_model`
 
-实现文件：[`privacyguard/infrastructure/decision/de_model_engine.py`](/Users/vis/Documents/GitHub/PrivacyGuard/privacyguard/infrastructure/decision/de_model_engine.py)
+实现文件：[`privacyguard/infrastructure/decision/de_model_engine.py`](privacyguard/infrastructure/decision/de_model_engine.py)
 
 行为：
 
@@ -197,14 +196,11 @@ payload
 
 当前 `de_model` runtime 支持：
 
-- `heuristic`
-- `torch`
+- `heuristic`（默认）
+- `torch`（需 `checkpoint_path`）
+- `bundle`（已预留 `bundle_path` 参数，构造时会 `raise NotImplementedError`）
 
-其中：
-
-- `heuristic` 是默认 runtime
-- `torch` 需要显式提供 `checkpoint_path`
-- `bundle` / `onnx` 当前尚未实现成功执行路径
+代码中未实现独立的 `onnx` runtime 类型。
 
 ## 默认行为与可选模式
 
@@ -213,11 +209,10 @@ payload
 | 配置 | 默认值 |
 | --- | --- |
 | `detector_mode` | `rule_based` |
-| `decision_mode` | `de_model` |
+| `decision_mode` | `de_model`（默认值定义见 `privacyguard/bootstrap/mode_config.py`） |
 | `de_model.runtime_type` | `heuristic` |
 | `screenshot_fill_mode` | `mix` |
 | `mapping_store` | `in_memory` |
-| `persona_repository` | `json` |
 | `ocr provider` | `ppocr_v5` |
 
 ### 当前支持的模式
@@ -235,10 +230,6 @@ payload
 #### Mapping Store
 
 - `in_memory`
-- `json`
-
-#### Persona Repository
-
 - `json`
 
 #### Screenshot Fill Strategy
@@ -378,44 +369,18 @@ guard = PrivacyGuard(
 
 当前 `torch` runtime 依赖已有 checkpoint；如果只想跑默认可用路径，继续用 `runtime_type="heuristic"` 即可。
 
-### 写入 persona 仓库
+### 写入 privacy 词库（`rule_based`）
 
 ```python
-from privacyguard import PrivacyGuard, PersonaRepository
+from privacyguard import PrivacyGuard
 
-repository = PersonaRepository()
-repository.write(
-    {
-        "personas": [
-            {
-                "persona_id": "owner",
-                "display_name": "主身份",
-                "slots": {
-                    "name": "张三",
-                    "phone": "13800138000",
-                    "email": "zhangsan@example.com",
-                    "address": "上海市浦东新区世纪大道100号",
-                },
-                "metadata": {
-                    "source": "manual_import",
-                },
-                "stats": {
-                    "exposure_count": 0,
-                },
-            }
-        ]
-    }
+guard = PrivacyGuard(detector_mode="rule_based")
+guard.write_privacy_repository(
+    {"name": ["张三"], "phone": ["13800138000"], "address": ["上海市浦东新区世纪大道100号"]}
 )
-
-guard = PrivacyGuard(decision_mode="label_persona_mixed")
-print(guard.persona_repo.get_persona("owner"))
 ```
 
-`PersonaRepository.write()` 支持按 `persona_id` 合并写入：
-
-- `slots`
-- `metadata`
-- `stats`
+未设置 `detector_config["privacy_repository_path"]` 时，默认写入并加载 `data/privacy_repository.json`。
 
 ## 顶层 API
 
@@ -452,7 +417,7 @@ print(guard.persona_repo.get_persona("owner"))
 
 - `session_id: str`
 - `turn_id: int = 0`
-- `agent_text: str`
+- `agent_text: str`（app 层字段名；转换为内部 [`RestoreRequest`](privacyguard/api/dto.py) 时映射为 `cloud_text`）
 
 返回字段：
 
@@ -460,18 +425,17 @@ print(guard.persona_repo.get_persona("owner"))
 - `restored_text`
 - `session_id`
 
-### `PersonaRepository.write(payload)`
+### `PrivacyGuard.write_privacy_repository(payload)`
 
-输入字段：
+输入字段（均为可选，合并写入；与 `data/privacy_repository.sample.json` 结构一致）：
 
-- `personas: list[...]`
+- `name` / `location_clue` / `phone` / `card_number` / `bank_account` / `passport_number` / `driver_license` / `email` / `address` / `id_number` / `organization`
+- `entities`：实体列表（按 `entity_id` 合并）
 
 返回字段：
 
 - `status`
 - `repository_path`
-- `written_count`
-- `persona_ids`
 
 ## 训练与 `de_model`
 
@@ -499,10 +463,8 @@ print(guard.persona_repo.get_persona("owner"))
 
 ## 数据与配置文件
 
-- `data/persona_repository.json`
-  本地 persona 仓库默认落盘位置
-- `data/personas.sample.json`
-  当本地仓库不存在时的只读回退样例
+- `data/privacy_repository.json`
+  默认隐私词库落盘位置（`write_privacy_repository` 未指定 `privacy_repository_path` 时）
 - `data/privacy_repository.sample.json`
   `RuleBasedPIIDetector` 示例词库
 - `data/china_geo_lexicon.json`
@@ -510,16 +472,15 @@ print(guard.persona_repo.get_persona("owner"))
 
 补充说明：
 
-- 词库不会自动启用，需要显式传入 `detector_config={"privacy_repository_path": ...}`
-- `JsonPersonaRepository` 读取时兼容 `{"personas": [...]}` 和直接的列表格式
-- 实际持久化到 `data/persona_repository.json` 时会写成列表格式
+- 使用 `PrivacyGuard.write_privacy_repository` 时，若未配置路径会写入默认 `data/privacy_repository.json` 并加载；否则需与 `detector_config={"privacy_repository_path": ...}` 指向同一文件
 
 ## 仓库结构
 
 ```text
 PrivacyGuard/
 ├─ privacyguard/
-│  ├─ app/                # 顶层 API、payload schema、pipeline 包装
+│  ├─ api/                  # 对外稳定 DTO（sanitize / restore 边界）
+│  ├─ app/                  # 顶层 API、payload schema、pipeline 包装
 │  ├─ application/        # sanitize / restore 编排与上下文服务
 │  ├─ bootstrap/          # 注册表、工厂、模式归一化
 │  ├─ domain/             # 枚举、接口、领域模型、约束解析

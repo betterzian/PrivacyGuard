@@ -3,7 +3,12 @@
 import json
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
+from privacyguard.domain.models.persona import PersonaProfile
+from privacyguard.infrastructure.persona.json_persona_repository import (
+    DEFAULT_PERSONA_REPOSITORY_PATH,
+    DEFAULT_PERSONA_SAMPLE_PATH,
+    JsonPersonaRepository,
+)
 
 
 def test_json_persona_repository_loads_all_supported_non_other_slots(tmp_path) -> None:
@@ -49,3 +54,59 @@ def test_json_persona_repository_loads_all_supported_non_other_slots(tmp_path) -
         PIIAttributeType.ID_NUMBER: "110101199001011234",
         PIIAttributeType.ORGANIZATION: "星海数据科技有限公司",
     }
+
+
+def test_json_persona_repository_reads_sample_but_flushes_to_local_repo(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    sample_path = tmp_path / DEFAULT_PERSONA_SAMPLE_PATH
+    sample_path.parent.mkdir(parents=True, exist_ok=True)
+    sample_path.write_text(
+        json.dumps(
+            [
+                {
+                    "persona_id": "sample-persona",
+                    "slots": {
+                        "name": "样例用户",
+                    },
+                    "stats": {
+                        "exposure_count": 0,
+                    },
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    repo = JsonPersonaRepository()
+    assert repo.get_persona("sample-persona") is not None
+
+    repo.upsert_persona(
+        PersonaProfile(
+            persona_id="local-persona",
+            display_name="本地主身份",
+            slots={
+                PIIAttributeType.NAME: "张三",
+                PIIAttributeType.PHONE: "13800138000",
+            },
+            stats={"exposure_count": 1},
+        )
+    )
+
+    local_repo_path = tmp_path / DEFAULT_PERSONA_REPOSITORY_PATH
+    assert local_repo_path.exists()
+    assert json.loads(sample_path.read_text(encoding="utf-8")) == [
+        {
+            "persona_id": "sample-persona",
+            "slots": {
+                "name": "样例用户",
+            },
+            "stats": {
+                "exposure_count": 0,
+            },
+        }
+    ]
+
+    reloaded = JsonPersonaRepository()
+    assert reloaded.get_persona("sample-persona") is not None
+    assert reloaded.get_slot_value("local-persona", PIIAttributeType.PHONE) == "13800138000"

@@ -53,7 +53,6 @@ PrivacyGuard 插在第 2 步和第 4 步之间，负责两件事：
 | OCR | `PPOCREngineAdapter` | 已接到主链路；缺依赖时显式报错，不做静默降级 |
 | Detector | `RuleBasedPIIDetector` | 已接到主链路 |
 | Decision | `LabelOnlyDecisionEngine` / `LabelPersonaMixedDecisionEngine` / `DEModelEngine` | 三种模式都可用 |
-| Persona Repository | `JsonPersonaRepository` | 已实现，默认支持本地仓库 + 样例回退 |
 | Mapping Store | `InMemoryMappingStore` / `JsonMappingStore` | 已实现 |
 | Rendering | `PromptRenderer` + `ScreenshotRenderer` | 已实现 |
 | Restoration | `ActionRestorer` | 已实现，但只恢复文本、只认当前 turn |
@@ -224,20 +223,16 @@ plan(context: DecisionContext) -> DecisionPlan
 
 ### 9.1 Persona Repository
 
-`JsonPersonaRepository` 的读取规则是：
+运行时由 `JsonPersonaRepository` 读取（无对外写入 API）。读取规则：
 
 1. 优先读取 `data/persona_repository.json`
 2. 如果本地仓库不存在，则回退读取 `data/personas.sample.json`
 
-写入由 `PersonaRepository.write()` 完成，支持：
+### 9.2 rule_based 隐私词库
 
-- `slots`
-- `metadata`
-- `stats`
+`RuleBasedPIIDetector` 可选加载本地 JSON 词库。对外通过 `PrivacyGuard.write_privacy_repository(payload)` 合并写入并刷新内存词典；未配置 `detector_config["privacy_repository_path"]` 时默认使用 `data/privacy_repository.json`。词条结构与 `data/privacy_repository.sample.json` 一致。
 
-并且会按 `persona_id` 合并更新。
-
-### 9.2 Mapping Store
+### 9.3 Mapping Store
 
 当前 mapping store 保存两类状态：
 

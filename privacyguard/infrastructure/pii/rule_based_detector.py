@@ -913,6 +913,11 @@ class RuleBasedPIIDetector:
         )
         return self.resolver.resolve_candidates(candidates)
 
+    def reload_privacy_dictionary(self) -> None:
+        """从 `privacy_repository_path` 重新加载词典与索引；路径未设置或文件缺失时与构造时行为一致。"""
+        self.dictionary = self._load_dictionary(self.privacy_repository_path)
+        self.dictionary_index = self._build_dictionary_index(self.dictionary)
+
     def _resolve_privacy_repository_path(self, privacy_repository_path: str | Path | None) -> Path | None:
         """解析 privacy_repository 路径；未提供时默认使用空词库。"""
         if privacy_repository_path is None:

@@ -173,6 +173,10 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# 运行时本地仓库（可能含真实 PII；样例为 data/*.sample.json）
+data/persona_repository.json
+data/privacy_repository.json
+
 # Cursor  
 #  Cursor is an AI-powered code editor.`.cursorignore` specifies files/directories to 
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
