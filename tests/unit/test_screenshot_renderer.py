@@ -137,7 +137,7 @@ def test_screenshot_renderer_skips_duplicate_legacy_draw_for_grouped_block() -> 
                 action_type=ActionType.GENERICIZE,
                 attr_type=PIIAttributeType.NAME,
                 source_text="张三",
-                replacement_text="@姓名1",
+                replacement_text="<姓名1>",
                 bbox=BoundingBox(x=1, y=1, width=10, height=50),
                 block_id="ocr-box-3",
                 reason="legacy-same-block",
@@ -260,7 +260,7 @@ def test_screenshot_renderer_genericize_cross_block_writes_placeholder_once() ->
                 action_type=ActionType.GENERICIZE,
                 attr_type=PIIAttributeType.ADDRESS,
                 source_text="海淀区知春路",
-                replacement_text="@地址1",
+                replacement_text="<地址1>",
                 bbox=BoundingBox(x=10, y=10, width=98, height=20),
                 block_id="ocr-merge-a-b",
                 reason="cross-generic",
@@ -273,7 +273,7 @@ def test_screenshot_renderer_genericize_cross_block_writes_placeholder_once() ->
 
     assert len(draw_items) == 2
     assert [item.block_id for item in draw_items] == ["ocr-a", "ocr-b"]
-    assert [item.text for item in draw_items] == ["@地址1", ""]
+    assert [item.text for item in draw_items] == ["<地址1>", ""]
 
 
 def test_screenshot_renderer_persona_address_cross_block_splits_by_semantic_components() -> None:

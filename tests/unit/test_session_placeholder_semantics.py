@@ -104,14 +104,14 @@ def test_sanitize_pipeline_allocates_session_unique_placeholders_across_turns() 
         rendering_engine=renderer,
     )
 
-    assert turn1.sanitized_prompt_text == "@姓名1"
-    assert turn2.sanitized_prompt_text == "@姓名2"
+    assert turn1.sanitized_prompt_text == "<姓名1>"
+    assert turn2.sanitized_prompt_text == "<姓名2>"
 
     restored = run_restore_pipeline(
         request=RestoreRequest(
             session_id="session-a",
             turn_id=2,
-            cloud_text="当前是@姓名2",
+            cloud_text="当前是<姓名2>",
         ),
         mapping_store=mapping_store,
         restoration_module=ActionRestorer(),
@@ -145,14 +145,14 @@ def test_sanitize_pipeline_reuses_placeholder_for_name_noise_canonical_source() 
         rendering_engine=renderer,
     )
 
-    assert turn1.sanitized_prompt_text == "@姓名1"
-    assert turn2.sanitized_prompt_text == "@姓名1"
+    assert turn1.sanitized_prompt_text == "<姓名1>"
+    assert turn2.sanitized_prompt_text == "<姓名1>"
 
     restored = run_restore_pipeline(
         request=RestoreRequest(
             session_id="session-name-noise",
             turn_id=2,
-            cloud_text="当前是@姓名1",
+            cloud_text="当前是<姓名1>",
         ),
         mapping_store=mapping_store,
         restoration_module=ActionRestorer(),
@@ -172,7 +172,7 @@ def test_restore_only_uses_current_turn_records() -> None:
                 turn_id=1,
                 candidate_id="cand-1",
                 source_text="张三",
-                replacement_text="@姓名1",
+                replacement_text="<姓名1>",
                 attr_type=PIIAttributeType.NAME,
                 action_type=ActionType.GENERICIZE,
                 source=PIISourceType.PROMPT,
@@ -188,7 +188,7 @@ def test_restore_only_uses_current_turn_records() -> None:
                 turn_id=2,
                 candidate_id="cand-2",
                 source_text="李四",
-                replacement_text="@姓名2",
+                replacement_text="<姓名2>",
                 attr_type=PIIAttributeType.NAME,
                 action_type=ActionType.GENERICIZE,
                 source=PIISourceType.PROMPT,
@@ -200,13 +200,13 @@ def test_restore_only_uses_current_turn_records() -> None:
         request=RestoreRequest(
             session_id="session-a2",
             turn_id=2,
-            cloud_text="上一轮@姓名1，这一轮@姓名2",
+            cloud_text="上一轮<姓名1>，这一轮<姓名2>",
         ),
         mapping_store=mapping_store,
         restoration_module=ActionRestorer(),
     )
 
-    assert restored.restored_text == "上一轮@姓名1，这一轮李四"
+    assert restored.restored_text == "上一轮<姓名1>，这一轮李四"
 
 
 def test_sanitize_pipeline_reuses_placeholder_for_canonicalized_addresses() -> None:
@@ -234,8 +234,8 @@ def test_sanitize_pipeline_reuses_placeholder_for_canonicalized_addresses() -> N
         rendering_engine=renderer,
     )
 
-    assert turn1.sanitized_prompt_text == "@地址1"
-    assert turn2.sanitized_prompt_text == "@地址1"
+    assert turn1.sanitized_prompt_text == "<地址1>"
+    assert turn2.sanitized_prompt_text == "<地址1>"
 
 
 def test_label_persona_mixed_replaces_address_by_source_granularity() -> None:
@@ -437,7 +437,7 @@ def test_label_persona_mixed_downgrade_still_produces_unique_placeholders() -> N
         rendering_engine=PromptRenderer(),
     )
 
-    assert response.sanitized_prompt_text == "@姓名1和@姓名2"
+    assert response.sanitized_prompt_text == "<姓名1>和<姓名2>"
 
     restored = run_restore_pipeline(
         request=RestoreRequest(
@@ -463,7 +463,7 @@ def test_in_memory_mapping_store_replaces_turn_snapshot() -> None:
                 turn_id=1,
                 candidate_id="cand-1",
                 source_text="张三",
-                replacement_text="@姓名1",
+                replacement_text="<姓名1>",
                 attr_type=PIIAttributeType.NAME,
                 action_type=ActionType.GENERICIZE,
                 source=PIISourceType.PROMPT,
@@ -479,7 +479,7 @@ def test_in_memory_mapping_store_replaces_turn_snapshot() -> None:
                 turn_id=1,
                 candidate_id="cand-2",
                 source_text="13800138000",
-                replacement_text="@手机号1",
+                replacement_text="<手机号1>",
                 attr_type=PIIAttributeType.PHONE,
                 action_type=ActionType.GENERICIZE,
                 source=PIISourceType.PROMPT,

@@ -166,7 +166,7 @@ def _build_policy_context() -> DecisionContext:
                 turn_id=1,
                 candidate_id="hist-phone",
                 source_text="13800138000",
-                replacement_text="@手机号1",
+                replacement_text="<手机号1>",
                 attr_type=PIIAttributeType.PHONE,
                 action_type=ActionType.GENERICIZE,
                 source=PIISourceType.OCR,

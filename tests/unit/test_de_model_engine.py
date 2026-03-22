@@ -169,7 +169,7 @@ def test_de_model_engine_uses_runtime_and_constraint_resolution_without_building
     assert "risk_sensitive_keep" in action_map["cand-keep"].reason
 
     assert action_map["cand-generic"].action_type == ActionType.GENERICIZE
-    assert action_map["cand-generic"].replacement_text == "@手机号1"
+    assert action_map["cand-generic"].replacement_text == "<手机号1>"
 
     assert action_map["cand-persona"].action_type == ActionType.PERSONA_SLOT
     assert action_map["cand-persona"].persona_id == "persona-main"
@@ -234,7 +234,7 @@ def test_de_model_engine_falls_back_persona_slot_to_genericize_when_persona_miss
     assert runtime.calls == 1
     assert plan.actions[0].action_type == ActionType.GENERICIZE
     assert plan.actions[0].persona_id is None
-    assert plan.actions[0].replacement_text == "@姓名1"
+    assert plan.actions[0].replacement_text == "<姓名1>"
     assert "已降级为 GENERICIZE" in plan.actions[0].reason
 
 

@@ -27,7 +27,14 @@ class ProtectionLevel(str, Enum):
 
 
 class PIIAttributeType(str, Enum):
-    """定义常见 PII 属性类别。"""
+    """定义常见 PII 属性类别。
+
+    ``OTHER`` 为兜底：凡无法明确归入其余任一细分类（姓名、电话、地址等语义类，或
+    NUMERIC / TEXTUAL 等形态类）的，均应使用 ``OTHER``。
+
+    按字符串形态粗分时：仅数字与符号为 ``NUMERIC``，仅文字与符号为 ``TEXTUAL``；
+    其余（字母与数字并存、仅符号、空白、空串等）均为 ``OTHER``。
+    """
 
     NAME = "name"
     LOCATION_CLUE = "location_clue"
@@ -40,4 +47,6 @@ class PIIAttributeType(str, Enum):
     ADDRESS = "address"
     ID_NUMBER = "id_number"
     ORGANIZATION = "organization"
+    NUMERIC = "numeric"
+    TEXTUAL = "textual"
     OTHER = "other"

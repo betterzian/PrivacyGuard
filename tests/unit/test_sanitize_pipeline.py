@@ -95,7 +95,7 @@ class _SpyDecisionEngine:
                     attr_type=context.candidates[0].attr_type,
                     source=context.candidates[0].source,
                     source_text=context.candidates[0].text,
-                    replacement_text="@姓名1",
+                    replacement_text="<姓名1>",
                 )
             ],
             metadata={"mode": "de_model"},
@@ -104,7 +104,7 @@ class _SpyDecisionEngine:
 
 class _Renderer:
     def render_text(self, prompt_text: str, plan: DecisionPlan):
-        return (prompt_text.replace("张三", "@姓名1"), [])
+        return (prompt_text.replace("张三", "<姓名1>"), [])
 
     def render_image(self, image, plan: DecisionPlan, ocr_blocks=None):
         return image
@@ -240,7 +240,7 @@ def test_sanitize_pipeline_builds_unified_decision_context() -> None:
     policy = derive_policy_context(spy_engine.received_context)
     assert policy.page_policy_state["_average_ocr_block_score"] == 1.0
     assert policy.page_policy_state["_ocr_candidate_count"] == 1
-    assert response.sanitized_prompt_text == "@姓名1去吃饭"
+    assert response.sanitized_prompt_text == "<姓名1>去吃饭"
     assert response.active_persona_id == "persona-1"
     assert mapping_store.get_session_binding("session-pipeline").active_persona_id == "persona-1"
 

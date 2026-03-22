@@ -765,6 +765,8 @@ _RULE_PROFILES = {
             PIIAttributeType.LOCATION_CLUE: 0.48,
             PIIAttributeType.ADDRESS: 0.35,
             PIIAttributeType.ORGANIZATION: 0.48,
+            PIIAttributeType.NUMERIC: 0.76,
+            PIIAttributeType.TEXTUAL: 0.76,
             PIIAttributeType.OTHER: 0.76,
             PIIAttributeType.PHONE: 0.74,
             PIIAttributeType.CARD_NUMBER: 0.74,
@@ -791,6 +793,8 @@ _RULE_PROFILES = {
             PIIAttributeType.LOCATION_CLUE: 0.52,
             PIIAttributeType.ADDRESS: 0.45,
             PIIAttributeType.ORGANIZATION: 0.48,
+            PIIAttributeType.NUMERIC: 0.76,
+            PIIAttributeType.TEXTUAL: 0.76,
             PIIAttributeType.OTHER: 0.76,
             PIIAttributeType.PHONE: 0.74,
             PIIAttributeType.CARD_NUMBER: 0.74,
@@ -817,6 +821,8 @@ _RULE_PROFILES = {
             PIIAttributeType.LOCATION_CLUE: 0.9,
             PIIAttributeType.ADDRESS: 0.6,
             PIIAttributeType.ORGANIZATION: 0.74,
+            PIIAttributeType.NUMERIC: 0.9,
+            PIIAttributeType.TEXTUAL: 0.9,
             PIIAttributeType.OTHER: 0.9,
             PIIAttributeType.PHONE: 0.74,
             PIIAttributeType.CARD_NUMBER: 0.74,
@@ -2301,6 +2307,8 @@ class RuleBasedPIIDetector:
             PIIAttributeType.ID_NUMBER: " <ID> ",
             PIIAttributeType.ADDRESS: " <ADDR> ",
             PIIAttributeType.ORGANIZATION: " <ORG> ",
+            PIIAttributeType.NUMERIC: " <NUM> ",
+            PIIAttributeType.TEXTUAL: " <TXT> ",
             PIIAttributeType.OTHER: " <CODE> ",
         }
         return mapping[attr_type]
@@ -4312,5 +4320,8 @@ class RuleBasedPIIDetector:
             "id_number": PIIAttributeType.ID_NUMBER,
             "id": PIIAttributeType.ID_NUMBER,
             "organization": PIIAttributeType.ORGANIZATION,
+            "numeric": PIIAttributeType.NUMERIC,
+            "textual": PIIAttributeType.TEXTUAL,
+            "other": PIIAttributeType.OTHER,
         }
         return mapping.get(key)

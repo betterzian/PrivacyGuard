@@ -245,7 +245,7 @@ def test_privacy_guard_sanitize_and_restore_preserve_external_dto_boundary() -> 
 
     assert sanitize_result == {
         "status": "ok",
-        "masked_prompt": "李四的电话是@手机号1普通文本",
+        "masked_prompt": "李四的电话是<手机号1>普通文本",
         "masked_image": None,
         "session_id": "session-facade",
         "turn_id": 1,

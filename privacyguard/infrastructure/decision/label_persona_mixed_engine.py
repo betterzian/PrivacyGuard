@@ -6,11 +6,16 @@ from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, cl
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
+from privacyguard.domain.policies.generic_placeholder import render_generic_replacement_text
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 
 
 class LabelPersonaMixedDecisionEngine:
-    """按属性类型混合使用 persona 槽位与通用标签。"""
+    """按属性类型混合使用 persona 槽位与通用标签。
+
+    职责：对每个候选仅决策 ``KEEP`` / ``PERSONA_SLOT`` / ``GENERICIZE``；凡 ``GENERICIZE`` 的
+    ``replacement_text`` 均由 ``render_generic_replacement_text`` 生成。
+    """
 
     def __init__(
         self,
@@ -83,7 +88,7 @@ class LabelPersonaMixedDecisionEngine:
                     action_type=ActionType.GENERICIZE,
                     attr_type=candidate.attr_type,
                     source=candidate.source,
-                    replacement_text=self._label_for_attr(candidate.attr_type),
+                    replacement_text=render_generic_replacement_text(candidate.attr_type, 1),
                     source_text=candidate.text,
                     canonical_source_text=candidate.canonical_source_text,
                     bbox=candidate.bbox,
@@ -119,22 +124,3 @@ class LabelPersonaMixedDecisionEngine:
             return None
         sorted_personas = sorted(personas, key=lambda item: int(item.stats.get("exposure_count", 0)))
         return sorted_personas[0].persona_id
-
-    def _label_for_attr(self, attr_type: PIIAttributeType, index: int = 1) -> str:
-        """返回属性类型对应的中文标签，格式为 @姓名1、@手机号1 等（无尖括号）。"""
-        mapping = {
-            PIIAttributeType.NAME: "姓名",
-            PIIAttributeType.LOCATION_CLUE: "位置",
-            PIIAttributeType.PHONE: "手机号",
-            PIIAttributeType.CARD_NUMBER: "卡号",
-            PIIAttributeType.BANK_ACCOUNT: "银行账号",
-            PIIAttributeType.PASSPORT_NUMBER: "护照号",
-            PIIAttributeType.DRIVER_LICENSE: "驾驶证号",
-            PIIAttributeType.EMAIL: "邮箱",
-            PIIAttributeType.ADDRESS: "地址",
-            PIIAttributeType.ID_NUMBER: "身份证号",
-            PIIAttributeType.ORGANIZATION: "机构",
-            PIIAttributeType.OTHER: "敏感信息",
-        }
-        name = mapping.get(attr_type, "敏感信息")
-        return f"@{name}{index}"

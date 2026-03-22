@@ -11,6 +11,7 @@ from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.domain.policies.generic_placeholder import GENERIC_PLACEHOLDER_LABELS
 from privacyguard.utils.pii_value import canonicalize_pii_value
 
 _ADDRESS_HINT_TOKENS = ("省", "市", "区", "县", "路", "街", "道", "号", "小区", "公寓")
@@ -18,20 +19,7 @@ _HIGH_CANDIDATE_CONFIDENCE = 0.85
 _LOW_CANDIDATE_CONFIDENCE = 0.5
 _LOW_OCR_BLOCK_SCORE = 0.75
 _MASK_CHARS = set("*＊xX×#＃•●○◦◯_＿?？")
-_ATTR_LABELS = {
-    PIIAttributeType.NAME: "姓名",
-    PIIAttributeType.LOCATION_CLUE: "位置",
-    PIIAttributeType.PHONE: "手机号",
-    PIIAttributeType.CARD_NUMBER: "卡号",
-    PIIAttributeType.BANK_ACCOUNT: "银行账号",
-    PIIAttributeType.PASSPORT_NUMBER: "护照号",
-    PIIAttributeType.DRIVER_LICENSE: "驾驶证号",
-    PIIAttributeType.EMAIL: "邮箱",
-    PIIAttributeType.ADDRESS: "地址",
-    PIIAttributeType.ID_NUMBER: "身份证号",
-    PIIAttributeType.ORGANIZATION: "机构",
-    PIIAttributeType.OTHER: "敏感信息",
-}
+_ATTR_LABELS = GENERIC_PLACEHOLDER_LABELS
 
 
 @dataclass(slots=True)

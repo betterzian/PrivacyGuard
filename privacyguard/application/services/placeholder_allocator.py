@@ -9,23 +9,10 @@ from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.mapping import ReplacementRecord
+from privacyguard.domain.policies.generic_placeholder import generic_placeholder_label, render_generic_replacement_text
 from privacyguard.utils.pii_value import canonicalize_pii_value
 
-_PLACEHOLDER_PREFIX = {
-    PIIAttributeType.NAME: "姓名",
-    PIIAttributeType.LOCATION_CLUE: "位置",
-    PIIAttributeType.PHONE: "手机号",
-    PIIAttributeType.CARD_NUMBER: "卡号",
-    PIIAttributeType.BANK_ACCOUNT: "银行账号",
-    PIIAttributeType.PASSPORT_NUMBER: "护照号",
-    PIIAttributeType.DRIVER_LICENSE: "驾驶证号",
-    PIIAttributeType.EMAIL: "邮箱",
-    PIIAttributeType.ADDRESS: "地址",
-    PIIAttributeType.ID_NUMBER: "身份证号",
-    PIIAttributeType.ORGANIZATION: "机构",
-    PIIAttributeType.OTHER: "敏感信息",
-}
-_PLACEHOLDER_PATTERN = re.compile(r"^@(?P<label>.+?)(?P<index>\d+)$")
+_PLACEHOLDER_PATTERN = re.compile(r"^<(?P<label>.+?)(?P<index>\d+)>$")
 
 
 class SessionPlaceholderAllocator:
@@ -49,7 +36,7 @@ class SessionPlaceholderAllocator:
             replacement_text = existing_by_source.get(source_key)
             if replacement_text is None:
                 next_index = next_indices[action.attr_type]
-                replacement_text = self._label_for_attr(action.attr_type, next_index)
+                replacement_text = render_generic_replacement_text(action.attr_type, next_index)
                 existing_by_source[source_key] = replacement_text
                 next_indices[action.attr_type] = next_index + 1
             updated = action.model_copy(deep=True)
@@ -79,7 +66,7 @@ class SessionPlaceholderAllocator:
             matched = _PLACEHOLDER_PATTERN.match(record.replacement_text)
             if matched is None:
                 continue
-            expected_label = _PLACEHOLDER_PREFIX.get(record.attr_type, "敏感信息")
+            expected_label = generic_placeholder_label(record.attr_type)
             if matched.group("label") != expected_label:
                 continue
             max_indices[record.attr_type] = max(max_indices[record.attr_type], int(matched.group("index")))
@@ -88,5 +75,3 @@ class SessionPlaceholderAllocator:
     def _source_key(self, attr_type: PIIAttributeType, source_text: str) -> tuple[PIIAttributeType, str]:
         return (attr_type, canonicalize_pii_value(attr_type, source_text))
 
-    def _label_for_attr(self, attr_type: PIIAttributeType, index: int) -> str:
-        return f"@{_PLACEHOLDER_PREFIX.get(attr_type, '敏感信息')}{index}"

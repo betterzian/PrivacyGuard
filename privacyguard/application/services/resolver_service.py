@@ -26,27 +26,14 @@ from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, cl
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.domain.policies.generic_placeholder import generic_placeholder_label, render_generic_replacement_text
 from privacyguard.infrastructure.decision.policy_context import derive_policy_context
 from privacyguard.utils.pii_value import canonicalize_pii_value
 
 _LOW_CANDIDATE_CONFIDENCE = 0.5
 _HIGH_CANDIDATE_CONFIDENCE = 0.85
 _LOW_OCR_BLOCK_SCORE = 0.75
-_PLACEHOLDER_PREFIX = {
-    PIIAttributeType.NAME: "姓名",
-    PIIAttributeType.LOCATION_CLUE: "位置",
-    PIIAttributeType.PHONE: "手机号",
-    PIIAttributeType.CARD_NUMBER: "卡号",
-    PIIAttributeType.BANK_ACCOUNT: "银行账号",
-    PIIAttributeType.PASSPORT_NUMBER: "护照号",
-    PIIAttributeType.DRIVER_LICENSE: "驾驶证号",
-    PIIAttributeType.EMAIL: "邮箱",
-    PIIAttributeType.ADDRESS: "地址",
-    PIIAttributeType.ID_NUMBER: "身份证号",
-    PIIAttributeType.ORGANIZATION: "机构",
-    PIIAttributeType.OTHER: "敏感信息",
-}
-_PLACEHOLDER_PATTERN = re.compile(r"^@(?P<label>.+?)(?P<index>\d+)$")
+_PLACEHOLDER_PATTERN = re.compile(r"^<(?P<label>.+?)(?P<index>\d+)>$")
 
 
 class CandidateResolverService:
@@ -424,7 +411,7 @@ class CandidateResolverService:
         if self.mapping_store is None:
             return None
         max_index = 0
-        expected_label = _PLACEHOLDER_PREFIX.get(attr_type, "敏感信息")
+        expected_label = generic_placeholder_label(attr_type)
         for record in self.mapping_store.get_replacements(session_id=session_id):
             if self._normalized_action_name(record.action_type) != ActionType.GENERICIZE.value:
                 continue
@@ -436,11 +423,11 @@ class CandidateResolverService:
             if matched.group("label") != expected_label:
                 continue
             max_index = max(max_index, int(matched.group("index")))
-        return self._label_for_attr(attr_type, max_index + 1)
+        return render_generic_replacement_text(attr_type, max_index + 1)
 
     def _safe_placeholder(self, attr_type: PIIAttributeType) -> str:
         """生成不依赖 session 历史的安全 placeholder。"""
-        return self._label_for_attr(attr_type, 1)
+        return render_generic_replacement_text(attr_type, 1)
 
     def _candidate_view_map(self, context: DecisionContext) -> dict[str, dict[str, object]]:
         views = derive_policy_context(context).candidate_policy_views
@@ -520,9 +507,6 @@ class CandidateResolverService:
                 deduped_parts.append(item)
         action.reason = " ".join(deduped_parts)
         return action
-
-    def _label_for_attr(self, attr_type: PIIAttributeType, index: int = 1) -> str:
-        return f"@{_PLACEHOLDER_PREFIX.get(attr_type, '敏感信息')}{index}"
 
     def _source_key(self, attr_type: PIIAttributeType, source_text: str) -> tuple[PIIAttributeType, str]:
         return (attr_type, canonicalize_pii_value(attr_type, source_text))

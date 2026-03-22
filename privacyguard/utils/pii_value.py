@@ -161,6 +161,31 @@ class AddressComponents:
         return "raw"
 
 
+def classify_content_shape_attr(value: str | None) -> PIIAttributeType:
+    """按内容形态粗分为 NUMERIC / TEXTUAL；其余一律为 OTHER（兜底）。
+
+    ``OTHER`` 表示未被 NUMERIC / TEXTUAL 规则容纳的内容：混合、仅符号、空白、空串等。
+
+    - 仅数字与符号（无 Unicode 字母）：NUMERIC
+    - 仅文字与符号（无数字；字母含拉丁与中日韩等）：TEXTUAL
+    - 其它任意情况：OTHER
+    """
+    if value is None:
+        return PIIAttributeType.OTHER
+    text = str(value)
+    if not text.strip():
+        return PIIAttributeType.OTHER
+    has_letter = any(char.isalpha() for char in text)
+    has_digit = any(char.isdigit() for char in text)
+    if has_letter and has_digit:
+        return PIIAttributeType.OTHER
+    if has_digit and not has_letter:
+        return PIIAttributeType.NUMERIC
+    if has_letter and not has_digit:
+        return PIIAttributeType.TEXTUAL
+    return PIIAttributeType.OTHER
+
+
 def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
     """按属性类型返回稳定 canonical key。"""
     cleaned = _compact_text(value)
@@ -188,6 +213,10 @@ def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
         return compact_email_value(cleaned)
     if attr_type == PIIAttributeType.ADDRESS:
         return canonicalize_address_text(cleaned)
+    if attr_type == PIIAttributeType.NUMERIC:
+        return compact_other_code_value(cleaned)
+    if attr_type == PIIAttributeType.TEXTUAL:
+        return normalize_text(value)
     if attr_type == PIIAttributeType.OTHER:
         return compact_other_code_value(cleaned)
     return normalize_text(value)
@@ -716,6 +745,10 @@ def _is_ignorable_match_char(attr_type: PIIAttributeType, char: str) -> bool:
         return char in _EMAIL_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.OTHER:
         return char in _OTHER_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.NUMERIC:
+        return char in _OTHER_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.TEXTUAL:
+        return char in _ORG_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ADDRESS:
         return char in _ADDRESS_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.LOCATION_CLUE:
