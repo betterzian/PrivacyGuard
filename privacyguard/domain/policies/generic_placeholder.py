@@ -22,6 +22,7 @@ GENERIC_PLACEHOLDER_LABELS: dict[PIIAttributeType, str] = {
     PIIAttributeType.ADDRESS: "地址",
     PIIAttributeType.ID_NUMBER: "身份证号",
     PIIAttributeType.ORGANIZATION: "机构",
+    PIIAttributeType.TIME: "时间",
     PIIAttributeType.NUMERIC: "数字",
     PIIAttributeType.TEXTUAL: "文字",
     PIIAttributeType.OTHER: "敏感信息",

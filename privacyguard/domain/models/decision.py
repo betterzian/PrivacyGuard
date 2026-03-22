@@ -14,7 +14,11 @@ def clone_action_metadata(metadata: dict[str, list[str]] | None) -> dict[str, li
 
 
 class DecisionAction(BaseModel):
-    """表示对单个候选实体的决策动作。"""
+    """表示对单个候选实体的决策动作。
+
+    ``replacement_text``：在决策引擎产出时可为 ``None``（抽象计划）；经
+    ``ReplacementGenerationService`` / ``apply_post_decision_steps`` 后，非 ``KEEP`` 动作应已填充。
+    """
 
     candidate_id: str
     action_type: ActionType

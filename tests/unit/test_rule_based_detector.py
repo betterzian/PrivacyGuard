@@ -138,7 +138,7 @@ def test_rule_based_pure_masked_name_is_not_detected(tmp_path) -> None:
     assert "XXX" not in _candidate_texts(weak_candidates, PIIAttributeType.NAME)
 
 
-def test_rule_based_other_detection_keeps_generic_number_fallback_across_profiles(tmp_path) -> None:
+def test_rule_based_numeric_detection_keeps_generic_number_fallback_across_profiles(tmp_path) -> None:
     detector = _make_detector(tmp_path)
     prompt_text = "订单号：20240318"
 
@@ -146,9 +146,9 @@ def test_rule_based_other_detection_keeps_generic_number_fallback_across_profile
     balanced_candidates = detector.detect(prompt_text=prompt_text, ocr_blocks=[], protection_level=ProtectionLevel.BALANCED)
     weak_candidates = detector.detect(prompt_text=prompt_text, ocr_blocks=[], protection_level=ProtectionLevel.WEAK)
 
-    assert "20240318" in _candidate_texts(strong_candidates, PIIAttributeType.OTHER)
-    assert "20240318" in _candidate_texts(balanced_candidates, PIIAttributeType.OTHER)
-    assert "20240318" in _candidate_texts(weak_candidates, PIIAttributeType.OTHER)
+    assert "20240318" in _candidate_texts(strong_candidates, PIIAttributeType.NUMERIC)
+    assert "20240318" in _candidate_texts(balanced_candidates, PIIAttributeType.NUMERIC)
+    assert "20240318" in _candidate_texts(weak_candidates, PIIAttributeType.NUMERIC)
 
 
 def test_rule_based_trims_terminal_punctuation_from_other_context_value(tmp_path) -> None:
@@ -674,11 +674,11 @@ def test_rule_based_detects_embedded_name_and_number_from_mixed_ocr_block(tmp_pa
     weak_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.WEAK)
 
     assert "李晓红" in _candidate_texts(strong_candidates, PIIAttributeType.NAME)
-    assert "15951169" in _candidate_texts(strong_candidates, PIIAttributeType.OTHER)
+    assert "15951169" in _candidate_texts(strong_candidates, PIIAttributeType.NUMERIC)
     assert "李晓红" in _candidate_texts(balanced_candidates, PIIAttributeType.NAME)
-    assert "15951169" in _candidate_texts(balanced_candidates, PIIAttributeType.OTHER)
+    assert "15951169" in _candidate_texts(balanced_candidates, PIIAttributeType.NUMERIC)
     assert "李晓红" in _candidate_texts(weak_candidates, PIIAttributeType.NAME)
-    assert "15951169" in _candidate_texts(weak_candidates, PIIAttributeType.OTHER)
+    assert "15951169" in _candidate_texts(weak_candidates, PIIAttributeType.NUMERIC)
 
 
 def test_rule_based_strong_keeps_compound_surname_standalone_name_fragment(tmp_path) -> None:
@@ -969,8 +969,37 @@ def test_rule_based_detects_generic_number_without_explicit_context(tmp_path) ->
     bare_candidates = detector.detect(prompt_text="今天是20240318", ocr_blocks=[])
     context_candidates = detector.detect(prompt_text="订单号：20240318", ocr_blocks=[])
 
-    assert "20240318" in _candidate_texts(bare_candidates, PIIAttributeType.OTHER)
-    assert "20240318" in _candidate_texts(context_candidates, PIIAttributeType.OTHER)
+    assert "20240318" in _candidate_texts(bare_candidates, PIIAttributeType.NUMERIC)
+    assert "20240318" in _candidate_texts(context_candidates, PIIAttributeType.NUMERIC)
+
+
+def test_rule_based_detects_numeric_with_light_symbols_as_numeric(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(prompt_text="订单号：20-24_03.18", ocr_blocks=[])
+
+    assert "20-24_03.18" in _candidate_texts(candidates, PIIAttributeType.NUMERIC)
+    assert "20-24_03.18" not in _candidate_texts(candidates, PIIAttributeType.OTHER)
+
+
+def test_rule_based_detects_clock_time_as_time(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(prompt_text="开会时间14:07，发车时间15：30，记录到08:09:10", ocr_blocks=[])
+
+    assert "14:07" in _candidate_texts(candidates, PIIAttributeType.TIME)
+    assert "15：30" in _candidate_texts(candidates, PIIAttributeType.TIME)
+    assert "08:09:10" in _candidate_texts(candidates, PIIAttributeType.TIME)
+    assert "14:07" not in _candidate_texts(candidates, PIIAttributeType.NUMERIC)
+
+
+def test_rule_based_context_other_field_text_falls_back_to_textual(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    candidates = detector.detect(prompt_text="验证码：临时-口令", ocr_blocks=[])
+
+    assert "临时-口令" in _candidate_texts(candidates, PIIAttributeType.TEXTUAL)
+    assert "临时-口令" not in _candidate_texts(candidates, PIIAttributeType.OTHER)
 
 
 def test_rule_based_detects_card_number_from_explicit_context_with_ocr_noise(tmp_path) -> None:
@@ -1010,12 +1039,12 @@ def test_rule_based_detects_driver_license_from_explicit_context(tmp_path) -> No
     assert "440301199001011234" not in _candidate_texts(candidates, PIIAttributeType.OTHER)
 
 
-def test_rule_based_regex_number_conflict_downgrades_order_like_long_number_to_other(tmp_path) -> None:
+def test_rule_based_regex_number_conflict_downgrades_order_like_long_number_to_numeric(tmp_path) -> None:
     detector = _make_detector(tmp_path)
 
     candidates = detector.detect(prompt_text="订单号1234567890123", ocr_blocks=[])
 
-    assert "1234567890123" in _candidate_texts(candidates, PIIAttributeType.OTHER)
+    assert "1234567890123" in _candidate_texts(candidates, PIIAttributeType.NUMERIC)
     assert "1234567890123" not in _candidate_texts(candidates, PIIAttributeType.CARD_NUMBER)
 
 
@@ -1026,6 +1055,7 @@ def test_rule_based_regex_number_conflict_prefers_id_with_birthdate_over_other_n
 
     assert "110101199001011234" in _candidate_texts(candidates, PIIAttributeType.ID_NUMBER)
     assert "110101199001011234" not in _candidate_texts(candidates, PIIAttributeType.CARD_NUMBER)
+    assert "110101199001011234" not in _candidate_texts(candidates, PIIAttributeType.NUMERIC)
     assert "110101199001011234" not in _candidate_texts(candidates, PIIAttributeType.OTHER)
 
 
@@ -1038,12 +1068,12 @@ def test_rule_based_regex_number_conflict_prefers_super_long_account_as_bank_acc
     assert "6217000012345678901234" not in _candidate_texts(candidates, PIIAttributeType.OTHER)
 
 
-def test_rule_based_regex_number_conflict_downgrades_bare_12_digit_number_to_other(tmp_path) -> None:
+def test_rule_based_regex_number_conflict_downgrades_bare_12_digit_number_to_numeric(tmp_path) -> None:
     detector = _make_detector(tmp_path)
 
     candidates = detector.detect(prompt_text="123456789012", ocr_blocks=[])
 
-    assert "123456789012" in _candidate_texts(candidates, PIIAttributeType.OTHER)
+    assert "123456789012" in _candidate_texts(candidates, PIIAttributeType.NUMERIC)
     assert "123456789012" not in _candidate_texts(candidates, PIIAttributeType.BANK_ACCOUNT)
     assert "123456789012" not in _candidate_texts(candidates, PIIAttributeType.DRIVER_LICENSE)
 

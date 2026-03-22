@@ -1,17 +1,20 @@
-"""决策动作约束解析器。"""
+"""决策动作结构约束解析器。
+
+仅修正动作类型与属性一致性，不生成 ``replacement_text``（由 ``ReplacementGenerationService`` 负责）。
+"""
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.models.decision import DecisionAction, clone_action_metadata
 from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.models.pii import PIICandidate
-from privacyguard.domain.policies.generic_placeholder import render_generic_replacement_text
+
 
 class ConstraintResolver:
-    """对决策动作进行合法性校正与降级。"""
+    """对决策动作做结构级校正与降级；不填充替换文案。"""
 
     def __init__(self, persona_repository: PersonaRepository) -> None:
-        """注入 persona 仓库以支持槽位校验。"""
+        """注入 persona 仓库以支持槽位存在性校验。"""
         self.persona_repository = persona_repository
 
     def resolve(
@@ -20,7 +23,7 @@ class ConstraintResolver:
         candidates: list[PIICandidate],
         session_binding: SessionBinding | None,
     ) -> list[DecisionAction]:
-        """按统一规则修正动作，确保可恢复与可解释。"""
+        """按统一规则修正动作类型；``replacement_text`` 保持为 None，交由生成阶段填写。"""
         candidate_map = {candidate.entity_id: candidate for candidate in candidates}
         resolved: list[DecisionAction] = []
         for action in actions:
@@ -54,7 +57,7 @@ class ConstraintResolver:
         candidate: PIICandidate,
         session_binding: SessionBinding | None,
     ) -> DecisionAction:
-        """修正单条动作并补充 reason。"""
+        """修正单条动作；不写入 ``replacement_text``。"""
         if action.action_type == ActionType.KEEP:
             action.replacement_text = None
             action.persona_id = None
@@ -64,7 +67,7 @@ class ConstraintResolver:
         if action.attr_type != candidate.attr_type:
             action.attr_type = candidate.attr_type
             action.action_type = ActionType.GENERICIZE
-            action.replacement_text = render_generic_replacement_text(candidate.attr_type, 1)
+            action.replacement_text = None
             action.persona_id = None
             action.reason = "检测到跨槽位替换，已改为同槽位 GENERICIZE。"
             return action
@@ -74,34 +77,24 @@ class ConstraintResolver:
             persona_id = active_persona_id or action.persona_id
             if not persona_id:
                 action.action_type = ActionType.GENERICIZE
-                action.replacement_text = render_generic_replacement_text(candidate.attr_type, 1)
+                action.replacement_text = None
                 action.persona_id = None
                 action.reason = "未绑定 persona，已降级为 GENERICIZE。"
                 return action
             slot_value = self.persona_repository.get_slot_value(persona_id, candidate.attr_type)
             if not slot_value:
                 action.action_type = ActionType.GENERICIZE
-                action.replacement_text = render_generic_replacement_text(candidate.attr_type, 1)
+                action.replacement_text = None
                 action.persona_id = None
                 action.reason = "persona 缺少槽位值，已降级为 GENERICIZE。"
                 return action
-            replacement_text = self.persona_repository.get_slot_replacement_text(
-                persona_id,
-                candidate.attr_type,
-                candidate.text,
-            )
             action.persona_id = persona_id
-            action.replacement_text = replacement_text or slot_value
-            action.reason = action.reason or (
-                "使用 persona repository 渲染后的替换值。"
-                if replacement_text
-                else "persona repository 未提供渲染值，已回退为原始 persona 槽位值。"
-            )
+            action.replacement_text = None
+            action.reason = action.reason or "PERSONA_SLOT 已校验，替换文案由生成阶段写入。"
             return action
 
         if action.action_type == ActionType.GENERICIZE:
-            if not action.replacement_text:
-                action.replacement_text = render_generic_replacement_text(candidate.attr_type, 1)
+            action.replacement_text = None
             action.persona_id = None
             action.reason = action.reason or "使用标准标签替换。"
             return action

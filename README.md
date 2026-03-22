@@ -509,3 +509,14 @@ PrivacyGuard/
 ├─ data/
 └─ examples/
 ```
+
+## 补充文档
+
+- `docs/REQUEST_FLOW.md`
+  当前 `sanitize / restore` 请求链路
+- `docs/DE_MODEL_IMPLEMENTATION.md`
+  当前 `de_model` 实现边界与运行时结构
+- `docs/DE_MODEL_TRAINING_LAYOUT.md`
+  当前训练相关目录与产物布局
+- `docs/DETECTOR_SCORING.md`
+  当前 `rule_based` detector 的候选打分规则、来源、二次修正与阈值

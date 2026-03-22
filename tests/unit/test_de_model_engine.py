@@ -14,6 +14,7 @@ from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.models.ocr import BoundingBox
 from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.application.services.replacement_generation import apply_post_decision_steps
 from privacyguard.infrastructure.decision.de_model_engine import DEModelEngine
 from privacyguard.infrastructure.decision.de_model_runtime import DEModelRuntimeOutput, RuntimeCandidateDecision
 from privacyguard.infrastructure.decision.features import PROTECTION_LEVEL_ORDER
@@ -73,7 +74,7 @@ def _workspace_temp_dir(prefix: str):
 
 
 def test_de_model_engine_uses_runtime_and_constraint_resolution_without_building_context() -> None:
-    """engine 消费既有上下文，调用 runtime，并让 resolver 收敛最终动作。"""
+    """engine 消费既有上下文并调用 runtime；替换文案由 apply_post_decision_steps 生成。"""
     persona_repo = _PersonaRepository(
         [
             PersonaProfile(
@@ -151,13 +152,14 @@ def test_de_model_engine_uses_runtime_and_constraint_resolution_without_building
             ],
         )
     )
+    mapping_store = InMemoryMappingStore()
     engine = DEModelEngine(
         persona_repository=persona_repo,
-        mapping_store=InMemoryMappingStore(),
+        mapping_store=mapping_store,
         runtime=runtime,
     )
 
-    plan = engine.plan(context)
+    plan = apply_post_decision_steps(engine.plan(context), context, mapping_store, persona_repo)
 
     assert runtime.calls == 1
     assert runtime.last_context is context
@@ -223,13 +225,14 @@ def test_de_model_engine_falls_back_persona_slot_to_genericize_when_persona_miss
             ],
         )
     )
+    mapping_store = InMemoryMappingStore()
     engine = DEModelEngine(
         persona_repository=persona_repo,
-        mapping_store=InMemoryMappingStore(),
+        mapping_store=mapping_store,
         runtime=runtime,
     )
 
-    plan = engine.plan(context)
+    plan = apply_post_decision_steps(engine.plan(context), context, mapping_store, persona_repo)
 
     assert runtime.calls == 1
     assert plan.actions[0].action_type == ActionType.GENERICIZE
@@ -398,14 +401,15 @@ def test_de_model_engine_torch_runtime_runs_checkpoint_inference() -> None:
             session_binding=None,
         )
 
+        mapping_store = InMemoryMappingStore()
         engine = DEModelEngine(
             persona_repository=persona_repo,
-            mapping_store=InMemoryMappingStore(),
+            mapping_store=mapping_store,
             runtime_type="torch",
             checkpoint_path=str(checkpoint_path),
         )
 
-        plan = engine.plan(context)
+        plan = apply_post_decision_steps(engine.plan(context), context, mapping_store, persona_repo)
 
         assert plan.active_persona_id == "persona-torch"
         assert plan.metadata["runtime_type"] == "torch_runtime"

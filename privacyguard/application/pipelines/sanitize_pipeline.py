@@ -8,17 +8,15 @@ OCR / prompt parse
 -> local context / quality / persona state preparation
 -> DecisionContextBuilder
 -> DecisionFeatureExtractor
--> DEModelEngine / runtime
--> ConstraintResolver
--> placeholder allocation / replacement planning
+-> DEModelEngine / runtime（抽象动作，无 replacement 文案）
+-> ConstraintResolver + ReplacementGenerationService（结构约束 + 拼字与会话占位）
 -> render
 -> mapping store
 
 说明：
 
 - 本文件只负责 application 层编排，不直接堆叠 de_model 内部细节
-- `DecisionFeatureExtractor`、runtime 与 `ConstraintResolver` 由 `decision_engine.plan(...)`
-  封装承担
+- `decision_engine.plan` 仅产出抽象动作；`apply_post_decision_steps` 统一做约束解析与替换生成
 - 后续若抽出 `AliasLinker`、`LocalContextBuilder`、`QualityAggregator`、
   `PersonaStateBuilder`，应接入本文件预留的准备阶段，而不是继续把细节写进主函数
 """
@@ -30,7 +28,7 @@ import logging
 
 from privacyguard.api.dto import SanitizeRequest, SanitizeResponse
 from privacyguard.application.services.decision_context_builder import DecisionContextBuilder
-from privacyguard.application.services.placeholder_allocator import SessionPlaceholderAllocator
+from privacyguard.application.services.replacement_generation import apply_post_decision_steps
 from privacyguard.application.services.session_service import SessionService
 from privacyguard.domain.interfaces.decision_engine import DecisionEngine
 from privacyguard.domain.interfaces.mapping_store import MappingStore
@@ -177,15 +175,16 @@ def _plan_replacements(
     decision_context,
     decision_engine: DecisionEngine,
     mapping_store: MappingStore,
+    persona_repository: PersonaRepository,
 ):
-    """阶段 6-9：生成动作计划并完成 placeholder 级替换规划。
-
-    `decision_engine.plan(...)` 是 de_model 内部边界：其内部可继续封装
-    `DecisionFeatureExtractor`、runtime 执行与 `ConstraintResolver`，但这些细节不在
-    sanitize pipeline 中展开。
-    """
+    """阶段 6-9：抽象决策计划 → 结构约束 → 替换文案与会话占位。"""
     decision_plan = decision_engine.plan(decision_context)
-    return SessionPlaceholderAllocator(mapping_store=mapping_store).assign(decision_plan)
+    return apply_post_decision_steps(
+        decision_plan,
+        decision_context,
+        mapping_store,
+        persona_repository,
+    )
 
 
 def _render_sanitize_result(
@@ -257,13 +256,13 @@ def run_sanitize_pipeline(
     )
 
     # 6. DecisionFeatureExtractor
-    # 7. DEModelEngine / runtime
-    # 8. ConstraintResolver
-    # 9. placeholder allocation / replacement planning
+    # 7. DEModelEngine / runtime（抽象）
+    # 8–9. ConstraintResolver + ReplacementGenerationService
     replacement_plan = _plan_replacements(
         decision_context=decision_context,
         decision_engine=decision_engine,
         mapping_store=mapping_store,
+        persona_repository=persona_repository,
     )
 
     # 10. render

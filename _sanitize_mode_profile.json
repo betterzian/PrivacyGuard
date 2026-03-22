@@ -1,0 +1,1085 @@
+{
+  "input": {
+    "json_path": "/Users/vis/Documents/GitHub/PrivacyGuard/_server_test_output.json",
+    "image_path": "/Users/vis/Documents/GitHub/PrivacyGuard/test.PNG",
+    "screenshot_used": true,
+    "detector_mode": "rule_based",
+    "repeats": 5,
+    "ocr_block_count": 43,
+    "prompt_length": 341
+  },
+  "notes": [
+    "ocr_extract 为静态 OCR 回放时间，不代表真实 OCR 模型推理耗时。",
+    "label_persona_mixed 的 persona 渲染文本可能因 render aliases 随机选择而在不同 run 间略有变化。"
+  ],
+  "modes": {
+    "label_persona_mixed": {
+      "timings_ms": {
+        "request_parse": 0.015875004464760423,
+        "ocr_extract": 0.0011669908417388797,
+        "detector": 11.528125003678724,
+        "session_context": 0.011709009413607419,
+        "decision_context_build": 0.02662501356098801,
+        "decision_plan": 0.11029199231415987,
+        "post_decision": 3.51316700107418,
+        "render_text": 0.23091600451152772,
+        "render_image": 387.72874999267515,
+        "persist_mapping": 0.0289169984171167,
+        "manual_total": 403.1987089983886
+      },
+      "ocr": {
+        "block_count": 43,
+        "sample": [
+          "14:07",
+          "5G",
+          "100",
+          "微信",
+          "马局的书童丫鬟群",
+          "14:06",
+          "[捂脸]",
+          "李恩慧-哈尔滨滑雪",
+          "14:02",
+          "[旺柴]",
+          "aminxe",
+          "•"
+        ]
+      },
+      "detector": {
+        "candidate_count": 37,
+        "attr_counts": {
+          "address": 2,
+          "location_clue": 3,
+          "name": 4,
+          "numeric": 8,
+          "time": 20
+        },
+        "source_counts": {
+          "ocr": 19,
+          "prompt": 18
+        },
+        "sample": [
+          {
+            "text": "14:07",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "14:06",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "14:02",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "13:58",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "13:44",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "13:11",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "12:32",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "12:05",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "12:01",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "15：30",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "李恩慧",
+            "attr_type": "name",
+            "source": "prompt",
+            "confidence": 0.92,
+            "matched_by": [
+              "heuristic_name_fragment"
+            ]
+          },
+          {
+            "text": "李晓红",
+            "attr_type": "name",
+            "source": "prompt",
+            "confidence": 0.94,
+            "matched_by": [
+              "heuristic_name_fragment"
+            ]
+          }
+        ]
+      },
+      "decision_raw": {
+        "active_persona_id": "zhangsan",
+        "summary": "label_persona_mixed 共生成 37 条动作。",
+        "action_counts": {
+          "GENERICIZE": 31,
+          "PERSONA_SLOT": 6
+        },
+        "attr_counts": {
+          "address": 2,
+          "location_clue": 3,
+          "name": 4,
+          "numeric": 8,
+          "time": 20
+        },
+        "sample": [
+          {
+            "source_text": "14:07",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "14:06",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "14:02",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "13:58",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "13:44",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "13:11",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "12:32",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "12:05",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "12:01",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "15：30",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "李恩慧",
+            "attr_type": "name",
+            "action_type": "PERSONA_SLOT",
+            "persona_id": "zhangsan",
+            "replacement_text": null
+          },
+          {
+            "source_text": "李晓红",
+            "attr_type": "name",
+            "action_type": "PERSONA_SLOT",
+            "persona_id": "zhangsan",
+            "replacement_text": null
+          }
+        ]
+      },
+      "decision_resolved": {
+        "active_persona_id": "zhangsan",
+        "summary": "label_persona_mixed 共生成 37 条动作。",
+        "action_counts": {
+          "GENERICIZE": 31,
+          "PERSONA_SLOT": 6
+        },
+        "attr_counts": {
+          "address": 2,
+          "location_clue": 3,
+          "name": 4,
+          "numeric": 8,
+          "time": 20
+        },
+        "sample": [
+          {
+            "source_text": "14:07",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间1>"
+          },
+          {
+            "source_text": "14:06",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间2>"
+          },
+          {
+            "source_text": "14:02",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间3>"
+          },
+          {
+            "source_text": "13:58",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间4>"
+          },
+          {
+            "source_text": "13:44",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间5>"
+          },
+          {
+            "source_text": "13:11",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间6>"
+          },
+          {
+            "source_text": "12:32",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间7>"
+          },
+          {
+            "source_text": "12:05",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间8>"
+          },
+          {
+            "source_text": "12:01",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间9>"
+          },
+          {
+            "source_text": "15：30",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间10>"
+          },
+          {
+            "source_text": "李恩慧",
+            "attr_type": "name",
+            "action_type": "PERSONA_SLOT",
+            "persona_id": "zhangsan",
+            "replacement_text": "张二麻子"
+          },
+          {
+            "source_text": "李晓红",
+            "attr_type": "name",
+            "action_type": "PERSONA_SLOT",
+            "persona_id": "zhangsan",
+            "replacement_text": "张三三"
+          }
+        ]
+      },
+      "render": {
+        "masked_prompt_preview": "<时间1>\n5G\n100\n微信\n马局的书童丫鬟群\n<时间2>\n[捂脸]\n张二麻子-<位置1>滑雪\n<时间3>\n[旺柴]\naminxe\n•\n<数字1>澳洲 PhD(500) 快快...\n<时间4>\n[15条]<数字2>-数学-无 bug无s56：[..\nA\n哈了滨推坡大队\n<时间5>\n蓉蓉蓉蓉蓉蓉蓉蓉： [动画表情]\n人\ndisney\n<时间6>\ndisney 秦胖哥：冲吗\n●\n公众号\n<时间7>\n[10 条]快讯：欧盟证实：美社交媒体平台X。.。\nの\n服务号\n<时间8>\n乐享江宁：<数字3>年浦东新区住宿、餐饮业团...\nA德新元药房张三三<数字4>...\n<时间9>\n19\n折叠的聊天\n泰州夜之幕拼车信息七群：<时间10>《漓川怪.。\n&=\n•\n&\n微信\n通讯录\n发现\n我",
+        "masked_prompt_length": 340,
+        "applied_replacements": {
+          "count": 37,
+          "action_counts": {
+            "GENERICIZE": 31,
+            "PERSONA_SLOT": 6
+          },
+          "attr_counts": {
+            "address": 2,
+            "location_clue": 3,
+            "name": 4,
+            "numeric": 8,
+            "time": 20
+          },
+          "sample": [
+            {
+              "source_text": "14:07",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间1>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "14:06",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间2>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "14:02",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间3>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "13:58",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间4>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "13:44",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间5>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "13:11",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间6>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "12:32",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间7>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "12:05",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间8>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "12:01",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间9>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "15：30",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间10>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "李恩慧",
+              "attr_type": "name",
+              "action_type": "PERSONA_SLOT",
+              "replacement_text": "张二麻子",
+              "persona_id": "zhangsan",
+              "source": "prompt"
+            },
+            {
+              "source_text": "李晓红",
+              "attr_type": "name",
+              "action_type": "PERSONA_SLOT",
+              "replacement_text": "张三三",
+              "persona_id": "zhangsan",
+              "source": "prompt"
+            }
+          ]
+        },
+        "has_masked_image": true
+      },
+      "persist": {
+        "stored_replacement_count": 37,
+        "active_persona_id_after_persist": "zhangsan"
+      },
+      "timings_ms_median": {
+        "request_parse": 0.011,
+        "ocr_extract": 0.001,
+        "detector": 11.476,
+        "session_context": 0.009,
+        "decision_context_build": 0.022,
+        "decision_plan": 0.107,
+        "post_decision": 3.42,
+        "render_text": 0.233,
+        "render_image": 387.729,
+        "persist_mapping": 0.028,
+        "manual_total": 403.199
+      },
+      "timings_ms_mean": {
+        "request_parse": 0.012,
+        "ocr_extract": 0.001,
+        "detector": 11.467,
+        "session_context": 0.009,
+        "decision_context_build": 0.023,
+        "decision_plan": 0.108,
+        "post_decision": 3.44,
+        "render_text": 0.232,
+        "render_image": 409.877,
+        "persist_mapping": 0.028,
+        "manual_total": 425.199
+      },
+      "timing_share_percent_median": {
+        "request_parse": 0.0,
+        "ocr_extract": 0.0,
+        "detector": 2.85,
+        "session_context": 0.0,
+        "decision_context_build": 0.01,
+        "decision_plan": 0.03,
+        "post_decision": 0.85,
+        "render_text": 0.06,
+        "render_image": 96.16,
+        "persist_mapping": 0.01
+      },
+      "public_sanitize_total_ms_median": 408.816,
+      "public_sanitize_output_preview": {
+        "status": "ok",
+        "session_id": "public-label_persona_mixed-0",
+        "turn_id": 0,
+        "mapping_count": 37,
+        "active_persona_id": "zhangsan",
+        "masked_prompt_preview": "<时间1>\n5G\n100\n微信\n马局的书童丫鬟群\n<时间2>\n[捂脸]\n张二麻子-<位置1>滑雪\n<时间3>\n[旺柴]\naminxe\n•\n<数字1>澳洲 PhD(500) 快快...\n<时间4>\n[15条]<数字2>-数学-无 bug无s56：[..\nA\n哈了滨推坡大队\n<时间5>\n蓉蓉蓉蓉蓉蓉蓉蓉： [动画表情]\n人\ndisney\n<时间6>\ndisney 秦胖哥：冲吗\n●\n公众号\n<时间7>\n[10 条]快讯：欧盟证实：美社交媒体平台X。.。\nの\n服务号\n<时间8>\n乐享江宁：<数字3>年浦东住宿、餐饮业团...\nA德新元药房张二麻子<数字4>...\n<时间9>\n19\n折叠的聊天\n泰州夜之幕拼车信息七群：<时间10>《漓川怪.。\n&=\n•\n&\n微信\n通讯录\n发现\n我"
+      }
+    },
+    "label_only": {
+      "timings_ms": {
+        "request_parse": 0.011209005606360734,
+        "ocr_extract": 0.0009159994078800082,
+        "detector": 14.230666987714358,
+        "session_context": 0.01649999467190355,
+        "decision_context_build": 0.026084002456627786,
+        "decision_plan": 0.109500004327856,
+        "post_decision": 3.343667005538009,
+        "render_text": 0.2373750030528754,
+        "render_image": 390.06337500177324,
+        "persist_mapping": 0.02416600182186812,
+        "manual_total": 408.0664159992011
+      },
+      "ocr": {
+        "block_count": 43,
+        "sample": [
+          "14:07",
+          "5G",
+          "100",
+          "微信",
+          "马局的书童丫鬟群",
+          "14:06",
+          "[捂脸]",
+          "李恩慧-哈尔滨滑雪",
+          "14:02",
+          "[旺柴]",
+          "aminxe",
+          "•"
+        ]
+      },
+      "detector": {
+        "candidate_count": 37,
+        "attr_counts": {
+          "address": 2,
+          "location_clue": 3,
+          "name": 4,
+          "numeric": 8,
+          "time": 20
+        },
+        "source_counts": {
+          "ocr": 19,
+          "prompt": 18
+        },
+        "sample": [
+          {
+            "text": "14:07",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "14:06",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "14:02",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "13:58",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "13:44",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "13:11",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "12:32",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "12:05",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "12:01",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "15：30",
+            "attr_type": "time",
+            "source": "prompt",
+            "confidence": 0.96,
+            "matched_by": [
+              "regex_time_clock"
+            ]
+          },
+          {
+            "text": "李恩慧",
+            "attr_type": "name",
+            "source": "prompt",
+            "confidence": 0.92,
+            "matched_by": [
+              "heuristic_name_fragment"
+            ]
+          },
+          {
+            "text": "李晓红",
+            "attr_type": "name",
+            "source": "prompt",
+            "confidence": 0.94,
+            "matched_by": [
+              "heuristic_name_fragment"
+            ]
+          }
+        ]
+      },
+      "decision_raw": {
+        "active_persona_id": null,
+        "summary": "label_only 共生成 37 条动作。",
+        "action_counts": {
+          "GENERICIZE": 37
+        },
+        "attr_counts": {
+          "address": 2,
+          "location_clue": 3,
+          "name": 4,
+          "numeric": 8,
+          "time": 20
+        },
+        "sample": [
+          {
+            "source_text": "14:07",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "14:06",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "14:02",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "13:58",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "13:44",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "13:11",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "12:32",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "12:05",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "12:01",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "15：30",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "李恩慧",
+            "attr_type": "name",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          },
+          {
+            "source_text": "李晓红",
+            "attr_type": "name",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": null
+          }
+        ]
+      },
+      "decision_resolved": {
+        "active_persona_id": null,
+        "summary": "label_only 共生成 37 条动作。",
+        "action_counts": {
+          "GENERICIZE": 37
+        },
+        "attr_counts": {
+          "address": 2,
+          "location_clue": 3,
+          "name": 4,
+          "numeric": 8,
+          "time": 20
+        },
+        "sample": [
+          {
+            "source_text": "14:07",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间1>"
+          },
+          {
+            "source_text": "14:06",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间2>"
+          },
+          {
+            "source_text": "14:02",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间3>"
+          },
+          {
+            "source_text": "13:58",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间4>"
+          },
+          {
+            "source_text": "13:44",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间5>"
+          },
+          {
+            "source_text": "13:11",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间6>"
+          },
+          {
+            "source_text": "12:32",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间7>"
+          },
+          {
+            "source_text": "12:05",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间8>"
+          },
+          {
+            "source_text": "12:01",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间9>"
+          },
+          {
+            "source_text": "15：30",
+            "attr_type": "time",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<时间10>"
+          },
+          {
+            "source_text": "李恩慧",
+            "attr_type": "name",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<姓名1>"
+          },
+          {
+            "source_text": "李晓红",
+            "attr_type": "name",
+            "action_type": "GENERICIZE",
+            "persona_id": null,
+            "replacement_text": "<姓名2>"
+          }
+        ]
+      },
+      "render": {
+        "masked_prompt_preview": "<时间1>\n5G\n100\n微信\n马局的书童丫鬟群\n<时间2>\n[捂脸]\n<姓名1>-<位置1>滑雪\n<时间3>\n[旺柴]\naminxe\n•\n<数字1>澳洲 PhD(500) 快快...\n<时间4>\n[15条]<数字2>-数学-无 bug无s56：[..\nA\n哈了滨推坡大队\n<时间5>\n蓉蓉蓉蓉蓉蓉蓉蓉： [动画表情]\n人\ndisney\n<时间6>\ndisney 秦胖哥：冲吗\n●\n公众号\n<时间7>\n[10 条]快讯：欧盟证实：美社交媒体平台X。.。\nの\n服务号\n<时间8>\n乐享江宁：<数字3>年<地址1>住宿、餐饮业团...\nA德新元药房<姓名2><数字4>...\n<时间9>\n19\n折叠的聊天\n泰州夜之幕拼车信息七群：<时间10>《漓川怪.。\n&=\n•\n&\n微信\n通讯录\n发现\n我",
+        "masked_prompt_length": 344,
+        "applied_replacements": {
+          "count": 37,
+          "action_counts": {
+            "GENERICIZE": 37
+          },
+          "attr_counts": {
+            "address": 2,
+            "location_clue": 3,
+            "name": 4,
+            "numeric": 8,
+            "time": 20
+          },
+          "sample": [
+            {
+              "source_text": "14:07",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间1>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "14:06",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间2>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "14:02",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间3>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "13:58",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间4>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "13:44",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间5>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "13:11",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间6>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "12:32",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间7>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "12:05",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间8>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "12:01",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间9>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "15：30",
+              "attr_type": "time",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<时间10>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "李恩慧",
+              "attr_type": "name",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<姓名1>",
+              "persona_id": null,
+              "source": "prompt"
+            },
+            {
+              "source_text": "李晓红",
+              "attr_type": "name",
+              "action_type": "GENERICIZE",
+              "replacement_text": "<姓名2>",
+              "persona_id": null,
+              "source": "prompt"
+            }
+          ]
+        },
+        "has_masked_image": true
+      },
+      "persist": {
+        "stored_replacement_count": 37,
+        "active_persona_id_after_persist": null
+      },
+      "timings_ms_median": {
+        "request_parse": 0.011,
+        "ocr_extract": 0.001,
+        "detector": 11.516,
+        "session_context": 0.009,
+        "decision_context_build": 0.021,
+        "decision_plan": 0.102,
+        "post_decision": 3.371,
+        "render_text": 0.231,
+        "render_image": 390.802,
+        "persist_mapping": 0.026,
+        "manual_total": 406.67
+      },
+      "timings_ms_mean": {
+        "request_parse": 0.011,
+        "ocr_extract": 0.001,
+        "detector": 12.039,
+        "session_context": 0.011,
+        "decision_context_build": 0.022,
+        "decision_plan": 0.103,
+        "post_decision": 3.398,
+        "render_text": 0.231,
+        "render_image": 391.439,
+        "persist_mapping": 0.025,
+        "manual_total": 407.283
+      },
+      "timing_share_percent_median": {
+        "request_parse": 0.0,
+        "ocr_extract": 0.0,
+        "detector": 2.83,
+        "session_context": 0.0,
+        "decision_context_build": 0.01,
+        "decision_plan": 0.03,
+        "post_decision": 0.83,
+        "render_text": 0.06,
+        "render_image": 96.1,
+        "persist_mapping": 0.01
+      },
+      "public_sanitize_total_ms_median": 412.977,
+      "public_sanitize_output_preview": {
+        "status": "ok",
+        "session_id": "public-label_only-0",
+        "turn_id": 0,
+        "mapping_count": 37,
+        "active_persona_id": null,
+        "masked_prompt_preview": "<时间1>\n5G\n100\n微信\n马局的书童丫鬟群\n<时间2>\n[捂脸]\n<姓名1>-<位置1>滑雪\n<时间3>\n[旺柴]\naminxe\n•\n<数字1>澳洲 PhD(500) 快快...\n<时间4>\n[15条]<数字2>-数学-无 bug无s56：[..\nA\n哈了滨推坡大队\n<时间5>\n蓉蓉蓉蓉蓉蓉蓉蓉： [动画表情]\n人\ndisney\n<时间6>\ndisney 秦胖哥：冲吗\n●\n公众号\n<时间7>\n[10 条]快讯：欧盟证实：美社交媒体平台X。.。\nの\n服务号\n<时间8>\n乐享江宁：<数字3>年<地址1>住宿、餐饮业团...\nA德新元药房<姓名2><数字4>...\n<时间9>\n19\n折叠的聊天\n泰州夜之幕拼车信息七群：<时间10>《漓川怪.。\n&=\n•\n&\n微信\n通讯录\n发现\n我"
+      }
+    }
+  },
+  "comparison": {
+    "manual_total_ms_delta": -3.471,
+    "public_total_ms_delta": -4.161,
+    "detector_candidate_count_equal": true,
+    "detector_attr_counts_equal": true,
+    "decision_action_counts": {
+      "label_persona_mixed": {
+        "GENERICIZE": 31,
+        "PERSONA_SLOT": 6
+      },
+      "label_only": {
+        "GENERICIZE": 37
+      }
+    },
+    "active_persona_id": {
+      "label_persona_mixed": "zhangsan",
+      "label_only": null
+    }
+  }
+}

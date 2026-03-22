@@ -2,14 +2,12 @@
 
 from pathlib import Path
 
-from privacyguard.domain.enums import ActionType, PIIAttributeType
+from privacyguard.domain.enums import ActionType
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, clone_action_metadata
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import SessionBinding
-from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
-from privacyguard.domain.policies.generic_placeholder import render_generic_replacement_text
 from privacyguard.infrastructure.decision.de_model_runtime import (
     DEModelRuntimeOutput,
     DecisionPolicyRuntime,
@@ -25,8 +23,8 @@ from privacyguard.infrastructure.persona.json_persona_repository import JsonPers
 class DEModelEngine:
     """使用 context/features/runtime 骨架模拟 de_model 的可运行占位实现。
 
-    职责：由 runtime 对每个候选给出 ``KEEP`` / ``PERSONA_SLOT`` / ``GENERICIZE``；凡 ``GENERICIZE`` 的
-    ``replacement_text`` 均由 ``render_generic_replacement_text`` 生成。
+    职责：由 runtime 对每个候选给出 ``KEEP`` / ``PERSONA_SLOT`` / ``GENERICIZE``（抽象，不含
+    ``replacement_text`` 的具体拼接；由 sanitize 链路的 ``ReplacementGenerationService`` 生成）。
     """
 
     def __init__(
@@ -53,7 +51,6 @@ class DEModelEngine:
         self.checkpoint_path = str(Path(checkpoint_path)) if checkpoint_path else None
         self.bundle_path = str(Path(bundle_path)) if bundle_path else None
         self.device = str(device).strip() or "cpu"
-        self.constraint_resolver = ConstraintResolver(self.persona_repository)
         self.feature_extractor = feature_extractor or DecisionFeatureExtractor()
         self.runtime = runtime or self._build_runtime()
 
@@ -105,17 +102,12 @@ class DEModelEngine:
             active_persona_id=binding.active_persona_id,
             runtime_output=runtime_output,
         )
-        resolved = self.constraint_resolver.resolve(
-            actions=actions,
-            candidates=context.candidates,
-            session_binding=binding,
-        )
         return DecisionPlan(
             session_id=context.session_id,
             turn_id=context.turn_id,
             active_persona_id=binding.active_persona_id,
-            actions=resolved,
-            summary=f"de_model 占位评分生成 {len(resolved)} 条动作。",
+            actions=actions,
+            summary=f"de_model 占位评分生成 {len(actions)} 条动作。",
             metadata={
                 "mode": "de_model",
                 "engine_type": "tiny_policy_skeleton",
@@ -140,7 +132,6 @@ class DEModelEngine:
     ) -> list[DecisionAction]:
         """将运行时输出转换为可解析的动作列表。"""
         candidate_map = {candidate.entity_id: candidate for candidate in context.candidates}
-        attr_counts: dict[PIIAttributeType, int] = {}
         actions: list[DecisionAction] = []
         for item in runtime_output.candidate_decisions:
             candidate = candidate_map.get(item.candidate_id)
@@ -184,16 +175,13 @@ class DEModelEngine:
                     )
                 )
                 continue
-            attr_counts[candidate.attr_type] = attr_counts.get(candidate.attr_type, 0) + 1
             actions.append(
                 DecisionAction(
                     candidate_id=candidate.entity_id,
                     action_type=ActionType.GENERICIZE,
                     attr_type=candidate.attr_type,
                     source=candidate.source,
-                    replacement_text=render_generic_replacement_text(
-                        candidate.attr_type, attr_counts[candidate.attr_type]
-                    ),
+                    replacement_text=None,
                     source_text=candidate.text,
                     canonical_source_text=candidate.canonical_source_text,
                     bbox=candidate.bbox,

@@ -5,16 +5,14 @@ from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan, clone_action_metadata
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import SessionBinding
-from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
-from privacyguard.domain.policies.generic_placeholder import render_generic_replacement_text
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 
 
 class LabelPersonaMixedDecisionEngine:
     """按属性类型混合使用 persona 槽位与通用标签。
 
-    职责：对每个候选仅决策 ``KEEP`` / ``PERSONA_SLOT`` / ``GENERICIZE``；凡 ``GENERICIZE`` 的
-    ``replacement_text`` 均由 ``render_generic_replacement_text`` 生成。
+    职责：对每个候选仅决策 ``KEEP`` / ``PERSONA_SLOT`` / ``GENERICIZE``（抽象；具体替换文案由
+    ``ReplacementGenerationService`` 生成）。
     """
 
     def __init__(
@@ -22,10 +20,9 @@ class LabelPersonaMixedDecisionEngine:
         confidence_threshold: float = 0.35,
         persona_repository: PersonaRepository | None = None,
     ) -> None:
-        """初始化阈值、persona 仓库与约束解析器。"""
+        """初始化阈值与 persona 仓库（用于选择 active persona）。"""
         self.confidence_threshold = confidence_threshold
         self.persona_repository = persona_repository or JsonPersonaRepository()
-        self.constraint_resolver = ConstraintResolver(self.persona_repository)
         self.persona_attr_types = {
             PIIAttributeType.NAME,
             PIIAttributeType.PHONE,
@@ -88,7 +85,7 @@ class LabelPersonaMixedDecisionEngine:
                     action_type=ActionType.GENERICIZE,
                     attr_type=candidate.attr_type,
                     source=candidate.source,
-                    replacement_text=render_generic_replacement_text(candidate.attr_type, 1),
+                    replacement_text=None,
                     source_text=candidate.text,
                     canonical_source_text=candidate.canonical_source_text,
                     bbox=candidate.bbox,
@@ -105,13 +102,12 @@ class LabelPersonaMixedDecisionEngine:
         )
         if binding.active_persona_id is None:
             binding.active_persona_id = active_persona_id
-        resolved = self.constraint_resolver.resolve(actions=actions, candidates=context.candidates, session_binding=binding)
         return DecisionPlan(
             session_id=context.session_id,
             turn_id=context.turn_id,
             active_persona_id=binding.active_persona_id,
-            actions=resolved,
-            summary=f"label_persona_mixed 共生成 {len(resolved)} 条动作。",
+            actions=actions,
+            summary=f"label_persona_mixed 共生成 {len(actions)} 条动作。",
             metadata={"mode": "label_persona_mixed"},
         )
 

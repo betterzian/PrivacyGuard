@@ -20,6 +20,7 @@ from privacyguard.infrastructure.pii.json_privacy_repository import (
 from privacyguard.utils.aho_matcher import AhoCorasickMatcher
 from privacyguard.utils.pii_value import (
     build_match_text,
+    classify_content_shape_attr,
     compact_bank_account_value,
     canonicalize_pii_value,
     compact_card_number_value,
@@ -765,6 +766,7 @@ _RULE_PROFILES = {
             PIIAttributeType.LOCATION_CLUE: 0.48,
             PIIAttributeType.ADDRESS: 0.35,
             PIIAttributeType.ORGANIZATION: 0.48,
+            PIIAttributeType.TIME: 0.76,
             PIIAttributeType.NUMERIC: 0.76,
             PIIAttributeType.TEXTUAL: 0.76,
             PIIAttributeType.OTHER: 0.76,
@@ -793,6 +795,7 @@ _RULE_PROFILES = {
             PIIAttributeType.LOCATION_CLUE: 0.52,
             PIIAttributeType.ADDRESS: 0.45,
             PIIAttributeType.ORGANIZATION: 0.48,
+            PIIAttributeType.TIME: 0.76,
             PIIAttributeType.NUMERIC: 0.76,
             PIIAttributeType.TEXTUAL: 0.76,
             PIIAttributeType.OTHER: 0.76,
@@ -821,6 +824,7 @@ _RULE_PROFILES = {
             PIIAttributeType.LOCATION_CLUE: 0.9,
             PIIAttributeType.ADDRESS: 0.6,
             PIIAttributeType.ORGANIZATION: 0.74,
+            PIIAttributeType.TIME: 0.9,
             PIIAttributeType.NUMERIC: 0.9,
             PIIAttributeType.TEXTUAL: 0.9,
             PIIAttributeType.OTHER: 0.9,
@@ -1334,6 +1338,13 @@ class RuleBasedPIIDetector:
                 (re.compile(rf"(?<![A-Za-z0-9])[1-9]\d{{5}}{_MASK_CHAR_CLASS_COMMON}{{8,10}}[\dXx]{{2,4}}(?![A-Za-z0-9])"), "regex_cn_id_masked", 0.86),
                 (re.compile(rf"(?<![A-Za-z0-9])[1-9]\d{{5}}{_MASK_CHAR_CLASS_COMMON}{{9,12}}(?![A-Za-z0-9])"), "regex_cn_id_masked_prefix_only", 0.84),
             ],
+            PIIAttributeType.TIME: [
+                (
+                    re.compile(r"(?<!\d)(?:[01]?\d|2[0-3])[:：][0-5]\d(?:[:：][0-5]\d)?(?!\d)"),
+                    "regex_time_clock",
+                    0.96,
+                ),
+            ],
         }
 
     def _build_context_rules(self) -> list[tuple[PIIAttributeType, re.Pattern[str], str, float, Callable[[str], bool]]]:
@@ -1414,7 +1425,7 @@ class RuleBasedPIIDetector:
             self._build_context_rule(
                 keywords=_OTHER_FIELD_KEYWORDS,
                 attr_type=PIIAttributeType.OTHER,
-                value_pattern=r"[A-Za-z0-9\-\s－—_.,，。·•]{4,40}",
+                value_pattern=r"[A-Za-z0-9一-龥\-\s－—_.,，。·•:：/\\()（）]{4,40}",
                 confidence=0.76,
                 matched_by="context_other_field",
                 validator=self._is_other_candidate,
@@ -2307,6 +2318,7 @@ class RuleBasedPIIDetector:
             PIIAttributeType.ID_NUMBER: " <ID> ",
             PIIAttributeType.ADDRESS: " <ADDR> ",
             PIIAttributeType.ORGANIZATION: " <ORG> ",
+            PIIAttributeType.TIME: " <TIME> ",
             PIIAttributeType.NUMERIC: " <NUM> ",
             PIIAttributeType.TEXTUAL: " <TXT> ",
             PIIAttributeType.OTHER: " <CODE> ",
@@ -2572,7 +2584,7 @@ class RuleBasedPIIDetector:
                 collected=collected,
                 text=raw_text,
                 matched_text=matched_text,
-                attr_type=PIIAttributeType.OTHER,
+                attr_type=PIIAttributeType.NUMERIC,
                 source=source,
                 bbox=bbox,
                 block_id=block_id,
@@ -2947,11 +2959,11 @@ class RuleBasedPIIDetector:
 
     def _is_regex_numeric_candidate_type(self, attr_type: PIIAttributeType, matched_by: str) -> bool:
         return attr_type in _HIGH_PRECISION_NUMERIC_ATTR_TYPES or (
-            attr_type == PIIAttributeType.OTHER and matched_by == "regex_number_ambiguous"
+            attr_type == PIIAttributeType.NUMERIC and matched_by == "regex_number_ambiguous"
         )
 
     def _is_regex_ambiguous_number_candidate(self, candidate: PIICandidate) -> bool:
-        return candidate.attr_type == PIIAttributeType.OTHER and "regex_number_ambiguous" in candidate.metadata.get("matched_by", [])
+        return candidate.attr_type == PIIAttributeType.NUMERIC and "regex_number_ambiguous" in candidate.metadata.get("matched_by", [])
 
     def _merge_ambiguous_numeric_candidate(
         self,
@@ -3894,9 +3906,10 @@ class RuleBasedPIIDetector:
         )
 
     def _is_other_candidate(self, value: str) -> bool:
-        """判断是否为需要保守脱敏的编号类字段。"""
+        """判断是否为需要保守脱敏的通用敏感字段。"""
+        shape_attr = classify_content_shape_attr(value)
         compact = compact_other_code_value(value)
-        if not re.fullmatch(r"[A-Za-z0-9]{4,32}", compact):
+        if not compact or not (4 <= len(compact) <= 32):
             return False
         if (
             self._is_phone_candidate(compact)
@@ -3908,12 +3921,13 @@ class RuleBasedPIIDetector:
             or self._is_email_candidate(compact)
         ):
             return False
-        digits_only = re.sub(r"\D", "", compact)
-        if len(digits_only) < 4:
-            return False
-        if 12 <= len(digits_only) <= 19:
+        if shape_attr == PIIAttributeType.TIME:
             return True
-        return True
+        if shape_attr == PIIAttributeType.NUMERIC:
+            return len(re.sub(r"\D", "", value)) >= 4
+        if shape_attr == PIIAttributeType.TEXTUAL:
+            return sum(char.isalpha() for char in value) >= 2
+        return any(char.isalpha() for char in value) and any(char.isdigit() for char in value)
 
     def _passes_luhn(self, digits: str) -> bool:
         total = 0
@@ -4207,6 +4221,7 @@ class RuleBasedPIIDetector:
         if skip_spans and span_start is not None and span_end is not None:
             if self._overlaps_any_span(span_start, span_end, skip_spans):
                 return
+        attr_type = self._normalize_fallback_attr_type(attr_type, cleaned_text)
         normalized = canonicalize_pii_value(attr_type, cleaned_text)
         key = (normalized, attr_type.value, span_start, span_end)
         entity_id = self.resolver.build_candidate_id(
@@ -4251,6 +4266,11 @@ class RuleBasedPIIDetector:
             previous.confidence = min(1.0, max(previous.confidence, incoming.confidence) + 0.08)
         elif "heuristic_address_fragment" in merged_matched_by and "regex_address_span" in merged_matched_by:
             previous.confidence = min(1.0, max(previous.confidence, incoming.confidence) + 0.06)
+
+    def _normalize_fallback_attr_type(self, attr_type: PIIAttributeType, value: str) -> PIIAttributeType:
+        if attr_type != PIIAttributeType.OTHER:
+            return attr_type
+        return classify_content_shape_attr(value)
 
     def _overlaps_any_span(
         self,
@@ -4320,6 +4340,7 @@ class RuleBasedPIIDetector:
             "id_number": PIIAttributeType.ID_NUMBER,
             "id": PIIAttributeType.ID_NUMBER,
             "organization": PIIAttributeType.ORGANIZATION,
+            "time": PIIAttributeType.TIME,
             "numeric": PIIAttributeType.NUMERIC,
             "textual": PIIAttributeType.TEXTUAL,
             "other": PIIAttributeType.OTHER,

@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 from privacyguard.app.privacy_guard import PrivacyGuard
+from privacyguard.app.schemas import SanitizeRequestModel
+from privacyguard.application.pipelines.sanitize_pipeline import _detect_candidates
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +78,22 @@ def main() -> int:
         "prompt_text": prompt_text,
         "screenshot": screenshot,
     }
+    request_model = SanitizeRequestModel.from_payload(payload)
+    request_dto = request_model.to_dto()
+    # 与 sanitize 主链 detector 阶段一致（见 sanitize_pipeline._detect_candidates）
+    detected = _detect_candidates(request=request_dto, pii_detector=guard.detector, ocr_blocks=ocr_blocks)
+    detector_export = {
+        "detector_mode": cfg.get("detector_mode", "rule_based"),
+        "session_id": request_dto.session_id,
+        "turn_id": request_dto.turn_id,
+        "candidate_count": len(detected),
+        "candidates": [c.model_dump(mode="json") for c in detected],
+    }
+    detector_path = ROOT / "_server_detector_output.json"
+    with detector_path.open("w", encoding="utf-8") as df:
+        json.dump(detector_export, df, ensure_ascii=False, indent=2)
+    print(f"已导出 detector 结果: {detector_path}")
+
     out = guard.sanitize(payload)
 
     masked = out.get("masked_prompt", "")

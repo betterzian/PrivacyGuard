@@ -1,0 +1,869 @@
+{
+  "detector_mode": "rule_based",
+  "session_id": "replay-server-ocr-json",
+  "turn_id": 0,
+  "candidate_count": 37,
+  "candidates": [
+    {
+      "entity_id": "e9580e4adb0abde625b373208a33dff8",
+      "text": "14:07",
+      "canonical_source_text": null,
+      "normalized_text": "14:07",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "7523499148389440efb49b730746c551",
+      "text": "14:06",
+      "canonical_source_text": null,
+      "normalized_text": "14:06",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 25,
+      "span_end": 30,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "35a42b64ca307c5f930ee04f3db31996",
+      "text": "14:02",
+      "canonical_source_text": null,
+      "normalized_text": "14:02",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 46,
+      "span_end": 51,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "197cdb8545d33cee804c19c6ad00b188",
+      "text": "13:58",
+      "canonical_source_text": null,
+      "normalized_text": "13:58",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 91,
+      "span_end": 96,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "eac77b100dfac1457d3aaa348d5f2377",
+      "text": "13:44",
+      "canonical_source_text": null,
+      "normalized_text": "13:44",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 137,
+      "span_end": 142,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "ad4ddaeb8297a44319cb933df5bd0960",
+      "text": "13:11",
+      "canonical_source_text": null,
+      "normalized_text": "13:11",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 169,
+      "span_end": 174,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "71d9970513fef41f6963549049691a67",
+      "text": "12:32",
+      "canonical_source_text": null,
+      "normalized_text": "12:32",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 195,
+      "span_end": 200,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "d3a43cc73fbabbee19db4fb17b59b4b2",
+      "text": "12:05",
+      "canonical_source_text": null,
+      "normalized_text": "12:05",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 233,
+      "span_end": 238,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "a095fcce8bc4479f997076ebcca9276b",
+      "text": "12:01",
+      "canonical_source_text": null,
+      "normalized_text": "12:01",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 284,
+      "span_end": 289,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "f73823c3475567cf4575d08fcd1ef620",
+      "text": "15：30",
+      "canonical_source_text": null,
+      "normalized_text": "15:30",
+      "attr_type": "time",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 311,
+      "span_end": 316,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "regex_time_clock"
+        ]
+      }
+    },
+    {
+      "entity_id": "c3ab7782847b883efcdb05824cebcc3a",
+      "text": "李恩慧",
+      "canonical_source_text": "李恩慧",
+      "normalized_text": "李恩慧",
+      "attr_type": "name",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 36,
+      "span_end": 39,
+      "confidence": 0.92,
+      "metadata": {
+        "matched_by": [
+          "heuristic_name_fragment"
+        ]
+      }
+    },
+    {
+      "entity_id": "ab5c635846035281dd81c0c1a1bd79ee",
+      "text": "李晓红",
+      "canonical_source_text": "李晓红",
+      "normalized_text": "李晓红",
+      "attr_type": "name",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 269,
+      "span_end": 272,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "heuristic_name_fragment"
+        ]
+      }
+    },
+    {
+      "entity_id": "c09cde6d60dea0e5790cf676fedda162",
+      "text": "哈尔滨",
+      "canonical_source_text": null,
+      "normalized_text": "哈尔滨",
+      "attr_type": "location_clue",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 40,
+      "span_end": 43,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "heuristic_geo_lexicon"
+        ]
+      }
+    },
+    {
+      "entity_id": "3e2de5d29623cf841c132e898a49acf6",
+      "text": "江宁区",
+      "canonical_source_text": null,
+      "normalized_text": "江宁区",
+      "attr_type": "address",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 249,
+      "span_end": 252,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "heuristic_geo_lexicon"
+        ]
+      }
+    },
+    {
+      "entity_id": "bffddc2fdd2b26405d54906e4754929a",
+      "text": "2024-26",
+      "canonical_source_text": null,
+      "normalized_text": "202426",
+      "attr_type": "numeric",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 66,
+      "span_end": 73,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "regex_generic_number"
+        ],
+        "digit_count": [
+          "6"
+        ]
+      }
+    },
+    {
+      "entity_id": "861855c8b1c4209259f7cb985f030890",
+      "text": "25.12.4",
+      "canonical_source_text": null,
+      "normalized_text": "25124",
+      "attr_type": "numeric",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 102,
+      "span_end": 109,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "regex_generic_number"
+        ],
+        "digit_count": [
+          "5"
+        ]
+      }
+    },
+    {
+      "entity_id": "7b20894f0b5c855914692416c293e2b3",
+      "text": "2025",
+      "canonical_source_text": null,
+      "normalized_text": "2025",
+      "attr_type": "numeric",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 244,
+      "span_end": 248,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "regex_generic_number"
+        ],
+        "digit_count": [
+          "4"
+        ]
+      }
+    },
+    {
+      "entity_id": "050647463b9546a2217b53786ce21115",
+      "text": "15951169",
+      "canonical_source_text": null,
+      "normalized_text": "15951169",
+      "attr_type": "numeric",
+      "source": "prompt",
+      "bbox": null,
+      "block_id": null,
+      "span_start": 272,
+      "span_end": 280,
+      "confidence": 0.98,
+      "metadata": {
+        "matched_by": [
+          "regex_generic_number"
+        ],
+        "digit_count": [
+          "8"
+        ]
+      }
+    },
+    {
+      "entity_id": "ad724c7c7ab81d6d7cdf3fbe5ae592ae",
+      "text": "14:07",
+      "canonical_source_text": null,
+      "normalized_text": "14:07",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 99,
+        "y": 42,
+        "width": 134,
+        "height": 58
+      },
+      "block_id": "ocr-0-0-99-42-134-58",
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-0-0-99-42-134-58"
+        ]
+      }
+    },
+    {
+      "entity_id": "30d811e0adc01ac2345b5441b014afc6",
+      "text": "14:06",
+      "canonical_source_text": null,
+      "normalized_text": "14:06",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 974,
+        "y": 298,
+        "width": 109,
+        "height": 45
+      },
+      "block_id": "ocr-5-5-974-298-109-45",
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-5-5-974-298-109-45"
+        ]
+      }
+    },
+    {
+      "entity_id": "81ffa0a428be2d57984ce16bee2b8ab1",
+      "text": "14:02",
+      "canonical_source_text": null,
+      "normalized_text": "14:02",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 975,
+        "y": 513,
+        "width": 109,
+        "height": 47
+      },
+      "block_id": "ocr-8-8-975-513-109-47",
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-8-8-975-513-109-47"
+        ]
+      }
+    },
+    {
+      "entity_id": "bc293ae831cfa855a99e4b5aec1b8c09",
+      "text": "13:58",
+      "canonical_source_text": null,
+      "normalized_text": "13:58",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 974,
+        "y": 730,
+        "width": 109,
+        "height": 44
+      },
+      "block_id": "ocr-13-13-974-730-109-44",
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-13-13-974-730-109-44"
+        ]
+      }
+    },
+    {
+      "entity_id": "5fada8662c031a5d73e451c78ff47b21",
+      "text": "13:44",
+      "canonical_source_text": null,
+      "normalized_text": "13:44",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 974,
+        "y": 947,
+        "width": 108,
+        "height": 43
+      },
+      "block_id": "ocr-17-17-974-947-108-43",
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-17-17-974-947-108-43"
+        ]
+      }
+    },
+    {
+      "entity_id": "7d6b8b2773ca0d992099076e63b1006d",
+      "text": "13:11",
+      "canonical_source_text": null,
+      "normalized_text": "13:11",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 986,
+        "y": 1162,
+        "width": 97,
+        "height": 45
+      },
+      "block_id": "ocr-21-21-986-1162-97-45",
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-21-21-986-1162-97-45"
+        ]
+      }
+    },
+    {
+      "entity_id": "99edf4db5af9a13a040372853c6f8160",
+      "text": "12:32",
+      "canonical_source_text": null,
+      "normalized_text": "12:32",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 976,
+        "y": 1376,
+        "width": 108,
+        "height": 47
+      },
+      "block_id": "ocr-25-25-976-1376-108-47",
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-25-25-976-1376-108-47"
+        ]
+      }
+    },
+    {
+      "entity_id": "d148ed388854ec6817a71c88a523cfaa",
+      "text": "12:05",
+      "canonical_source_text": null,
+      "normalized_text": "12:05",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 974,
+        "y": 1593,
+        "width": 109,
+        "height": 47
+      },
+      "block_id": "ocr-29-29-974-1593-109-47",
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-29-29-974-1593-109-47"
+        ]
+      }
+    },
+    {
+      "entity_id": "30bc0885ddc480edb9516dc0083d0173",
+      "text": "12:01",
+      "canonical_source_text": null,
+      "normalized_text": "12:01",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 981,
+        "y": 1810,
+        "width": 102,
+        "height": 44
+      },
+      "block_id": "ocr-32-32-981-1810-102-44",
+      "span_start": 0,
+      "span_end": 5,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-32-32-981-1810-102-44"
+        ]
+      }
+    },
+    {
+      "entity_id": "63b0c1fac9cf2d1f66bd424349f20204",
+      "text": "15：30",
+      "canonical_source_text": null,
+      "normalized_text": "15:30",
+      "attr_type": "time",
+      "source": "ocr",
+      "bbox": {
+        "x": 226,
+        "y": 2104,
+        "width": 827,
+        "height": 50
+      },
+      "block_id": "ocr-35-35-226-2104-827-50",
+      "span_start": 12,
+      "span_end": 17,
+      "confidence": 0.96,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_time_clock"
+        ],
+        "ocr_block_ids": [
+          "ocr-35-35-226-2104-827-50"
+        ]
+      }
+    },
+    {
+      "entity_id": "c5fbea3eeff136dfc977fc3901e830ea",
+      "text": "李恩慧",
+      "canonical_source_text": null,
+      "normalized_text": "李恩慧",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 227,
+        "y": 518,
+        "width": 428,
+        "height": 58
+      },
+      "block_id": "ocr-7-7-227-518-428-58",
+      "span_start": 0,
+      "span_end": 3,
+      "confidence": 0.92,
+      "metadata": {
+        "matched_by": [
+          "heuristic_name_fragment",
+          "ocr_page_span"
+        ],
+        "ocr_block_ids": [
+          "ocr-7-7-227-518-428-58"
+        ]
+      }
+    },
+    {
+      "entity_id": "72e044d7654eae3c08addd7fe0bae8bf",
+      "text": "李晓红",
+      "canonical_source_text": null,
+      "normalized_text": "李晓红",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 225,
+        "y": 1813,
+        "width": 719,
+        "height": 59
+      },
+      "block_id": "ocr-31-31-225-1813-719-59",
+      "span_start": 6,
+      "span_end": 9,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "heuristic_name_fragment",
+          "ocr_page_span"
+        ],
+        "ocr_block_ids": [
+          "ocr-31-31-225-1813-719-59"
+        ]
+      }
+    },
+    {
+      "entity_id": "ca361045a2337d50a36add6c7e8cf0f9",
+      "text": "哈尔滨",
+      "canonical_source_text": null,
+      "normalized_text": "哈尔滨",
+      "attr_type": "location_clue",
+      "source": "ocr",
+      "bbox": {
+        "x": 227,
+        "y": 518,
+        "width": 428,
+        "height": 58
+      },
+      "block_id": "ocr-7-7-227-518-428-58",
+      "span_start": 4,
+      "span_end": 7,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "heuristic_geo_lexicon",
+          "ocr_page_span"
+        ],
+        "ocr_block_ids": [
+          "ocr-7-7-227-518-428-58"
+        ]
+      }
+    },
+    {
+      "entity_id": "19562fa28885527c89aabceb0878636c",
+      "text": "江宁区",
+      "canonical_source_text": null,
+      "normalized_text": "江宁区",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 225,
+        "y": 1674,
+        "width": 801,
+        "height": 50
+      },
+      "block_id": "ocr-30-30-225-1674-801-50",
+      "span_start": 10,
+      "span_end": 13,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "heuristic_geo_lexicon",
+          "ocr_page_span"
+        ],
+        "ocr_block_ids": [
+          "ocr-30-30-225-1674-801-50"
+        ]
+      }
+    },
+    {
+      "entity_id": "f25267fac82e6f883dae6fa91663f31f",
+      "text": "泰州",
+      "canonical_source_text": null,
+      "normalized_text": "泰州",
+      "attr_type": "location_clue",
+      "source": "ocr",
+      "bbox": {
+        "x": 226,
+        "y": 2104,
+        "width": 827,
+        "height": 50
+      },
+      "block_id": "ocr-35-35-226-2104-827-50",
+      "span_start": 0,
+      "span_end": 2,
+      "confidence": 0.86,
+      "metadata": {
+        "matched_by": [
+          "heuristic_geo_lexicon",
+          "ocr_page_span"
+        ],
+        "ocr_block_ids": [
+          "ocr-35-35-226-2104-827-50"
+        ]
+      }
+    },
+    {
+      "entity_id": "6fca0dfffb2a0327e13fe06d4db0d671",
+      "text": "2024-26",
+      "canonical_source_text": null,
+      "normalized_text": "202426",
+      "attr_type": "numeric",
+      "source": "ocr",
+      "bbox": {
+        "x": 223,
+        "y": 729,
+        "width": 705,
+        "height": 64
+      },
+      "block_id": "ocr-12-12-223-729-705-64",
+      "span_start": 0,
+      "span_end": 7,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_generic_number"
+        ],
+        "digit_count": [
+          "6"
+        ],
+        "ocr_block_ids": [
+          "ocr-12-12-223-729-705-64"
+        ]
+      }
+    },
+    {
+      "entity_id": "4f7267361fffd731c6b4c1eeb4966368",
+      "text": "25.12.4",
+      "canonical_source_text": null,
+      "normalized_text": "25124",
+      "attr_type": "numeric",
+      "source": "ocr",
+      "bbox": {
+        "x": 225,
+        "y": 809,
+        "width": 715,
+        "height": 50
+      },
+      "block_id": "ocr-14-14-225-809-715-50",
+      "span_start": 5,
+      "span_end": 12,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_generic_number"
+        ],
+        "digit_count": [
+          "5"
+        ],
+        "ocr_block_ids": [
+          "ocr-14-14-225-809-715-50"
+        ]
+      }
+    },
+    {
+      "entity_id": "7b6f840086dbe3d73a3fead7ed04668c",
+      "text": "2025",
+      "canonical_source_text": null,
+      "normalized_text": "2025",
+      "attr_type": "numeric",
+      "source": "ocr",
+      "bbox": {
+        "x": 225,
+        "y": 1674,
+        "width": 801,
+        "height": 50
+      },
+      "block_id": "ocr-30-30-225-1674-801-50",
+      "span_start": 5,
+      "span_end": 9,
+      "confidence": 0.94,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_generic_number"
+        ],
+        "digit_count": [
+          "4"
+        ],
+        "ocr_block_ids": [
+          "ocr-30-30-225-1674-801-50"
+        ]
+      }
+    },
+    {
+      "entity_id": "866bdeefb84631ce0d43cb04edd055e1",
+      "text": "15951169",
+      "canonical_source_text": null,
+      "normalized_text": "15951169",
+      "attr_type": "numeric",
+      "source": "ocr",
+      "bbox": {
+        "x": 225,
+        "y": 1813,
+        "width": 719,
+        "height": 59
+      },
+      "block_id": "ocr-31-31-225-1813-719-59",
+      "span_start": 9,
+      "span_end": 17,
+      "confidence": 0.98,
+      "metadata": {
+        "matched_by": [
+          "ocr_page_span",
+          "regex_generic_number"
+        ],
+        "digit_count": [
+          "8"
+        ],
+        "ocr_block_ids": [
+          "ocr-31-31-225-1813-719-59"
+        ]
+      }
+    }
+  ]
+}
