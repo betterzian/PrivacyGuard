@@ -15,6 +15,7 @@ from privacyguard.infrastructure.decision.label_persona_mixed_engine import Labe
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 from privacyguard.infrastructure.rendering.prompt_renderer import PromptRenderer
 from privacyguard.infrastructure.restoration.action_restorer import ActionRestorer
+from privacyguard.utils.pii_value import persona_slot_replacement
 
 
 class _EmptyPersonaRepo:
@@ -256,7 +257,10 @@ def test_label_persona_mixed_replaces_address_by_source_granularity() -> None:
             return None
 
         def get_slot_replacement_text(self, persona_id, attr_type, source_text):
-            return self.get_slot_value(persona_id, attr_type)
+            slot_value = self.get_slot_value(persona_id, attr_type)
+            if slot_value is None:
+                return None
+            return persona_slot_replacement(attr_type, source_text, slot_value)
 
     mapping_store = InMemoryMappingStore()
 
@@ -276,6 +280,88 @@ def test_label_persona_mixed_replaces_address_by_source_granularity() -> None:
     )
 
     assert response.sanitized_prompt_text == "收货地址：广东省广州市"
+
+
+def test_label_persona_mixed_prefers_repository_render_text_for_name_persona_slot() -> None:
+    class _AliasPersonaRepo:
+        def get_persona(self, persona_id):
+            return PersonaProfile(
+                persona_id="persona-1",
+                display_name="persona-1",
+                slots={PIIAttributeType.NAME: "李四"},
+                stats={},
+            )
+
+        def list_personas(self):
+            return [self.get_persona("persona-1")]
+
+        def get_slot_value(self, persona_id, attr_type):
+            if attr_type == PIIAttributeType.NAME:
+                return "李四"
+            return None
+
+        def get_slot_replacement_text(self, persona_id, attr_type, source_text):
+            if attr_type == PIIAttributeType.NAME:
+                return "李岚"
+            return self.get_slot_value(persona_id, attr_type)
+
+    response = run_sanitize_pipeline(
+        request=SanitizeRequest(
+            session_id="session-persona-name-alias",
+            turn_id=1,
+            prompt_text="联系人：张三",
+            screenshot=None,
+        ),
+        ocr_engine=_OCR(),
+        pii_detector=_Detector([_name_candidate("cand-name", "张三", 4, 6)]),
+        persona_repository=_AliasPersonaRepo(),
+        mapping_store=InMemoryMappingStore(),
+        decision_engine=LabelPersonaMixedDecisionEngine(persona_repository=_AliasPersonaRepo()),
+        rendering_engine=PromptRenderer(),
+    )
+
+    assert response.sanitized_prompt_text == "联系人：李岚"
+
+
+def test_label_persona_mixed_prefers_repository_render_text_for_address_persona_slot() -> None:
+    class _AddressRenderPersonaRepo:
+        def get_persona(self, persona_id):
+            return PersonaProfile(
+                persona_id="persona-1",
+                display_name="persona-1",
+                slots={PIIAttributeType.ADDRESS: "广东省广州市天河区体育西路100号"},
+                stats={},
+            )
+
+        def list_personas(self):
+            return [self.get_persona("persona-1")]
+
+        def get_slot_value(self, persona_id, attr_type):
+            if attr_type == PIIAttributeType.ADDRESS:
+                return "广东省广州市天河区体育西路100号"
+            return None
+
+        def get_slot_replacement_text(self, persona_id, attr_type, source_text):
+            if attr_type == PIIAttributeType.ADDRESS:
+                return "广州天河"
+            return self.get_slot_value(persona_id, attr_type)
+
+    response = run_sanitize_pipeline(
+        request=SanitizeRequest(
+            session_id="session-persona-addr-render",
+            turn_id=1,
+            prompt_text="收货地址：四川省成都市",
+            screenshot=None,
+        ),
+        ocr_engine=_OCR(),
+        pii_detector=_Detector([_address_candidate("cand-addr", "四川省成都市", 5, 11)]),
+        persona_repository=_AddressRenderPersonaRepo(),
+        mapping_store=InMemoryMappingStore(),
+        decision_engine=LabelPersonaMixedDecisionEngine(persona_repository=_AddressRenderPersonaRepo()),
+        rendering_engine=PromptRenderer(),
+    )
+
+    assert response.sanitized_prompt_text == "收货地址：广州天河"
 
 
 def test_label_persona_mixed_uses_persona_slot_for_card_number() -> None:

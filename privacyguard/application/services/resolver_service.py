@@ -27,7 +27,7 @@ from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.decision.policy_context import derive_policy_context
-from privacyguard.utils.pii_value import canonicalize_pii_value, persona_slot_replacement
+from privacyguard.utils.pii_value import canonicalize_pii_value
 
 _LOW_CANDIDATE_CONFIDENCE = 0.5
 _HIGH_CANDIDATE_CONFIDENCE = 0.85
@@ -259,11 +259,19 @@ class CandidateResolverService:
                 fallback_reason="PERSONA_SLOT 缺少对应 persona slot，已回退为 GENERICIZE。",
                 resolution_reason="当前 persona 不支持该 attr_type 或槽位值为空。",
             )
+        replacement_text = self.persona_repository.get_slot_replacement_text(
+            persona_id,
+            candidate.attr_type,
+            candidate.text,
+        )
         action.persona_id = persona_id
-        action.replacement_text = persona_slot_replacement(candidate.attr_type, candidate.text, slot_value)
+        action.replacement_text = replacement_text or slot_value
+        resolution_reason = "PERSONA_SLOT 通过槽位校验，使用 persona repository 渲染后的替换值。"
+        if not replacement_text:
+            resolution_reason = "PERSONA_SLOT 通过槽位校验，但 persona repository 未提供渲染值，已回退为原始 persona 槽位值。"
         return self._annotate_action(
             action,
-            resolution_reason="PERSONA_SLOT 通过槽位校验，使用 active persona 槽位值。",
+            resolution_reason=resolution_reason,
         )
 
     def _resolve_genericize(self, *, plan_session_id: str, action: DecisionAction) -> DecisionAction:

@@ -5,8 +5,6 @@ from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.models.decision import DecisionAction, clone_action_metadata
 from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.domain.models.pii import PIICandidate
-from privacyguard.utils.pii_value import persona_slot_replacement
-
 
 class ConstraintResolver:
     """对决策动作进行合法性校正与降级。"""
@@ -86,9 +84,18 @@ class ConstraintResolver:
                 action.persona_id = None
                 action.reason = "persona 缺少槽位值，已降级为 GENERICIZE。"
                 return action
+            replacement_text = self.persona_repository.get_slot_replacement_text(
+                persona_id,
+                candidate.attr_type,
+                candidate.text,
+            )
             action.persona_id = persona_id
-            action.replacement_text = persona_slot_replacement(candidate.attr_type, candidate.text, slot_value)
-            action.reason = action.reason or "使用 persona 槽位值替换。"
+            action.replacement_text = replacement_text or slot_value
+            action.reason = action.reason or (
+                "使用 persona repository 渲染后的替换值。"
+                if replacement_text
+                else "persona repository 未提供渲染值，已回退为原始 persona 槽位值。"
+            )
             return action
 
         if action.action_type == ActionType.GENERICIZE:
