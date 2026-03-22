@@ -1541,6 +1541,117 @@ def test_rule_based_dictionary_supports_entity_records_and_aliases(tmp_path) -> 
     )
 
 
+def test_rule_based_detector_reads_v2_true_personas_name_and_address_aliases(tmp_path) -> None:
+    dictionary_path = tmp_path / "pii_dictionary.v2.json"
+    dictionary_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "true_personas": [
+                    {
+                        "persona_id": "real_001",
+                        "slots": {
+                            "name": {"value": "张三", "aliases": ["张三三"]},
+                            "address": {
+                                "province": {"value": "上海市", "aliases": ["上海"]},
+                                "city": {"value": "上海市", "aliases": ["上海"]},
+                                "district": {"value": "浦东新区", "aliases": ["浦东"]},
+                            },
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
+
+    candidates = detector.detect(prompt_text="请联系张三三，地址在浦东", ocr_blocks=[])
+
+    assert any(
+        candidate.text == "张三三"
+        and candidate.attr_type == PIIAttributeType.NAME
+        and candidate.metadata.get("local_entity_ids") == ["real_001"]
+        for candidate in candidates
+    )
+    assert any(
+        candidate.text == "浦东"
+        and candidate.attr_type == PIIAttributeType.ADDRESS
+        and candidate.metadata.get("local_entity_ids") == ["real_001"]
+        for candidate in candidates
+    )
+
+
+def test_rule_based_detector_reads_v2_true_persona_street_alias(tmp_path) -> None:
+    dictionary_path = tmp_path / "pii_dictionary.v2.json"
+    dictionary_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "true_personas": [
+                    {
+                        "persona_id": "real_001",
+                        "slots": {
+                            "address": {
+                                "province": {"value": "广东省", "aliases": ["广东"]},
+                                "city": {"value": "广州市", "aliases": ["广州"]},
+                                "district": {"value": "天河区", "aliases": ["天河"]},
+                                "street": {"value": "体育西路100号", "aliases": ["体育西路"]},
+                            },
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
+
+    candidates = detector.detect(prompt_text="请到体育西路办理", ocr_blocks=[])
+
+    assert any(
+        candidate.text == "体育西路"
+        and candidate.attr_type == PIIAttributeType.ADDRESS
+        and candidate.metadata.get("local_entity_ids") == ["real_001"]
+        for candidate in candidates
+    )
+
+
+def test_rule_based_detector_reads_v2_true_persona_country_level_address(tmp_path) -> None:
+    dictionary_path = tmp_path / "pii_dictionary.v2.json"
+    dictionary_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "true_personas": [
+                    {
+                        "persona_id": "real_001",
+                        "slots": {
+                            "address": {
+                                "country": {"value": "中国", "aliases": ["中华人民共和国"]},
+                            },
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
+
+    candidates = detector.detect(prompt_text="中华人民共和国", ocr_blocks=[])
+
+    assert any(
+        candidate.text == "中华人民共和国"
+        and candidate.attr_type == PIIAttributeType.ADDRESS
+        and candidate.metadata.get("local_entity_ids") == ["real_001"]
+        for candidate in candidates
+    )
+
+
 def test_rule_based_missing_dictionary_does_not_print_to_stdout(tmp_path, capsys) -> None:
     detector = RuleBasedPIIDetector(privacy_repository_path=tmp_path / "missing.json")
 

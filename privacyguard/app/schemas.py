@@ -62,6 +62,9 @@ class PrivacyRepositoryWritePayloadModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    version: int | None = None
+    stats: dict[str, Any] | None = None
+    true_personas: list[dict[str, Any]] | None = None
     name: list[str] | str | None = None
     location_clue: list[str] | str | None = None
     phone: list[str] | str | None = None

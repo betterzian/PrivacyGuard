@@ -946,6 +946,8 @@ class RuleBasedPIIDetector:
             LOGGER.warning("rule_based privacy_repository not found; falling back to rules only: %s", dictionary_path)
             return {}
         content = json.loads(dictionary_path.read_text(encoding="utf-8"))
+        if content.get("version") == 2 and isinstance(content.get("true_personas"), list):
+            return self._load_v2_dictionary(content)
         mapped: dict[PIIAttributeType, list[_LocalDictionaryEntry]] = {}
         for raw_key, values in content.items():
             if raw_key == "entities":
@@ -978,6 +980,71 @@ class RuleBasedPIIDetector:
                     default_aliases=aliases_by_attr.get(raw_key),
                 )
         return mapped
+
+    def _load_v2_dictionary(self, content: dict[str, object]) -> dict[PIIAttributeType, list[_LocalDictionaryEntry]]:
+        mapped: dict[PIIAttributeType, list[_LocalDictionaryEntry]] = {}
+        for raw_persona in content.get("true_personas", []):
+            if not isinstance(raw_persona, dict):
+                continue
+            entity_id = str(raw_persona.get("persona_id") or "").strip() or None
+            slots = raw_persona.get("slots", {})
+            if not isinstance(slots, dict):
+                continue
+            for raw_key, values in slots.items():
+                attr_type = self._to_attr_type(raw_key)
+                if attr_type is None:
+                    continue
+                if attr_type == PIIAttributeType.ADDRESS:
+                    self._append_dictionary_values(
+                        mapped=mapped,
+                        attr_type=attr_type,
+                        values=self._expand_v2_address_slot(values),
+                        entity_id=entity_id,
+                    )
+                    continue
+                self._append_dictionary_values(
+                    mapped=mapped,
+                    attr_type=attr_type,
+                    values=[values],
+                    entity_id=entity_id,
+                )
+        return mapped
+
+    def _expand_v2_address_slot(self, address_slot) -> list[object]:
+        if not isinstance(address_slot, dict):
+            return []
+
+        rendered_parts: list[str] = []
+        aliases: list[str] = []
+        expanded: list[object] = []
+        province_value: str | None = None
+        country_value: str | None = None
+
+        for level_name in ("country", "province", "city", "district", "street", "building", "room"):
+            level = address_slot.get(level_name)
+            if not isinstance(level, dict):
+                continue
+            value = str(level.get("value") or "").strip()
+            if not value:
+                continue
+            if level_name == "country":
+                country_value = value
+            if level_name == "province":
+                province_value = value
+            if level_name == "country":
+                rendered_parts.append(value)
+            elif level_name != "city" or value != province_value:
+                rendered_parts.append(value)
+            aliases.extend(self._normalize_aliases(level.get("aliases")))
+            expanded.append(level)
+
+        full_value = "".join(rendered_parts)
+        unique_aliases = [alias for alias in dict.fromkeys(aliases) if alias and alias != full_value]
+        if country_value and country_value != full_value:
+            unique_aliases.append(country_value)
+        if full_value:
+            expanded.insert(0, {"value": full_value, "aliases": unique_aliases})
+        return expanded
 
     def _append_dictionary_values(
         self,
