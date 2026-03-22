@@ -1,4 +1,4 @@
-"""基于 JSON 文件的 privacy 词库读写（仅支持 v2 schema）。"""
+"""基于 JSON 文件的 privacy 词库读写。"""
 
 from __future__ import annotations
 
@@ -8,34 +8,33 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from privacyguard.infrastructure.repository.schemas_v2 import (
-    AddressLevelExposureStatsV2,
-    AddressStatsV2,
-    ExposureInfoV2,
-    PersonaDocumentV2,
-    PersonaStatsV2,
-    PrivacyRepositoryDocumentV2,
-    RepositoryStatsV2,
-    SlotStatsV2,
-    V2_VERSION,
+from privacyguard.infrastructure.repository.schemas import (
+    AddressLevelExposureStats,
+    AddressStats,
+    ExposureInfo,
+    PersonaDocument,
+    PersonaStats,
+    PrivacyRepositoryDocument,
+    RepositoryStats,
+    SlotStats,
 )
 
 DEFAULT_PRIVACY_REPOSITORY_PATH = "data/privacy_repository.json"
 
 
 class InvalidPrivacyRepositoryError(ValueError):
-    """磁盘或 patch 中的 JSON 不符合 privacy v2 文档 schema。"""
+    """磁盘或 patch 中的 JSON 不符合 privacy 文档 schema。"""
 
 
-def ensure_v2_privacy_document(payload: dict[str, Any] | None) -> PrivacyRepositoryDocumentV2:
-    """校验并返回 v2 文档；空 payload 视为空词库。"""
+def parse_privacy_repository_document(payload: dict[str, Any] | None) -> PrivacyRepositoryDocument:
+    """校验并返回文档；空 payload 视为空词库。"""
     if not payload:
-        return PrivacyRepositoryDocumentV2(version=V2_VERSION, true_personas=[])
+        return PrivacyRepositoryDocument(true_personas=[])
     try:
-        return PrivacyRepositoryDocumentV2.model_validate(payload)
+        return PrivacyRepositoryDocument.model_validate(payload)
     except ValidationError as exc:
         raise InvalidPrivacyRepositoryError(
-            'privacy_repository 必须为 v2：{"version": 2, "true_personas": [...]}'
+            'privacy_repository 必须包含 {"true_personas": [...]}'
         ) from exc
 
 
@@ -100,21 +99,21 @@ def _deep_merge_value(old: Any, new: Any) -> Any:
     return new
 
 
-def _merge_persona_documents(old: PersonaDocumentV2, new: PersonaDocumentV2) -> PersonaDocumentV2:
+def _merge_persona_documents(old: PersonaDocument, new: PersonaDocument) -> PersonaDocument:
     merged_raw = _deep_merge_value(
         old.model_dump(mode="json", exclude_none=True),
         new.model_dump(mode="json", exclude_none=True),
     )
     merged_raw["persona_id"] = old.persona_id
-    return PersonaDocumentV2.model_validate(merged_raw)
+    return PersonaDocument.model_validate(merged_raw)
 
 
-def merge_v2_privacy_documents(
-    base: PrivacyRepositoryDocumentV2,
-    patch: PrivacyRepositoryDocumentV2,
-) -> PrivacyRepositoryDocumentV2:
-    """按 persona_id 合并两份 v2 privacy document。"""
-    by_id: dict[str, PersonaDocumentV2] = {persona.persona_id: persona for persona in base.true_personas}
+def merge_privacy_repository_documents(
+    base: PrivacyRepositoryDocument,
+    patch: PrivacyRepositoryDocument,
+) -> PrivacyRepositoryDocument:
+    """按 persona_id 合并两份 privacy document。"""
+    by_id: dict[str, PersonaDocument] = {persona.persona_id: persona for persona in base.true_personas}
     ordered_ids = [persona.persona_id for persona in base.true_personas]
 
     for persona in patch.true_personas:
@@ -125,14 +124,13 @@ def merge_v2_privacy_documents(
         ordered_ids.append(persona.persona_id)
 
     personas = [by_id[persona_id] for persona_id in ordered_ids]
-    return PrivacyRepositoryDocumentV2(
-        version=V2_VERSION,
+    return PrivacyRepositoryDocument(
         stats=_aggregate_repository_stats(personas),
         true_personas=personas,
     )
 
 
-def _merge_exposure_info(left: ExposureInfoV2, right: ExposureInfoV2) -> ExposureInfoV2:
+def _merge_exposure_info(left: ExposureInfo, right: ExposureInfo) -> ExposureInfo:
     latest_at = left.last_exposed_at
     latest_session = left.last_exposed_session_id
     latest_turn = left.last_exposed_turn_id
@@ -140,7 +138,7 @@ def _merge_exposure_info(left: ExposureInfoV2, right: ExposureInfoV2) -> Exposur
         latest_at = right.last_exposed_at
         latest_session = right.last_exposed_session_id
         latest_turn = right.last_exposed_turn_id
-    return ExposureInfoV2(
+    return ExposureInfo(
         exposure_count=left.exposure_count + right.exposure_count,
         last_exposed_at=latest_at,
         last_exposed_session_id=latest_session,
@@ -148,10 +146,10 @@ def _merge_exposure_info(left: ExposureInfoV2, right: ExposureInfoV2) -> Exposur
     )
 
 
-def _merge_address_stats(left: AddressStatsV2, right: AddressStatsV2) -> AddressStatsV2:
-    return AddressStatsV2(
+def _merge_address_stats(left: AddressStats, right: AddressStats) -> AddressStats:
+    return AddressStats(
         total=_merge_exposure_info(left.total, right.total),
-        levels=AddressLevelExposureStatsV2(
+        levels=AddressLevelExposureStats(
             country=_merge_exposure_info(left.levels.country, right.levels.country),
             province=_merge_exposure_info(left.levels.province, right.levels.province),
             city=_merge_exposure_info(left.levels.city, right.levels.city),
@@ -163,21 +161,21 @@ def _merge_address_stats(left: AddressStatsV2, right: AddressStatsV2) -> Address
     )
 
 
-def _aggregate_repository_stats(personas: list[PersonaDocumentV2]) -> RepositoryStatsV2:
-    total = ExposureInfoV2()
+def _aggregate_repository_stats(personas: list[PersonaDocument]) -> RepositoryStats:
+    total = ExposureInfo()
     slot_totals = {
-        "name": ExposureInfoV2(),
-        "location_clue": ExposureInfoV2(),
-        "phone": ExposureInfoV2(),
-        "card_number": ExposureInfoV2(),
-        "bank_account": ExposureInfoV2(),
-        "passport_number": ExposureInfoV2(),
-        "driver_license": ExposureInfoV2(),
-        "email": ExposureInfoV2(),
-        "id_number": ExposureInfoV2(),
-        "organization": ExposureInfoV2(),
+        "name": ExposureInfo(),
+        "location_clue": ExposureInfo(),
+        "phone": ExposureInfo(),
+        "card_number": ExposureInfo(),
+        "bank_account": ExposureInfo(),
+        "passport_number": ExposureInfo(),
+        "driver_license": ExposureInfo(),
+        "email": ExposureInfo(),
+        "id_number": ExposureInfo(),
+        "organization": ExposureInfo(),
     }
-    address_total = AddressStatsV2()
+    address_total = AddressStats()
 
     for persona in personas:
         total = _merge_exposure_info(total, persona.stats.total)
@@ -185,7 +183,7 @@ def _aggregate_repository_stats(personas: list[PersonaDocumentV2]) -> Repository
             slot_totals[slot_name] = _merge_exposure_info(slot_totals[slot_name], getattr(persona.stats.slots, slot_name))
         address_total = _merge_address_stats(address_total, persona.stats.address)
 
-    slots_stats = SlotStatsV2(
+    slots_stats = SlotStats(
         name=slot_totals["name"],
         location_clue=slot_totals["location_clue"],
         phone=slot_totals["phone"],
@@ -198,12 +196,12 @@ def _aggregate_repository_stats(personas: list[PersonaDocumentV2]) -> Repository
         id_number=slot_totals["id_number"],
         organization=slot_totals["organization"],
     )
-    personas_stats = PersonaStatsV2(
+    personas_stats = PersonaStats(
         total=total.model_copy(deep=True),
         slots=slots_stats.model_copy(deep=True),
         address=address_total.model_copy(deep=True),
     )
-    return RepositoryStatsV2(
+    return RepositoryStats(
         total=total,
         personas=personas_stats,
         slots=slots_stats,
@@ -212,7 +210,7 @@ def _aggregate_repository_stats(personas: list[PersonaDocumentV2]) -> Repository
 
 
 class JsonPrivacyRepository:
-    """读写 rule_based 检测器使用的本地 privacy JSON 词库（仅 v2）。"""
+    """读写 rule_based 检测器使用的本地 privacy JSON 词库。"""
 
     def __init__(self, path: str | None = None) -> None:
         self.path = Path(path) if path else Path(DEFAULT_PRIVACY_REPOSITORY_PATH)
@@ -225,10 +223,10 @@ class JsonPrivacyRepository:
         return raw if isinstance(raw, dict) else {}
 
     def merge_and_write(self, patch: dict[str, Any]) -> None:
-        """将 patch 校验为 v2 后按 persona 合并并原子写入。"""
-        base_document = ensure_v2_privacy_document(self.load_raw())
-        patch_document = ensure_v2_privacy_document(patch)
-        merged = merge_v2_privacy_documents(base_document, patch_document)
+        """将 patch 校验后按 persona 合并并原子写入。"""
+        base_document = parse_privacy_repository_document(self.load_raw())
+        patch_document = parse_privacy_repository_document(patch)
+        merged = merge_privacy_repository_documents(base_document, patch_document)
         self._atomic_write(merged.model_dump(mode="json", exclude_none=True))
 
     def _atomic_write(self, payload: dict[str, Any]) -> None:

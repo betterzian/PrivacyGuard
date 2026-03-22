@@ -1,4 +1,4 @@
-"""JsonPrivacyRepository 合并写入测试（仅 v2）。"""
+"""JsonPrivacyRepository 合并写入测试。"""
 
 import json
 
@@ -10,7 +10,9 @@ from privacyguard.api.errors import InvalidConfigurationError
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.json_privacy_repository import (
     DEFAULT_PRIVACY_REPOSITORY_PATH,
+    InvalidPrivacyRepositoryError,
     JsonPrivacyRepository,
+    parse_privacy_repository_document,
 )
 
 
@@ -23,7 +25,7 @@ def test_write_privacy_repository_requires_rule_based_detector() -> None:
         guard.write_privacy_repository({"true_personas": []})
 
 
-def test_write_privacy_repository_accepts_v2_true_personas(tmp_path) -> None:
+def test_write_privacy_repository_accepts_true_personas(tmp_path) -> None:
     repo_path = tmp_path / "privacy_repository.json"
     guard = PrivacyGuard(
         detector_mode="rule_based",
@@ -33,7 +35,6 @@ def test_write_privacy_repository_accepts_v2_true_personas(tmp_path) -> None:
 
     summary = guard.write_privacy_repository(
         {
-            "version": 2,
             "true_personas": [
                 {
                     "persona_id": "real_001",
@@ -47,7 +48,7 @@ def test_write_privacy_repository_accepts_v2_true_personas(tmp_path) -> None:
 
     stored = json.loads(repo_path.read_text(encoding="utf-8"))
     assert summary["status"] == "ok"
-    assert stored["version"] == 2
+    assert "version" not in stored
     assert stored["true_personas"][0]["persona_id"] == "real_001"
     names = [entry.value for entry in guard.detector.dictionary.get(PIIAttributeType.NAME, [])]
     assert "张三" in names
@@ -59,7 +60,18 @@ def test_write_privacy_repository_rejects_legacy_flat_payload() -> None:
         guard.write_privacy_repository({"name": ["张三"]})
 
 
-def test_write_privacy_repository_preserves_explicit_v2_persona_id_that_looks_like_legacy_pattern(tmp_path) -> None:
+def test_write_privacy_repository_rejects_top_level_version_field() -> None:
+    guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_only")
+    with pytest.raises(ValidationError):
+        guard.write_privacy_repository({"version": 2, "true_personas": []})
+
+
+def test_parse_privacy_repository_document_rejects_top_level_version() -> None:
+    with pytest.raises(InvalidPrivacyRepositoryError):
+        parse_privacy_repository_document({"version": 2, "true_personas": []})
+
+
+def test_write_privacy_repository_preserves_explicit_persona_id_that_looks_like_legacy_pattern(tmp_path) -> None:
     repo_path = tmp_path / "privacy_repository.json"
     guard = PrivacyGuard(
         detector_mode="rule_based",
@@ -69,7 +81,6 @@ def test_write_privacy_repository_preserves_explicit_v2_persona_id_that_looks_li
 
     guard.write_privacy_repository(
         {
-            "version": 2,
             "true_personas": [
                 {
                     "persona_id": "legacy-name-1",
@@ -90,7 +101,6 @@ def test_json_privacy_repository_repeated_same_persona_writes_do_not_duplicate_r
     repository = JsonPrivacyRepository(path=str(repo_path))
 
     patch = {
-        "version": 2,
         "true_personas": [
             {
                 "persona_id": "p_name",
@@ -112,7 +122,6 @@ def test_json_privacy_repository_merges_conflicting_name_on_same_persona(tmp_pat
     repository = JsonPrivacyRepository(path=str(repo_path))
     repository.merge_and_write(
         {
-            "version": 2,
             "true_personas": [
                 {"persona_id": "friend_1", "slots": {"name": {"value": "Alice", "aliases": []}}},
             ],
@@ -121,7 +130,6 @@ def test_json_privacy_repository_merges_conflicting_name_on_same_persona(tmp_pat
 
     repository.merge_and_write(
         {
-            "version": 2,
             "true_personas": [
                 {"persona_id": "friend_1", "slots": {"name": {"value": "Bob", "aliases": []}}},
             ],
@@ -139,7 +147,6 @@ def test_json_privacy_repository_merge_adds_phone_to_existing_persona(tmp_path) 
     repository = JsonPrivacyRepository(path=str(repo_path))
     repository.merge_and_write(
         {
-            "version": 2,
             "true_personas": [
                 {
                     "persona_id": "dup",
@@ -153,7 +160,6 @@ def test_json_privacy_repository_merge_adds_phone_to_existing_persona(tmp_path) 
 
     repository.merge_and_write(
         {
-            "version": 2,
             "true_personas": [
                 {
                     "persona_id": "dup",
@@ -177,7 +183,6 @@ def test_json_privacy_repository_write_merge_and_reload_detector(tmp_path, monke
     repo_path.write_text(
         json.dumps(
             {
-                "version": 2,
                 "true_personas": [
                     {"persona_id": "old", "slots": {"name": {"value": "旧名", "aliases": []}}},
                 ],
@@ -194,7 +199,6 @@ def test_json_privacy_repository_write_merge_and_reload_detector(tmp_path, monke
     )
     guard.write_privacy_repository(
         {
-            "version": 2,
             "true_personas": [
                 {"persona_id": "new", "slots": {"name": {"value": "新名", "aliases": []}}},
             ],
@@ -202,13 +206,12 @@ def test_json_privacy_repository_write_merge_and_reload_detector(tmp_path, monke
     )
 
     stored = json.loads(repo_path.read_text(encoding="utf-8"))
-    assert stored["version"] == 2
+    assert "version" not in stored
     assert [persona["slots"]["name"]["value"] for persona in stored["true_personas"]] == ["旧名", "新名"]
 
     assert (
         guard.write_privacy_repository(
             {
-                "version": 2,
                 "true_personas": [
                     {"persona_id": "new", "slots": {"phone": {"value": "13900000000", "aliases": []}}},
                 ],

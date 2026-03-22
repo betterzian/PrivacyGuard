@@ -377,7 +377,6 @@ from privacyguard import PrivacyGuard
 guard = PrivacyGuard(detector_mode="rule_based")
 guard.write_privacy_repository(
     {
-        "version": 2,
         "true_personas": [
             {
                 "persona_id": "demo",
@@ -394,7 +393,7 @@ guard.write_privacy_repository(
 )
 ```
 
-未设置 `detector_config["privacy_repository_path"]` 时，默认写入并加载 `data/privacy_repository.json`。词库文件必须为 v2（`version: 2` 与 `true_personas`）。
+未设置 `detector_config["privacy_repository_path"]` 时，默认写入并加载 `data/privacy_repository.json`。词库文件须包含 `true_personas`（可选 `stats`）。
 
 ## 顶层 API
 
@@ -441,9 +440,8 @@ guard.write_privacy_repository(
 
 ### `PrivacyGuard.write_privacy_repository(payload)`
 
-输入为 **v2 隐私词库片段**（可选字段，按 `persona_id` 与磁盘已有内容合并；形状与 `data/privacy_repository.sample.json` 一致）：
+输入为 **隐私词库片段**（可选字段，按 `persona_id` 与磁盘已有内容合并；形状与 `data/privacy_repository.sample.json` 一致）：
 
-- `version`：应为 `2`（可省略，合并结果始终为 v2）
 - `stats`：可选
 - `true_personas`：要合并写入的 persona 文档列表（每人至少包含 `persona_id` 与非空 `slots`）
 
@@ -481,15 +479,17 @@ guard.write_privacy_repository(
 - `data/privacy_repository.json`
   默认隐私词库落盘位置（`write_privacy_repository` 未指定 `privacy_repository_path` 时）
 - `data/privacy_repository.sample.json`
-  v2 示例词库（`version` + `true_personas`）
+  示例词库（`stats` + `true_personas`）
 - `data/personas.sample.json`
-  v2 示例假身份库（`version` + `fake_personas`），供 `JsonPersonaRepository` 在本地 `persona_repository.json` 不存在时回退加载
+  示例假身份库（`stats` + `fake_personas`），供 `JsonPersonaRepository` 在本地 `persona_repository.json` 不存在时回退加载
 - `data/china_geo_lexicon.json`
   内置地理词汇表，供地址和 location clue 规则使用
 
 补充说明：
 
 - 使用 `PrivacyGuard.write_privacy_repository` 时，若未配置路径会写入默认 `data/privacy_repository.json` 并加载；否则需与 `detector_config={"privacy_repository_path": ...}` 指向同一文件
+
+**迁移（旧 JSON 含 `version`）**：顶层不再允许 `version` 等未在 schema 中声明的字段。若磁盘上仍是 `{"version": 2, "true_personas": ...}` 或 `{"version": 2, "fake_personas": ...}`，请手动删除 `version` 键后再加载；否则校验会失败（`extra` 禁止未知字段）。
 
 ## 仓库结构
 

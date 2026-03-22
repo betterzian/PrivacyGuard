@@ -10,19 +10,18 @@ from typing import Any
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.models.persona import PersonaProfile
-from privacyguard.infrastructure.repository.schemas_v2 import (
-    AddressLevelExposureStatsV2,
-    AddressSlotStorageV2,
-    AddressStatsV2,
-    ExposureInfoV2,
-    PersonaDocumentV2,
-    PersonaRepositoryDocumentV2,
-    PersonaSlotsV2,
-    RepositoryStatsV2,
-    PersonaStatsV2,
-    SharedSlotStorageV2,
-    SlotStatsV2,
-    V2_VERSION,
+from privacyguard.infrastructure.repository.schemas import (
+    AddressLevelExposureStats,
+    AddressSlotStorage,
+    AddressStats,
+    ExposureInfo,
+    PersonaDocument,
+    PersonaRepositoryDocument,
+    PersonaSlots,
+    PersonaStats,
+    RepositoryStats,
+    SharedSlotStorage,
+    SlotStats,
 )
 from privacyguard.utils.pii_value import parse_address_components
 
@@ -31,7 +30,7 @@ DEFAULT_PERSONA_SAMPLE_PATH = "data/personas.sample.json"
 
 
 class InvalidPersonaRepositoryError(ValueError):
-    """persona 仓库 JSON 不是 v2 文档（``version`` + ``fake_personas``）。"""
+    """persona 仓库 JSON 不符合 schema（需含 ``fake_personas``）。"""
 
 PROFILE_KEY_TO_ATTR_TYPE = {
     "name": PIIAttributeType.NAME,
@@ -51,8 +50,8 @@ ATTR_TYPE_TO_PROFILE_KEY = {value: key for key, value in PROFILE_KEY_TO_ATTR_TYP
 _ADDRESS_RENDER_ORDER = ("province", "city", "district", "street", "building", "room")
 
 
-def _runtime_stats_to_persona_stats(stats_data: dict[str, object] | object) -> PersonaStatsV2:
-    """将 runtime 扁平 stats 转为 ``PersonaStatsV2``（仅填充 total 等常用字段）。"""
+def _runtime_stats_to_persona_stats(stats_data: dict[str, object] | object) -> PersonaStats:
+    """将 runtime 扁平 stats 转为 ``PersonaStats``（仅填充 total 等常用字段）。"""
     if not isinstance(stats_data, dict):
         stats_data = {}
     sd = stats_data
@@ -66,16 +65,16 @@ def _runtime_stats_to_persona_stats(stats_data: dict[str, object] | object) -> P
         tid = max(tid, 0)
     sid_raw = sd.get("last_exposed_session_id")
     sid = str(sid_raw).strip() if sid_raw is not None and str(sid_raw).strip() else None
-    total = ExposureInfoV2(
+    total = ExposureInfo(
         exposure_count=max(int(sd.get("exposure_count", 0) or 0), 0),
         last_exposed_session_id=sid,
         last_exposed_turn_id=tid,
     )
-    return PersonaStatsV2(total=total)
+    return PersonaStats(total=total)
 
 
-def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocumentV2:
-    """将 ``PersonaProfile`` 转为 v2 ``PersonaDocumentV2``（扁平槽位写入 storage slot）。"""
+def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocument:
+    """将 ``PersonaProfile`` 转为 ``PersonaDocument``（扁平槽位写入 storage slot）。"""
     slot_values: dict[str, object] = {}
     for attr_type, key in ATTR_TYPE_TO_PROFILE_KEY.items():
         raw = persona.slots.get(attr_type)
@@ -85,14 +84,14 @@ def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocu
         if not text:
             continue
         if attr_type == PIIAttributeType.ADDRESS:
-            slot_values["address"] = AddressSlotStorageV2(
-                street=SharedSlotStorageV2(value=text, aliases=[]),
+            slot_values["address"] = AddressSlotStorage(
+                street=SharedSlotStorage(value=text, aliases=[]),
             )
         else:
-            slot_values[key] = SharedSlotStorageV2(value=text, aliases=[])
+            slot_values[key] = SharedSlotStorage(value=text, aliases=[])
     if not slot_values:
         raise ValueError("PersonaProfile must contain at least one non-empty slot for storage")
-    slots = PersonaSlotsV2(**slot_values)
+    slots = PersonaSlots(**slot_values)
     display_name = persona.display_name
     if not display_name and slots.name:
         display_name = slots.name.value
@@ -108,7 +107,7 @@ def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocu
         vs = str(mv).strip()
         if vs:
             meta[ks] = vs
-    return PersonaDocumentV2(
+    return PersonaDocument(
         persona_id=persona.persona_id,
         display_name=display_name,
         slots=slots,
@@ -125,7 +124,7 @@ _ADDRESS_ROOM_SIGNAL_RE = re.compile(r"(?:室|房|层)")
 _COUNTRY_PREFIXES = ("中国大陆", "中国")
 
 
-def _merge_exposure_info(left: ExposureInfoV2, right: ExposureInfoV2) -> ExposureInfoV2:
+def _merge_exposure_info(left: ExposureInfo, right: ExposureInfo) -> ExposureInfo:
     latest_at = left.last_exposed_at
     latest_session = left.last_exposed_session_id
     latest_turn = left.last_exposed_turn_id
@@ -133,7 +132,7 @@ def _merge_exposure_info(left: ExposureInfoV2, right: ExposureInfoV2) -> Exposur
         latest_at = right.last_exposed_at
         latest_session = right.last_exposed_session_id
         latest_turn = right.last_exposed_turn_id
-    return ExposureInfoV2(
+    return ExposureInfo(
         exposure_count=left.exposure_count + right.exposure_count,
         last_exposed_at=latest_at,
         last_exposed_session_id=latest_session,
@@ -141,10 +140,10 @@ def _merge_exposure_info(left: ExposureInfoV2, right: ExposureInfoV2) -> Exposur
     )
 
 
-def _merge_address_stats(left: AddressStatsV2, right: AddressStatsV2) -> AddressStatsV2:
-    return AddressStatsV2(
+def _merge_address_stats(left: AddressStats, right: AddressStats) -> AddressStats:
+    return AddressStats(
         total=_merge_exposure_info(left.total, right.total),
-        levels=AddressLevelExposureStatsV2(
+        levels=AddressLevelExposureStats(
             country=_merge_exposure_info(left.levels.country, right.levels.country),
             province=_merge_exposure_info(left.levels.province, right.levels.province),
             city=_merge_exposure_info(left.levels.city, right.levels.city),
@@ -156,21 +155,21 @@ def _merge_address_stats(left: AddressStatsV2, right: AddressStatsV2) -> Address
     )
 
 
-def _aggregate_repository_stats(personas: list[PersonaDocumentV2]) -> RepositoryStatsV2:
-    total = ExposureInfoV2()
+def _aggregate_repository_stats(personas: list[PersonaDocument]) -> RepositoryStats:
+    total = ExposureInfo()
     slot_totals = {
-        "name": ExposureInfoV2(),
-        "location_clue": ExposureInfoV2(),
-        "phone": ExposureInfoV2(),
-        "card_number": ExposureInfoV2(),
-        "bank_account": ExposureInfoV2(),
-        "passport_number": ExposureInfoV2(),
-        "driver_license": ExposureInfoV2(),
-        "email": ExposureInfoV2(),
-        "id_number": ExposureInfoV2(),
-        "organization": ExposureInfoV2(),
+        "name": ExposureInfo(),
+        "location_clue": ExposureInfo(),
+        "phone": ExposureInfo(),
+        "card_number": ExposureInfo(),
+        "bank_account": ExposureInfo(),
+        "passport_number": ExposureInfo(),
+        "driver_license": ExposureInfo(),
+        "email": ExposureInfo(),
+        "id_number": ExposureInfo(),
+        "organization": ExposureInfo(),
     }
-    address_total = AddressStatsV2()
+    address_total = AddressStats()
 
     for persona in personas:
         total = _merge_exposure_info(total, persona.stats.total)
@@ -178,7 +177,7 @@ def _aggregate_repository_stats(personas: list[PersonaDocumentV2]) -> Repository
             slot_totals[slot_name] = _merge_exposure_info(slot_totals[slot_name], getattr(persona.stats.slots, slot_name))
         address_total = _merge_address_stats(address_total, persona.stats.address)
 
-    slots_stats = SlotStatsV2(
+    slots_stats = SlotStats(
         name=slot_totals["name"],
         location_clue=slot_totals["location_clue"],
         phone=slot_totals["phone"],
@@ -191,12 +190,12 @@ def _aggregate_repository_stats(personas: list[PersonaDocumentV2]) -> Repository
         id_number=slot_totals["id_number"],
         organization=slot_totals["organization"],
     )
-    personas_stats = PersonaStatsV2(
+    personas_stats = PersonaStats(
         total=total.model_copy(deep=True),
         slots=slots_stats.model_copy(deep=True),
         address=address_total.model_copy(deep=True),
     )
-    return RepositoryStatsV2(
+    return RepositoryStats(
         total=total,
         personas=personas_stats,
         slots=slots_stats,
@@ -249,8 +248,8 @@ class JsonPersonaRepository:
             return fallback_path
         return self.path
 
-    def _load_personas(self, source_path: Path) -> tuple[dict[str, PersonaProfile], dict[str, PersonaDocumentV2]]:
-        """读取 JSON 并转换为 runtime persona 索引与 v2 storage 索引。"""
+    def _load_personas(self, source_path: Path) -> tuple[dict[str, PersonaProfile], dict[str, PersonaDocument]]:
+        """读取 JSON 并转换为 runtime persona 索引与 storage 索引。"""
         if not source_path.exists():
             return ({}, {})
 
@@ -258,24 +257,20 @@ class JsonPersonaRepository:
         document = self._load_document(raw_payload)
 
         personas: dict[str, PersonaProfile] = {}
-        stored_fake_personas: dict[str, PersonaDocumentV2] = {}
+        stored_fake_personas: dict[str, PersonaDocument] = {}
         for stored_persona in document.fake_personas:
             personas[stored_persona.persona_id] = self._build_runtime_persona(stored_persona)
             stored_fake_personas[stored_persona.persona_id] = stored_persona
         return (personas, stored_fake_personas)
 
-    def _load_document(self, raw_payload: Any) -> PersonaRepositoryDocumentV2:
-        """仅加载 v2 persona 仓库文档（``version: 2`` + ``fake_personas``）。"""
+    def _load_document(self, raw_payload: Any) -> PersonaRepositoryDocument:
+        """加载 persona 仓库文档（``fake_personas``）。"""
         if not isinstance(raw_payload, dict):
             raise InvalidPersonaRepositoryError("persona 仓库顶层必须是 JSON 对象")
-        if raw_payload.get("version") != V2_VERSION:
-            raise InvalidPersonaRepositoryError(
-                "persona 仓库必须为 v2：{\"version\": 2, \"fake_personas\": [...]}"
-            )
-        return PersonaRepositoryDocumentV2.model_validate(raw_payload)
+        return PersonaRepositoryDocument.model_validate(raw_payload)
 
-    def _build_runtime_persona(self, stored_persona: PersonaDocumentV2) -> PersonaProfile:
-        """将 v2 storage persona 投影为现有 runtime PersonaProfile。"""
+    def _build_runtime_persona(self, stored_persona: PersonaDocument) -> PersonaProfile:
+        """将 storage persona 投影为现有 runtime PersonaProfile。"""
         slots = self._flatten_runtime_slots(stored_persona)
         display_name = stored_persona.display_name or slots.get(PIIAttributeType.NAME) or stored_persona.persona_id
         return PersonaProfile(
@@ -286,8 +281,8 @@ class JsonPersonaRepository:
             stats=self._flatten_runtime_stats(stored_persona.stats),
         )
 
-    def _flatten_runtime_slots(self, stored_persona: PersonaDocumentV2) -> dict[PIIAttributeType, str]:
-        """将 v2 structured slots 扁平化为当前 runtime 仍在消费的字符串槽位。"""
+    def _flatten_runtime_slots(self, stored_persona: PersonaDocument) -> dict[PIIAttributeType, str]:
+        """将 structured slots 扁平化为当前 runtime 仍在消费的字符串槽位。"""
         slots: dict[PIIAttributeType, str] = {}
 
         for attr_type, key in ATTR_TYPE_TO_PROFILE_KEY.items():
@@ -303,22 +298,22 @@ class JsonPersonaRepository:
 
         return slots
 
-    def _flatten_runtime_stats(self, stats: PersonaStatsV2) -> dict[str, int | str | None]:
-        """将 v2 stats.total 投影为当前 runtime 兼容字典。"""
+    def _flatten_runtime_stats(self, stats: PersonaStats) -> dict[str, int | str | None]:
+        """将 stats.total 投影为当前 runtime 兼容字典。"""
         return {
             "exposure_count": stats.total.exposure_count,
             "last_exposed_session_id": stats.total.last_exposed_session_id,
             "last_exposed_turn_id": stats.total.last_exposed_turn_id,
         }
 
-    def _pick_render_text(self, slot: SharedSlotStorageV2, *, randomize: bool) -> str:
+    def _pick_render_text(self, slot: SharedSlotStorage, *, randomize: bool) -> str:
         if not randomize or not slot.aliases:
             return slot.value
         return self._rng.choice([slot.value, *slot.aliases])
 
     def _render_address_slot(
         self,
-        slot: AddressSlotStorageV2 | None,
+        slot: AddressSlotStorage | None,
         *,
         source_text: str | None = None,
         randomize: bool,
@@ -431,25 +426,24 @@ class JsonPersonaRepository:
         fallback = "".join(part for part in fallback_parts if part)
         return fallback or None
 
-    def _to_storage_document(self) -> PersonaRepositoryDocumentV2:
-        """将当前 storage persona 集合聚合并持久化为 v2 document。"""
+    def _to_storage_document(self) -> PersonaRepositoryDocument:
+        """将当前 storage persona 集合聚合并持久化为仓库文档。"""
         personas = list(self._stored_fake_personas.values())
-        return PersonaRepositoryDocumentV2(
-            version=V2_VERSION,
+        return PersonaRepositoryDocument(
             stats=_aggregate_repository_stats(personas),
             fake_personas=personas,
         )
 
-    def _runtime_persona_to_storage(self, persona: PersonaProfile) -> PersonaDocumentV2:
-        """将 runtime PersonaProfile 提升回单条 v2 storage persona。"""
+    def _runtime_persona_to_storage(self, persona: PersonaProfile) -> PersonaDocument:
+        """将 runtime PersonaProfile 提升回单条 storage persona。"""
         return _persona_profile_to_persona_document(persona)
 
     def _merge_runtime_persona_into_storage(
         self,
         persona: PersonaProfile,
-        existing: PersonaDocumentV2 | None,
-    ) -> PersonaDocumentV2:
-        """把 runtime 更新合并回 storage persona，并尽量保留原有 rich v2 结构。"""
+        existing: PersonaDocument | None,
+    ) -> PersonaDocument:
+        """把 runtime 更新合并回 storage persona，并尽量保留原有 rich 结构。"""
         incoming = self._runtime_persona_to_storage(persona)
         if existing is None:
             return incoming
@@ -485,7 +479,7 @@ class JsonPersonaRepository:
         metadata = dict(existing.metadata)
         metadata.update(persona.metadata)
 
-        return PersonaDocumentV2(
+        return PersonaDocument(
             persona_id=persona.persona_id,
             display_name=persona.display_name or existing.display_name or incoming.display_name,
             slots=incoming.slots.model_copy(update=merged_slot_values, deep=True),
@@ -548,7 +542,7 @@ class JsonPersonaRepository:
         self._flush_to_file()
 
     def _flush_to_file(self) -> None:
-        """使用原子替换方式安全写入 persona v2 JSON。"""
+        """使用原子替换方式安全写入 persona JSON。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         document = self._to_storage_document()
         payload = document.model_dump(mode="json", exclude_none=True)

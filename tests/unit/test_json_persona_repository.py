@@ -20,7 +20,6 @@ def test_json_persona_repository_loads_all_supported_non_other_slots(tmp_path) -
     persona_path.write_text(
         json.dumps(
             {
-                "version": 2,
                 "fake_personas": [
                     {
                         "persona_id": "persona-all",
@@ -65,12 +64,11 @@ def test_json_persona_repository_loads_all_supported_non_other_slots(tmp_path) -
     }
 
 
-def test_json_persona_repository_loads_v2_fake_personas_and_renders_replacement_text(tmp_path) -> None:
-    persona_path = tmp_path / "persona_repository.v2.json"
+def test_json_persona_repository_loads_fake_personas_and_renders_replacement_text(tmp_path) -> None:
+    persona_path = tmp_path / "persona_repository.json"
     persona_path.write_text(
         json.dumps(
             {
-                "version": 2,
                 "fake_personas": [
                     {
                         "persona_id": "fake-1",
@@ -130,12 +128,11 @@ def test_json_persona_repository_loads_v2_fake_personas_and_renders_replacement_
     assert repo.get_slot_replacement_text("fake-1", PIIAttributeType.ADDRESS, "2号楼802室") == "2号楼802室"
 
 
-def test_json_persona_repository_reads_structured_v2_address_slots(tmp_path) -> None:
-    persona_path = tmp_path / "personas.v2.json"
+def test_json_persona_repository_reads_structured_address_slots(tmp_path) -> None:
+    persona_path = tmp_path / "personas.json"
     persona_path.write_text(
         json.dumps(
             {
-                "version": 2,
                 "fake_personas": [
                     {
                         "persona_id": "legacy-1",
@@ -166,12 +163,32 @@ def test_json_persona_repository_reads_structured_v2_address_slots(tmp_path) -> 
     assert repo.get_slot_replacement_text("legacy-1", PIIAttributeType.NAME, "李四") in {"张三", "张三三"}
 
 
-def test_json_persona_repository_rejects_malformed_v2_payload(tmp_path) -> None:
-    persona_path = tmp_path / "broken_persona_repository.json"
+def test_json_persona_repository_rejects_top_level_version_field(tmp_path) -> None:
+    persona_path = tmp_path / "with_version.json"
     persona_path.write_text(
         json.dumps(
             {
                 "version": 2,
+                "fake_personas": [
+                    {
+                        "persona_id": "x",
+                        "slots": {"name": {"value": "a", "aliases": []}},
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError):
+        JsonPersonaRepository(path=str(persona_path))
+
+
+def test_json_persona_repository_rejects_malformed_payload(tmp_path) -> None:
+    persona_path = tmp_path / "broken_persona_repository.json"
+    persona_path.write_text(
+        json.dumps(
+            {
                 "personas": [],
             },
             ensure_ascii=False,
@@ -190,12 +207,11 @@ def test_json_persona_repository_rejects_non_object_root(tmp_path) -> None:
         JsonPersonaRepository(path=str(persona_path))
 
 
-def test_json_persona_repository_upsert_preserves_existing_rich_v2_persona_fields(tmp_path) -> None:
-    persona_path = tmp_path / "persona_repository.v2.json"
+def test_json_persona_repository_upsert_preserves_existing_rich_persona_fields(tmp_path) -> None:
+    persona_path = tmp_path / "persona_repository.json"
     persona_path.write_text(
         json.dumps(
             {
-                "version": 2,
                 "fake_personas": [
                     {
                         "persona_id": "fake-1",
@@ -231,7 +247,7 @@ def test_json_persona_repository_upsert_preserves_existing_rich_v2_persona_field
     written = json.loads(persona_path.read_text(encoding="utf-8"))
     persona = written["fake_personas"][0]
 
-    assert written["version"] == 2
+    assert "version" not in written
     assert persona["slots"]["name"] == {"value": "李然", "aliases": ["李岚"]}
     assert persona["slots"]["address"]["city"] == {"value": "广州市", "aliases": ["广州"]}
     assert persona["slots"]["address"]["street"] == {"value": "体育西路", "aliases": ["体西路"]}
@@ -243,11 +259,10 @@ def test_json_persona_repository_upsert_preserves_existing_rich_v2_persona_field
 
 
 def test_json_persona_repository_country_fragment_without_stored_country_does_not_expand_to_full_address(tmp_path) -> None:
-    persona_path = tmp_path / "persona_repository.v2.json"
+    persona_path = tmp_path / "persona_repository.json"
     persona_path.write_text(
         json.dumps(
             {
-                "version": 2,
                 "fake_personas": [
                     {
                         "persona_id": "fake-1",
@@ -280,7 +295,6 @@ def test_json_persona_repository_reads_sample_but_flushes_to_local_repo(tmp_path
     sample_path = tmp_path / DEFAULT_PERSONA_SAMPLE_PATH
     sample_path.parent.mkdir(parents=True, exist_ok=True)
     sample_doc = {
-        "version": 2,
         "fake_personas": [
             {
                 "persona_id": "sample-persona",
@@ -312,7 +326,7 @@ def test_json_persona_repository_reads_sample_but_flushes_to_local_repo(tmp_path
     assert local_repo_path.exists()
     assert json.loads(sample_path.read_text(encoding="utf-8")) == sample_doc
     local_payload = json.loads(local_repo_path.read_text(encoding="utf-8"))
-    assert local_payload["version"] == 2
+    assert "version" not in local_payload
     assert [item["persona_id"] for item in local_payload["fake_personas"]] == [
         "sample-persona",
         "local-persona",

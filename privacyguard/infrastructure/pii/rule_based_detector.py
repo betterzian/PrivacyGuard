@@ -15,7 +15,7 @@ from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.pii.json_privacy_repository import (
     InvalidPrivacyRepositoryError,
-    ensure_v2_privacy_document,
+    parse_privacy_repository_document,
 )
 from privacyguard.utils.aho_matcher import AhoCorasickMatcher
 from privacyguard.utils.pii_value import (
@@ -929,7 +929,7 @@ class RuleBasedPIIDetector:
         return Path(privacy_repository_path)
 
     def _load_dictionary(self, dictionary_path: Path | None) -> dict[PIIAttributeType, list[_LocalDictionaryEntry]]:
-        """读取本地 privacy 词条（仅 v2：version + true_personas）。"""
+        """读取本地 privacy 词条（``true_personas``）。"""
         if dictionary_path is None:
             return {}
         if not dictionary_path.exists():
@@ -938,10 +938,10 @@ class RuleBasedPIIDetector:
         raw = json.loads(dictionary_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise InvalidPrivacyRepositoryError("privacy_repository JSON 顶层必须是对象")
-        document = ensure_v2_privacy_document(raw)
-        return self._load_v2_dictionary(document.model_dump(mode="json"))
+        document = parse_privacy_repository_document(raw)
+        return self._load_privacy_dictionary(document.model_dump(mode="json"))
 
-    def _load_v2_dictionary(self, content: dict[str, object]) -> dict[PIIAttributeType, list[_LocalDictionaryEntry]]:
+    def _load_privacy_dictionary(self, content: dict[str, object]) -> dict[PIIAttributeType, list[_LocalDictionaryEntry]]:
         mapped: dict[PIIAttributeType, list[_LocalDictionaryEntry]] = {}
         for raw_persona in content.get("true_personas", []):
             if not isinstance(raw_persona, dict):
@@ -958,7 +958,7 @@ class RuleBasedPIIDetector:
                     self._append_dictionary_values(
                         mapped=mapped,
                         attr_type=attr_type,
-                        values=self._expand_v2_address_slot(values),
+                        values=self._expand_structured_address_slot(values),
                         entity_id=entity_id,
                     )
                     continue
@@ -970,7 +970,7 @@ class RuleBasedPIIDetector:
                 )
         return mapped
 
-    def _expand_v2_address_slot(self, address_slot) -> list[object]:
+    def _expand_structured_address_slot(self, address_slot) -> list[object]:
         if not isinstance(address_slot, dict):
             return []
 
