@@ -37,6 +37,14 @@ class _PersonaRepository:
             return None
         return persona.slots.get(attr_type)
 
+    def get_slot_replacement_text(
+        self,
+        persona_id: str,
+        attr_type: PIIAttributeType,
+        source_text: str,
+    ) -> str | None:
+        return self.get_slot_value(persona_id, attr_type)
+
 
 class _SpyRuntime:
     def __init__(self, response_factory) -> None:

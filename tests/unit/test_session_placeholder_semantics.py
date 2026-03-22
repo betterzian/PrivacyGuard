@@ -27,6 +27,9 @@ class _EmptyPersonaRepo:
     def get_slot_value(self, persona_id, attr_type):
         return None
 
+    def get_slot_replacement_text(self, persona_id, attr_type, source_text):
+        return self.get_slot_value(persona_id, attr_type)
+
 
 class _OCR:
     def extract(self, image):
@@ -252,6 +255,9 @@ def test_label_persona_mixed_replaces_address_by_source_granularity() -> None:
                 return "广东省广州市天河区体育西路100号"
             return None
 
+        def get_slot_replacement_text(self, persona_id, attr_type, source_text):
+            return self.get_slot_value(persona_id, attr_type)
+
     mapping_store = InMemoryMappingStore()
 
     response = run_sanitize_pipeline(
@@ -289,6 +295,9 @@ def test_label_persona_mixed_uses_persona_slot_for_card_number() -> None:
             if attr_type == PIIAttributeType.CARD_NUMBER:
                 return "4111111111111111"
             return None
+
+        def get_slot_replacement_text(self, persona_id, attr_type, source_text):
+            return self.get_slot_value(persona_id, attr_type)
 
     mapping_store = InMemoryMappingStore()
 

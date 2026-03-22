@@ -30,6 +30,14 @@ class _PersonaRepository:
             return None
         return persona.slots.get(attr_type)
 
+    def get_slot_replacement_text(
+        self,
+        persona_id: str,
+        attr_type: PIIAttributeType,
+        source_text: str,
+    ) -> str | None:
+        return self.get_slot_value(persona_id, attr_type)
+
 
 def test_tiny_policy_net_forward_shapes_and_parameter_budget() -> None:
     persona_repo = _PersonaRepository(

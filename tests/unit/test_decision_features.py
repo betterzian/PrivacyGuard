@@ -43,6 +43,14 @@ class _PersonaRepository:
             return None
         return persona.slots.get(attr_type)
 
+    def get_slot_replacement_text(
+        self,
+        persona_id: str,
+        attr_type: PIIAttributeType,
+        source_text: str,
+    ) -> str | None:
+        return self.get_slot_value(persona_id, attr_type)
+
 
 def test_decision_feature_extractor_maps_candidate_policy_views_to_dense_features() -> None:
     """candidate dense feature 应优先来自新的 candidate_policy_views。"""

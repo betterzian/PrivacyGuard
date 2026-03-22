@@ -29,6 +29,14 @@ class _PersonaRepository:
             return None
         return persona.slots.get(attr_type)
 
+    def get_slot_replacement_text(
+        self,
+        persona_id: str,
+        attr_type: PIIAttributeType,
+        source_text: str,
+    ) -> str | None:
+        return self.get_slot_value(persona_id, attr_type)
+
 
 def test_tiny_policy_output_decoder_emits_keep_protocol_fields_for_low_confidence() -> None:
     torch = __import__("pytest").importorskip("torch")

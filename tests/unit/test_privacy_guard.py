@@ -1,6 +1,7 @@
 """PrivacyGuard 顶层装配与外部入口回归测试。"""
 
 from privacyguard import PrivacyGuard
+from privacyguard.bootstrap.factories import PlaceholderPersonaRepository
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType
 from privacyguard.domain.models.action import RestoredSlot
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
@@ -38,6 +39,14 @@ class _StaticPersonaRepository:
         if persona is None:
             return None
         return persona.slots.get(attr_type)
+
+    def get_slot_replacement_text(
+        self,
+        persona_id: str,
+        attr_type: PIIAttributeType,
+        source_text: str,
+    ) -> str | None:
+        return self.get_slot_value(persona_id, attr_type)
 
 
 class _StaticDecisionEngine:
@@ -131,6 +140,27 @@ class _SimpleRestorationModule:
                 )
             )
         return (restored_text, restored_slots)
+
+
+def test_static_persona_repository_get_slot_replacement_text_delegates_to_get_slot_value() -> None:
+    repo = _StaticPersonaRepository(
+        [
+            PersonaProfile(
+                persona_id="persona-main",
+                display_name="角色主",
+                slots={PIIAttributeType.NAME: "李四"},
+                stats={"exposure_count": 0},
+            )
+        ]
+    )
+
+    assert repo.get_slot_replacement_text("persona-main", PIIAttributeType.NAME, "张三") == "李四"
+
+
+def test_placeholder_persona_repository_get_slot_replacement_text_delegates_to_get_slot_value() -> None:
+    repo = PlaceholderPersonaRepository()
+
+    assert repo.get_slot_replacement_text("persona-main", PIIAttributeType.NAME, "张三") is None
 
 
 def test_privacy_guard_passes_decision_config_to_de_model_engine() -> None:

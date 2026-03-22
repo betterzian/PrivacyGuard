@@ -17,3 +17,11 @@ class PersonaRepository(Protocol):
 
     def get_slot_value(self, persona_id: str, attr_type: PIIAttributeType) -> str | None:
         """读取 persona 的属性槽位值。"""
+
+    def get_slot_replacement_text(
+        self,
+        persona_id: str,
+        attr_type: PIIAttributeType,
+        source_text: str,
+    ) -> str | None:
+        """按源文本粒度与仓库渲染规则返回替换值。"""

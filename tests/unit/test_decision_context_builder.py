@@ -27,6 +27,14 @@ class _PersonaRepository:
             return None
         return persona.slots.get(attr_type)
 
+    def get_slot_replacement_text(
+        self,
+        persona_id: str,
+        attr_type: PIIAttributeType,
+        source_text: str,
+    ) -> str | None:
+        return self.get_slot_value(persona_id, attr_type)
+
 
 def test_decision_context_builder_builds_new_policy_views_for_prompt_and_single_block_ocr() -> None:
     """builder 负责收敛策略上下文，不负责 detector 本身。"""
