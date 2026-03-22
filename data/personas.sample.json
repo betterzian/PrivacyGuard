@@ -1,162 +1,159 @@
-[
-  {
-    "persona_id": "zhangsan",
-    "slots": {
-      "name": {
-        "value": "张三",
-        "aliases":["张二麻子", "张三三"]
-      },
-      "phone": {
-        "value": "13900001111",
-        "aliases":["13900001112", "13900001113"]
-      },
-      "card_number":{
-        "value": "4111111111111111",
-        "aliases":["4111111111111112", "4111111111111113"]
-      },
-      "bank_account": {
-        "value": "6222020202020202020",
-        "aliases":["6222020202020202021", "6222020202020202022"]
-      },
-      "passport_number": {
-        "value": "E12345678",
-        "aliases":["E12345679", "E12345680"]
-      },
-      "driver_license": {
-        "value": "310101199001011234",
-        "aliases":["310101199001011235", "310101199001011236"]
-      },
-      "email": {
-        "value": "zhangsan@example.com",
-        "aliases":["zhangsan@example.com.cn", "zhangsan@example.com.hk"]
-      },
-      "id_number": "310101199001011234",
-      "organization": {
-        "value":"星海数科有限公司",
-        "aliases":["星海数科", "星海科技"]
-      },
-      "address":{
-        "country": {
-          "value": "中国",
-          "aliases":["中国", "中国大陆"]
+{
+  "version": 2,
+  "fake_personas": [
+    {
+      "persona_id": "zhangsan",
+      "slots": {
+        "name": {
+          "value": "张三",
+          "aliases": ["张二麻子", "张三三"]
         },
-        "province": {
-          "value": "上海市",
-          "aliases":["上海", "上海市"]
+        "phone": {
+          "value": "13900001111",
+          "aliases": ["13900001112", "13900001113"]
         },
-        "city": {
-          "value": "上海市",
-          "aliases":["上海", "上海市"]
+        "card_number": {
+          "value": "4111111111111111",
+          "aliases": ["4111111111111112", "4111111111111113"]
         },
-        "district": {
-          "value": "浦东新区",
-          "aliases":["浦东", "浦东新区"]
+        "bank_account": {
+          "value": "6222020202020202020",
+          "aliases": ["6222020202020202021", "6222020202020202022"]
         },
-        "street": {
-          "value": "世纪大道100号",
-          "aliases":["世纪大道", "世纪大道100号"]
-        },  
-        "detail": {
-          "value": "1号楼101室",
-          "aliases":["1号楼", "1号楼101室"]
+        "passport_number": {
+          "value": "E12345678",
+          "aliases": ["E12345679", "E12345680"]
+        },
+        "driver_license": {
+          "value": "310101199001011234",
+          "aliases": ["310101199001011235", "310101199001011236"]
+        },
+        "email": {
+          "value": "zhangsan@example.com",
+          "aliases": ["zhangsan@example.com.cn", "zhangsan@example.com.hk"]
+        },
+        "id_number": {
+          "value": "310101199001011234",
+          "aliases": []
+        },
+        "organization": {
+          "value": "星海数科有限公司",
+          "aliases": ["星海数科", "星海科技"]
+        },
+        "address": {
+          "country": {
+            "value": "中国",
+            "aliases": ["中国大陆"]
+          },
+          "province": {
+            "value": "上海市",
+            "aliases": ["上海"]
+          },
+          "city": {
+            "value": "上海市",
+            "aliases": ["上海"]
+          },
+          "district": {
+            "value": "浦东新区",
+            "aliases": ["浦东"]
+          },
+          "street": {
+            "value": "世纪大道100号",
+            "aliases": ["世纪大道"]
+          },
+          "building": {
+            "value": "1号楼",
+            "aliases": ["一号楼"]
+          },
+          "room": {
+            "value": "101室",
+            "aliases": ["101"]
+          }
+        }
+      },
+      "stats": {
+        "total": {
+          "exposure_count": 0,
+          "last_exposed_turn_id": 2
         }
       }
     },
-    "stats": {
-      "exposure_count": 0,
-      "last_exposed_session_time": "2026-03-21 10:00:00",
-      "last_exposed_session_id": null,
-      "last_exposed_turn_id": 2,
-      "name_exposure_count": 0,
-      "phone_exposure_count": 0,
-      "card_number_exposure_count": 0,
-      "bank_account_exposure_count": 0,
-      "passport_number_exposure_count": 0,
-      "driver_license_exposure_count": 0,
-      "address_exposure_count": 0,
-      "email_exposure_count": 0,
-      "id_number_exposure_count": 0,
-      "organization_exposure_count": 0
-    }
-  },
-  {
-    "persona_id": "lisi",
-    "slots": {
-      "name": {
-        "value": "李四",
-        "aliases":["李四四", "李四五"]
-      },
-      "phone": {
-        "value": "13600002222",
-        "aliases":["13600002223", "13600002224"]
-      },
-      "card_number": {
-        "value": "5555555555554444",
-        "aliases":["5555555555554445", "5555555555554446"]
-      },
-      "bank_account": {
-        "value": "6212260202020202020",
-        "aliases":["6212260202020202021", "6212260202020202022"]
-      },
-      "passport_number": {
-        "value": "K76543210",
-        "aliases":["K76543211", "K76543212"]
-      },
-      "driver_license": {
-        "value": "110101198812123456",
-        "aliases":["110101198812123457", "110101198812123458"]
-      },
-      "email": {
-        "value": "lisi@example.com",
-        "aliases":["lisi@example.com.cn", "lisi@example.com.hk"]
-      },
-      "id_number": "110101198812123456",
-      "organization": {
-        "value": "北辰教育科技集团",
-        "aliases":["北辰教育", "北辰科技"]
-      },
-      "address":{
-        "country": {
-          "value": "中国",
-          "aliases":["中国", "中国大陆"]
+    {
+      "persona_id": "lisi",
+      "slots": {
+        "name": {
+          "value": "李四",
+          "aliases": ["李四四", "李四五"]
         },
-        "province": {
-          "value": "北京市",
-          "aliases":["北京", "北京市"]
+        "phone": {
+          "value": "13600002222",
+          "aliases": ["13600002223", "13600002224"]
         },
-        "city": {
-          "value": "北京市",
-          "aliases":["北京", "北京市"]
+        "card_number": {
+          "value": "5555555555554444",
+          "aliases": ["5555555555554445", "5555555555554446"]
         },
-        "district": {
-          "value": "海淀区",
-          "aliases":["海淀", "海淀区"]
+        "bank_account": {
+          "value": "6212260202020202020",
+          "aliases": ["6212260202020202021", "6212260202020202022"]
         },
-        "street": {
-          "value": "知春路88号",
-          "aliases":["知春路", "知春路88号"]
+        "passport_number": {
+          "value": "K76543210",
+          "aliases": ["K76543211", "K76543212"]
         },
-        "detail": {
-          "value": "1号楼101室",
-          "aliases":["1号楼", "1号楼101室"]
+        "driver_license": {
+          "value": "110101198812123456",
+          "aliases": ["110101198812123457", "110101198812123458"]
+        },
+        "email": {
+          "value": "lisi@example.com",
+          "aliases": ["lisi@example.com.cn", "lisi@example.com.hk"]
+        },
+        "id_number": {
+          "value": "110101198812123456",
+          "aliases": []
+        },
+        "organization": {
+          "value": "北辰教育科技集团",
+          "aliases": ["北辰教育", "北辰科技"]
+        },
+        "address": {
+          "country": {
+            "value": "中国",
+            "aliases": ["中国大陆"]
+          },
+          "province": {
+            "value": "北京市",
+            "aliases": ["北京"]
+          },
+          "city": {
+            "value": "北京市",
+            "aliases": ["北京"]
+          },
+          "district": {
+            "value": "海淀区",
+            "aliases": ["海淀"]
+          },
+          "street": {
+            "value": "知春路88号",
+            "aliases": ["知春路"]
+          },
+          "building": {
+            "value": "1号楼",
+            "aliases": ["一号楼"]
+          },
+          "room": {
+            "value": "101室",
+            "aliases": ["101"]
+          }
+        }
+      },
+      "stats": {
+        "total": {
+          "exposure_count": 0,
+          "last_exposed_turn_id": 3
         }
       }
-    },
-    "stats": {
-      "exposure_count": 0,
-      "last_exposed_session_time": "2026-03-21 10:00:00",
-      "last_exposed_session_id": null,
-      "last_exposed_turn_id": 3,
-      "name_exposure_count": 0,
-      "phone_exposure_count": 0,
-      "card_number_exposure_count": 0,
-      "bank_account_exposure_count": 0,
-      "passport_number_exposure_count": 0,
-      "driver_license_exposure_count": 0,
-      "address_exposure_count": 0,
-      "email_exposure_count": 0,
-      "id_number_exposure_count": 0,
-      "organization_exposure_count": 0
     }
-  }
-]
+  ]
+}

@@ -1,5 +1,5 @@
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,25 +58,13 @@ class RestorePayloadModel(BaseModel):
 
 
 class PrivacyRepositoryWritePayloadModel(BaseModel):
-    """rule_based 隐私词库 JSON 的合并写入载荷（与 data/*.sample.json 结构一致）。"""
+    """rule_based 隐私词库 v2 合并写入载荷（仅 ``version`` + ``true_personas``）。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    version: int | None = None
+    version: Literal[2] | None = None
     stats: dict[str, Any] | None = None
     true_personas: list[dict[str, Any]] | None = None
-    name: list[str] | str | None = None
-    location_clue: list[str] | str | None = None
-    phone: list[str] | str | None = None
-    card_number: list[str] | str | None = None
-    bank_account: list[str] | str | None = None
-    passport_number: list[str] | str | None = None
-    driver_license: list[str] | str | None = None
-    email: list[str] | str | None = None
-    address: list[str] | str | None = None
-    id_number: list[str] | str | None = None
-    organization: list[str] | str | None = None
-    entities: list[dict[str, Any]] | None = None
 
 
 @dataclass(slots=True)

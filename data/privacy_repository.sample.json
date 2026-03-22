@@ -1,13 +1,55 @@
 {
-  "name": ["张三", "李四"],
-  "phone": ["13800138000"],
-  "card_number": ["6222021001112223334"],
-  "bank_account": ["6217000012345678901"],
-  "passport_number": ["E12345678"],
-  "driver_license": ["110101199001011234"],
-  "email": ["demo@example.com"],
-  "address": ["北京市海淀区知春路88号"],
-  "id_number": ["110101199001011234"],
-  "organization": ["星海数据科技有限公司"]
+  "version": 2,
+  "true_personas": [
+    {
+      "persona_id": "sample_primary",
+      "display_name": "示例主档案",
+      "slots": {
+        "name": {
+          "value": "张三",
+          "aliases": [
+            "李四"
+          ]
+        },
+        "phone": {
+          "value": "13800138000",
+          "aliases": []
+        },
+        "card_number": {
+          "value": "6222021001112223334",
+          "aliases": []
+        },
+        "bank_account": {
+          "value": "6217000012345678901",
+          "aliases": []
+        },
+        "passport_number": {
+          "value": "E12345678",
+          "aliases": []
+        },
+        "driver_license": {
+          "value": "110101199001011234",
+          "aliases": []
+        },
+        "email": {
+          "value": "demo@example.com",
+          "aliases": []
+        },
+        "address": {
+          "street": {
+            "value": "北京市海淀区知春路88号",
+            "aliases": []
+          }
+        },
+        "id_number": {
+          "value": "110101199001011234",
+          "aliases": []
+        },
+        "organization": {
+          "value": "星海数据科技有限公司",
+          "aliases": []
+        }
+      }
+    }
+  ]
 }
-

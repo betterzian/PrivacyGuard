@@ -10,6 +10,7 @@ from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.infrastructure.persona.json_persona_repository import (
     DEFAULT_PERSONA_REPOSITORY_PATH,
     DEFAULT_PERSONA_SAMPLE_PATH,
+    InvalidPersonaRepositoryError,
     JsonPersonaRepository,
 )
 
@@ -18,24 +19,29 @@ def test_json_persona_repository_loads_all_supported_non_other_slots(tmp_path) -
     persona_path = tmp_path / "personas.json"
     persona_path.write_text(
         json.dumps(
-            [
-                {
-                    "persona_id": "persona-all",
-                    "slots": {
-                        "name": "李四",
-                        "phone": "13900001111",
-                        "card_number": "4111111111111111",
-                        "bank_account": "6222020202020202020",
-                        "passport_number": "E12345678",
-                        "driver_license": "110101199001011234",
-                        "email": "lisi@example.com",
-                        "address": "北京市海淀区知春路88号",
-                        "id_number": "110101199001011234",
-                        "organization": "星海数据科技有限公司",
-                    },
-                    "stats": {"exposure_count": 0},
-                }
-            ],
+            {
+                "version": 2,
+                "fake_personas": [
+                    {
+                        "persona_id": "persona-all",
+                        "slots": {
+                            "name": {"value": "李四", "aliases": []},
+                            "phone": {"value": "13900001111", "aliases": []},
+                            "card_number": {"value": "4111111111111111", "aliases": []},
+                            "bank_account": {"value": "6222020202020202020", "aliases": []},
+                            "passport_number": {"value": "E12345678", "aliases": []},
+                            "driver_license": {"value": "110101199001011234", "aliases": []},
+                            "email": {"value": "lisi@example.com", "aliases": []},
+                            "address": {
+                                "street": {"value": "北京市海淀区知春路88号", "aliases": []},
+                            },
+                            "id_number": {"value": "110101199001011234", "aliases": []},
+                            "organization": {"value": "星海数据科技有限公司", "aliases": []},
+                        },
+                        "stats": {"total": {"exposure_count": 0}},
+                    }
+                ],
+            },
             ensure_ascii=False,
         ),
         encoding="utf-8",
@@ -124,26 +130,30 @@ def test_json_persona_repository_loads_v2_fake_personas_and_renders_replacement_
     assert repo.get_slot_replacement_text("fake-1", PIIAttributeType.ADDRESS, "2号楼802室") == "2号楼802室"
 
 
-def test_json_persona_repository_reads_structured_legacy_sample_slots(tmp_path) -> None:
-    persona_path = tmp_path / "legacy_personas.json"
+def test_json_persona_repository_reads_structured_v2_address_slots(tmp_path) -> None:
+    persona_path = tmp_path / "personas.v2.json"
     persona_path.write_text(
         json.dumps(
-            [
-                {
-                    "persona_id": "legacy-1",
-                    "slots": {
-                        "name": {"value": "张三", "aliases": ["张三三"]},
-                        "address": {
-                            "province": {"value": "上海市", "aliases": ["上海"]},
-                            "city": {"value": "上海市", "aliases": ["上海"]},
-                            "district": {"value": "浦东新区", "aliases": ["浦东"]},
-                            "street": {"value": "世纪大道100号", "aliases": ["世纪大道"]},
-                            "detail": {"value": "1号楼101室", "aliases": ["1号楼"]},
+            {
+                "version": 2,
+                "fake_personas": [
+                    {
+                        "persona_id": "legacy-1",
+                        "slots": {
+                            "name": {"value": "张三", "aliases": ["张三三"]},
+                            "address": {
+                                "province": {"value": "上海市", "aliases": ["上海"]},
+                                "city": {"value": "上海市", "aliases": ["上海"]},
+                                "district": {"value": "浦东新区", "aliases": ["浦东"]},
+                                "street": {"value": "世纪大道100号", "aliases": ["世纪大道"]},
+                                "building": {"value": "1号楼", "aliases": ["一号楼"]},
+                                "room": {"value": "101室", "aliases": ["101"]},
+                            },
                         },
-                    },
-                    "stats": {"exposure_count": 1},
-                }
-            ],
+                        "stats": {"total": {"exposure_count": 1}},
+                    }
+                ],
+            },
             ensure_ascii=False,
         ),
         encoding="utf-8",
@@ -169,7 +179,14 @@ def test_json_persona_repository_rejects_malformed_v2_payload(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationError):
+    with pytest.raises((ValidationError, InvalidPersonaRepositoryError)):
+        JsonPersonaRepository(path=str(persona_path))
+
+
+def test_json_persona_repository_rejects_non_object_root(tmp_path) -> None:
+    persona_path = tmp_path / "array_root.json"
+    persona_path.write_text(json.dumps([], ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(InvalidPersonaRepositoryError):
         JsonPersonaRepository(path=str(persona_path))
 
 
@@ -262,23 +279,19 @@ def test_json_persona_repository_reads_sample_but_flushes_to_local_repo(tmp_path
     monkeypatch.chdir(tmp_path)
     sample_path = tmp_path / DEFAULT_PERSONA_SAMPLE_PATH
     sample_path.parent.mkdir(parents=True, exist_ok=True)
-    sample_path.write_text(
-        json.dumps(
-            [
-                {
-                    "persona_id": "sample-persona",
-                    "slots": {
-                        "name": "样例用户",
-                    },
-                    "stats": {
-                        "exposure_count": 0,
-                    },
-                }
-            ],
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+    sample_doc = {
+        "version": 2,
+        "fake_personas": [
+            {
+                "persona_id": "sample-persona",
+                "slots": {
+                    "name": {"value": "样例用户", "aliases": []},
+                },
+                "stats": {"total": {"exposure_count": 0}},
+            }
+        ],
+    }
+    sample_path.write_text(json.dumps(sample_doc, ensure_ascii=False), encoding="utf-8")
 
     repo = JsonPersonaRepository()
     assert repo.get_persona("sample-persona") is not None
@@ -297,17 +310,7 @@ def test_json_persona_repository_reads_sample_but_flushes_to_local_repo(tmp_path
 
     local_repo_path = tmp_path / DEFAULT_PERSONA_REPOSITORY_PATH
     assert local_repo_path.exists()
-    assert json.loads(sample_path.read_text(encoding="utf-8")) == [
-        {
-            "persona_id": "sample-persona",
-            "slots": {
-                "name": "样例用户",
-            },
-            "stats": {
-                "exposure_count": 0,
-            },
-        }
-    ]
+    assert json.loads(sample_path.read_text(encoding="utf-8")) == sample_doc
     local_payload = json.loads(local_repo_path.read_text(encoding="utf-8"))
     assert local_payload["version"] == 2
     assert [item["persona_id"] for item in local_payload["fake_personas"]] == [

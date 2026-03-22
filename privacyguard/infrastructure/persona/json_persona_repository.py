@@ -10,7 +10,6 @@ from typing import Any
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.models.persona import PersonaProfile
-from privacyguard.infrastructure.repository.migration_v2 import migrate_legacy_repository
 from privacyguard.infrastructure.repository.schemas_v2 import (
     AddressLevelExposureStatsV2,
     AddressSlotStorageV2,
@@ -18,6 +17,7 @@ from privacyguard.infrastructure.repository.schemas_v2 import (
     ExposureInfoV2,
     PersonaDocumentV2,
     PersonaRepositoryDocumentV2,
+    PersonaSlotsV2,
     RepositoryStatsV2,
     PersonaStatsV2,
     SharedSlotStorageV2,
@@ -28,6 +28,10 @@ from privacyguard.utils.pii_value import parse_address_components
 
 DEFAULT_PERSONA_REPOSITORY_PATH = "data/persona_repository.json"
 DEFAULT_PERSONA_SAMPLE_PATH = "data/personas.sample.json"
+
+
+class InvalidPersonaRepositoryError(ValueError):
+    """persona 仓库 JSON 不是 v2 文档（``version`` + ``fake_personas``）。"""
 
 PROFILE_KEY_TO_ATTR_TYPE = {
     "name": PIIAttributeType.NAME,
@@ -45,6 +49,74 @@ PROFILE_KEY_TO_ATTR_TYPE = {
 
 ATTR_TYPE_TO_PROFILE_KEY = {value: key for key, value in PROFILE_KEY_TO_ATTR_TYPE.items()}
 _ADDRESS_RENDER_ORDER = ("province", "city", "district", "street", "building", "room")
+
+
+def _runtime_stats_to_persona_stats(stats_data: dict[str, object] | object) -> PersonaStatsV2:
+    """将 runtime 扁平 stats 转为 ``PersonaStatsV2``（仅填充 total 等常用字段）。"""
+    if not isinstance(stats_data, dict):
+        stats_data = {}
+    sd = stats_data
+    tid_raw = sd.get("last_exposed_turn_id")
+    tid: int | None
+    try:
+        tid = int(tid_raw) if tid_raw is not None else None
+    except (TypeError, ValueError):
+        tid = None
+    if tid is not None:
+        tid = max(tid, 0)
+    sid_raw = sd.get("last_exposed_session_id")
+    sid = str(sid_raw).strip() if sid_raw is not None and str(sid_raw).strip() else None
+    total = ExposureInfoV2(
+        exposure_count=max(int(sd.get("exposure_count", 0) or 0), 0),
+        last_exposed_session_id=sid,
+        last_exposed_turn_id=tid,
+    )
+    return PersonaStatsV2(total=total)
+
+
+def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocumentV2:
+    """将 ``PersonaProfile`` 转为 v2 ``PersonaDocumentV2``（扁平槽位写入 storage slot）。"""
+    slot_values: dict[str, object] = {}
+    for attr_type, key in ATTR_TYPE_TO_PROFILE_KEY.items():
+        raw = persona.slots.get(attr_type)
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        if attr_type == PIIAttributeType.ADDRESS:
+            slot_values["address"] = AddressSlotStorageV2(
+                street=SharedSlotStorageV2(value=text, aliases=[]),
+            )
+        else:
+            slot_values[key] = SharedSlotStorageV2(value=text, aliases=[])
+    if not slot_values:
+        raise ValueError("PersonaProfile must contain at least one non-empty slot for storage")
+    slots = PersonaSlotsV2(**slot_values)
+    display_name = persona.display_name
+    if not display_name and slots.name:
+        display_name = slots.name.value
+    if not display_name:
+        display_name = persona.persona_id
+    meta: dict[str, str] = {}
+    for mk, mv in (persona.metadata or {}).items():
+        ks = str(mk).strip()
+        if not ks:
+            continue
+        if mv is None:
+            continue
+        vs = str(mv).strip()
+        if vs:
+            meta[ks] = vs
+    return PersonaDocumentV2(
+        persona_id=persona.persona_id,
+        display_name=display_name,
+        slots=slots,
+        stats=_runtime_stats_to_persona_stats(persona.stats),
+        metadata=meta,
+    )
+
+
 _ADDRESS_STREET_SIGNAL_RE = re.compile(r"(?:路|街|大道|道|巷|弄|胡同)")
 _ADDRESS_CITY_SIGNAL_RE = re.compile(r"(?:自治州|地区|盟|市)")
 _ADDRESS_DISTRICT_SIGNAL_RE = re.compile(r"(?:新区|自治县|自治旗|区|县|旗)")
@@ -193,34 +265,14 @@ class JsonPersonaRepository:
         return (personas, stored_fake_personas)
 
     def _load_document(self, raw_payload: Any) -> PersonaRepositoryDocumentV2:
-        """统一加载 v2 或 legacy persona payload。"""
-        if isinstance(raw_payload, dict) and raw_payload.get("version") == V2_VERSION:
-            return PersonaRepositoryDocumentV2.model_validate(raw_payload)
-
-        if isinstance(raw_payload, dict):
-            raw_items = raw_payload.get("personas", [])
-        elif isinstance(raw_payload, list):
-            raw_items = raw_payload
-        else:
-            raw_items = []
-
-        stored_personas: list[PersonaDocumentV2] = []
-        for item in raw_items:
-            if not isinstance(item, dict):
-                continue
-            try:
-                migrated = migrate_legacy_repository([item])
-            except ValueError:
-                continue
-            if not isinstance(migrated, PersonaRepositoryDocumentV2) or not migrated.fake_personas:
-                continue
-            stored_personas.append(migrated.fake_personas[0])
-
-        return PersonaRepositoryDocumentV2(
-            version=V2_VERSION,
-            stats=_aggregate_repository_stats(stored_personas),
-            fake_personas=stored_personas,
-        )
+        """仅加载 v2 persona 仓库文档（``version: 2`` + ``fake_personas``）。"""
+        if not isinstance(raw_payload, dict):
+            raise InvalidPersonaRepositoryError("persona 仓库顶层必须是 JSON 对象")
+        if raw_payload.get("version") != V2_VERSION:
+            raise InvalidPersonaRepositoryError(
+                "persona 仓库必须为 v2：{\"version\": 2, \"fake_personas\": [...]}"
+            )
+        return PersonaRepositoryDocumentV2.model_validate(raw_payload)
 
     def _build_runtime_persona(self, stored_persona: PersonaDocumentV2) -> PersonaProfile:
         """将 v2 storage persona 投影为现有 runtime PersonaProfile。"""
@@ -390,10 +442,7 @@ class JsonPersonaRepository:
 
     def _runtime_persona_to_storage(self, persona: PersonaProfile) -> PersonaDocumentV2:
         """将 runtime PersonaProfile 提升回单条 v2 storage persona。"""
-        migrated = migrate_legacy_repository([self._serialize_runtime_persona(persona)])
-        if not isinstance(migrated, PersonaRepositoryDocumentV2) or not migrated.fake_personas:
-            raise ValueError("persona runtime upgrade did not produce a storage persona")
-        return migrated.fake_personas[0]
+        return _persona_profile_to_persona_document(persona)
 
     def _merge_runtime_persona_into_storage(
         self,
@@ -445,7 +494,7 @@ class JsonPersonaRepository:
         )
 
     def _serialize_runtime_persona(self, persona: PersonaProfile) -> dict[str, object]:
-        """将 runtime PersonaProfile 转换为 legacy-like payload，再交给 migration 层升级到 v2。"""
+        """将 runtime PersonaProfile 序列化为可 JSON 化的调试视图（扁平槽位）。"""
         item: dict[str, object] = {
             "persona_id": persona.persona_id,
             "slots": self._serialize_profile(persona),
@@ -458,7 +507,7 @@ class JsonPersonaRepository:
         return item
 
     def _serialize_profile(self, persona: PersonaProfile) -> dict[str, str]:
-        """将 runtime persona 槽位转换为 legacy slots 字段。"""
+        """将 runtime persona 槽位转换为字符串字典。"""
         slots: dict[str, str] = {}
         for attr_type, key in ATTR_TYPE_TO_PROFILE_KEY.items():
             value = persona.slots.get(attr_type)
@@ -468,7 +517,7 @@ class JsonPersonaRepository:
         return slots
 
     def _serialize_stats(self, stats_data: dict[str, object] | object) -> dict[str, int | str | None]:
-        """将 runtime stats 节点转换为 legacy 兼容字典。"""
+        """将 runtime stats 节点转换为扁平字典。"""
         if not isinstance(stats_data, dict):
             stats_data = {}
         return {

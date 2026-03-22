@@ -13,6 +13,10 @@ from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.infrastructure.pii.json_privacy_repository import (
+    InvalidPrivacyRepositoryError,
+    ensure_v2_privacy_document,
+)
 from privacyguard.utils.aho_matcher import AhoCorasickMatcher
 from privacyguard.utils.pii_value import (
     build_match_text,
@@ -925,61 +929,17 @@ class RuleBasedPIIDetector:
         return Path(privacy_repository_path)
 
     def _load_dictionary(self, dictionary_path: Path | None) -> dict[PIIAttributeType, list[_LocalDictionaryEntry]]:
-        """读取本地 privacy 词条并映射到属性类型。
-
-        支持两种格式：
-        1. 旧格式：{"name": ["张三"], "address": ["北京市海淀区XX路"]}
-        2. 实体格式：
-           {
-             "entities": [
-               {
-                 "entity_id": "friend_1",
-                 "name": ["张三"],
-                 "address": [{"value": "广东广州天河体育西102", "aliases": ["体育西路"]}]
-               }
-             ]
-           }
-        """
+        """读取本地 privacy 词条（仅 v2：version + true_personas）。"""
         if dictionary_path is None:
             return {}
         if not dictionary_path.exists():
             LOGGER.warning("rule_based privacy_repository not found; falling back to rules only: %s", dictionary_path)
             return {}
-        content = json.loads(dictionary_path.read_text(encoding="utf-8"))
-        if content.get("version") == 2 and isinstance(content.get("true_personas"), list):
-            return self._load_v2_dictionary(content)
-        mapped: dict[PIIAttributeType, list[_LocalDictionaryEntry]] = {}
-        for raw_key, values in content.items():
-            if raw_key == "entities":
-                continue
-            attr_type = self._to_attr_type(raw_key)
-            if attr_type is None:
-                continue
-            self._append_dictionary_values(
-                mapped=mapped,
-                attr_type=attr_type,
-                values=values,
-                entity_id=None,
-            )
-        for raw_entity in content.get("entities", []):
-            if not isinstance(raw_entity, dict):
-                continue
-            entity_id = str(raw_entity.get("entity_id") or raw_entity.get("id") or "").strip() or None
-            aliases_by_attr = raw_entity.get("aliases", {}) if isinstance(raw_entity.get("aliases", {}), dict) else {}
-            for raw_key, values in raw_entity.items():
-                if raw_key in {"entity_id", "id", "aliases", "label", "name_aliases"}:
-                    continue
-                attr_type = self._to_attr_type(raw_key)
-                if attr_type is None:
-                    continue
-                self._append_dictionary_values(
-                    mapped=mapped,
-                    attr_type=attr_type,
-                    values=values,
-                    entity_id=entity_id,
-                    default_aliases=aliases_by_attr.get(raw_key),
-                )
-        return mapped
+        raw = json.loads(dictionary_path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise InvalidPrivacyRepositoryError("privacy_repository JSON 顶层必须是对象")
+        document = ensure_v2_privacy_document(raw)
+        return self._load_v2_dictionary(document.model_dump(mode="json"))
 
     def _load_v2_dictionary(self, content: dict[str, object]) -> dict[PIIAttributeType, list[_LocalDictionaryEntry]]:
         mapped: dict[PIIAttributeType, list[_LocalDictionaryEntry]] = {}
@@ -1054,7 +1014,7 @@ class RuleBasedPIIDetector:
         entity_id: str | None,
         default_aliases=None,
     ) -> None:
-        """向词典映射追加兼容旧格式与实体格式的词条。"""
+        """向词典映射追加词条（含 value / aliases 字典项）。"""
         if isinstance(values, (str, int, float)):
             entries = [values]
         elif isinstance(values, list):

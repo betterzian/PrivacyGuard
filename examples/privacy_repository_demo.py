@@ -8,10 +8,24 @@ def main() -> None:
     guard = PrivacyGuard(detector_mode="rule_based", decision_mode="label_only")
     summary = guard.write_privacy_repository(
         {
-            "name": ["张三", "李四"],
-            "phone": ["13800138000"],
-            "email": ["zhangsan@example.com"],
-            "address": ["上海市浦东新区世纪大道100号"],
+            "version": 2,
+            "true_personas": [
+                {
+                    "persona_id": "demo_user",
+                    "display_name": "演示用户",
+                    "slots": {
+                        "name": {"value": "张三", "aliases": ["李四"]},
+                        "phone": {"value": "13800138000", "aliases": []},
+                        "email": {"value": "zhangsan@example.com", "aliases": []},
+                        "address": {
+                            "street": {
+                                "value": "上海市浦东新区世纪大道100号",
+                                "aliases": [],
+                            }
+                        },
+                    },
+                }
+            ],
         }
     )
     print("Written:", summary["repository_path"])

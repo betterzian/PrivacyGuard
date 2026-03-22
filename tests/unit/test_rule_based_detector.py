@@ -2,11 +2,57 @@
 
 import json
 
+import pytest
+
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
+from privacyguard.infrastructure.pii.json_privacy_repository import InvalidPrivacyRepositoryError
 from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector, _OCR_SEMANTIC_BREAK_TOKEN
+
+_V2_DICT_NAME_ZHANGSAN = {
+    "version": 2,
+    "true_personas": [
+        {"persona_id": "dict_default", "slots": {"name": {"value": "张三", "aliases": []}}},
+    ],
+}
+
+
+def _v2_repo_one_persona(flat_slots: dict[str, list]) -> dict[str, object]:
+    """将旧式顶层词库（如 ``{"phone": ["138..."]}``）转为单 persona 的 v2 文档。"""
+    addr_list = flat_slots.get("address")
+    if isinstance(addr_list, list) and len(addr_list) > 1:
+        return {
+            "version": 2,
+            "true_personas": [
+                {
+                    "persona_id": f"addr_{i}",
+                    "slots": {"address": {"street": {"value": str(text), "aliases": []}}},
+                }
+                for i, text in enumerate(addr_list)
+            ],
+        }
+    slots: dict[str, object] = {}
+    for key, values in flat_slots.items():
+        if key == "address" or values is None:
+            continue
+        if not isinstance(values, list) or not values:
+            continue
+        if isinstance(values[0], dict):
+            slots[key] = values[0]
+        else:
+            head, *rest = values
+            slots[key] = {"value": str(head), "aliases": [str(x) for x in rest if x is not None]}
+    if "address" in flat_slots:
+        av = flat_slots["address"]
+        if isinstance(av, list) and len(av) == 1:
+            slots["address"] = {"street": {"value": str(av[0]), "aliases": []}}
+    return {"version": 2, "true_personas": [{"persona_id": "lexicon", "slots": slots}]}
+
+
+def _write_v2_lexicon(path, flat_slots: dict[str, list]) -> None:
+    path.write_text(json.dumps(_v2_repo_one_persona(flat_slots), ensure_ascii=False), encoding="utf-8")
 
 
 def _make_detector(tmp_path) -> RuleBasedPIIDetector:
@@ -166,7 +212,7 @@ def test_rule_based_partial_masked_address_fragment_is_detected_without_field_la
 
 def test_rule_based_protection_level_weak_still_keeps_local_dictionary_priority(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"name": ["张三"]}, ensure_ascii=False), encoding="utf-8")
+    dictionary_path.write_text(json.dumps(_V2_DICT_NAME_ZHANGSAN, ensure_ascii=False), encoding="utf-8")
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(
@@ -273,7 +319,7 @@ def test_rule_based_prefers_session_history_over_duplicate_local_dictionary(tmp_
         ],
     )
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"name": ["张三"]}, ensure_ascii=False), encoding="utf-8")
+    dictionary_path.write_text(json.dumps(_V2_DICT_NAME_ZHANGSAN, ensure_ascii=False), encoding="utf-8")
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path, mapping_store=mapping_store)
 
     candidates = detector.detect(
@@ -1038,7 +1084,7 @@ def test_rule_based_records_block_id_and_span_for_partial_ocr_hits(tmp_path) -> 
 
 def test_rule_based_dictionary_matches_ocr_name_with_inner_space(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"name": ["张三"]}, ensure_ascii=False), encoding="utf-8")
+    dictionary_path.write_text(json.dumps(_V2_DICT_NAME_ZHANGSAN, ensure_ascii=False), encoding="utf-8")
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
     ocr_blocks = [
         OCRTextBlock(text="请联系张 三", bbox=BoundingBox(x=0, y=0, width=60, height=20), block_id="ocr-name-1"),
@@ -1058,7 +1104,7 @@ def test_rule_based_dictionary_matches_ocr_name_with_inner_space(tmp_path) -> No
 
 def test_rule_based_dictionary_matches_phone_with_ocr_punctuation_noise(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"phone": ["13800138000"]}, ensure_ascii=False), encoding="utf-8")
+    _write_v2_lexicon(dictionary_path, {"phone": ["13800138000"]})
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(prompt_text="请联系1380·0138_000", ocr_blocks=[])
@@ -1073,10 +1119,7 @@ def test_rule_based_dictionary_matches_phone_with_ocr_punctuation_noise(tmp_path
 
 def test_rule_based_dictionary_matches_card_with_ocr_punctuation_noise(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(
-        json.dumps({"card_number": ["6222020012345678"]}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_v2_lexicon(dictionary_path, {"card_number": ["6222020012345678"]})
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(prompt_text="卡号是6222 0200-1234，5678", ocr_blocks=[])
@@ -1091,10 +1134,7 @@ def test_rule_based_dictionary_matches_card_with_ocr_punctuation_noise(tmp_path)
 
 def test_rule_based_dictionary_matches_bank_account_with_ocr_punctuation_noise(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(
-        json.dumps({"bank_account": ["123456789012345678"]}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_v2_lexicon(dictionary_path, {"bank_account": ["123456789012345678"]})
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(prompt_text="收款账号1234 5678-9012，345678", ocr_blocks=[])
@@ -1109,10 +1149,7 @@ def test_rule_based_dictionary_matches_bank_account_with_ocr_punctuation_noise(t
 
 def test_rule_based_dictionary_matches_passport_with_ocr_punctuation_noise(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(
-        json.dumps({"passport_number": ["E12345678"]}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_v2_lexicon(dictionary_path, {"passport_number": ["E12345678"]})
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(prompt_text="护照是E-1234 5678", ocr_blocks=[])
@@ -1127,10 +1164,7 @@ def test_rule_based_dictionary_matches_passport_with_ocr_punctuation_noise(tmp_p
 
 def test_rule_based_dictionary_matches_driver_license_with_ocr_punctuation_noise(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(
-        json.dumps({"driver_license": ["440301199001011234"]}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_v2_lexicon(dictionary_path, {"driver_license": ["440301199001011234"]})
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(prompt_text="驾驶证号440301-19900101 1234", ocr_blocks=[])
@@ -1145,20 +1179,17 @@ def test_rule_based_dictionary_matches_driver_license_with_ocr_punctuation_noise
 
 def test_rule_based_dictionary_matches_prefix_only_and_suffix_only_masked_high_precision_values(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(
-        json.dumps(
-            {
-                "phone": ["15412348000"],
-                "card_number": ["6222020012345678"],
-                "bank_account": ["123456789012345678"],
-                "email": ["foo@bar.com"],
-                "id_number": ["110101199001011234"],
-                "passport_number": ["E12345678"],
-                "driver_license": ["440301199001011234"],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_v2_lexicon(
+        dictionary_path,
+        {
+            "phone": ["15412348000"],
+            "card_number": ["6222020012345678"],
+            "bank_account": ["123456789012345678"],
+            "email": ["foo@bar.com"],
+            "id_number": ["110101199001011234"],
+            "passport_number": ["E12345678"],
+            "driver_license": ["440301199001011234"],
+        },
     )
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
@@ -1244,20 +1275,17 @@ def test_rule_based_session_history_matches_prefix_only_and_suffix_only_masked_p
 
 def test_rule_based_dictionary_matches_common_mask_symbols_for_high_precision_values(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(
-        json.dumps(
-            {
-                "phone": ["15412348000"],
-                "card_number": ["6222020012345678"],
-                "bank_account": ["123456789012345678"],
-                "email": ["foo@bar.com"],
-                "id_number": ["110101199001011234"],
-                "passport_number": ["E12345678"],
-                "driver_license": ["440301199001011234"],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_v2_lexicon(
+        dictionary_path,
+        {
+            "phone": ["15412348000"],
+            "card_number": ["6222020012345678"],
+            "bank_account": ["123456789012345678"],
+            "email": ["foo@bar.com"],
+            "id_number": ["110101199001011234"],
+            "passport_number": ["E12345678"],
+            "driver_license": ["440301199001011234"],
+        },
     )
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
@@ -1294,7 +1322,7 @@ def test_rule_based_dictionary_matches_common_mask_symbols_for_high_precision_va
 
 def test_rule_based_dictionary_matches_email_with_ocr_punctuation_noise(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"email": ["foo@bar.com"]}, ensure_ascii=False), encoding="utf-8")
+    _write_v2_lexicon(dictionary_path, {"email": ["foo@bar.com"]})
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(prompt_text="邮箱是foo＠bar，com", ocr_blocks=[])
@@ -1309,7 +1337,7 @@ def test_rule_based_dictionary_matches_email_with_ocr_punctuation_noise(tmp_path
 
 def test_rule_based_dictionary_matches_name_with_ocr_digit_noise_and_sets_canonical_source(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"name": ["张三"]}, ensure_ascii=False), encoding="utf-8")
+    dictionary_path.write_text(json.dumps(_V2_DICT_NAME_ZHANGSAN, ensure_ascii=False), encoding="utf-8")
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(prompt_text="请联系张1三处理", ocr_blocks=[])
@@ -1325,7 +1353,7 @@ def test_rule_based_dictionary_matches_name_with_ocr_digit_noise_and_sets_canoni
 
 def test_rule_based_dictionary_does_not_match_name_prefix_inside_longer_name(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"name": ["张三"]}, ensure_ascii=False), encoding="utf-8")
+    dictionary_path.write_text(json.dumps(_V2_DICT_NAME_ZHANGSAN, ensure_ascii=False), encoding="utf-8")
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(prompt_text="张三丰是小说人物", ocr_blocks=[])
@@ -1340,7 +1368,7 @@ def test_rule_based_dictionary_does_not_match_name_prefix_inside_longer_name(tmp
 
 def test_rule_based_dictionary_keeps_known_name_match_in_action_context(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"name": ["张三"]}, ensure_ascii=False), encoding="utf-8")
+    dictionary_path.write_text(json.dumps(_V2_DICT_NAME_ZHANGSAN, ensure_ascii=False), encoding="utf-8")
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
 
     candidates = detector.detect(prompt_text="请联系张三处理", ocr_blocks=[])
@@ -1450,7 +1478,7 @@ def test_rule_based_strong_name_rule_canonicalizes_ocr_digit_noise(tmp_path) -> 
 
 def test_rule_based_dictionary_matches_address_without_province_suffix(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"address": ["四川省成都市"]}, ensure_ascii=False), encoding="utf-8")
+    _write_v2_lexicon(dictionary_path, {"address": ["四川省成都市"]})
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
     ocr_blocks = [
         OCRTextBlock(text="四川成都市武侯区", bbox=BoundingBox(x=0, y=0, width=80, height=20), block_id="ocr-addr-1"),
@@ -1470,7 +1498,7 @@ def test_rule_based_dictionary_matches_address_without_province_suffix(tmp_path)
 
 def test_rule_based_dictionary_matches_address_fragment_from_detailed_local_address(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(json.dumps({"address": ["广东广州天河体育西102"]}, ensure_ascii=False), encoding="utf-8")
+    _write_v2_lexicon(dictionary_path, {"address": ["广东广州天河体育西102"]})
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
     ocr_blocks = [
         OCRTextBlock(text="请到体育西路办理", bbox=BoundingBox(x=0, y=0, width=90, height=20), block_id="ocr-addr-2"),
@@ -1491,10 +1519,7 @@ def test_rule_based_dictionary_matches_address_fragment_from_detailed_local_addr
 
 def test_rule_based_dictionary_downgrades_ambiguous_local_address_alias_binding_to_type_only_hit(tmp_path) -> None:
     dictionary_path = tmp_path / "pii_dictionary.json"
-    dictionary_path.write_text(
-        json.dumps({"address": ["广东广州天河体育西102", "上海徐汇体育西88"]}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_v2_lexicon(dictionary_path, {"address": ["广东广州天河体育西102", "上海徐汇体育西88"]})
     detector = RuleBasedPIIDetector(privacy_repository_path=dictionary_path)
     ocr_blocks = [
         OCRTextBlock(text="请到体育西路办理", bbox=BoundingBox(x=0, y=0, width=90, height=20), block_id="ocr-addr-3"),
@@ -1517,13 +1542,21 @@ def test_rule_based_dictionary_supports_entity_records_and_aliases(tmp_path) -> 
     dictionary_path.write_text(
         json.dumps(
             {
-                "entities": [
+                "version": 2,
+                "true_personas": [
                     {
-                        "entity_id": "friend_1",
-                        "name": ["张三"],
-                        "address": [{"value": "广东广州天河体育西102", "aliases": ["体育西路"]}],
+                        "persona_id": "friend_1",
+                        "slots": {
+                            "name": {"value": "张三", "aliases": []},
+                            "address": {
+                                "province": {"value": "广东省", "aliases": []},
+                                "city": {"value": "广州市", "aliases": []},
+                                "district": {"value": "天河区", "aliases": []},
+                                "street": {"value": "体育西102", "aliases": ["体育西路"]},
+                            },
+                        },
                     }
-                ]
+                ],
             },
             ensure_ascii=False,
         ),
@@ -1652,6 +1685,13 @@ def test_rule_based_detector_reads_v2_true_persona_country_level_address(tmp_pat
     )
 
 
+def test_rule_based_rejects_legacy_flat_privacy_repository(tmp_path) -> None:
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps({"name": ["张三"]}, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(InvalidPrivacyRepositoryError):
+        RuleBasedPIIDetector(privacy_repository_path=path)
+
+
 def test_rule_based_missing_dictionary_does_not_print_to_stdout(tmp_path, capsys) -> None:
     detector = RuleBasedPIIDetector(privacy_repository_path=tmp_path / "missing.json")
 
@@ -1666,10 +1706,11 @@ def test_rule_based_dictionary_downgrades_ambiguous_entity_level_name_binding_to
     dictionary_path.write_text(
         json.dumps(
             {
-                "entities": [
-                    {"entity_id": "friend_1", "name": ["张三"]},
-                    {"entity_id": "friend_2", "name": ["张三"]},
-                ]
+                "version": 2,
+                "true_personas": [
+                    {"persona_id": "friend_1", "slots": {"name": {"value": "张三", "aliases": []}}},
+                    {"persona_id": "friend_2", "slots": {"name": {"value": "张三", "aliases": []}}},
+                ],
             },
             ensure_ascii=False,
         ),
