@@ -1,4 +1,4 @@
-"""PII 值的 canonicalization 与 persona 替换辅助工具。"""
+"""PII 值规范化（canonicalization）与 persona 替换辅助工具。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Build the base ``DecisionContext`` used by decision-related modules."""
+"""构建各决策相关模块共用的基础 ``DecisionContext``。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from privacyguard.domain.models.pii import PIICandidate
 
 
 class DecisionContextBuilder:
-    """Assemble the stable, engine-agnostic decision context."""
+    """组装与具体引擎无关的稳定决策上下文。"""
 
     def __init__(self, mapping_store: MappingStore, persona_repository: PersonaRepository) -> None:
         self.mapping_store = mapping_store

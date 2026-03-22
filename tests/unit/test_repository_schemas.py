@@ -1,4 +1,4 @@
-"""Repository storage schema tests."""
+"""仓库（repository）存储 schema 的单元测试。"""
 
 from __future__ import annotations
 
@@ -115,15 +115,15 @@ def test_repository_documents_reject_duplicate_persona_ids() -> None:
 @pytest.mark.parametrize(
     ("factory", "match"),
     [
-        (lambda: SharedSlotStorage(value="x", aliases=["y", "y"]), "unique"),
-        (lambda: SharedSlotStorage(value="x", aliases=["x"]), "duplicate"),
+        (lambda: SharedSlotStorage(value="x", aliases=["y", "y"]), "唯一"),
+        (lambda: SharedSlotStorage(value="x", aliases=["x"]), "主值"),
         (lambda: SharedSlotStorage(value="x", aliases=[], alias_role="match"), "extra"),
-        (lambda: AddressSlotStorage(room=SharedSlotStorage(value="1201", aliases=[])), "building"),
+        (lambda: AddressSlotStorage(room=SharedSlotStorage(value="1201", aliases=[])), "楼栋"),
         (
             lambda: AddressSlotStorage(building=SharedSlotStorage(value="88号", aliases=[])),
-            "street",
+            "街道",
         ),
-        (lambda: AddressSlotStorage(), "address"),
+        (lambda: AddressSlotStorage(), "地址"),
         (
             lambda: AddressSlotStorage(
                 city=SharedSlotStorage(value="北京", aliases=[]),
@@ -240,7 +240,7 @@ def test_runtime_projection_detaches_stats_from_storage_persona() -> None:
 @pytest.mark.parametrize(
     ("factory", "match"),
     [
-        (lambda: AddressSlotRuntime(), "address"),
+        (lambda: AddressSlotRuntime(), "地址"),
         (
             lambda: AddressSlotRuntime(
                 room=project_true_persona_to_runtime(
@@ -252,7 +252,7 @@ def test_runtime_projection_detaches_stats_from_storage_persona() -> None:
                     )
                 ).slots.name
             ),
-            "building",
+            "楼栋",
         ),
         (
             lambda: AddressSlotRuntime(
@@ -265,7 +265,7 @@ def test_runtime_projection_detaches_stats_from_storage_persona() -> None:
                     )
                 ).slots.name
             ),
-            "street",
+            "街道",
         ),
     ],
 )

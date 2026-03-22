@@ -86,9 +86,9 @@ class SharedSlotStorage(RepositoryBaseModel):
     @model_validator(mode="after")
     def _validate_aliases(self) -> "SharedSlotStorage":
         if len(set(self.aliases)) != len(self.aliases):
-            raise ValueError("aliases must be unique")
+            raise ValueError("别名必须唯一")
         if self.value in self.aliases:
-            raise ValueError("aliases cannot duplicate value")
+            raise ValueError("别名不能与主值重复")
         return self
 
 
@@ -106,11 +106,11 @@ def _validate_address_levels(
     room: SharedSlotStorage | SharedSlotRuntime | None,
 ) -> None:
     if not any((country, province, city, district, street, building, room)):
-        raise ValueError("address must not be empty")
+        raise ValueError("地址不能为空")
     if room and not building:
-        raise ValueError("room requires building")
+        raise ValueError("有房间则必须有楼栋")
     if building and not street:
-        raise ValueError("building requires street")
+        raise ValueError("有楼栋则必须有街道")
 
 
 class AddressSlotStorage(RepositoryBaseModel):
@@ -199,7 +199,7 @@ class PersonaSlots(RepositoryBaseModel):
                 self.organization,
             )
         ):
-            raise ValueError("slots must not be empty")
+            raise ValueError("slots 不能为空")
         return self
 
 
@@ -237,7 +237,7 @@ class PrivacyRepositoryDocument(RepositoryBaseModel):
     def _validate_unique_personas(self) -> "PrivacyRepositoryDocument":
         persona_ids = [persona.persona_id for persona in self.true_personas]
         if len(set(persona_ids)) != len(persona_ids):
-            raise ValueError("persona_id must be unique within document")
+            raise ValueError("文档内 persona_id 必须唯一")
         return self
 
 
@@ -249,7 +249,7 @@ class PersonaRepositoryDocument(RepositoryBaseModel):
     def _validate_unique_personas(self) -> "PersonaRepositoryDocument":
         persona_ids = [persona.persona_id for persona in self.fake_personas]
         if len(set(persona_ids)) != len(persona_ids):
-            raise ValueError("persona_id must be unique within document")
+            raise ValueError("文档内 persona_id 必须唯一")
         return self
 
 

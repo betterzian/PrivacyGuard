@@ -1,4 +1,4 @@
-"""Repository storage schema exports."""
+"""仓库（repository）存储 schema 的对外导出。"""
 
 from privacyguard.infrastructure.repository.schemas import (
     AddressLevel,

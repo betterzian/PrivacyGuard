@@ -1,4 +1,4 @@
-"""Zero-dependency Aho-Corasick matcher for exact multi-pattern search."""
+"""无额外依赖的 Aho-Corasick 多模式精确匹配器。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class _AutomatonNode:
 
 
 class AhoCorasickMatcher:
-    """Exact multi-pattern matcher backed by an Aho-Corasick automaton."""
+    """基于 Aho-Corasick 自动机的多模式精确匹配器。"""
 
     def __init__(self, patterns: Iterable[str]) -> None:
         unique_patterns = sorted({str(item).strip() for item in patterns if str(item).strip()}, key=lambda item: (-len(item), item))
@@ -26,7 +26,7 @@ class AhoCorasickMatcher:
         self._build_failure_links()
 
     def finditer(self, text: str) -> Iterator[tuple[int, int, str]]:
-        """Yield ``(start, end, pattern)`` matches in streaming scan order."""
+        """按流式扫描顺序产出 ``(start, end, pattern)`` 形式的匹配。"""
         if not text or not self._patterns:
             return
         state = 0

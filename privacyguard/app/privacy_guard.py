@@ -1,4 +1,4 @@
-"""PrivacyGuard app facade。
+"""PrivacyGuard 应用层门面（facade）。
 
 `PrivacyGuard` 是对外应用层入口，职责边界保持收敛：
 

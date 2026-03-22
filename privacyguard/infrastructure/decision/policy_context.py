@@ -1,4 +1,4 @@
-"""Derive decision policy views from the base ``DecisionContext``."""
+"""由基础 ``DecisionContext`` 推导决策策略视图。"""
 
 from __future__ import annotations
 

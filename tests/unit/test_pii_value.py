@@ -1,4 +1,4 @@
-"""PII canonicalization 与 persona 替换辅助测试。"""
+"""PII 值规范化与 persona 替换辅助函数的测试。"""
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.utils.pii_value import canonicalize_pii_value, dictionary_match_variants, persona_slot_replacement

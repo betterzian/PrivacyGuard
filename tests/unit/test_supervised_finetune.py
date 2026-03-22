@@ -1,4 +1,4 @@
-"""Minimal supervised finetune integration test."""
+"""最小 supervised 微调集成测试。"""
 
 from contextlib import contextmanager
 import json
