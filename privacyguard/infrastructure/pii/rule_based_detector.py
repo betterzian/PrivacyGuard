@@ -259,6 +259,35 @@ _NON_PERSON_TOKENS = {
     "老板",
     "助理",
 }
+_UI_OPERATION_NAME_WHITELIST = {
+    "公告",
+    "通知",
+    "通知群",
+    "文件",
+    "搜索",
+    "设置",
+    "编辑",
+    "删除",
+    "转发",
+    "收藏",
+    "添加",
+    "发送",
+    "分享",
+    "回复",
+    "撤回",
+    "复制",
+    "粘贴",
+    "拍照",
+    "相册",
+    "扫一扫",
+    "返回",
+    "关闭",
+    "打开",
+    "刷新",
+    "保存",
+    "上传",
+    "下载",
+}
 _LOCATION_ACTIVITY_TOKENS = (
     "拼车",
     "滑雪",
@@ -735,6 +764,12 @@ class _OCRPageDocument:
     blocks: tuple[OCRTextBlock, ...]
     text: str
     char_refs: tuple[tuple[int, int] | None, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _OCRSceneIndex:
+    lines: tuple[tuple[int, ...], ...]
+    position_by_block_index: dict[int, tuple[int, int]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -1652,6 +1687,7 @@ class RuleBasedPIIDetector:
         document = self._build_ocr_page_document(ocr_blocks)
         if document is None:
             return remapped_candidates
+        scene_index = self._build_ocr_scene_index(document.blocks)
         document_candidates = self._scan_text(
             document.text,
             PIISourceType.OCR,
@@ -1664,7 +1700,9 @@ class RuleBasedPIIDetector:
         for candidate in document_candidates:
             remapped = self._remap_ocr_page_candidate(candidate, document)
             if remapped is not None:
-                remapped_candidates.append(remapped)
+                refined = self._refine_ocr_name_candidate(remapped, document, scene_index, rule_profile)
+                if refined is not None:
+                    remapped_candidates.append(refined)
             remapped_candidates.extend(self._derive_address_block_candidates(candidate, document))
         return remapped_candidates
 
@@ -1712,6 +1750,30 @@ class RuleBasedPIIDetector:
             text="".join(merged_chars),
             char_refs=tuple(char_refs),
         )
+
+    def _build_ocr_scene_index(self, blocks: tuple[OCRTextBlock, ...]) -> _OCRSceneIndex:
+        lines = self._group_blocks_by_page_line(list(blocks))
+        block_index_by_identity = {id(block): index for index, block in enumerate(blocks)}
+        indexed_lines: list[tuple[int, ...]] = []
+        position_by_block_index: dict[int, tuple[int, int]] = {}
+        assigned: set[int] = set()
+        for line in lines:
+            indexed_line: list[int] = []
+            for block in line:
+                block_index = block_index_by_identity.get(id(block))
+                if block_index is None:
+                    continue
+                position_by_block_index[block_index] = (len(indexed_lines), len(indexed_line))
+                indexed_line.append(block_index)
+                assigned.add(block_index)
+            if indexed_line:
+                indexed_lines.append(tuple(indexed_line))
+        for block_index in range(len(blocks)):
+            if block_index in assigned:
+                continue
+            position_by_block_index[block_index] = (len(indexed_lines), 0)
+            indexed_lines.append((block_index,))
+        return _OCRSceneIndex(lines=tuple(indexed_lines), position_by_block_index=position_by_block_index)
 
     def _group_blocks_by_page_line(self, ocr_blocks: list[OCRTextBlock]) -> list[list[OCRTextBlock]]:
         """按 bbox 的垂直重叠关系将 OCR block 近似聚成页面文本行。"""
@@ -2087,6 +2149,209 @@ class RuleBasedPIIDetector:
         if re.fullmatch(r"[\d\s:：./\-]{1,6}", stripped) is None:
             return False
         return any(char.isdigit() for char in stripped)
+
+    def _ocr_candidate_block_indices(
+        self,
+        candidate: PIICandidate,
+        document: _OCRPageDocument,
+    ) -> tuple[int, ...]:
+        block_index_by_id = {
+            block.block_id: index
+            for index, block in enumerate(document.blocks)
+            if block.block_id
+        }
+        indices: list[int] = []
+        for block_id in candidate.metadata.get("ocr_block_ids", []):
+            block_index = block_index_by_id.get(block_id)
+            if block_index is not None:
+                indices.append(block_index)
+        if not indices and candidate.block_id:
+            block_index = block_index_by_id.get(candidate.block_id)
+            if block_index is not None:
+                indices.append(block_index)
+        if not indices and candidate.bbox is not None:
+            for index, block in enumerate(document.blocks):
+                if block.bbox == candidate.bbox and candidate.text and candidate.text in block.text:
+                    indices.append(index)
+                    break
+        if not indices and len(document.blocks) == 1:
+            return (0,)
+        return tuple(dict.fromkeys(indices))
+
+    def _refine_ocr_name_candidate(
+        self,
+        candidate: PIICandidate,
+        document: _OCRPageDocument,
+        scene_index: _OCRSceneIndex,
+        rule_profile: _RuleStrengthProfile,
+    ) -> PIICandidate | None:
+        if candidate.attr_type != PIIAttributeType.NAME or candidate.source != PIISourceType.OCR:
+            return candidate
+        if rule_profile.level == ProtectionLevel.WEAK:
+            return candidate
+        block_indices = self._ocr_candidate_block_indices(candidate, document)
+        if len(block_indices) != 1:
+            return candidate
+        block_index = block_indices[0]
+        block = document.blocks[block_index]
+        candidate_compact = self._compact_name_value(
+            candidate.canonical_source_text or candidate.text,
+            allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+        )
+        if not candidate_compact:
+            return None
+        if self._is_ui_operation_name_token(candidate_compact):
+            return None
+        block_compact = self._compact_name_value(block.text, allow_ocr_noise=True)
+        exact_block_match = bool(block_compact) and block_compact == candidate_compact
+        if not exact_block_match:
+            if self._looks_like_ui_time_metadata(block.text):
+                return None
+            if self._looks_like_bracketed_ui_label(block.text):
+                return None
+            return candidate
+        scene_confidence, scene_tags = self._ocr_name_scene_confidence(
+            document,
+            scene_index,
+            block_index=block_index,
+            rule_profile=rule_profile,
+        )
+        if scene_confidence <= 0.0:
+            return None
+        refined = candidate.model_copy(deep=True)
+        refined.confidence = max(refined.confidence, scene_confidence)
+        refined.metadata = self._merge_candidate_metadata(
+            refined.metadata,
+            {
+                "matched_by": ["ocr_scene_name_block"],
+                "ocr_scene_signals": scene_tags,
+            },
+        )
+        return refined
+
+    def _ocr_name_scene_confidence(
+        self,
+        document: _OCRPageDocument,
+        scene_index: _OCRSceneIndex,
+        *,
+        block_index: int,
+        rule_profile: _RuleStrengthProfile,
+    ) -> tuple[float, list[str]]:
+        block = document.blocks[block_index]
+        score = 0.0
+        scene_tags: list[str] = ["ocr_scene_exact_block"]
+        if block.score >= 0.96:
+            score += 0.24
+            scene_tags.append("high_ocr_score")
+        elif block.score >= 0.88:
+            score += 0.14
+            scene_tags.append("good_ocr_score")
+        elif block.score < 0.7:
+            score -= 0.24
+            scene_tags.append("low_ocr_score")
+        if self._same_line_has_right_time_metadata(document, scene_index, block_index):
+            score += 0.4
+            scene_tags.append("right_time_metadata")
+        if self._next_line_has_preview_text(document, scene_index, block_index):
+            score += 0.28
+            scene_tags.append("next_line_preview")
+        if self._looks_like_ui_time_metadata(block.text):
+            score -= 0.6
+            scene_tags.append("time_like_block")
+        if self._looks_like_bracketed_ui_label(block.text):
+            score -= 0.6
+            scene_tags.append("ui_label_block")
+        if rule_profile.level == ProtectionLevel.BALANCED:
+            if score < 0.48:
+                return 0.0, scene_tags
+            return min(0.86, 0.68 + score * 0.18), scene_tags
+        if score < 0.18:
+            return 0.0, scene_tags
+        return min(0.9, 0.7 + score * 0.18), scene_tags
+
+    def _same_line_has_right_time_metadata(
+        self,
+        document: _OCRPageDocument,
+        scene_index: _OCRSceneIndex,
+        block_index: int,
+    ) -> bool:
+        position = scene_index.position_by_block_index.get(block_index)
+        if position is None:
+            return False
+        line_index, item_index = position
+        if line_index >= len(scene_index.lines):
+            return False
+        for next_block_index in scene_index.lines[line_index][item_index + 1 :]:
+            if self._looks_like_ui_time_metadata(document.blocks[next_block_index].text):
+                return True
+        return False
+
+    def _next_line_has_preview_text(
+        self,
+        document: _OCRPageDocument,
+        scene_index: _OCRSceneIndex,
+        block_index: int,
+    ) -> bool:
+        position = scene_index.position_by_block_index.get(block_index)
+        block = document.blocks[block_index]
+        if position is None or block.bbox is None:
+            return False
+        line_index, _ = position
+        if line_index + 1 >= len(scene_index.lines):
+            return False
+        left_tolerance = self._clamped_ocr_tolerance(
+            float(block.bbox.height),
+            ratio=0.65,
+            min_px=8.0,
+            max_px=24.0,
+        )
+        for next_block_index in scene_index.lines[line_index + 1]:
+            next_block = document.blocks[next_block_index]
+            if next_block.bbox is None:
+                continue
+            if abs(next_block.bbox.x - block.bbox.x) > left_tolerance:
+                continue
+            if self._looks_like_ocr_preview_text(next_block.text):
+                return True
+        return False
+
+    def _looks_like_ocr_preview_text(self, text: str) -> bool:
+        compact = re.sub(r"\s+", "", self._clean_extracted_value(text))
+        if len(compact) < 4:
+            return False
+        if self._looks_like_ui_time_metadata(compact):
+            return False
+        if self._looks_like_bracketed_ui_label(compact):
+            return False
+        if re.fullmatch(r"[\d+＋]+", compact):
+            return False
+        return any(self._is_cjk_char(char) for char in compact)
+
+    def _looks_like_ui_time_metadata(self, text: str) -> bool:
+        compact = re.sub(r"\s+", "", self._clean_extracted_value(text))
+        if not compact or len(compact) > 16:
+            return False
+        if self._looks_like_short_numeric_metadata(compact):
+            return True
+        if re.fullmatch(r"(?:20\d{2}/)?\d{1,2}/\d{1,2}", compact):
+            return True
+        if re.fullmatch(r"(?:昨天|今天|前天|明天)?(?:凌晨|早上|上午|中午|下午|傍晚|晚上)?\d{1,2}[:：]\d{2}", compact):
+            return True
+        if re.fullmatch(r"(?:昨天|今天|前天|明天|刚刚|星期[一二三四五六日天]|周[一二三四五六日天])", compact):
+            return True
+        if re.fullmatch(
+            r"(?:昨天|今天|前天|明天|星期[一二三四五六日天]|周[一二三四五六日天])(?:凌晨|早上|上午|中午|下午|傍晚|晚上)?\d{0,2}(?::\d{2})?",
+            compact,
+        ):
+            return True
+        return False
+
+    def _looks_like_bracketed_ui_label(self, text: str) -> bool:
+        stripped = text.strip()
+        if re.match(r"^[\[\(（【<《].{1,8}[\]\)）】>》]", stripped):
+            return True
+        compact = re.sub(r"\s+", "", self._clean_extracted_value(stripped))
+        return any(compact.startswith(token) for token in _UI_OPERATION_NAME_WHITELIST)
 
     def _remap_ocr_page_candidate(
         self,
@@ -3689,6 +3954,12 @@ class RuleBasedPIIDetector:
             return True
         return any(compact.startswith(token) for token in _LOCATION_CLUE_TOKENS)
 
+    def _is_ui_operation_name_token(self, value: str) -> bool:
+        compact = re.sub(r"\s+", "", self._clean_extracted_value(value))
+        if not compact:
+            return False
+        return compact in _UI_OPERATION_NAME_WHITELIST
+
     def _generic_name_confidence(
         self,
         raw_text: str,
@@ -3722,6 +3993,15 @@ class RuleBasedPIIDetector:
             right_char is None or not self._is_cjk_char(right_char)
         )
         if standalone:
+            if source == PIISourceType.OCR:
+                return self._ocr_standalone_name_confidence(
+                    raw_text,
+                    span_start,
+                    span_end,
+                    value=value,
+                    source=source,
+                    rule_profile=rule_profile,
+                )
             return self._strong_standalone_name_confidence(
                 raw_text,
                 span_start,
@@ -3731,9 +4011,48 @@ class RuleBasedPIIDetector:
                 rule_profile=rule_profile,
             )
         if right_char is not None and right_char.isdigit():
+            if source == PIISourceType.OCR:
+                ocr_suffix = self._clean_extracted_value(raw_text[span_start:min(len(raw_text), span_end + 8)])
+                if self._looks_like_ui_time_metadata(ocr_suffix):
+                    return 0.0
             if left_support or left_char is None or not self._is_cjk_char(left_char):
                 return 0.96 if rule_profile.level == ProtectionLevel.WEAK else 0.94
             return 0.0
+        return 0.0
+
+    def _ocr_standalone_name_confidence(
+        self,
+        raw_text: str,
+        span_start: int,
+        span_end: int,
+        *,
+        value: str,
+        source: PIISourceType,
+        rule_profile: _RuleStrengthProfile,
+    ) -> float:
+        if source != PIISourceType.OCR or rule_profile.level == ProtectionLevel.WEAK:
+            return 0.0
+        compact = self._compact_name_value(value, allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG)
+        if not compact:
+            return 0.0
+        if self._is_ui_operation_name_token(compact):
+            return 0.0
+        if any(compact.endswith(suffix) for suffix in _NAME_STANDALONE_NEGATIVE_SUFFIXES):
+            return 0.0
+        if any(token in compact for token in _NON_PERSON_TOKENS):
+            return 0.0
+        is_compound = compact[:2] in _COMMON_COMPOUND_SURNAMES
+        if is_compound:
+            if not 3 <= len(compact) <= 4:
+                return 0.0
+        elif not 2 <= len(compact) <= 3:
+            return 0.0
+        full_text = self._clean_extracted_value(raw_text)
+        if full_text == value:
+            return 0.82 if rule_profile.level == ProtectionLevel.BALANCED else 0.9
+        window = self._clean_extracted_value(raw_text[max(0, span_start - 2):min(len(raw_text), span_end + 2)])
+        if value in window and len(window) <= len(value) + 2:
+            return 0.74 if rule_profile.level == ProtectionLevel.BALANCED else 0.86
         return 0.0
 
     def _strong_standalone_name_confidence(
@@ -3960,6 +4279,8 @@ class RuleBasedPIIDetector:
         cleaned = self._clean_extracted_value(value)
         compact = cleaned.replace(" ", "")
         if not compact or compact in _NAME_BLACKLIST:
+            return False
+        if self._is_ui_operation_name_token(compact):
             return False
         if compact in _NON_PERSON_TOKENS:
             return False

@@ -659,6 +659,101 @@ def test_rule_based_strong_avoids_standalone_ui_label_name_false_positives_in_oc
     assert "乐享江宁" not in _candidate_texts(candidates, PIIAttributeType.NAME)
 
 
+def test_rule_based_ui_operation_whitelist_blocks_embedded_ui_name_false_positives(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="[群公告]定时禁言已生效，禁言时段为22:00",
+            bbox=BoundingBox(x=0, y=0, width=320, height=20),
+            block_id="ocr-ui-whitelist-1",
+        ),
+        OCRTextBlock(
+            text="[文件]2025舞蹈表演一班英语.zip",
+            bbox=BoundingBox(x=0, y=30, width=280, height=20),
+            block_id="ocr-ui-whitelist-2",
+        ),
+    ]
+
+    candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.STRONG)
+    name_texts = _candidate_texts(candidates, PIIAttributeType.NAME)
+
+    assert "公告" not in name_texts
+    assert "文件" not in name_texts
+
+
+def test_rule_based_balanced_detects_small_ocr_name_block_in_chat_list_scene(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="李元芳",
+            bbox=BoundingBox(x=0, y=0, width=72, height=20),
+            block_id="ocr-chat-name-1",
+            score=0.99,
+        ),
+        OCRTextBlock(
+            text="昨天晚上8:57",
+            bbox=BoundingBox(x=180, y=0, width=96, height=20),
+            block_id="ocr-chat-time-1",
+            score=0.99,
+        ),
+        OCRTextBlock(
+            text="[文件]2025舞蹈表演一班英语.zip",
+            bbox=BoundingBox(x=0, y=32, width=280, height=20),
+            block_id="ocr-chat-preview-1",
+            score=0.99,
+        ),
+    ]
+
+    balanced_candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=ocr_blocks,
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert "李元芳" in _candidate_texts(balanced_candidates, PIIAttributeType.NAME)
+
+
+def test_rule_based_strong_ocr_scene_filters_low_quality_short_block_and_time_prefix(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(
+            text="通红",
+            bbox=BoundingBox(x=0, y=0, width=48, height=20),
+            block_id="ocr-scene-noise-1",
+            score=0.28,
+        ),
+        OCRTextBlock(
+            text="李元芳",
+            bbox=BoundingBox(x=0, y=50, width=72, height=20),
+            block_id="ocr-scene-name-1",
+            score=0.99,
+        ),
+        OCRTextBlock(
+            text="凌晨0:42",
+            bbox=BoundingBox(x=180, y=50, width=88, height=20),
+            block_id="ocr-scene-time-1",
+            score=0.98,
+        ),
+        OCRTextBlock(
+            text="你好，我叫梅长苏。",
+            bbox=BoundingBox(x=0, y=82, width=180, height=20),
+            block_id="ocr-scene-preview-1",
+            score=0.99,
+        ),
+    ]
+
+    strong_candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=ocr_blocks,
+        protection_level=ProtectionLevel.STRONG,
+    )
+    name_texts = _candidate_texts(strong_candidates, PIIAttributeType.NAME)
+
+    assert "李元芳" in name_texts
+    assert "通红" not in name_texts
+    assert "凌晨" not in name_texts
+
+
 def test_rule_based_detects_embedded_name_and_number_from_mixed_ocr_block(tmp_path) -> None:
     detector = _make_detector(tmp_path)
     ocr_blocks = [
