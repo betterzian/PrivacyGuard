@@ -1,5 +1,10 @@
 """PrivacyGuard 顶层装配与外部入口回归测试。"""
 
+from types import SimpleNamespace
+
+import pytest
+
+import privacyguard.app.privacy_guard as privacy_guard_module
 from privacyguard import PrivacyGuard
 from privacyguard.bootstrap.factories import PlaceholderPersonaRepository
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType
@@ -142,6 +147,16 @@ class _SimpleRestorationModule:
         return (restored_text, restored_slots)
 
 
+def _fake_registry() -> SimpleNamespace:
+    return SimpleNamespace(
+        persona_repository_types={},
+        mapping_store_types={},
+        ocr_providers={},
+        rendering_modes={},
+        restoration_modes={},
+    )
+
+
 def test_static_persona_repository_get_slot_replacement_text_delegates_to_get_slot_value() -> None:
     repo = _StaticPersonaRepository(
         [
@@ -163,9 +178,23 @@ def test_placeholder_persona_repository_get_slot_replacement_text_delegates_to_g
     assert repo.get_slot_replacement_text("persona-main", PIIAttributeType.NAME, "张三") is None
 
 
-def test_privacy_guard_passes_decision_config_to_de_model_engine() -> None:
+def test_privacy_guard_passes_decision_config_to_de_model_engine(monkeypatch) -> None:
+    real_import_module = privacy_guard_module.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "torch":
+            return object()
+        return real_import_module(name)
+
+    monkeypatch.setattr(privacy_guard_module.importlib, "import_module", fake_import_module)
     guard = PrivacyGuard(
         decision_mode="de_model",
+        detector=_StaticDetector([]),
+        ocr=_StaticOCREngine(),
+        renderer=_SimpleRenderer(),
+        restoration=_SimpleRestorationModule(),
+        persona_repo=_StaticPersonaRepository([]),
+        mapping_table=InMemoryMappingStore(),
         decision_config={
             "runtime_type": "heuristic",
             "keep_threshold": 0.4,
@@ -177,6 +206,100 @@ def test_privacy_guard_passes_decision_config_to_de_model_engine() -> None:
     assert guard.decision_engine.runtime_type == "heuristic"
     assert guard.decision_engine.keep_threshold == 0.4
     assert guard.decision_engine.device == "cpu"
+
+
+def test_privacy_guard_imports_torch_before_building_default_de_model_components(monkeypatch) -> None:
+    events: list[str] = []
+
+    def fake_import_module(name: str):
+        events.append(f"import:{name}")
+        if name == "torch":
+            return object()
+        raise AssertionError(f"unexpected import_module call: {name}")
+
+    def fake_build_component(mapping, key, category, component_config=None, injected_dependencies=None):
+        _ = (mapping, component_config, injected_dependencies)
+        events.append(f"build:{category}:{key}")
+        return SimpleNamespace(category=category, key=key)
+
+    def fake_build_detector(*args, **kwargs):
+        _ = (args, kwargs)
+        events.append("build:detector")
+        return SimpleNamespace()
+
+    def fake_build_decision(*args, **kwargs):
+        _ = (args, kwargs)
+        events.append("build:decision")
+        return SimpleNamespace()
+
+    monkeypatch.setattr(privacy_guard_module.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(privacy_guard_module, "get_or_create_registry", lambda registry=None: _fake_registry())
+    monkeypatch.setattr(privacy_guard_module, "_build_component", fake_build_component)
+    monkeypatch.setattr(privacy_guard_module, "build_detector", fake_build_detector)
+    monkeypatch.setattr(privacy_guard_module, "build_decision", fake_build_decision)
+
+    PrivacyGuard(decision_mode="de_model")
+
+    assert events[0] == "import:torch"
+    first_build_index = next(index for index, item in enumerate(events) if item.startswith("build:"))
+    assert first_build_index > 0
+
+
+def test_privacy_guard_raises_early_when_default_de_model_torch_missing(monkeypatch) -> None:
+    events: list[str] = []
+
+    def fake_import_module(name: str):
+        if name != "torch":
+            raise AssertionError(f"unexpected import_module call: {name}")
+        raise ImportError("torch missing")
+
+    def fail_if_build_called(*args, **kwargs):
+        _ = (args, kwargs)
+        events.append("build-called")
+        raise AssertionError("torch 缺失时不应该开始构建其它组件。")
+
+    monkeypatch.setattr(privacy_guard_module.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(privacy_guard_module, "get_or_create_registry", lambda registry=None: _fake_registry())
+    monkeypatch.setattr(privacy_guard_module, "_build_component", fail_if_build_called)
+    monkeypatch.setattr(privacy_guard_module, "build_detector", fail_if_build_called)
+    monkeypatch.setattr(privacy_guard_module, "build_decision", fail_if_build_called)
+
+    with pytest.raises(RuntimeError, match="torch"):
+        PrivacyGuard(decision_mode="de_model")
+
+    assert events == []
+
+
+def test_privacy_guard_non_default_decision_mode_does_not_preload_torch(monkeypatch) -> None:
+    events: list[str] = []
+
+    def fail_import_module(name: str):
+        raise AssertionError(f"non-default decision mode 不应预加载 torch: {name}")
+
+    def fake_build_component(mapping, key, category, component_config=None, injected_dependencies=None):
+        _ = (mapping, component_config, injected_dependencies)
+        events.append(f"build:{category}:{key}")
+        return SimpleNamespace(category=category, key=key)
+
+    def fake_build_detector(*args, **kwargs):
+        _ = (args, kwargs)
+        events.append("build:detector")
+        return SimpleNamespace()
+
+    def fake_build_decision(*args, **kwargs):
+        _ = (args, kwargs)
+        events.append("build:decision")
+        return SimpleNamespace()
+
+    monkeypatch.setattr(privacy_guard_module.importlib, "import_module", fail_import_module)
+    monkeypatch.setattr(privacy_guard_module, "get_or_create_registry", lambda registry=None: _fake_registry())
+    monkeypatch.setattr(privacy_guard_module, "_build_component", fake_build_component)
+    monkeypatch.setattr(privacy_guard_module, "build_detector", fake_build_detector)
+    monkeypatch.setattr(privacy_guard_module, "build_decision", fake_build_decision)
+
+    PrivacyGuard(decision_mode="label_only")
+
+    assert "build:decision" in events
 
 
 def test_privacy_guard_sanitize_and_restore_preserve_external_dto_boundary() -> None:

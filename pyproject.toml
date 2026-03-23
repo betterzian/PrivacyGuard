@@ -7,23 +7,30 @@ name = "privacyguard"
 version = "0.1.0"
 description = "PrivacyGuard 第一轮骨架工程"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-    "pydantic>=2.6,<3.0",
-    "PyYAML>=6.0,<7.0",
-    "Pillow>=10.0,<12.0",
+    "pydantic>=2.12.5,<3.0",
+    "PyYAML>=6.0.2,<7.0",
+    "Pillow>=12.0.0,<13.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0,<9.0",
 ]
+# PyTorch 由 conda 环境提供 GPU 运行时；这里只声明 Python 包版本，
+# 不在 pyproject 中绑定 CUDA / cuDNN 变体名。
 train = [
-    "torch>=2.3,<3.0",
+    "torch==2.10.0+cu130",
+    "torchvision==0.25.0+cu130",
 ]
-# PP-OCRv5 真实推理（需安装 paddleocr 与 PaddlePaddle）
+# Paddle 按平台分流：
+# - Windows: CPU 版 paddlepaddle
+# - Linux: GPU 版 paddlepaddle-gpu
 ocr = [
-    "paddleocr>=3.0.0",
+    "paddleocr==3.4.0",
+    "paddlepaddle==3.3.0; platform_system == 'Windows'",
+    "paddlepaddle-gpu==3.3.0; platform_system == 'Linux'",
 ]
 
 [tool.setuptools.packages.find]

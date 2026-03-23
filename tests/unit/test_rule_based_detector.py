@@ -798,6 +798,42 @@ def test_rule_based_inserts_semantic_break_between_short_header_and_following_lo
     assert document.text == f"折叠的聊天{_OCR_SEMANTIC_BREAK_TOKEN}泰州夜之幕拼车信息"
 
 
+def test_rule_based_clean_extracted_value_trims_semantic_break_edge_noise(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+
+    assert detector._clean_extracted_value(
+        f"{_OCR_SEMANTIC_BREAK_TOKEN}\u674e\u5143\u82b3{_OCR_SEMANTIC_BREAK_TOKEN}"
+    ) == "\u674e\u5143\u82b3"
+    assert detector._clean_extracted_value("> \u674e\u5143\u82b3 <") == "\u674e\u5143\u82b3"
+    assert detector._clean_extracted_value(
+        f"\u901a\u77e5{_OCR_SEMANTIC_BREAK_TOKEN}\u674e\u5143\u82b3"
+    ) == f"\u901a\u77e5{_OCR_SEMANTIC_BREAK_TOKEN}\u674e\u5143\u82b3"
+
+
+def test_rule_based_strong_detects_bare_ocr_name_wrapped_by_semantic_breaks(tmp_path) -> None:
+    detector = _make_detector(tmp_path)
+    ocr_blocks = [
+        OCRTextBlock(text="\u901a\u77e5", bbox=BoundingBox(x=0, y=0, width=48, height=20), block_id="ocr-break-name-1"),
+        OCRTextBlock(text="\u674e\u5143\u82b3", bbox=BoundingBox(x=0, y=36, width=72, height=20), block_id="ocr-break-name-2"),
+        OCRTextBlock(text="\u51cc\u66680:42", bbox=BoundingBox(x=0, y=72, width=88, height=20), block_id="ocr-break-name-3"),
+    ]
+
+    document = detector._build_ocr_page_document(ocr_blocks)
+    strong_candidates = detector.detect(prompt_text="", ocr_blocks=ocr_blocks, protection_level=ProtectionLevel.STRONG)
+    balanced_candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=ocr_blocks,
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert document is not None
+    assert document.text == (
+        f"\u901a\u77e5{_OCR_SEMANTIC_BREAK_TOKEN}\u674e\u5143\u82b3{_OCR_SEMANTIC_BREAK_TOKEN}\u51cc\u66680:42"
+    )
+    assert "\u674e\u5143\u82b3" in _candidate_texts(strong_candidates, PIIAttributeType.NAME)
+    assert "\u674e\u5143\u82b3" not in _candidate_texts(balanced_candidates, PIIAttributeType.NAME)
+
+
 def test_rule_based_inserts_semantic_break_between_right_metadata_and_next_line_number(tmp_path) -> None:
     detector = _make_detector(tmp_path)
     ocr_blocks = [

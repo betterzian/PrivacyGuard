@@ -3611,9 +3611,23 @@ class RuleBasedPIIDetector:
     def _clean_extracted_value(self, value: str) -> str:
         """清理上下文提取值两侧的噪声字符。"""
         cleaned = value.strip()
-        cleaned = re.sub(r"^[\s\[{(<（【「『\"'`]+", "", cleaned)
-        cleaned = re.sub(r"[\s\]})>）】」』\"'`.,，;；、。！？!?]+$", "", cleaned)
+        cleaned = self._strip_ocr_break_edge_noise(cleaned)
+        cleaned = re.sub(r"^[\s\[{(<>（【「『\"'`]+", "", cleaned)
+        cleaned = re.sub(r"[\s\]})<>）】」』\"'`.,，;；、。！？!?]+$", "", cleaned)
+        cleaned = self._strip_ocr_break_edge_noise(cleaned)
         return cleaned.strip()
+
+    def _strip_ocr_break_edge_noise(self, value: str) -> str:
+        cleaned = value.strip()
+        token = _OCR_SEMANTIC_BREAK_TOKEN.strip()
+        while True:
+            previous = cleaned
+            if cleaned.startswith(token):
+                cleaned = cleaned[len(token):].lstrip()
+            if cleaned.endswith(token):
+                cleaned = cleaned[: -len(token)].rstrip()
+            if cleaned == previous:
+                return cleaned
 
     def _clean_address_candidate(self, value: str) -> str:
         """清理地址候选前后的连接词与标点。"""
