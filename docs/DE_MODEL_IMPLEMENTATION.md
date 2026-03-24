@@ -183,7 +183,7 @@ persona 级状态用于表达当前 persona 集合对本轮候选的支持情况
 
 - 使用类型化 placeholder
 - 当前后续会通过 `SessionPlaceholderAllocator` 分配 session-stable placeholder
-- 典型形式如 `@姓名1`、`@手机号1`
+- 典型形式如 `<姓名1>`、`<手机号1>`（由 `generic_placeholder.py` 统一渲染）
 
 #### `PERSONA_SLOT`
 
@@ -414,7 +414,7 @@ persona 的作用是为 `PERSONA_SLOT` 提供受约束的假值来源。
 - `KEEP` 不参与 restore
 - `GENERICIZE` 可通过 replacement record 恢复
 - `PERSONA_SLOT` 可通过 replacement record 恢复
-- 旧别名 `LABEL` 视作 `GENERICIZE`
+- 历史 `ReplacementRecord` 若仍写入旧动作名 `LABEL`，`restore_pipeline.py` 会按 `GENERICIZE` 兼容处理；当前 decision / runtime / 训练链路不再对外输出 `LABEL`
 
 因此：
 
@@ -479,13 +479,19 @@ runtime
 - `rewrite_mode`
 - `final_action`
 
-后续可以继续把训练目标与网络 head 完整收敛为：
+同时，`TinyPolicyNet` 当前实际上已经新增了：
 
 - `protect_head`
 - `rewrite_mode_head`
-- `persona_head`
+- `persona_selector`（承担 persona head 角色）
 
-但当前仍保留兼容的旧平面 `action_head`。
+但需要明确当前真实边界：
+
+- `TorchTinyPolicyRuntime` 的 decode 仍以 `action_logits` 为主来生成 `final_action`
+- `protect_decision` / `rewrite_mode` 在 runtime 输出里仍主要是从 `final_action` 回收敛得到
+- `protect_head` / `rewrite_mode_head` 当前主要被 supervised loss 直接消费，并为后续 runtime 迁移预留位点
+
+因此当前仍保留兼容的旧平面 `action_head`，尚未把 runtime decode 完全切换到层级 head。
 
 ### 6.4 bundle runtime
 
@@ -498,14 +504,27 @@ runtime
 
 ### 6.5 训练与导出
 
-训练与数据导出层已经向层级标签迁移：
+训练与数据导出层已经向层级标签迁移，但需要区分**内存对象字段**与 **JSONL 导出键名**。
+
+当前 `training/types.py` 里与监督目标直接相关的 `SupervisedTurnLabels` 字段是：
+
+- `target_persona_id`
+- `candidate_actions`
+- `target_protect_labels`
+- `target_rewrite_modes`
+- `final_actions`
+
+当前 `training/pipelines/build_dataset.py` 导出的 `labels` 键名是：
 
 - `target_protect_label`
 - `target_rewrite_mode`
 - `target_persona_id`
 - `final_action`
+- `candidate_actions`（旧单层兼容视图）
 
-后续可以继续把 runtime 输出、训练标签、损失函数和评估协议完全统一，但当前仓库仍保留旧字段兼容层。
+另外，`training/export.py` + `training/pipelines/export_runtime_bundle.py` 当前只负责写 runtime metadata；并不会把 checkpoint 转成可被 `runtime_type="bundle"` 直接执行的模型包。
+
+后续可以继续把 runtime 输出、训练标签、损失函数和评估协议完全统一，但当前仓库仍保留旧字段兼容层，bundle 导出也仍停留在 metadata 位点。
 
 ---
 

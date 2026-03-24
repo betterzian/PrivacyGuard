@@ -54,7 +54,10 @@ training 侧负责：
 - `training/types.py`
 - `training/runtime_bridge.py`
 - `training/torch_batch.py`
+- `training/session_rollout.py`
+- `training/adversary.py`
 - `training/losses.py`
+- `training/export.py`
 - `training/pipelines/build_dataset.py`
 - `training/pipelines/run_supervised_finetune.py`
 - `training/pipelines/run_adversarial_finetune.py`
@@ -131,23 +134,39 @@ training 侧负责：
 
 ### 3.2 正式监督标签：`SupervisedTurnLabels`
 
-当前训练标签已经从旧单层 `target_action` 升级为层级标签，正式字段是：
+当前需要区分两层：
 
+- **内存对象**：`training/types.py` 中的 `SupervisedTurnLabels`
+- **导出 JSONL**：`training/pipelines/build_dataset.py` 写出的 `labels`
+
+`SupervisedTurnLabels` 的正式字段是：
+
+- `target_persona_id`
+- `candidate_actions`
+- `final_actions`
+- `target_protect_labels`
+- `target_rewrite_modes`
+
+导出到 JSONL 时，对应键名是：
+
+- `target_persona_id`
+- `candidate_actions`
+- `final_action`
 - `target_protect_label`
 - `target_rewrite_mode`
-- `target_persona_id`
-- `final_action`
 
 含义如下：
 
-#### `target_protect_label`
+#### `target_protect_labels` / `target_protect_label`
 
 candidate 级标签：
 
 - `KEEP`
 - `REWRITE`
 
-#### `target_rewrite_mode`
+前者是 `SupervisedTurnLabels` 的内存字段名，后者是 JSONL 中的导出键名。
+
+#### `target_rewrite_modes` / `target_rewrite_mode`
 
 candidate 级标签：
 
@@ -164,7 +183,7 @@ candidate 级标签：
 turn 级 persona 目标。  
 当当前轮不需要或不存在 persona 监督时，可以为空。
 
-#### `final_action`
+#### `final_actions` / `final_action`
 
 candidate 级最终动作标签，当前作为：
 
@@ -184,9 +203,10 @@ candidate 级最终动作标签，当前作为：
 - `GENERICIZE -> target_protect_label=REWRITE, target_rewrite_mode=GENERICIZE`
 - `PERSONA_SLOT -> target_protect_label=REWRITE, target_rewrite_mode=PERSONA_SLOT`
 
-旧别名也继续兼容：
+需要特别注意：
 
-- `LABEL -> GENERICIZE`
+- 当前 training / runtime 主链默认只使用三种正式动作名：`KEEP`、`GENERICIZE`、`PERSONA_SLOT`
+- 历史 `LABEL` 兼容主要保留在 restore 的旧记录处理路径，不应再作为新的训练导出标签写入
 
 ---
 
@@ -198,16 +218,27 @@ candidate 级最终动作标签，当前作为：
 
 - `page_features`
 - `candidate_features`
+- `candidate_mask`
 - `persona_features`
+- `persona_mask`
 - `candidate_text_ids`
+- `candidate_text_mask`
 - `candidate_prompt_ids`
+- `candidate_prompt_mask`
 - `candidate_ocr_ids`
+- `candidate_ocr_mask`
 - `persona_text_ids`
+- `persona_text_mask`
+- `candidate_ids`
+- `persona_ids`
 
 这对应：
 
 - 结构化特征
 - 文本辅助特征
+- batch 内有效位置掩码与样本 ID 对齐信息
+
+其中字符序列由 `CharacterHashTokenizer` 编码，当前不是 BPE / sentencepiece 一类 tokenizer。
 
 ### 4.2 监督 batch：`SupervisedTinyPolicyBatch`
 
@@ -307,13 +338,22 @@ candidate 级最终动作标签，当前作为：
 - 如果缺少合法 persona target
 - 或当前标签不能稳定支持 `PERSONA_SLOT`
 
-则对应 rewrite_mode / persona 监督会被 mask
+则：
+
+- candidate 级 `rewrite_mode` 目标会被 mask 为 `IGNORE_INDEX`
+- turn 级 `persona` 目标缺失时，该轮不计算 `persona_loss`
 
 ---
 
 ## 7. 当前网络头布局
 
 `TinyPolicyNet` 当前已经逐步向层级 head 收敛，但仍保留兼容旧 head 的能力。
+
+从实现上看，模型主体当前由：
+
+- `CharacterHashTokenizer` + `SharedTextEncoder` 处理字符级辅助文本
+- page token + candidate token 的 `TransformerEncoder` 汇总页面上下文
+- persona selector 选择当前 active persona
 
 当前相关 head 为：
 
@@ -325,6 +365,8 @@ candidate 级最终动作标签，当前作为：
 当前含义是：
 
 - 新训练主线已经可以使用层级标签
+- `protect_head` / `rewrite_mode_head` 已经能被 supervised loss 直接消费
+- `action_head` 仍是当前 `TorchTinyPolicyRuntime` decode `final_action` 的主要来源
 - 旧 checkpoint / 旧 action head 仍尽量保持兼容
 
 ---
@@ -371,8 +413,13 @@ supervised JSONL
 当前尚未完全实现：
 
 - 真正的 adversarial finetune
-- 真正的 bundle / onnx runtime
+- 真正可执行的 bundle / onnx runtime
 - 完整移动端导出产物
+
+其中需要特别区分：
+
+- `export_runtime_bundle()` 当前已经可用，但只会写 metadata JSON
+- `DEModelEngine(runtime_type="bundle")` 仍会直接抛出 `NotImplementedError`
 
 也就是说，当前仓库已经有：
 
@@ -397,9 +444,15 @@ supervised JSONL
 - runtime 协议：`privacyguard/infrastructure/decision/de_model_runtime.py`
 - 决策引擎：`privacyguard/infrastructure/decision/de_model_engine.py`
 - 网络头：`privacyguard/infrastructure/decision/tiny_policy_net.py`
+- 轻量 tokenizer：`privacyguard/infrastructure/decision/tokenizer.py`
 - 默认模式常量：`privacyguard/bootstrap/mode_config.py`
 - 训练标签：`training/types.py`
+- runtime/训练桥接：`training/runtime_bridge.py`
 - batch 组织：`training/torch_batch.py`
+- 会话 rollout：`training/session_rollout.py`
+- 对抗模型协议：`training/adversary.py`
 - 数据导出：`training/pipelines/build_dataset.py`
 - supervised finetune：`training/pipelines/run_supervised_finetune.py`
 - supervised loss：`training/losses.py`
+- runtime metadata 描述：`training/export.py`
+- runtime metadata 导出：`training/pipelines/export_runtime_bundle.py`
