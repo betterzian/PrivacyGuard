@@ -23,7 +23,6 @@ OCR / prompt parse
 
 from __future__ import annotations
 
-import inspect
 import logging
 
 from privacyguard.api.dto import SanitizeRequest, SanitizeResponse
@@ -72,26 +71,6 @@ def _trace_detector_input(session_id: str, turn_id: int, prompt_text: str, ocr_b
         len(ocr_blocks),
         ocr_lengths,
     )
-
-
-def _detect_candidates(request: SanitizeRequest, pii_detector: PIIDetector, ocr_blocks: list) -> list:
-    """向后兼容地调用 detector；支持带会话上下文与保护度的实现。"""
-    detect_method = pii_detector.detect
-    parameters = inspect.signature(detect_method).parameters
-    kwargs = {
-        "prompt_text": request.prompt_text,
-        "ocr_blocks": ocr_blocks,
-    }
-    if "session_id" in parameters:
-        kwargs["session_id"] = request.session_id
-    if "turn_id" in parameters:
-        kwargs["turn_id"] = request.turn_id
-    if "protection_level" in parameters:
-        kwargs["protection_level"] = request.protection_level
-    if "detector_overrides" in parameters:
-        kwargs["detector_overrides"] = request.detector_overrides
-    return detect_method(**kwargs)
-
 
 def _trace_detector_output(session_id: str, turn_id: int, candidates: list) -> None:
     """追踪 Detector 输出：默认仅在 debug 打印非明文摘要。"""
@@ -234,7 +213,14 @@ def run_sanitize_pipeline(
 
     # 2. detector
     _trace_detector_input(request.session_id, request.turn_id, request.prompt_text, ocr_blocks)
-    detected_candidates = _detect_candidates(request=request, pii_detector=pii_detector, ocr_blocks=ocr_blocks)
+    detected_candidates = pii_detector.detect(
+        prompt_text=request.prompt_text,
+        ocr_blocks=ocr_blocks,
+        session_id=request.session_id,
+        turn_id=request.turn_id,
+        protection_level=request.protection_level,
+        detector_overrides=request.detector_overrides,
+    )
     _trace_detector_output(request.session_id, request.turn_id, detected_candidates)
 
     # 3. alias / session context preparation

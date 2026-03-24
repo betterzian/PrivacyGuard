@@ -30,7 +30,7 @@ from typing import Iterable
 from privacyguard.domain.models.decision import DecisionPlan
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.features import DecisionFeatureExtractor
-from privacyguard.infrastructure.decision.policy_context import derive_policy_context
+from privacyguard.infrastructure.decision.policy_context import DerivedDecisionPolicyContext, derive_policy_context
 from training.runtime_bridge import pack_training_turn, plan_to_supervision
 from training.types import (
     SupervisedTurnLabels,
@@ -50,9 +50,10 @@ def build_jsonl_dataset(
     target_path.parent.mkdir(parents=True, exist_ok=True)
     with target_path.open("w", encoding="utf-8") as handle:
         for context in contexts:
-            example, _packed = pack_training_turn(context, extractor=feature_extractor)
+            policy = derive_policy_context(context)
+            example, _packed = pack_training_turn(context, extractor=feature_extractor, policy=policy)
             handle.write(
-                json.dumps(_example_payload(example, context=context), ensure_ascii=False) + "\n"
+                json.dumps(_example_payload(example, context=context, policy=policy), ensure_ascii=False) + "\n"
             )
     return target_path
 
@@ -68,15 +69,21 @@ def build_supervised_jsonl_dataset(
     target_path.parent.mkdir(parents=True, exist_ok=True)
     with target_path.open("w", encoding="utf-8") as handle:
         for context, plan in samples:
-            example, _packed = pack_training_turn(context, extractor=feature_extractor)
+            policy = derive_policy_context(context)
+            example, _packed = pack_training_turn(context, extractor=feature_extractor, policy=policy)
             labels = plan_to_supervision(plan)
-            payload = _example_payload(example, context=context)
+            payload = _example_payload(example, context=context, policy=policy)
             payload["labels"] = _labels_payload(labels)
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
     return target_path
 
 
-def _example_payload(example, *, context: DecisionContext) -> dict[str, object]:
+def _example_payload(
+    example,
+    *,
+    context: DecisionContext,
+    policy: DerivedDecisionPolicyContext,
+) -> dict[str, object]:
     """构造训练样本 payload。
 
     关键新增字段：
@@ -104,9 +111,9 @@ def _example_payload(example, *, context: DecisionContext) -> dict[str, object]:
         "page_vector": example.page_vector,
         "candidate_vectors": example.candidate_vectors,
         "persona_vectors": example.persona_vectors,
-        "candidate_policy_view": _candidate_policy_view_payload(context),
-        "page_policy_state": _page_policy_state_payload(context),
-        "persona_policy_states": _persona_policy_states_payload(context),
+        "candidate_policy_view": _candidate_policy_view_payload(policy),
+        "page_policy_state": _page_policy_state_payload(policy),
+        "persona_policy_states": _persona_policy_states_payload(policy),
         "metadata": example.metadata,
     }
 
@@ -136,9 +143,9 @@ def _labels_payload(labels: SupervisedTurnLabels) -> dict[str, object]:
     }
 
 
-def _candidate_policy_view_payload(context: DecisionContext) -> dict[str, dict[str, object]]:
+def _candidate_policy_view_payload(policy: DerivedDecisionPolicyContext) -> dict[str, dict[str, object]]:
     payload: dict[str, dict[str, object]] = {}
-    for view in derive_policy_context(context).candidate_policy_views:
+    for view in policy.candidate_policy_views:
         if not isinstance(view, dict):
             continue
         candidate_id = str(view.get("candidate_id", "")).strip()
@@ -148,12 +155,12 @@ def _candidate_policy_view_payload(context: DecisionContext) -> dict[str, dict[s
     return payload
 
 
-def _page_policy_state_payload(context: DecisionContext) -> dict[str, object]:
-    return _json_ready(derive_policy_context(context).page_policy_state)
+def _page_policy_state_payload(policy: DerivedDecisionPolicyContext) -> dict[str, object]:
+    return _json_ready(policy.page_policy_state)
 
 
-def _persona_policy_states_payload(context: DecisionContext) -> list[dict[str, object]]:
-    return _json_ready(derive_policy_context(context).persona_policy_states)
+def _persona_policy_states_payload(policy: DerivedDecisionPolicyContext) -> list[dict[str, object]]:
+    return _json_ready(policy.persona_policy_states)
 
 
 def _final_action_payload(labels: SupervisedTurnLabels) -> dict[str, str]:

@@ -29,25 +29,7 @@ class ConstraintResolver:
         for action in actions:
             candidate = candidate_map.get(action.candidate_id)
             if candidate is None:
-                resolved.append(
-                    DecisionAction(
-                        candidate_id=action.candidate_id,
-                        action_type=ActionType.KEEP,
-                        attr_type=action.attr_type,
-                        source=action.source,
-                        replacement_text=None,
-                        persona_id=None,
-                        bbox=action.bbox,
-                        block_id=action.block_id,
-                        span_start=action.span_start,
-                        span_end=action.span_end,
-                        reason="候选不存在，动作降级为 KEEP。",
-                        source_text=action.source_text,
-                        canonical_source_text=action.canonical_source_text,
-                        metadata=clone_action_metadata(action.metadata),
-                    )
-                )
-                continue
+                raise ValueError(f"ConstraintResolver 未找到 candidate: {action.candidate_id}")
             resolved.append(self._resolve_single(action, candidate, session_binding))
         return resolved
 
@@ -65,29 +47,21 @@ class ConstraintResolver:
             return action
 
         if action.attr_type != candidate.attr_type:
-            action.attr_type = candidate.attr_type
-            action.action_type = ActionType.GENERICIZE
-            action.replacement_text = None
-            action.persona_id = None
-            action.reason = "检测到跨槽位替换，已改为同槽位 GENERICIZE。"
-            return action
+            raise ValueError(
+                f"DecisionAction.attr_type 与 candidate 不一致: "
+                f"candidate_id={action.candidate_id}, action={action.attr_type}, candidate={candidate.attr_type}"
+            )
 
         if action.action_type == ActionType.PERSONA_SLOT:
             active_persona_id = session_binding.active_persona_id if session_binding else None
             persona_id = active_persona_id or action.persona_id
             if not persona_id:
-                action.action_type = ActionType.GENERICIZE
-                action.replacement_text = None
-                action.persona_id = None
-                action.reason = "未绑定 persona，已降级为 GENERICIZE。"
-                return action
+                raise ValueError(f"PERSONA_SLOT 缺少 persona_id: candidate_id={action.candidate_id}")
             slot_value = self.persona_repository.get_slot_value(persona_id, candidate.attr_type)
             if not slot_value:
-                action.action_type = ActionType.GENERICIZE
-                action.replacement_text = None
-                action.persona_id = None
-                action.reason = "persona 缺少槽位值，已降级为 GENERICIZE。"
-                return action
+                raise ValueError(
+                    f"PERSONA_SLOT 缺少可用槽位: persona_id={persona_id}, attr_type={candidate.attr_type}"
+                )
             action.persona_id = persona_id
             action.replacement_text = None
             action.reason = action.reason or "PERSONA_SLOT 已校验，替换文案由生成阶段写入。"
@@ -99,8 +73,4 @@ class ConstraintResolver:
             action.reason = action.reason or "使用标准标签替换。"
             return action
 
-        action.action_type = ActionType.KEEP
-        action.replacement_text = None
-        action.persona_id = None
-        action.reason = "动作类型非法，已降级为 KEEP。"
-        return action
+        raise ValueError(f"ConstraintResolver 收到非法动作类型: {action.action_type!r}")

@@ -6,6 +6,7 @@ from privacyguard.domain.models.decision import DecisionPlan
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.features import DecisionFeatureExtractor, PackedDecisionFeatures
 from privacyguard.infrastructure.decision.policy_context import (
+    DerivedDecisionPolicyContext,
     candidate_by_id as derived_candidate_by_id,
     derive_policy_context,
 )
@@ -15,23 +16,25 @@ from training.types import RenderedTurnObservation, SupervisedTurnLabels, Traini
 def pack_training_turn(
     context: DecisionContext,
     extractor: DecisionFeatureExtractor | None = None,
+    *,
+    policy: DerivedDecisionPolicyContext | None = None,
 ) -> tuple[TrainingTurnExample, PackedDecisionFeatures]:
     """把运行时上下文转成训练侧单轮样本。"""
     feature_extractor = extractor or DecisionFeatureExtractor()
-    packed = feature_extractor.pack(context)
-    policy = derive_policy_context(context)
+    resolved_policy = policy or derive_policy_context(context)
+    packed = feature_extractor.pack(context, policy=resolved_policy)
     example = TrainingTurnExample(
         session_id=context.session_id,
         turn_id=context.turn_id,
         prompt_text=context.prompt_text,
         ocr_texts=[block.text for block in context.ocr_blocks],
-        candidate_ids=[str(view.get("candidate_id", "")) for view in policy.candidate_policy_views],
-        candidate_texts=[_candidate_text(context, view) for view in policy.candidate_policy_views],
-        candidate_prompt_contexts=[str(view.get("_prompt_context", "")) for view in policy.candidate_policy_views],
-        candidate_ocr_contexts=[str(view.get("_ocr_context", "")) for view in policy.candidate_policy_views],
-        candidate_attr_types=[view.get("attr_type") for view in policy.candidate_policy_views],
-        persona_ids=[str(state.get("persona_id", "")) for state in policy.persona_policy_states],
-        persona_texts=[_persona_text(context, state) for state in policy.persona_policy_states],
+        candidate_ids=[str(view.get("candidate_id", "")) for view in resolved_policy.candidate_policy_views],
+        candidate_texts=[_candidate_text(context, view) for view in resolved_policy.candidate_policy_views],
+        candidate_prompt_contexts=[str(view.get("_prompt_context", "")) for view in resolved_policy.candidate_policy_views],
+        candidate_ocr_contexts=[str(view.get("_ocr_context", "")) for view in resolved_policy.candidate_policy_views],
+        candidate_attr_types=[view.get("attr_type") for view in resolved_policy.candidate_policy_views],
+        persona_ids=[str(state.get("persona_id", "")) for state in resolved_policy.persona_policy_states],
+        persona_texts=[_persona_text(context, state) for state in resolved_policy.persona_policy_states],
         active_persona_id=context.session_binding.active_persona_id if context.session_binding else None,
         page_vector=packed.page_vector,
         candidate_vectors=packed.candidate_vectors,
@@ -71,15 +74,6 @@ def plan_to_observation(
         applied_action_types={action.candidate_id: action.action_type for action in plan.actions},
         metadata=dict(plan.metadata),
     )
-
-
-def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
-    return derive_policy_context(context).candidate_policy_views
-
-
-def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
-    return derive_policy_context(context).persona_policy_states
-
 
 def _candidate_text(context: DecisionContext, view: dict[str, object]) -> str:
     candidate_id = str(view.get("candidate_id", "")).strip()

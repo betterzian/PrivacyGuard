@@ -5,6 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
+from privacyguard.domain.policies.action_labels import (
+    PROTECT_LABEL_KEEP,
+    PROTECT_LABEL_REWRITE,
+    PROTECT_ORDER,
+    REWRITE_MODE_GENERICIZE,
+    REWRITE_MODE_NONE,
+    REWRITE_MODE_ORDER,
+    REWRITE_MODE_PERSONA_SLOT,
+)
 from training.adversary import AdversaryPrediction
 
 
@@ -49,13 +58,6 @@ def combine_reward(weights: TrainingObjectiveWeights, reward: RewardBreakdown) -
 
 
 IGNORE_INDEX = -100
-PROTECT_LABEL_KEEP = "KEEP"
-PROTECT_LABEL_REWRITE = "REWRITE"
-REWRITE_MODE_NONE = "NONE"
-REWRITE_MODE_GENERICIZE = "GENERICIZE"
-REWRITE_MODE_PERSONA_SLOT = "PERSONA_SLOT"
-PROTECT_ORDER: tuple[str, str] = (PROTECT_LABEL_KEEP, PROTECT_LABEL_REWRITE)
-REWRITE_MODE_ORDER: tuple[str, str] = (REWRITE_MODE_GENERICIZE, REWRITE_MODE_PERSONA_SLOT)
 
 
 @dataclass(slots=True)
@@ -107,14 +109,14 @@ def compute_hierarchical_supervised_loss(
     from torch.nn import functional as F
 
     loss_weights = weights or SupervisedLossWeights()
-    protect_logits = _protect_logits(output=output, torch_module=torch_module)
-    rewrite_mode_logits = _rewrite_mode_logits(output=output, torch_module=torch_module)
+    protect_logits = _protect_logits(output=output)
+    rewrite_mode_logits = _rewrite_mode_logits(output=output)
     device = batch.page_features.device
     zero = batch.page_features.sum() * 0.0
     total_loss = zero
     breakdown = SupervisedLossBreakdown()
 
-    if protect_logits is not None and bool((batch.target_protect_labels != IGNORE_INDEX).any().item()):
+    if bool((batch.target_protect_labels != IGNORE_INDEX).any().item()):
         protect_loss = F.cross_entropy(
             protect_logits.reshape(-1, protect_logits.shape[-1]),
             batch.target_protect_labels.reshape(-1),
@@ -126,7 +128,7 @@ def compute_hierarchical_supervised_loss(
         protect_loss = zero
 
     rewrite_targets = _masked_rewrite_targets(batch=batch, torch_module=torch_module)
-    if rewrite_mode_logits is not None and bool((rewrite_targets != IGNORE_INDEX).any().item()):
+    if bool((rewrite_targets != IGNORE_INDEX).any().item()):
         rewrite_mode_loss = F.cross_entropy(
             rewrite_mode_logits.reshape(-1, rewrite_mode_logits.shape[-1]),
             rewrite_targets.reshape(-1),
@@ -148,7 +150,7 @@ def compute_hierarchical_supervised_loss(
     else:
         persona_loss = zero
 
-    if loss_weights.cost > 0.0 and protect_logits is not None:
+    if loss_weights.cost > 0.0:
         cost_loss = _keep_cost_loss(
             protect_logits=protect_logits,
             protect_targets=batch.target_protect_labels,
@@ -167,26 +169,18 @@ def compute_hierarchical_supervised_loss(
     return (total_loss, breakdown)
 
 
-def _protect_logits(*, output, torch_module):
+def _protect_logits(*, output):
     logits = getattr(output, "protect_logits", None)
-    if logits is not None:
-        return logits
-    action_logits = getattr(output, "action_logits", None)
-    if action_logits is None:
-        return None
-    keep_logits = action_logits[..., 0]
-    rewrite_logits = torch_module.max(action_logits[..., 1:], dim=-1).values
-    return torch_module.stack([keep_logits, rewrite_logits], dim=-1)
+    if logits is None:
+        raise ValueError("模型输出缺少 protect_logits，无法计算层级监督损失。")
+    return logits
 
 
-def _rewrite_mode_logits(*, output, torch_module):
+def _rewrite_mode_logits(*, output):
     logits = getattr(output, "rewrite_mode_logits", None)
-    if logits is not None:
-        return logits
-    action_logits = getattr(output, "action_logits", None)
-    if action_logits is None:
-        return None
-    return action_logits[..., 1:3]
+    if logits is None:
+        raise ValueError("模型输出缺少 rewrite_mode_logits，无法计算层级监督损失。")
+    return logits
 
 
 def _masked_rewrite_targets(*, batch, torch_module):

@@ -8,22 +8,11 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from privacyguard.domain.enums import ActionType
+from privacyguard.domain.policies.action_labels import ACTION_ORDER, PROTECT_ORDER, REWRITE_MODE_ORDER
 from privacyguard.infrastructure.decision.features import (
     CANDIDATE_FEATURE_DIM,
     PAGE_FEATURE_DIM,
     PERSONA_FEATURE_DIM,
-)
-
-ACTION_ORDER: tuple[ActionType, ActionType, ActionType] = (
-    ActionType.KEEP,
-    ActionType.GENERICIZE,
-    ActionType.PERSONA_SLOT,
-)
-PROTECT_ORDER: tuple[str, str] = ("KEEP", "REWRITE")
-REWRITE_MODE_ORDER: tuple[str, str] = (
-    ActionType.GENERICIZE.value,
-    ActionType.PERSONA_SLOT.value,
 )
 
 
@@ -327,34 +316,11 @@ class TinyPolicyNet(nn.Module):
         return sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)
 
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
-        """兼容旧 checkpoint。
-
-        旧 checkpoint 只有 `action_head`，缺少新增的 `protect_head` / `rewrite_mode_head`
-        时，仍允许按严格模式入口加载；新 head 将保持随机初始化。
-        """
-
-        def _super_load(strict_value: bool):
-            try:
-                return nn.Module.load_state_dict(self, state_dict, strict=strict_value, assign=assign)
-            except TypeError:
-                return nn.Module.load_state_dict(self, state_dict, strict=strict_value)
-
-        if not strict:
-            return _super_load(False)
-
-        incompatible = _super_load(False)
-        missing_keys = [
-            key
-            for key in incompatible.missing_keys
-            if not key.startswith(("protect_head.", "rewrite_mode_head."))
-        ]
-        unexpected_keys = list(incompatible.unexpected_keys)
-        if missing_keys or unexpected_keys:
-            raise RuntimeError(
-                "Error(s) in loading state_dict for TinyPolicyNet: "
-                f"missing_keys={missing_keys}, unexpected_keys={unexpected_keys}"
-            )
-        return incompatible
+        """按调用方指定的 strict 语义加载 checkpoint。"""
+        try:
+            return nn.Module.load_state_dict(self, state_dict, strict=strict, assign=assign)
+        except TypeError:
+            return nn.Module.load_state_dict(self, state_dict, strict=strict)
 
     def _encode_candidate_texts(self, batch: TinyPolicyBatch) -> torch.Tensor:
         text_repr = self._encode_text_tensor(batch.candidate_text_ids, batch.candidate_text_mask)

@@ -28,7 +28,7 @@ runtime 侧负责：
 
 - 读取 `DecisionContext` 并在内部派生策略视图
 - 提取轻量特征
-- 通过 heuristic runtime 或 torch runtime 做策略推理
+- 通过 torch runtime 做策略推理
 - 输出统一 runtime 协议
 - 收敛为最终执行动作
 

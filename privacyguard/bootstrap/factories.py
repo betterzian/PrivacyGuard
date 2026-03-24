@@ -5,6 +5,7 @@ from typing import Any
 
 from privacyguard.api.errors import ComponentNotRegisteredError
 from privacyguard.bootstrap.registry import ComponentRegistry, create_default_registry
+from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.action import RestoredSlot
 from privacyguard.domain.models.decision import DecisionPlan
 from privacyguard.domain.models.decision_context import DecisionContext
@@ -40,8 +41,25 @@ class PlaceholderOCREngine:
 class PlaceholderPIIDetector:
     """PII 检测占位实现。"""
 
-    def detect(self, prompt_text: str, ocr_blocks: list[OCRTextBlock]) -> list[Any]:
+    def detect(
+        self,
+        prompt_text: str,
+        ocr_blocks: list[OCRTextBlock],
+        *,
+        session_id: str | None = None,
+        turn_id: int | None = None,
+        protection_level: ProtectionLevel | str = ProtectionLevel.BALANCED,
+        detector_overrides: dict[PIIAttributeType | str, float] | None = None,
+    ) -> list[Any]:
         """占位检测函数。"""
+        _ = (
+            prompt_text,
+            ocr_blocks,
+            session_id,
+            turn_id,
+            protection_level,
+            detector_overrides,
+        )
         raise NotImplementedError("第 1 轮不实现 PII 检测逻辑。")
 
 

@@ -7,6 +7,13 @@ from dataclasses import dataclass, field, replace
 import torch
 
 from privacyguard.domain.models.decision_context import DecisionContext
+from privacyguard.domain.policies.action_labels import (
+    ACTION_ORDER,
+    PROTECT_LABEL_REWRITE,
+    PROTECT_ORDER,
+    REWRITE_MODE_NONE,
+    REWRITE_MODE_ORDER,
+)
 from privacyguard.infrastructure.decision.features import (
     CANDIDATE_FEATURE_DIM,
     PAGE_FEATURE_DIM,
@@ -17,13 +24,12 @@ from privacyguard.infrastructure.decision.policy_context import (
     candidate_by_id as derived_candidate_by_id,
     derive_policy_context,
 )
-from privacyguard.infrastructure.decision.tiny_policy_net import ACTION_ORDER, PROTECT_ORDER, REWRITE_MODE_ORDER, TinyPolicyBatch
+from privacyguard.infrastructure.decision.tiny_policy_net import TinyPolicyBatch
 from privacyguard.infrastructure.decision.tokenizer import CharacterHashTokenizer
 from training.types import (
-    PROTECT_LABEL_REWRITE,
-    REWRITE_MODE_NONE,
     SupervisedTurnLabels,
     TrainingTurnExample,
+    hierarchical_labels_to_action,
     normalize_action_type,
     normalize_rewrite_mode,
 )
@@ -102,9 +108,19 @@ class TinyPolicyBatchBuilder:
         if not contexts:
             raise ValueError("contexts 不能为空。")
         batch_size = len(contexts)
-        packed_features = [self.feature_extractor.pack(context) for context in contexts]
-        max_candidates = max(1, min(self.max_candidates, max(len(packed.candidate_ids) for packed in packed_features)))
-        max_personas = max(1, min(self.max_personas, max(len(packed.persona_ids) for packed in packed_features)))
+        policies = [derive_policy_context(context) for context in contexts]
+        packed_features = [
+            self.feature_extractor.pack(context, policy=policy)
+            for context, policy in zip(contexts, policies, strict=False)
+        ]
+        for context, packed in zip(contexts, packed_features):
+            self._validate_capacity(
+                candidate_count=len(packed.candidate_ids),
+                persona_count=len(packed.persona_ids),
+                subject=f"session_id={context.session_id}, turn_id={context.turn_id}",
+            )
+        max_candidates = max(1, max(len(packed.candidate_ids) for packed in packed_features))
+        max_personas = max(1, max(len(packed.persona_ids) for packed in packed_features))
 
         page_features = torch.zeros((batch_size, PAGE_FEATURE_DIM), dtype=torch.float32)
         candidate_features = torch.zeros((batch_size, max_candidates, CANDIDATE_FEATURE_DIM), dtype=torch.float32)
@@ -124,14 +140,15 @@ class TinyPolicyBatchBuilder:
         persona_ids = [["" for _ in range(max_personas)] for _ in range(batch_size)]
 
         for batch_index, context in enumerate(contexts):
+            policy = policies[batch_index]
             packed = packed_features[batch_index]
-            candidate_views = _candidate_policy_views(context)
+            candidate_views = policy.candidate_policy_views
             candidate_view_by_id = {
                 str(view.get("candidate_id", "")).strip(): view
                 for view in candidate_views
                 if str(view.get("candidate_id", "")).strip()
             }
-            persona_states = _persona_policy_states(context)
+            persona_states = policy.persona_policy_states
             persona_state_by_id = {
                 str(state.get("persona_id", "")).strip(): state
                 for state in persona_states
@@ -203,8 +220,14 @@ class TinyPolicyBatchBuilder:
         if not examples:
             raise ValueError("examples 不能为空。")
         batch_size = len(examples)
-        max_candidates = max(1, min(self.max_candidates, max(len(example.candidate_ids) for example in examples)))
-        max_personas = max(1, min(self.max_personas, max(len(example.persona_ids) for example in examples)))
+        for example in examples:
+            self._validate_capacity(
+                candidate_count=len(example.candidate_ids),
+                persona_count=len(example.persona_ids),
+                subject=f"session_id={example.session_id}, turn_id={example.turn_id}",
+            )
+        max_candidates = max(1, max(len(example.candidate_ids) for example in examples))
+        max_personas = max(1, max(len(example.persona_ids) for example in examples))
 
         page_features = torch.zeros((batch_size, PAGE_FEATURE_DIM), dtype=torch.float32)
         candidate_features = torch.zeros((batch_size, max_candidates, CANDIDATE_FEATURE_DIM), dtype=torch.float32)
@@ -305,8 +328,22 @@ class TinyPolicyBatchBuilder:
 
             if label.target_persona_id:
                 persona_index = persona_lookup.get(label.target_persona_id)
-                if persona_index is not None:
-                    target_persona_indices[batch_index] = persona_index
+                if persona_index is None:
+                    raise ValueError(
+                        f"target_persona_id 未出现在 batch 中: {label.target_persona_id}"
+                    )
+                target_persona_indices[batch_index] = persona_index
+
+            labeled_candidate_ids = (
+                set(label.final_actions)
+                | set(label.target_protect_labels)
+                | set(label.target_rewrite_modes)
+            )
+            missing_candidate_ids = sorted(candidate_id for candidate_id in labeled_candidate_ids if candidate_id not in candidate_lookup)
+            if missing_candidate_ids:
+                raise ValueError(
+                    f"以下 candidate label 未出现在 batch 中: {missing_candidate_ids}"
+                )
 
             for candidate_id, candidate_index in candidate_lookup.items():
                 if (
@@ -315,7 +352,13 @@ class TinyPolicyBatchBuilder:
                     and candidate_id not in label.target_rewrite_modes
                 ):
                     continue
-                final_action = normalize_action_type(label.final_actions.get(candidate_id))
+                if candidate_id in label.final_actions:
+                    final_action = normalize_action_type(label.final_actions[candidate_id])
+                else:
+                    final_action = hierarchical_labels_to_action(
+                        label.target_protect_labels.get(candidate_id),
+                        label.target_rewrite_modes.get(candidate_id),
+                    )
                 protect_label = str(label.target_protect_labels.get(candidate_id, "KEEP")).strip().upper()
                 rewrite_mode = normalize_rewrite_mode(label.target_rewrite_modes.get(candidate_id)) or REWRITE_MODE_NONE
 
@@ -371,10 +414,13 @@ class TinyPolicyBatchBuilder:
                     break
         return f"{display_name} {slot_text}".strip()
 
+    def _validate_capacity(self, *, candidate_count: int, persona_count: int, subject: str) -> None:
+        if candidate_count > self.max_candidates:
+            raise ValueError(
+                f"{subject} 的 candidate 数量 {candidate_count} 超过 max_candidates={self.max_candidates}"
+            )
+        if persona_count > self.max_personas:
+            raise ValueError(
+                f"{subject} 的 persona 数量 {persona_count} 超过 max_personas={self.max_personas}"
+            )
 
-def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
-    return derive_policy_context(context).candidate_policy_views
-
-
-def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
-    return derive_policy_context(context).persona_policy_states

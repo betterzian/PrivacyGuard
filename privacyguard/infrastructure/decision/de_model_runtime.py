@@ -8,17 +8,17 @@ from typing import Protocol, runtime_checkable
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.models.decision_context import DecisionContext
-from privacyguard.infrastructure.decision.features import PackedDecisionFeatures
-from privacyguard.infrastructure.decision.policy_context import derive_policy_context
-
-RUNTIME_ACTION_ORDER: tuple[ActionType, ActionType, ActionType] = (
-    ActionType.KEEP,
-    ActionType.GENERICIZE,
-    ActionType.PERSONA_SLOT,
+from privacyguard.domain.policies.action_labels import (
+    ACTION_ORDER,
+    PROTECT_LABEL_KEEP,
+    PROTECT_LABEL_REWRITE,
+    REWRITE_MODE_NONE,
 )
-PROTECT_DECISION_KEEP = "KEEP"
-PROTECT_DECISION_REWRITE = "REWRITE"
-REWRITE_MODE_NONE = "NONE"
+from privacyguard.infrastructure.decision.features import PackedDecisionFeatures
+from privacyguard.infrastructure.decision.policy_context import (
+    DerivedDecisionPolicyContext,
+    derive_policy_context,
+)
 
 
 @dataclass(slots=True)
@@ -80,7 +80,7 @@ class TinyPolicyOutputDecoder:
     _tie_priority: dict[ActionType, int] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._tie_priority = {action: index for index, action in enumerate(RUNTIME_ACTION_ORDER)}
+        self._tie_priority = {action: index for index, action in enumerate(ACTION_ORDER)}
 
     def decode(self, *, batch, output, torch_module) -> DEModelRuntimeOutput:
         """将模型输出解码为 persona 选择与 candidate 动作。"""
@@ -93,7 +93,7 @@ class TinyPolicyOutputDecoder:
             action_probs = torch_module.softmax(output.action_logits[0, index], dim=-1)
             action_scores = {
                 action: float(action_probs[action_index].item())
-                for action_index, action in enumerate(RUNTIME_ACTION_ORDER)
+                for action_index, action in enumerate(ACTION_ORDER)
             }
             final_action, decode_policy, fallback_reason = self._decode_candidate_action(
                 action_scores=action_scores,
@@ -177,6 +177,7 @@ class DecisionPolicyRuntime(Protocol):
         *,
         context: DecisionContext,
         packed: PackedDecisionFeatures,
+        policy: DerivedDecisionPolicyContext | None = None,
     ) -> DEModelRuntimeOutput:
         """根据完整上下文与压缩特征输出 runtime 决策。"""
 
@@ -209,16 +210,18 @@ class TinyPolicyRuntime:
         *,
         context: DecisionContext,
         packed: PackedDecisionFeatures,
+        policy: DerivedDecisionPolicyContext | None = None,
     ) -> DEModelRuntimeOutput:
         """基于上下文与压缩特征生成占位策略输出。"""
-        active_persona_id, persona_scores = self._select_persona(context=context)
+        resolved_policy = policy or derive_policy_context(context)
+        active_persona_id, persona_scores = self._select_persona(context=context, policy=resolved_policy)
         persona_slots: dict[PIIAttributeType, str] = {}
         for item in context.persona_profiles:
             if item.persona_id == active_persona_id:
                 persona_slots = item.slots
                 break
         candidate_decisions: list[RuntimeCandidateDecision] = []
-        for feature in _candidate_policy_views(context):
+        for feature in resolved_policy.candidate_policy_views:
             scores = self._candidate_scores(
                 feature=feature,
                 active_persona_id=active_persona_id,
@@ -254,8 +257,13 @@ class TinyPolicyRuntime:
             candidate_decisions=candidate_decisions,
         )
 
-    def _select_persona(self, context: DecisionContext) -> tuple[str | None, dict[str, float]]:
-        persona_states = _persona_policy_states(context)
+    def _select_persona(
+        self,
+        *,
+        context: DecisionContext,
+        policy: DerivedDecisionPolicyContext,
+    ) -> tuple[str | None, dict[str, float]]:
+        persona_states = policy.persona_policy_states
         if not persona_states:
             return (None, {})
         active_persona_id = context.session_binding.active_persona_id if context.session_binding else None
@@ -402,9 +410,11 @@ class TorchTinyPolicyRuntime:
         *,
         context: DecisionContext,
         packed: PackedDecisionFeatures,
+        policy: DerivedDecisionPolicyContext | None = None,
     ) -> DEModelRuntimeOutput:
         """执行 TinyPolicyNet 前向，并把 logits 解码为运行时输出。"""
         _ = packed
+        _ = policy
         batch = self._batch_builder.build([context]).to(self.device)
         with self._torch.no_grad():
             output = self._model(batch)
@@ -475,14 +485,14 @@ def _hierarchical_view(final_action: ActionType) -> tuple[str, str]:
     """把平面动作整理为 protect_decision + rewrite_mode 两级视图。"""
     normalized_action = _normalized_action_type(final_action)
     if normalized_action == ActionType.KEEP:
-        return (PROTECT_DECISION_KEEP, REWRITE_MODE_NONE)
+        return (PROTECT_LABEL_KEEP, REWRITE_MODE_NONE)
     if normalized_action == ActionType.PERSONA_SLOT:
-        return (PROTECT_DECISION_REWRITE, ActionType.PERSONA_SLOT.value)
-    return (PROTECT_DECISION_REWRITE, ActionType.GENERICIZE.value)
+        return (PROTECT_LABEL_REWRITE, ActionType.PERSONA_SLOT.value)
+    return (PROTECT_LABEL_REWRITE, ActionType.GENERICIZE.value)
 
 
 def _normalized_action_type(action_type: ActionType | str) -> ActionType:
-    """归一化动作名：只保留工程动作（KEEP/GENERICIZE/PERSONA_SLOT）。"""
+    """归一化动作名：只接受工程动作（KEEP/GENERICIZE/PERSONA_SLOT）。"""
     if isinstance(action_type, ActionType):
         return action_type
     normalized = str(action_type or "").strip().upper()
@@ -491,12 +501,14 @@ def _normalized_action_type(action_type: ActionType | str) -> ActionType:
         "GENERICIZE": ActionType.GENERICIZE,
         "PERSONA_SLOT": ActionType.PERSONA_SLOT,
     }
-    return aliases.get(normalized, ActionType.KEEP)
+    if normalized in aliases:
+        return aliases[normalized]
+    raise ValueError(f"非法 de_model 动作名: {action_type!r}")
 
 
 def _normalized_action_scores(action_scores: dict[ActionType | str, float]) -> dict[ActionType, float]:
     """把旧 action score 键归一化到当前动作集合。"""
-    normalized: dict[ActionType, float] = {action: 0.0 for action in RUNTIME_ACTION_ORDER}
+    normalized: dict[ActionType, float] = {action: 0.0 for action in ACTION_ORDER}
     for action, score in (action_scores or {}).items():
         normalized_action = _normalized_action_type(action)
         normalized[normalized_action] = max(normalized.get(normalized_action, 0.0), float(score))
@@ -513,14 +525,6 @@ def _compose_reason(reasons: list[str], fallback_reason: str | None) -> str:
     if fallback and fallback not in parts:
         parts.append(fallback)
     return "；".join(parts)
-
-
-def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
-    return derive_policy_context(context).candidate_policy_views
-
-
-def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
-    return derive_policy_context(context).persona_policy_states
 
 
 def _attr_type_from_view(view: dict[str, object]) -> PIIAttributeType:

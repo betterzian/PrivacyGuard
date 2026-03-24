@@ -11,11 +11,10 @@ from privacyguard.domain.models.mapping import SessionBinding
 from privacyguard.infrastructure.decision.de_model_runtime import (
     DEModelRuntimeOutput,
     DecisionPolicyRuntime,
-    TinyPolicyRuntime,
     TorchTinyPolicyRuntime,
 )
 from privacyguard.infrastructure.decision.features import DecisionFeatureExtractor
-from privacyguard.infrastructure.decision.policy_context import page_policy_state
+from privacyguard.infrastructure.decision.policy_context import derive_policy_context
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 
@@ -34,7 +33,7 @@ class DEModelEngine:
         keep_threshold: float = 0.25,
         persona_score_threshold: float = 0.0,
         action_tie_tolerance: float = 1e-6,
-        runtime_type: str = "heuristic",
+        runtime_type: str = "torch",
         checkpoint_path: str | None = None,
         bundle_path: str | None = None,
         device: str = "cpu",
@@ -58,7 +57,6 @@ class DEModelEngine:
         """将 de_model runtime 类型归一化为内部标准键。"""
         normalized = str(runtime_type).strip().lower()
         aliases = {
-            "heuristic": "heuristic",
             "torch": "torch",
             "bundle": "bundle",
         }
@@ -68,8 +66,6 @@ class DEModelEngine:
 
     def _build_runtime(self) -> DecisionPolicyRuntime:
         """按 runtime_type 构建运行时。"""
-        if self.runtime_type == "heuristic":
-            return TinyPolicyRuntime(keep_threshold=self.keep_threshold)
         if self.runtime_type == "torch":
             if not self.checkpoint_path:
                 raise ValueError("de_model runtime_type='torch' 时必须提供 checkpoint_path。")
@@ -83,14 +79,15 @@ class DEModelEngine:
         if self.runtime_type == "bundle":
             if not self.bundle_path:
                 raise ValueError("de_model runtime_type='bundle' 时必须提供 bundle_path。")
-            raise NotImplementedError("de_model bundle runtime 尚未实现；当前请使用 runtime_type='heuristic'。")
+            raise NotImplementedError("de_model bundle runtime 尚未实现；当前请使用 runtime_type='torch'。")
         raise ValueError(f"不支持的 de_model runtime_type: {self.runtime_type}")
 
     def plan(self, context: DecisionContext) -> DecisionPlan:
         """使用统一上下文生成 de_model 占位计划。"""
-        packed = self.feature_extractor.pack(context)
-        runtime_output = self.runtime.predict(context=context, packed=packed)
-        derived_page_policy_state = page_policy_state(context)
+        policy = derive_policy_context(context)
+        packed = self.feature_extractor.pack(context, policy=policy)
+        runtime_output = self.runtime.predict(context=context, packed=packed, policy=policy)
+        derived_page_policy_state = policy.page_policy_state
         binding = context.session_binding or SessionBinding(
             session_id=context.session_id,
             active_persona_id=runtime_output.active_persona_id,

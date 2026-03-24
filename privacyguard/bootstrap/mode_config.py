@@ -4,7 +4,7 @@ from privacyguard.api.errors import InvalidConfigurationError
 
 # 默认模式（PrivacyGuard 及各处统一引用）
 DEFAULT_DETECTOR_MODE = "rule_based"
-DEFAULT_DECISION_MODE = "de_model"
+DEFAULT_DECISION_MODE = "label_only"
 
 # 规范模式名（与 bootstrap/factories 注册键一致，无别名）
 DETECTOR_MODE_ALIASES = {

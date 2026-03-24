@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.policy_context import (
+    DerivedDecisionPolicyContext,
     candidate_by_id as derived_candidate_by_id,
     derive_policy_context,
     persona_by_id as derived_persona_by_id,
@@ -82,18 +83,22 @@ class PackedDecisionFeatures:
     persona_vectors: list[list[float]]
 
 
-def pack_decision_features(context: DecisionContext) -> PackedDecisionFeatures:
+def pack_decision_features(
+    context: DecisionContext,
+    *,
+    policy: DerivedDecisionPolicyContext | None = None,
+) -> PackedDecisionFeatures:
     """把上下文打包为当前 runtime 可消费的定长特征。
 
     优先从 `DecisionContext` 派生策略视图；若上下文已预构建同名字段则兼容读取。
     """
-    policy = derive_policy_context(context)
-    page_vector = build_page_features(context)
-    text_inputs = build_text_inputs(context)
+    resolved_policy = policy or derive_policy_context(context)
+    page_vector = build_page_features(context, policy=resolved_policy)
+    text_inputs = build_text_inputs(context, policy=resolved_policy)
 
     candidate_ids: list[str] = []
     candidate_vectors: list[list[float]] = []
-    for candidate_policy_view in policy.candidate_policy_views:
+    for candidate_policy_view in resolved_policy.candidate_policy_views:
         candidate_id = str(candidate_policy_view.get("candidate_id", "")).strip()
         if not candidate_id:
             continue
@@ -108,7 +113,7 @@ def pack_decision_features(context: DecisionContext) -> PackedDecisionFeatures:
 
     persona_ids: list[str] = []
     persona_vectors: list[list[float]] = []
-    for persona_policy_state in policy.persona_policy_states:
+    for persona_policy_state in resolved_policy.persona_policy_states:
         persona_id = str(persona_policy_state.get("persona_id", "")).strip()
         if not persona_id:
             continue
@@ -130,16 +135,20 @@ def pack_decision_features(context: DecisionContext) -> PackedDecisionFeatures:
     )
 
 
-def build_page_features(context: DecisionContext) -> list[float]:
+def build_page_features(
+    context: DecisionContext,
+    *,
+    policy: DerivedDecisionPolicyContext | None = None,
+) -> list[float]:
     """从 `page_policy_state` 构造 page vector。
 
     向量布局保持兼容旧模型，但取值来源优先来自新页面状态。
 
     页面向量中的 protection one-hot 继续保持在尾部，避免影响 runtime / TinyPolicyNet。
     """
-    policy = derive_policy_context(context)
-    state = policy.page_policy_state
-    candidate_views = policy.candidate_policy_views
+    resolved_policy = policy or derive_policy_context(context)
+    state = resolved_policy.page_policy_state
+    candidate_views = resolved_policy.candidate_policy_views
     prompt_text = getattr(context, "prompt_text", "") or ""
     ocr_blocks = list(getattr(context, "ocr_blocks", []) or [])
 
@@ -381,13 +390,17 @@ def build_persona_features(
     ]
 
 
-def build_text_inputs(context: DecisionContext) -> dict[str, dict[str, dict[str, str]]]:
+def build_text_inputs(
+    context: DecisionContext,
+    *,
+    policy: DerivedDecisionPolicyContext | None = None,
+) -> dict[str, dict[str, dict[str, str]]]:
     """构建辅助文本通道输入。
     """
-    policy = derive_policy_context(context)
+    resolved_policy = policy or derive_policy_context(context)
     candidate_inputs: dict[str, dict[str, str]] = {}
     candidate_by_id = _candidate_by_id(context)
-    for view in policy.candidate_policy_views:
+    for view in resolved_policy.candidate_policy_views:
         candidate_id = str(view.get("candidate_id", "")).strip()
         if not candidate_id:
             continue
@@ -410,7 +423,7 @@ def build_text_inputs(context: DecisionContext) -> dict[str, dict[str, dict[str,
         }
 
     persona_inputs: dict[str, dict[str, str]] = {}
-    for state in policy.persona_policy_states:
+    for state in resolved_policy.persona_policy_states:
         persona_id = str(state.get("persona_id", "")).strip()
         if not persona_id:
             continue
@@ -433,20 +446,13 @@ def build_text_inputs(context: DecisionContext) -> dict[str, dict[str, dict[str,
 class DecisionFeatureExtractor:
     """将 DecisionContext 压缩为轻量数值特征。"""
 
-    def pack(self, context: DecisionContext) -> PackedDecisionFeatures:
-        return pack_decision_features(context)
-
-
-def _candidate_policy_views(context: DecisionContext) -> list[dict[str, object]]:
-    return derive_policy_context(context).candidate_policy_views
-
-
-def _page_policy_state(context: DecisionContext) -> dict[str, object]:
-    return derive_policy_context(context).page_policy_state
-
-
-def _persona_policy_states(context: DecisionContext) -> list[dict[str, object]]:
-    return derive_policy_context(context).persona_policy_states
+    def pack(
+        self,
+        context: DecisionContext,
+        *,
+        policy: DerivedDecisionPolicyContext | None = None,
+    ) -> PackedDecisionFeatures:
+        return pack_decision_features(context, policy=policy)
 
 
 def _candidate_by_id(context: DecisionContext) -> dict[str, object]:

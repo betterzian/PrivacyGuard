@@ -50,13 +50,8 @@ class ReplacementGenerationService:
             if action.replacement_text:
                 final_actions.append(action.model_copy(deep=True))
                 continue
-            candidate = candidate_map.get(action.candidate_id)
-            attr = candidate.attr_type if candidate else action.attr_type
-            final_actions.append(
-                action.model_copy(
-                    update={"replacement_text": render_generic_replacement_text(attr, 1)},
-                    deep=True,
-                )
+            raise ValueError(
+                f"GENERICIZE 缺少 replacement_text，placeholder 分配未完成: candidate_id={action.candidate_id}"
             )
         return plan.model_copy(update={"actions": final_actions}, deep=True)
 
@@ -64,13 +59,15 @@ class ReplacementGenerationService:
         """为 ``PERSONA_SLOT`` 写入 persona 渲染文案（结构合法性由 ConstraintResolver 保证）。"""
         candidate = candidate_map.get(action.candidate_id)
         if candidate is None:
-            return action.model_copy(deep=True)
+            raise ValueError(f"PERSONA_SLOT 缺少 candidate: {action.candidate_id}")
         persona_id = action.persona_id
         if not persona_id:
-            return action.model_copy(deep=True)
+            raise ValueError(f"PERSONA_SLOT 缺少 persona_id: candidate_id={action.candidate_id}")
         slot_value = self._persona_repository.get_slot_value(persona_id, candidate.attr_type)
         if not slot_value:
-            return action.model_copy(deep=True)
+            raise ValueError(
+                f"PERSONA_SLOT 缺少可用槽位: persona_id={persona_id}, attr_type={candidate.attr_type}"
+            )
         replacement_text = self._persona_repository.get_slot_replacement_text(
             persona_id,
             candidate.attr_type,

@@ -1,0 +1,491 @@
+"""ScreenshotRenderer internal helper functions."""
+
+from privacyguard.infrastructure.rendering.screenshot_renderer_shared import *
+
+def _to_pil_image(self, image: Any):
+    """将输入统一转换为 PIL Image。"""
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+    if isinstance(image, Image.Image):
+        return image.copy()
+    if isinstance(image, (str, Path)):
+        path = Path(image)
+        if path.exists():
+            try:
+                return Image.open(path).convert("RGB")
+            except Exception:
+                return None
+        return None
+    try:
+        import numpy as np
+    except Exception:
+        np = None
+    if np is not None and isinstance(image, np.ndarray):
+        return Image.fromarray(image).convert("RGB")
+    return None
+
+def _create_draw(self, image):
+    """创建绘图对象。"""
+    from PIL import ImageDraw
+
+    return ImageDraw.Draw(image)
+
+def _get_bbox_fill_color(self, image: Any, bbox: BoundingBox) -> tuple[int, int, int]:
+    """box1=[x,y,w,h]，box2 为四边各外扩 2 像素；取 (box2 - box1) 环带内像素平均色填充。"""
+    try:
+        from PIL import Image
+        w, h = image.size
+        x, y, bw, bh = bbox.x, bbox.y, bbox.width, bbox.height
+        x1, y1 = x, y
+        x2, y2 = x + bw, y + bh
+        x1e = max(0, x1 - 2)
+        y1e = max(0, y1 - 2)
+        x2e = min(w, x2 + 2)
+        y2e = min(h, y2 + 2)
+        pixels: list[tuple[int, int, int]] = []
+        for py in range(y1e, y2e):
+            for px in range(x1e, x2e):
+                if px < x1 or px >= x2 or py < y1 or py >= y2:
+                    pixels.append(image.getpixel((px, py))[:3])
+        if not pixels:
+            crop = image.crop((max(0, x1), max(0, y1), min(w, x2), min(h, y2)))
+            pixels = list(crop.getdata())
+        if not pixels:
+            return self._parse_fill(self._fallback_bg)
+        r = sum(p[0] for p in pixels) // len(pixels)
+        g = sum(p[1] for p in pixels) // len(pixels)
+        b = sum(p[2] for p in pixels) // len(pixels)
+        return (r, g, b)
+    except Exception:
+        return self._parse_fill(self._fallback_bg)
+
+def _parse_fill(self, color: str) -> tuple[int, int, int]:
+    """将 'white'/'black' 或 '#rrggbb' 转为 (r,g,b)。"""
+    if color in ("white", "#fff", "#ffffff"):
+        return (255, 255, 255)
+    if color in ("black", "#000", "#000000"):
+        return (0, 0, 0)
+    if color.startswith("#") and len(color) >= 7:
+        return (int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
+    return (255, 255, 255)
+
+def _font_size_from_bbox_height(self, bbox: BoundingBox) -> int:
+    """以 box 高度为文字高度计算字号（保守值，避免渲染后超出）。"""
+    return max(8, int(bbox.height * 0.85))
+
+def _draw_text_box(
+    self,
+    draw,
+    item: _DrawItem,
+    image: Any,
+    skip_fill: bool = False,
+) -> None:
+    """按原文估计字号，优先横向适配，再将离屏文字蒙版居中贴回 box。"""
+    bbox = item.bbox
+    text = item.text
+    left = bbox.x
+    top = bbox.y
+    right = bbox.x + bbox.width
+    bottom = bbox.y + bbox.height
+    fill_rgb = self._get_bbox_fill_color(image, bbox)
+    if not skip_fill:
+        draw.rectangle([(left, top), (right, bottom)], fill=fill_rgb, outline=None)
+    if not text:
+        return
+    pad = 2
+    center_x, center_y, target_w, target_h, rotation_degrees = self._text_region_geometry(item, pad=pad)
+    layout = self._resolve_text_layout(
+        draw=draw,
+        bbox=bbox,
+        text=text,
+        original_text=item.original_text or text,
+        target_w=target_w,
+        target_h=target_h,
+    )
+    if layout is None:
+        return
+    mask = layout.mask
+    if abs(rotation_degrees) >= 1.0:
+        mask = self._rotate_mask(mask, -rotation_degrees)
+    mask_w, mask_h = mask.size
+    if abs(rotation_degrees) < 1.0:
+        tx = left + pad
+    else:
+        tx = int(round(center_x - mask_w / 2))
+    ty = int(round(center_y - mask_h / 2))
+    r, g, b = fill_rgb
+    luminance = (r * 299 + g * 587 + b * 114) / 1000
+    text_fill = (255, 255, 255) if luminance < 140 else (0, 0, 0)
+    image.paste(text_fill, (tx, ty), mask)
+
+def _resolve_text_layout(
+    self,
+    draw,
+    bbox: BoundingBox,
+    text: str,
+    original_text: str,
+    *,
+    target_w: int | None = None,
+    target_h: int | None = None,
+) -> _TextLayout | None:
+    """先锁定接近原文的基准字号，再按宽度优先适配 replacement 文本。"""
+    from PIL import ImageFont
+
+    pad = 2
+    target_w = target_w if target_w is not None else max(4, bbox.width - 2 * pad)
+    target_h = target_h if target_h is not None else max(4, bbox.height - 2 * pad)
+    font_path = _get_font_path(f"{original_text}{text}")
+    base_font_size = self._estimate_base_font_size(
+        draw=draw,
+        text=original_text or text,
+        font_path=font_path,
+        target_w=target_w,
+        target_h=target_h,
+    )
+    min_font_size = 6
+    current_size = max(base_font_size, min_font_size)
+    while current_size >= min_font_size:
+        font = self._load_font(font_path, current_size, ImageFont)
+        original_single_line = self._build_text_mask(draw, original_text or text, font)
+        desired_width = min(target_w, original_single_line.size[0])
+        for single_line, char_spacing in self._single_line_masks(
+            draw=draw,
+            text=text,
+            font=font,
+            desired_width=desired_width,
+        ):
+            exact_layout = self._layout_from_mask(
+                mask=single_line,
+                rendered_text=text,
+                font_size=current_size,
+                target_w=target_w,
+                target_h=target_h,
+                allow_x_scale=False,
+                allow_y_scale=False,
+                char_spacing=char_spacing,
+            )
+            if exact_layout is not None:
+                return exact_layout
+            compressed_single_line = self._layout_from_mask(
+                mask=single_line,
+                rendered_text=text,
+                font_size=current_size,
+                target_w=target_w,
+                target_h=target_h,
+                allow_x_scale=True,
+                allow_y_scale=False,
+                min_x_scale=0.72,
+                char_spacing=char_spacing,
+            )
+            if compressed_single_line is not None:
+                return compressed_single_line
+        wrapped_text = self._wrap_text_to_width(draw, text, font, target_w)
+        if wrapped_text != text:
+            wrapped_mask = self._build_text_mask(draw, wrapped_text, font)
+            wrapped_layout = self._layout_from_mask(
+                mask=wrapped_mask,
+                rendered_text=wrapped_text,
+                font_size=current_size,
+                target_w=target_w,
+                target_h=target_h,
+                allow_x_scale=False,
+                allow_y_scale=False,
+                char_spacing=0.0,
+            )
+            if wrapped_layout is not None:
+                return wrapped_layout
+            compressed_wrapped_layout = self._layout_from_mask(
+                mask=wrapped_mask,
+                rendered_text=wrapped_text,
+                font_size=current_size,
+                target_w=target_w,
+                target_h=target_h,
+                allow_x_scale=True,
+                allow_y_scale=False,
+                min_x_scale=0.72,
+                char_spacing=0.0,
+            )
+            if compressed_wrapped_layout is not None:
+                return compressed_wrapped_layout
+        current_size = max(min_font_size, current_size - 2)
+        if current_size == min_font_size:
+            break
+
+    final_font = self._load_font(font_path, min_font_size, ImageFont)
+    final_text = self._wrap_text_to_width(draw, text, final_font, target_w) or text
+    final_mask = self._build_text_mask(draw, final_text, final_font)
+    return self._layout_from_mask(
+        mask=final_mask,
+        rendered_text=final_text,
+        font_size=min_font_size,
+        target_w=target_w,
+        target_h=target_h,
+        allow_x_scale=True,
+        allow_y_scale=True,
+        min_x_scale=0.0,
+        min_y_scale=0.0,
+        char_spacing=0.0,
+    )
+
+def _estimate_base_font_size(
+    self,
+    draw,
+    text: str,
+    font_path: Path | None,
+    target_w: int | None,
+    target_h: int,
+) -> int:
+    """根据原 OCR 文本的视觉高宽反推一个接近原图的基准字号。"""
+    from PIL import ImageFont
+
+    sample_text = text or "Hg"
+    low = 6
+    high = max(12, target_h * 3)
+    best = low
+    while low <= high:
+        mid = (low + high) // 2
+        font = self._load_font(font_path, mid, ImageFont)
+        bbox_xy = self._measure_multiline_text(draw, sample_text, font)
+        text_w = bbox_xy[2] - bbox_xy[0]
+        text_h = bbox_xy[3] - bbox_xy[1]
+        fits_height = text_h <= target_h
+        fits_width = target_w is None or text_w <= target_w
+        if fits_height and fits_width:
+            best = mid
+            low = mid + 1
+        else:
+            high = mid - 1
+    return max(best, 6)
+
+def _load_font(self, font_path: Path | None, font_size: int, image_font_module):
+    """加载指定字号字体，失败时回退到默认字体。"""
+    try:
+        if font_path is not None:
+            return image_font_module.truetype(str(font_path), size=font_size)
+    except Exception:
+        pass
+    return image_font_module.load_default()
+
+def _single_line_masks(
+    self,
+    draw,
+    text: str,
+    font,
+    desired_width: int,
+) -> list[tuple[Any, float]]:
+    """生成单行文本候选；保持原始字距，不做人为字间拉伸。"""
+    natural_mask = self._build_text_mask(draw, text, font)
+    return [(natural_mask, 0.0)]
+
+def _estimate_char_spacing(self, text: str, natural_width: int, desired_width: int) -> float:
+    """估计单行文本的字符间距，使其更接近原文占宽。"""
+    if len(text) <= 1:
+        return 0.0
+    gap_count = len(text) - 1
+    average_char_width = max(1.0, natural_width / len(text))
+    target_spacing = (desired_width - natural_width) / gap_count
+    min_spacing = -average_char_width * 0.35
+    max_spacing = average_char_width * 0.9
+    return max(min_spacing, min(max_spacing, target_spacing))
+
+def _build_text_mask(self, draw, text: str, font, char_spacing: float = 0.0) -> Any:
+    """将文本离屏渲染成蒙版，用真实像素 bbox 参与布局与居中。"""
+    if "\n" not in text and abs(char_spacing) >= 0.01:
+        return self._build_spaced_single_line_mask(draw, text, font, char_spacing)
+    return self._build_default_text_mask(draw, text, font)
+
+def _build_default_text_mask(self, draw, text: str, font) -> Any:
+    """默认文本蒙版生成。"""
+    from PIL import Image, ImageDraw
+
+    bbox_xy = self._measure_multiline_text(draw, text, font)
+    width = max(1, bbox_xy[2] - bbox_xy[0])
+    height = max(1, bbox_xy[3] - bbox_xy[1])
+    mask = Image.new("L", (width, height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.multiline_text(
+        (-bbox_xy[0], -bbox_xy[1]),
+        text,
+        fill=255,
+        font=font,
+        spacing=0,
+        align="left",
+    )
+    return mask
+
+def _build_spaced_single_line_mask(self, draw, text: str, font, char_spacing: float) -> Any:
+    """按字符间距逐字离屏渲染单行文本。"""
+    from PIL import Image, ImageDraw
+
+    line_bbox = draw.textbbox((0, 0), text, font=font)
+    line_top = line_bbox[1]
+    line_bottom = line_bbox[3]
+    glyph_boxes: list[tuple[tuple[int, int, int, int], float]] = []
+    cursor_x = 0.0
+    min_left = 0.0
+    max_right = 0.0
+    for index, char in enumerate(text):
+        bbox_xy = draw.textbbox((0, 0), char, font=font)
+        glyph_boxes.append((bbox_xy, cursor_x))
+        min_left = min(min_left, cursor_x + bbox_xy[0])
+        max_right = max(max_right, cursor_x + bbox_xy[2])
+        advance = bbox_xy[2] - bbox_xy[0]
+        cursor_x += advance
+        if index < len(text) - 1:
+            cursor_x += char_spacing
+    width = max(1, int(math.ceil(max_right - min_left)))
+    height = max(1, int(math.ceil(line_bottom - line_top)))
+    mask = Image.new("L", (width, height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    for index, char in enumerate(text):
+        bbox_xy, glyph_x = glyph_boxes[index]
+        mask_draw.text(
+            (glyph_x - min_left - bbox_xy[0], -line_top),
+            char,
+            fill=255,
+            font=font,
+        )
+    return mask
+
+def _layout_from_mask(
+    self,
+    mask: Any,
+    rendered_text: str,
+    font_size: int,
+    target_w: int,
+    target_h: int,
+    *,
+    allow_x_scale: bool,
+    allow_y_scale: bool,
+    min_x_scale: float = 1.0,
+    min_y_scale: float = 1.0,
+    char_spacing: float = 0.0,
+) -> _TextLayout | None:
+    """把离屏蒙版适配到目标框内。"""
+    from PIL import Image
+
+    mask_w, mask_h = mask.size
+    if mask_w <= 0 or mask_h <= 0:
+        return None
+    scale_x = 1.0
+    scale_y = 1.0
+    if mask_w > target_w:
+        if not allow_x_scale:
+            return None
+        scale_x = target_w / mask_w
+        if scale_x < min_x_scale:
+            return None
+    if mask_h > target_h:
+        if not allow_y_scale:
+            return None
+        scale_y = target_h / mask_h
+        if scale_y < min_y_scale:
+            return None
+    if scale_x == 1.0 and scale_y == 1.0:
+        return _TextLayout(
+            mask=mask,
+            rendered_text=rendered_text,
+            font_size=font_size,
+            char_spacing=char_spacing,
+        )
+    resampling = getattr(Image, "Resampling", Image).LANCZOS
+    resized = mask.resize(
+        (
+            max(1, int(round(mask_w * scale_x))),
+            max(1, int(round(mask_h * scale_y))),
+        ),
+        resample=resampling,
+    )
+    return _TextLayout(
+        mask=resized,
+        rendered_text=rendered_text,
+        font_size=font_size,
+        char_spacing=char_spacing,
+        scale_x=scale_x,
+        scale_y=scale_y,
+    )
+
+def _text_region_geometry(
+    self,
+    item: _DrawItem,
+    *,
+    pad: int = 2,
+) -> tuple[float, float, int, int, float]:
+    """返回绘制中心点、文本区域宽高与旋转角度。"""
+    bbox = item.bbox
+    if item.polygon and len(item.polygon) >= 4:
+        points = [(point.x, point.y) for point in item.polygon]
+        center_x = sum(point[0] for point in points) / len(points)
+        center_y = sum(point[1] for point in points) / len(points)
+        top_width = self._distance(points[0], points[1])
+        bottom_width = self._distance(points[2], points[3])
+        left_height = self._distance(points[0], points[3])
+        right_height = self._distance(points[1], points[2])
+        target_w = max(4, int(round(max(1.0, (top_width + bottom_width) / 2 - 2 * pad))))
+        target_h = max(4, int(round(max(1.0, (left_height + right_height) / 2 - 2 * pad))))
+        rotation_degrees = item.rotation_degrees or self._polygon_rotation(item.polygon)
+        return center_x, center_y, target_w, target_h, rotation_degrees
+    center_x = bbox.x + bbox.width / 2
+    center_y = bbox.y + bbox.height / 2
+    target_w = max(4, bbox.width - 2 * pad)
+    target_h = max(4, bbox.height - 2 * pad)
+    return center_x, center_y, target_w, target_h, 0.0
+
+def _polygon_rotation(self, polygon: list[PolygonPoint]) -> float:
+    """根据 polygon 的顶部边估计视觉旋转角度。"""
+    if len(polygon) < 2:
+        return 0.0
+    for index in range(len(polygon)):
+        point_1 = polygon[index]
+        point_2 = polygon[(index + 1) % len(polygon)]
+        dx = point_2.x - point_1.x
+        dy = point_2.y - point_1.y
+        if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+            continue
+        return math.degrees(math.atan2(dy, dx))
+    return 0.0
+
+def _rotate_mask(self, mask: Any, angle_degrees: float) -> Any:
+    """旋转文本蒙版，使其与 OCR 多边形方向一致。"""
+    from PIL import Image
+
+    resampling = getattr(Image, "Resampling", Image).BICUBIC
+    return mask.rotate(angle_degrees, resample=resampling, expand=True)
+
+def _distance(self, point_1: tuple[float, float], point_2: tuple[float, float]) -> float:
+    """计算两点间距离。"""
+    return math.hypot(point_2[0] - point_1[0], point_2[1] - point_1[1])
+
+def _wrap_text_to_width(self, draw, text: str, font, target_w: int) -> str:
+    """按宽度将文本折成多行，优先保证不横向溢出。"""
+    paragraphs = text.splitlines() or [text]
+    wrapped_lines: list[str] = []
+    for paragraph in paragraphs:
+        if not paragraph:
+            wrapped_lines.append("")
+            continue
+        current = ""
+        for char in paragraph:
+            candidate = current + char
+            if current and self._text_width(draw, candidate, font) > target_w:
+                wrapped_lines.append(current)
+                current = char
+                continue
+            current = candidate
+        if current:
+            wrapped_lines.append(current)
+    return "\n".join(wrapped_lines)
+
+def _measure_multiline_text(self, draw, text: str, font) -> tuple[int, int, int, int]:
+    """测量多行文本的 bbox。"""
+    try:
+        return draw.multiline_textbbox((0, 0), text, font=font, spacing=0, align="left")
+    except Exception:
+        return draw.textbbox((0, 0), text, font=font)
+
+def _text_width(self, draw, text: str, font) -> int:
+    """测量单行文本宽度。"""
+    bbox_xy = draw.textbbox((0, 0), text, font=font)
+    return bbox_xy[2] - bbox_xy[0]

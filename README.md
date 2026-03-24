@@ -15,7 +15,7 @@ PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私
 | 截图脱敏 | 已支持 OCR + 局部重绘 + 多种填充策略 |
 | PII 检测 | 默认公开模式为 `rule_based` |
 | 决策模式 | `label_only`、`label_persona_mixed`、`de_model` |
-| `de_model` runtime | `heuristic` 可直接使用，`torch` 可加载 checkpoint，`bundle` 预留但未实现 |
+| `de_model` runtime | `torch` 可加载 checkpoint，`bundle` 预留但未实现 |
 | 训练链路 | 已有 supervised 数据导出、最小 finetune、torch runtime 回接 |
 
 ## 它适合做什么
@@ -42,7 +42,7 @@ PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私
 python -m pip install -e .
 ```
 
-默认 `decision_mode` 为 `de_model` 时，`PrivacyGuard` 初始化会**校验本机已安装 PyTorch**（即使使用 `heuristic` runtime、不加载 checkpoint）。若只装基础依赖且仍用默认决策模式，请安装 `'.[train]'`，或改用 `decision_mode="label_only"` / `"label_persona_mixed"`，或注入自定义 `decision_engine`。
+默认 `decision_mode` 现在是 `label_only`。若要使用 `de_model`，请安装 `'.[train]'` 并显式传入 `decision_config={"runtime_type": "torch", "checkpoint_path": ...}`；否则会在装配 `DEModelEngine` 时失败。
 
 开发依赖：
 
@@ -232,8 +232,8 @@ print(result["repository_path"])
 注意：
 
 - `de_model` 是策略决策层，不是 detector
-- 默认 runtime 是 `heuristic`
-- `torch` runtime 需要传入 `checkpoint_path`
+- 当前只支持 `torch` runtime
+- `torch` runtime 必须传入 `checkpoint_path`
 - `bundle` runtime 当前会直接抛出 `NotImplementedError`
 
 示例：
@@ -241,15 +241,6 @@ print(result["repository_path"])
 ```python
 from privacyguard import PrivacyGuard
 
-guard = PrivacyGuard(
-    decision_mode="de_model",
-    decision_config={"runtime_type": "heuristic"},
-)
-```
-
-使用 torch runtime：
-
-```python
 guard = PrivacyGuard(
     decision_mode="de_model",
     decision_config={
@@ -266,8 +257,8 @@ guard = PrivacyGuard(
 | 配置项 | 默认值 |
 | --- | --- |
 | `detector_mode` | `rule_based` |
-| `decision_mode` | `de_model` |
-| `de_model.runtime_type` | `heuristic` |
+| `decision_mode` | `label_only` |
+| `de_model.runtime_type` | `torch` |
 | `screenshot_fill_mode` | `mix` |
 | `mapping_table` | `InMemoryMappingStore` |
 | `ocr provider` | `ppocr_v5` |
@@ -355,7 +346,10 @@ from privacyguard.infrastructure.persona.json_persona_repository import JsonPers
 
 guard = PrivacyGuard(
     decision_mode="de_model",
-    decision_config={"runtime_type": "heuristic"},
+    decision_config={
+        "runtime_type": "torch",
+        "checkpoint_path": "artifacts/sft/tiny_policy_supervised.pt",
+    },
     mapping_table=JsonMappingStore(path="data/mapping_store.json"),
     persona_repo=JsonPersonaRepository(path="data/personas.sample.json"),
 )

@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
-
-PROTECT_LABEL_KEEP = "KEEP"
-PROTECT_LABEL_REWRITE = "REWRITE"
-REWRITE_MODE_NONE = "NONE"
-REWRITE_MODE_GENERICIZE = ActionType.GENERICIZE.value
-REWRITE_MODE_PERSONA_SLOT = ActionType.PERSONA_SLOT.value
+from privacyguard.domain.policies.action_labels import (
+    PROTECT_LABEL_KEEP,
+    PROTECT_LABEL_REWRITE,
+    REWRITE_MODE_GENERICIZE,
+    REWRITE_MODE_NONE,
+    REWRITE_MODE_PERSONA_SLOT,
+)
 
 
 @dataclass(slots=True)
@@ -86,12 +87,23 @@ class SupervisedTurnLabels:
 
             if provided_action is not None:
                 derived_protect, derived_rewrite = action_to_hierarchical_labels(provided_action)
+                if provided_protect is not None and provided_protect != derived_protect:
+                    raise ValueError(
+                        f"candidate_id={candidate_id} 的 protect_label 与 final_action 不一致: "
+                        f"{provided_protect} != {derived_protect}"
+                    )
+                if provided_rewrite is not None and provided_rewrite != derived_rewrite:
+                    raise ValueError(
+                        f"candidate_id={candidate_id} 的 rewrite_mode 与 final_action 不一致: "
+                        f"{provided_rewrite} != {derived_rewrite}"
+                    )
+                protect_label = derived_protect
+                rewrite_mode = derived_rewrite
+                final_action = provided_action
             else:
-                derived_protect, derived_rewrite = (PROTECT_LABEL_KEEP, REWRITE_MODE_NONE)
-
-            protect_label = provided_protect or derived_protect
-            rewrite_mode = provided_rewrite or derived_rewrite
-            final_action = provided_action or hierarchical_labels_to_action(protect_label, rewrite_mode)
+                protect_label = provided_protect
+                rewrite_mode = provided_rewrite
+                final_action = hierarchical_labels_to_action(protect_label, rewrite_mode)
 
             protect_labels[candidate_id] = protect_label
             rewrite_modes[candidate_id] = rewrite_mode
@@ -147,40 +159,51 @@ class TrainingEpisode:
 
 
 def normalize_action_type(action: ActionType | str | None) -> ActionType:
-    """归一化训练侧动作名，并兼容旧别名 `LABEL -> GENERICIZE`。"""
+    """归一化训练侧动作名；非法值直接报错。"""
     if isinstance(action, ActionType):
         return action
     normalized = str(action or "").strip().upper()
+    if not normalized:
+        raise ValueError("action_type 不能为空。")
     aliases = {
         "KEEP": ActionType.KEEP,
         "GENERICIZE": ActionType.GENERICIZE,
         "PERSONA_SLOT": ActionType.PERSONA_SLOT,
     }
-    return aliases.get(normalized, ActionType.KEEP)
+    if normalized in aliases:
+        return aliases[normalized]
+    raise ValueError(f"非法训练动作名: {action!r}")
 
 
 def normalize_protect_label(label: str | None) -> str | None:
     """归一化 protect 标签。"""
     normalized = str(label or "").strip().upper()
+    if not normalized:
+        return None
     if normalized in {PROTECT_LABEL_KEEP, PROTECT_LABEL_REWRITE}:
         return normalized
-    return None
+    raise ValueError(f"非法 protect_label: {label!r}")
 
 
 def normalize_rewrite_mode(mode: str | None) -> str | None:
-    """归一化 rewrite_mode 标签，并兼容旧别名 `LABEL`。"""
+    """归一化 rewrite_mode 标签；非法值直接报错。"""
     normalized = str(mode or "").strip().upper()
+    if not normalized:
+        return None
     aliases = {
-        "": None,
         REWRITE_MODE_NONE: REWRITE_MODE_NONE,
         "GENERICIZE": REWRITE_MODE_GENERICIZE,
         "PERSONA_SLOT": REWRITE_MODE_PERSONA_SLOT,
     }
-    return aliases.get(normalized)
+    if normalized in aliases:
+        return aliases[normalized]
+    raise ValueError(f"非法 rewrite_mode: {mode!r}")
 
 
 def action_to_hierarchical_labels(action: ActionType | str | None) -> tuple[str, str]:
     """把单层 final_action 拆成 protect_label + rewrite_mode。"""
+    if action is None:
+        raise ValueError("final_action 不能为空。")
     normalized_action = normalize_action_type(action)
     if normalized_action == ActionType.KEEP:
         return (PROTECT_LABEL_KEEP, REWRITE_MODE_NONE)
@@ -191,10 +214,25 @@ def action_to_hierarchical_labels(action: ActionType | str | None) -> tuple[str,
 
 def hierarchical_labels_to_action(protect_label: str | None, rewrite_mode: str | None) -> ActionType:
     """把层级标签合成为单层 final_action。"""
-    normalized_protect = normalize_protect_label(protect_label) or PROTECT_LABEL_KEEP
-    normalized_rewrite = normalize_rewrite_mode(rewrite_mode) or REWRITE_MODE_NONE
+    normalized_protect = normalize_protect_label(protect_label)
+    normalized_rewrite = normalize_rewrite_mode(rewrite_mode)
+    if normalized_protect is None:
+        if normalized_rewrite is None:
+            raise ValueError("protect_label 和 rewrite_mode 不能同时缺失。")
+        normalized_protect = (
+            PROTECT_LABEL_KEEP if normalized_rewrite == REWRITE_MODE_NONE else PROTECT_LABEL_REWRITE
+        )
+    if normalized_rewrite is None:
+        if normalized_protect == PROTECT_LABEL_KEEP:
+            normalized_rewrite = REWRITE_MODE_NONE
+        else:
+            raise ValueError("REWRITE 动作必须提供 rewrite_mode。")
     if normalized_protect == PROTECT_LABEL_KEEP:
+        if normalized_rewrite != REWRITE_MODE_NONE:
+            raise ValueError("KEEP 不允许非 NONE 的 rewrite_mode。")
         return ActionType.KEEP
+    if normalized_rewrite == REWRITE_MODE_NONE:
+        raise ValueError("REWRITE 动作不能使用 NONE rewrite_mode。")
     if normalized_rewrite == REWRITE_MODE_PERSONA_SLOT:
         return ActionType.PERSONA_SLOT
     return ActionType.GENERICIZE
