@@ -29,8 +29,8 @@ train = [
 # - Linux: GPU 版 paddlepaddle-gpu
 ocr = [
     "paddleocr==3.4.0",
-    "paddlepaddle==3.3.0; platform_system == 'Windows'",
-    "paddlepaddle-gpu==3.3.0; platform_system == 'Linux'",
+    "paddlepaddle==3.2.2; platform_system == 'Windows'",
+    "paddlepaddle-gpu==3.2.2; platform_system == 'Linux'",
 ]
 
 [tool.setuptools.packages.find]

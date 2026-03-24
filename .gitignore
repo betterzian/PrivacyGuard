@@ -186,3 +186,83 @@ data/privacy_repository.json
 
 # Local git worktrees
 .worktrees/
+
+# --- PrivacyGuard：本地生成物、训练产物与环境临时（勿提交） ---
+artifacts/
+outputs/
+runs/
+logs/
+wandb/
+mlruns/
+lightning_logs/
+tensorboard/
+.pytest_tmp/
+benchmark_results/
+
+# 大型模型检查点与导出（若需入库小体积示例，可用具体路径 ! 反向包含）
+*.pt
+*.pth
+*.ptc
+*.ckpt
+*.safetensors
+*.onnx
+*.tflite
+*.ort
+*.engine
+
+# 通用临时 / 备份
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+*.swp
+*.swo
+.#*
+
+# 操作系统与资源管理器
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# 本地草稿、沙箱与一次性调试脚本目录（按需创建）
+scratch/
+playground/
+.local/
+
+# 工具与编辑器（本地配置；避免把工作区隐私路径提交上去）
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/tasks.json
+.vs/
+*.sublime-workspace
+.VSCodeCounter/
+
+# --- AI 编码助手 / CLI：本地状态、缓存与会话（Codex、Claude Code、Trae 等；勿提交） ---
+# Anthropic Claude Code
+.claude/
+# OpenAI Codex（项目级配置与缓存；不含仓库根目录里你主动维护的说明文档）
+.codex/
+# Trae 等同类工具常见项目目录
+.trae/
+.traeide/
+# 其他常见 AI IDE / 插件本地数据
+.windsurf/
+.continue/
+.aider*
+.kilocode/
+.qoder/
+# Google Gemini CLI、Amazon Q Developer 等项目级目录（若存在）
+.gemini/
+.amazonq/
+# 部分工具产生的本地会话/导出（通配，可按需收窄）
+*.aider.input.history
+**/agent-transcripts/
+
+# 可选：本地脚本或小工具（取消注释即可生效）
+# local_*.py
+# _scratch*.py

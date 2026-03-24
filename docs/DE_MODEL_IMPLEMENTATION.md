@@ -52,10 +52,8 @@ OCR / prompt parse
 -> alias / session context preparation
 -> local context / quality / persona state preparation
 -> DecisionContextBuilder
--> DecisionFeatureExtractor
--> DEModelEngine / runtime
--> ConstraintResolver
--> placeholder allocation / replacement planning
+-> decision_engine.plan（`de_model` 时在内部：DecisionFeatureExtractor → runtime）
+-> apply_post_decision_steps：ConstraintResolver → ReplacementGenerationService（占位与 replacement_text）
 -> render
 -> mapping store
 ```
@@ -64,13 +62,16 @@ OCR / prompt parse
 
 - `sanitize_pipeline.py` 负责 application 层编排
 - `DecisionContextBuilder` 负责收敛正式策略上下文
-- `DecisionFeatureExtractor` 负责把上下文映射为轻量特征
-- `DEModelEngine` 负责驱动 runtime 并输出动作计划
-- `ConstraintResolver` 负责当前默认引擎路径中的动作合法性收敛
-- `SessionPlaceholderAllocator` 负责为 `GENERICIZE` 分配 session-stable placeholder
+- `DecisionFeatureExtractor` 与 de_model runtime **封装在** `DEModelEngine.plan` 内（非编排层独立函数）
+- `DEModelEngine`（及其他 `DecisionEngine`）负责输出**抽象** `DecisionPlan`
+- `ConstraintResolver`、`SessionPlaceholderAllocator` 与 persona/generic 文案补全在 `apply_post_decision_steps` 中顺序执行
 - `render + mapping store` 负责执行与闭环
 
 说明：`DecisionFeatureExtractor` → de_model runtime → `ConstraintResolver` 这一细链**仅**在 `decision_mode="de_model"`（`DEModelEngine`）内发生。`label_only` 与 `label_persona_mixed` 同样消费 `DecisionContext` 并调用各自的 `ConstraintResolver`，但不经过 `DecisionFeatureExtractor` 与 `TinyPolicyRuntime` / `TorchTinyPolicyRuntime`。
+
+`sanitize_pipeline.py` 注释里的阶段 6–7（特征提取与 de_model runtime）在代码中**并入** `decision_engine.plan(...)`：仅当引擎为 `DEModelEngine` 时，才在 `plan` 内部调用 `DecisionFeatureExtractor.pack` 与具体 runtime；编排层没有单独的公开步骤函数。
+
+**默认 `PrivacyGuard` 与 torch：** `privacyguard/app/privacy_guard.py` 在默认 `decision_mode="de_model"` 且未注入 `decision_engine` 时，会在初始化阶段 **`import torch`**；若环境中未安装 PyTorch，会直接报错（与 `decision_config` 里 `runtime_type="heuristic"` 仍可不加载 checkpoint 无关——校验发生在装配决策引擎之前）。不需要 torch 的用法包括：使用 `label_only` / `label_persona_mixed`，或自行注入不依赖 torch 的 `decision_engine`。
 
 ### 2.3 正式运行时上下文：`DecisionContext` 与派生策略视图
 
@@ -289,14 +290,14 @@ runtime 不负责：
 
 `DEModelEngine` 是当前 de_model 的执行骨架。
 
-当前默认逻辑是：
+当前 `plan(...)` 内逻辑是：
 
 1. 接收 `DecisionContext`
 2. 调用 `DecisionFeatureExtractor.pack(...)`
 3. 调用 runtime
-4. 将 runtime 输出映射为 `DecisionAction`
-5. 调用 `ConstraintResolver`
-6. 产出最终 `DecisionPlan`
+4. 将 runtime 输出映射为 `DecisionAction` 列表并封装为 `DecisionPlan`
+
+`ConstraintResolver`**不在** `DEModelEngine.plan` 内调用；它在 sanitize 编排的 `apply_post_decision_steps`（`privacyguard/application/services/replacement_generation.py`）中、于 **任意** `decision_engine.plan(...)` 返回之后统一执行，再进入占位分配与 `replacement_text` 补全。
 
 `DEModelEngine` 不直接承担 builder 逻辑。  
 builder 在 sanitize pipeline 中先完成，engine 消费的是已经准备好的统一上下文。

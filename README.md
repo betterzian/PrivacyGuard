@@ -34,36 +34,38 @@ PrivacyGuard 是一个面向 GUI Agent / 手机智能助手场景的端侧隐私
 
 要求：
 
-- Python `>=3.11`
+- Python `>=3.12,<3.13`（与 `pyproject.toml` 中 `requires-python` 一致）
 
 基础安装：
 
 ```bash
-python3 -m pip install -e .
+python -m pip install -e .
 ```
+
+默认 `decision_mode` 为 `de_model` 时，`PrivacyGuard` 初始化会**校验本机已安装 PyTorch**（即使使用 `heuristic` runtime、不加载 checkpoint）。若只装基础依赖且仍用默认决策模式，请安装 `'.[train]'`，或改用 `decision_mode="label_only"` / `"label_persona_mixed"`，或注入自定义 `decision_engine`。
 
 开发依赖：
 
 ```bash
-python3 -m pip install -e '.[dev]'
+python -m pip install -e '.[dev]'
 ```
 
 截图 OCR 依赖：
 
 ```bash
-python3 -m pip install -e '.[ocr]'
+python -m pip install -e '.[ocr]'
 ```
 
 训练依赖：
 
 ```bash
-python3 -m pip install -e '.[train]'
+python -m pip install -e '.[train]'
 ```
 
 一次装齐常用依赖：
 
 ```bash
-python3 -m pip install -e '.[dev,ocr,train]'
+python -m pip install -e '.[dev,ocr,train]'
 ```
 
 ## 快速开始
@@ -102,12 +104,6 @@ print(restore_resp["restored_text"])
 ```text
 我叫<姓名1>，电话是<手机号1>。
 我叫张三，电话是13800138000。
-```
-
-也可以直接运行现成脚本：
-
-```bash
-python3 examples/minimal_demo.py
 ```
 
 ## 处理截图
@@ -292,13 +288,7 @@ guard = PrivacyGuard(
 - `protection_level: "weak" | "balanced" | "strong" = "balanced"`
 - `detector_overrides: dict | None`
 
-`detector_overrides` 当前只允许覆盖：
-
-- `name`
-- `location_clue`
-- `address`
-- `organization`
-- `other`
+`detector_overrides` 当前在载荷中可写：`name`、`location_clue`、`address`、`organization`、`other`。其中 **`rule_based` 检测器实际只合并** `name`、`address`、`organization`、`other` 四类阈值（见 `DETECTOR_SCORING.md` 第 10 节）；`location_clue` 字段目前不会影响 detector。
 
 返回字段：
 
@@ -471,7 +461,7 @@ PrivacyGuard/
 ├─ tests/
 ├─ docs/
 ├─ data/
-└─ examples/
+└─ examples/                # 可按需添加演示脚本；仓库内联示例见上文
 ```
 
 ## 推荐阅读
@@ -484,17 +474,10 @@ PrivacyGuard/
 
 文档：
 
-- [`docs/REQUEST_FLOW.md`](docs/REQUEST_FLOW.md)
 - [`docs/DETECTOR_SCORING.md`](docs/DETECTOR_SCORING.md)
 - [`docs/DE_MODEL_IMPLEMENTATION.md`](docs/DE_MODEL_IMPLEMENTATION.md)
 - [`docs/DE_MODEL_TRAINING_LAYOUT.md`](docs/DE_MODEL_TRAINING_LAYOUT.md)
-
-示例：
-
-- [`examples/minimal_demo.py`](examples/minimal_demo.py)
-- [`examples/run_server_ocr_label_persona_mixed.py`](examples/run_server_ocr_label_persona_mixed.py)
-- [`examples/profile_sanitize_modes.py`](examples/profile_sanitize_modes.py)
-- [`examples/paddleocr_import_demo.py`](examples/paddleocr_import_demo.py)
+- [`training/README.md`](training/README.md)
 
 ## 当前限制
 

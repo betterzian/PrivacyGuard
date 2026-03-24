@@ -521,16 +521,18 @@ max(0.4, parent_confidence - 0.08)
 
 当前外部 override 能调的主要是**按属性的最低保留阈值**，不是每条规则的基础分。
 
-当前允许 override 的类型只有：
+`RuleBasedPIIDetector._normalize_confidence_overrides` 只会把阈值写进 `min_confidence_by_attr`，且 **仅接受** 内部集合 `_TUNABLE_RULE_ATTR_TYPES`：
 
 - `NAME`
 - `ADDRESS`
 - `ORGANIZATION`
 - `OTHER`
 
+公开 sanitize 载荷里 `detector_overrides` 的 Pydantic 模型（`DetectorOverridesModel`）还包含 `location_clue` 字段，但 **当前不会进入上述可调集合**，因此对 `rule_based` detector 的阈值**不生效**（除非后续扩展 `_TUNABLE_RULE_ATTR_TYPES` 与合并逻辑）。
+
 也就是说：
 
-- 你可以改“这类候选最低多少分才保留”
+- 你可以改“这几类候选最低多少分才保留”（通过 API 映射为上述四种属性类型）
 - 不能直接从外部把 `regex_phone_mobile` 的基础分从 `0.86` 改成 `0.91`
 
 如果要改变单条规则分值，当前需要直接改 detector 代码。

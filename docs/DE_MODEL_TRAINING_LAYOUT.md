@@ -333,15 +333,24 @@ candidate 级最终动作标签，当前作为：
 
 ### 8.1 runtime 到训练
 
+推理侧（sanitize，且 `decision_mode="de_model"`）：
+
 ```text
 DecisionContext
--> DecisionFeatureExtractor
--> DecisionPlan
--> runtime_bridge / dataset export
+-> DEModelEngine.plan（内部 DecisionFeatureExtractor.pack + runtime）
+-> DecisionPlan（抽象动作）
+-> apply_post_decision_steps（ConstraintResolver + 占位与替换生成）
+```
+
+训练数据与 finetune（离线）：
+
+```text
+（DecisionContext, 金标 DecisionPlan 或等价标签）
+-> build_supervised_jsonl_dataset / runtime_bridge
 -> supervised JSONL
 -> TinyPolicyNet finetune
 -> checkpoint
--> TorchTinyPolicyRuntime
+-> TorchTinyPolicyRuntime（可选回接）
 ```
 
 ### 8.2 监督训练的实际边界
@@ -381,10 +390,14 @@ supervised JSONL
 
 当前文档和代码的直接对应关系如下：
 
-- `DecisionContext`：`privacyguard/application/services/decision_context_builder.py`
+- `DecisionContext`（领域模型）：`privacyguard/domain/models/decision_context.py`
+- `DecisionContextBuilder`（组装器）：`privacyguard/application/services/decision_context_builder.py`
+- 策略视图派生：`privacyguard/infrastructure/decision/policy_context.py`
 - 特征映射：`privacyguard/infrastructure/decision/features.py`
 - runtime 协议：`privacyguard/infrastructure/decision/de_model_runtime.py`
+- 决策引擎：`privacyguard/infrastructure/decision/de_model_engine.py`
 - 网络头：`privacyguard/infrastructure/decision/tiny_policy_net.py`
+- 默认模式常量：`privacyguard/bootstrap/mode_config.py`
 - 训练标签：`training/types.py`
 - batch 组织：`training/torch_batch.py`
 - 数据导出：`training/pipelines/build_dataset.py`
