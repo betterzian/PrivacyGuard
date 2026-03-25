@@ -189,6 +189,7 @@ data/privacy_repository.json
 
 # --- PrivacyGuard：本地生成物、训练产物与环境临时（勿提交） ---
 artifacts/
+tests/.artifacts/
 outputs/
 runs/
 logs/
