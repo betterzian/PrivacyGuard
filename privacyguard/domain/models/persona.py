@@ -17,6 +17,6 @@ class PersonaProfile(BaseModel):
 
     persona_id: str
     display_name: str
-    slots: dict[PIIAttributeType, str] = Field(default_factory=dict)
+    slots: dict[PIIAttributeType, list[str]] = Field(default_factory=dict)
     metadata: dict[str, str] = Field(default_factory=dict)
     stats: dict[str, int | str | None] = Field(default_factory=dict)

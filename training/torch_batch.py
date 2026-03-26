@@ -404,15 +404,26 @@ class TinyPolicyBatchBuilder:
         slots = state.get("_slots", {})
         if not isinstance(slots, dict):
             slots = {}
-        slot_text = " ".join(str(value) for value in slots.values())
+        slot_text = self._flatten_slot_values(slots)
         if not display_name:
             persona_id = str(state.get("persona_id", "")).strip()
             for persona in context.persona_profiles:
                 if persona.persona_id == persona_id:
                     display_name = persona.display_name
-                    slot_text = " ".join(str(value) for value in persona.slots.values())
+                    slot_text = self._flatten_slot_values(persona.slots)
                     break
         return f"{display_name} {slot_text}".strip()
+
+    def _flatten_slot_values(self, slots: dict[object, object]) -> str:
+        fragments: list[str] = []
+        for value in slots.values():
+            if isinstance(value, list):
+                fragments.extend(str(item).strip() for item in value if str(item).strip())
+                continue
+            text = str(value).strip()
+            if text:
+                fragments.append(text)
+        return " ".join(fragments)
 
     def _validate_capacity(self, *, candidate_count: int, persona_count: int, subject: str) -> None:
         if candidate_count > self.max_candidates:

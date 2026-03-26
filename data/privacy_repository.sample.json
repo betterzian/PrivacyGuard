@@ -1,53 +1,367 @@
 {
   "true_personas": [
     {
-      "persona_id": "sample_primary",
-      "display_name": "示例主档案",
+      "persona_id": "sample_true_zh",
+      "display_name": "中文真实档案示例",
       "slots": {
-        "name": {
-          "value": "张三",
-          "aliases": [
-            "李四"
-          ]
-        },
-        "phone": {
-          "value": "13800138000",
-          "aliases": []
-        },
-        "card_number": {
-          "value": "6222021001112223334",
-          "aliases": []
-        },
-        "bank_account": {
-          "value": "6217000012345678901",
-          "aliases": []
-        },
-        "passport_number": {
-          "value": "E12345678",
-          "aliases": []
-        },
-        "driver_license": {
-          "value": "110101199001011234",
-          "aliases": []
-        },
-        "email": {
-          "value": "demo@example.com",
-          "aliases": []
-        },
-        "address": {
-          "street": {
-            "value": "北京市海淀区知春路88号",
+        "name": [
+          {
+            "value": "林样本",
+            "aliases": [
+              "林示例"
+            ]
+          }
+        ],
+        "location_clue": [
+          {
+            "value": "样本校区",
+            "aliases": [
+              "样本园"
+            ]
+          },
+          {
+            "value": "演示街区",
+            "aliases": [
+              "演示广场"
+            ]
+          }
+        ],
+        "phone": [
+          {
+            "value": "13800000001",
+            "aliases": []
+          },
+          {
+            "value": "13800000002",
             "aliases": []
           }
-        },
-        "id_number": {
-          "value": "110101199001011234",
-          "aliases": []
-        },
-        "organization": {
-          "value": "星海数据科技有限公司",
-          "aliases": []
-        }
+        ],
+        "card_number": [
+          {
+            "value": "4000000000000002",
+            "aliases": []
+          },
+          {
+            "value": "4000000000009995",
+            "aliases": []
+          }
+        ],
+        "bank_account": [
+          {
+            "value": "0005678900003001",
+            "aliases": []
+          },
+          {
+            "value": "0005678900003002",
+            "aliases": []
+          }
+        ],
+        "passport_number": [
+          {
+            "value": "E00030001",
+            "aliases": []
+          },
+          {
+            "value": "E00030002",
+            "aliases": []
+          }
+        ],
+        "driver_license": [
+          {
+            "value": "DL-ZH-0003-A",
+            "aliases": []
+          },
+          {
+            "value": "DL-ZH-0003-B",
+            "aliases": []
+          }
+        ],
+        "email": [
+          {
+            "value": "lin.sample@example.com",
+            "aliases": []
+          },
+          {
+            "value": "lin.sample@example.org",
+            "aliases": []
+          }
+        ],
+        "address": [
+          {
+            "country": {
+              "value": "中国",
+              "aliases": [
+                "中国大陆"
+              ]
+            },
+            "province": {
+              "value": "江苏省",
+              "aliases": [
+                "江苏"
+              ]
+            },
+            "city": {
+              "value": "南京市",
+              "aliases": [
+                "南京"
+              ]
+            },
+            "district": {
+              "value": "建邺区",
+              "aliases": []
+            },
+            "street": {
+              "value": "样本路18号",
+              "aliases": [
+                "样本路"
+              ]
+            },
+            "building": {
+              "value": "2号楼",
+              "aliases": [
+                "二号楼"
+              ]
+            },
+            "room": {
+              "value": "301室",
+              "aliases": [
+                "301"
+              ]
+            }
+          },
+          {
+            "country": {
+              "value": "中国",
+              "aliases": [
+                "中国大陆"
+              ]
+            },
+            "province": {
+              "value": "江苏省",
+              "aliases": [
+                "江苏"
+              ]
+            },
+            "city": {
+              "value": "南京市",
+              "aliases": [
+                "南京"
+              ]
+            },
+            "district": {
+              "value": "雨花台区",
+              "aliases": []
+            },
+            "street": {
+              "value": "演示大道66号",
+              "aliases": [
+                "演示大道"
+              ]
+            },
+            "building": {
+              "value": "研发楼",
+              "aliases": []
+            },
+            "room": {
+              "value": "908室",
+              "aliases": [
+                "908"
+              ]
+            }
+          }
+        ],
+        "id_number": [
+          {
+            "value": "ID-ZH-SAMPLE-0003",
+            "aliases": []
+          }
+        ],
+        "organization": [
+          {
+            "value": "样本数联技术（演示）",
+            "aliases": [
+              "样本数联"
+            ]
+          }
+        ]
+      },
+      "metadata": {
+        "locale": "zh_cn",
+        "repository_kind": "synthetic_sample"
+      }
+    },
+    {
+      "persona_id": "sample_true_en",
+      "display_name": "English True Sample",
+      "slots": {
+        "name": [
+          {
+            "value": "Jordan Demo",
+            "aliases": [
+              "J. Demo"
+            ]
+          }
+        ],
+        "location_clue": [
+          {
+            "value": "Demo Campus",
+            "aliases": [
+              "Campus West"
+            ]
+          },
+          {
+            "value": "Sample Market",
+            "aliases": [
+              "Market Block"
+            ]
+          }
+        ],
+        "phone": [
+          {
+            "value": "2025550111",
+            "aliases": []
+          },
+          {
+            "value": "2025550112",
+            "aliases": []
+          }
+        ],
+        "card_number": [
+          {
+            "value": "6011111111111117",
+            "aliases": []
+          },
+          {
+            "value": "3530111333300000",
+            "aliases": []
+          }
+        ],
+        "bank_account": [
+          {
+            "value": "0006543200004001",
+            "aliases": []
+          },
+          {
+            "value": "0006543200004002",
+            "aliases": []
+          }
+        ],
+        "passport_number": [
+          {
+            "value": "P00040001",
+            "aliases": []
+          },
+          {
+            "value": "P00040002",
+            "aliases": []
+          }
+        ],
+        "driver_license": [
+          {
+            "value": "DL-EN-0004-A",
+            "aliases": []
+          },
+          {
+            "value": "DL-EN-0004-B",
+            "aliases": []
+          }
+        ],
+        "email": [
+          {
+            "value": "jordan.demo@example.com",
+            "aliases": []
+          },
+          {
+            "value": "jordan.demo@example.net",
+            "aliases": []
+          }
+        ],
+        "address": [
+          {
+            "country": {
+              "value": "United States",
+              "aliases": [
+                "USA"
+              ]
+            },
+            "province": {
+              "value": "WA",
+              "aliases": [
+                "Washington"
+              ]
+            },
+            "city": {
+              "value": "Seattle",
+              "aliases": []
+            },
+            "street": {
+              "value": "410 Sample St",
+              "aliases": [
+                "Sample Street"
+              ]
+            },
+            "building": {
+              "value": "Unit 5A",
+              "aliases": []
+            },
+            "postal_code": {
+              "value": "98101",
+              "aliases": []
+            }
+          },
+          {
+            "country": {
+              "value": "United States",
+              "aliases": [
+                "USA"
+              ]
+            },
+            "province": {
+              "value": "WA",
+              "aliases": [
+                "Washington"
+              ]
+            },
+            "city": {
+              "value": "Seattle",
+              "aliases": []
+            },
+            "street": {
+              "value": "900 Demo Blvd",
+              "aliases": [
+                "Demo Boulevard"
+              ]
+            },
+            "building": {
+              "value": "Suite 480",
+              "aliases": [
+                "Ste 480"
+              ]
+            },
+            "postal_code": {
+              "value": "98104",
+              "aliases": []
+            }
+          }
+        ],
+        "id_number": [
+          {
+            "value": "ID-EN-SAMPLE-0004",
+            "aliases": []
+          }
+        ],
+        "organization": [
+          {
+            "value": "Cedar Demo Systems",
+            "aliases": [
+              "Cedar Demo"
+            ]
+          }
+        ]
+      },
+      "metadata": {
+        "locale": "en_us",
+        "repository_kind": "synthetic_sample"
       }
     }
   ]

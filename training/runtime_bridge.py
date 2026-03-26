@@ -13,6 +13,18 @@ from privacyguard.infrastructure.decision.policy_context import (
 from training.types import RenderedTurnObservation, SupervisedTurnLabels, TrainingTurnExample
 
 
+def _flatten_slot_values(slots: dict[object, object]) -> str:
+    fragments: list[str] = []
+    for value in slots.values():
+        if isinstance(value, list):
+            fragments.extend(str(item).strip() for item in value if str(item).strip())
+            continue
+        text = str(value).strip()
+        if text:
+            fragments.append(text)
+    return " ".join(fragments)
+
+
 def pack_training_turn(
     context: DecisionContext,
     extractor: DecisionFeatureExtractor | None = None,
@@ -91,12 +103,12 @@ def _persona_text(context: DecisionContext, state: dict[str, object]) -> str:
     slots = state.get("_slots", {})
     if not isinstance(slots, dict):
         slots = {}
-    slot_text = " ".join(str(value) for value in slots.values())
+    slot_text = _flatten_slot_values(slots)
     if not display_name:
         persona_id = str(state.get("persona_id", "")).strip()
         for persona in context.persona_profiles:
             if persona.persona_id == persona_id:
                 display_name = persona.display_name
-                slot_text = " ".join(str(value) for value in persona.slots.values())
+                slot_text = _flatten_slot_values(persona.slots)
                 break
     return f"{display_name} {slot_text}".strip()

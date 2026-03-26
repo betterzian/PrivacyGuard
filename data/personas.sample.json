@@ -1,157 +1,381 @@
 {
   "fake_personas": [
     {
-      "persona_id": "zhangsan",
+      "persona_id": "sample_zh_profile",
+      "display_name": "中文示例档案",
       "slots": {
-        "name": {
-          "value": "张三",
-          "aliases": ["张二麻子", "张三三"]
-        },
-        "phone": {
-          "value": "13900001111",
-          "aliases": ["13900001112", "13900001113"]
-        },
-        "card_number": {
-          "value": "4111111111111111",
-          "aliases": ["4111111111111112", "4111111111111113"]
-        },
-        "bank_account": {
-          "value": "6222020202020202020",
-          "aliases": ["6222020202020202021", "6222020202020202022"]
-        },
-        "passport_number": {
-          "value": "E12345678",
-          "aliases": ["E12345679", "E12345680"]
-        },
-        "driver_license": {
-          "value": "310101199001011234",
-          "aliases": ["310101199001011235", "310101199001011236"]
-        },
-        "email": {
-          "value": "zhangsan@example.com",
-          "aliases": ["zhangsan@example.com.cn", "zhangsan@example.com.hk"]
-        },
-        "id_number": {
-          "value": "310101199001011234",
-          "aliases": []
-        },
-        "organization": {
-          "value": "星海数科有限公司",
-          "aliases": ["星海数科", "星海科技"]
-        },
-        "address": {
-          "country": {
-            "value": "中国",
-            "aliases": ["中国大陆"]
-          },
-          "province": {
-            "value": "上海市",
-            "aliases": ["上海"]
-          },
-          "city": {
-            "value": "上海市",
-            "aliases": ["上海"]
-          },
-          "district": {
-            "value": "浦东新区",
-            "aliases": ["浦东"]
-          },
-          "street": {
-            "value": "世纪大道100号",
-            "aliases": ["世纪大道"]
-          },
-          "building": {
-            "value": "1号楼",
-            "aliases": ["一号楼"]
-          },
-          "room": {
-            "value": "101室",
-            "aliases": ["101"]
+        "name": [
+          {
+            "value": "陈示例",
+            "aliases": [
+              "陈样本"
+            ]
           }
-        }
+        ],
+        "location_clue": [
+          {
+            "value": "样例园区",
+            "aliases": [
+              "样例科技园"
+            ]
+          },
+          {
+            "value": "测试商圈",
+            "aliases": [
+              "测试广场"
+            ]
+          }
+        ],
+        "phone": [
+          {
+            "value": "13900000001",
+            "aliases": []
+          },
+          {
+            "value": "13900000002",
+            "aliases": []
+          }
+        ],
+        "card_number": [
+          {
+            "value": "4111111111111111",
+            "aliases": []
+          },
+          {
+            "value": "4242424242424242",
+            "aliases": []
+          }
+        ],
+        "bank_account": [
+          {
+            "value": "0001234500001001",
+            "aliases": []
+          },
+          {
+            "value": "0001234500001002",
+            "aliases": []
+          }
+        ],
+        "passport_number": [
+          {
+            "value": "E00010001",
+            "aliases": []
+          },
+          {
+            "value": "E00010002",
+            "aliases": []
+          }
+        ],
+        "driver_license": [
+          {
+            "value": "DL-ZH-0001-A",
+            "aliases": []
+          },
+          {
+            "value": "DL-ZH-0001-B",
+            "aliases": []
+          }
+        ],
+        "email": [
+          {
+            "value": "chen.sample@example.com",
+            "aliases": []
+          },
+          {
+            "value": "chen.sample@example.org",
+            "aliases": []
+          }
+        ],
+        "address": [
+          {
+            "country": {
+              "value": "中国",
+              "aliases": [
+                "中国大陆"
+              ]
+            },
+            "province": {
+              "value": "浙江省",
+              "aliases": [
+                "浙江"
+              ]
+            },
+            "city": {
+              "value": "杭州市",
+              "aliases": [
+                "杭州"
+              ]
+            },
+            "district": {
+              "value": "西湖区",
+              "aliases": []
+            },
+            "street": {
+              "value": "样例路88号",
+              "aliases": [
+                "样例路"
+              ]
+            },
+            "building": {
+              "value": "3号楼",
+              "aliases": [
+                "三号楼"
+              ]
+            },
+            "room": {
+              "value": "502室",
+              "aliases": [
+                "502"
+              ]
+            }
+          },
+          {
+            "country": {
+              "value": "中国",
+              "aliases": [
+                "中国大陆"
+              ]
+            },
+            "province": {
+              "value": "浙江省",
+              "aliases": [
+                "浙江"
+              ]
+            },
+            "city": {
+              "value": "杭州市",
+              "aliases": [
+                "杭州"
+              ]
+            },
+            "district": {
+              "value": "西湖区",
+              "aliases": []
+            },
+            "street": {
+              "value": "测试大道168号",
+              "aliases": [
+                "测试大道"
+              ]
+            },
+            "building": {
+              "value": "创新楼",
+              "aliases": []
+            },
+            "room": {
+              "value": "1201室",
+              "aliases": [
+                "1201"
+              ]
+            }
+          }
+        ],
+        "id_number": [
+          {
+            "value": "ID-ZH-SAMPLE-0001",
+            "aliases": []
+          }
+        ],
+        "organization": [
+          {
+            "value": "示例云联科技（样本）",
+            "aliases": [
+              "示例云联",
+              "云联样本"
+            ]
+          }
+        ]
       },
       "stats": {
         "total": {
-          "exposure_count": 0,
-          "last_exposed_turn_id": 2
+          "exposure_count": 0
         }
+      },
+      "metadata": {
+        "locale": "zh_cn",
+        "profile_kind": "synthetic_sample"
       }
     },
     {
-      "persona_id": "lisi",
+      "persona_id": "sample_en_profile",
+      "display_name": "English Sample Profile",
       "slots": {
-        "name": {
-          "value": "李四",
-          "aliases": ["李四四", "李四五"]
-        },
-        "phone": {
-          "value": "13600002222",
-          "aliases": ["13600002223", "13600002224"]
-        },
-        "card_number": {
-          "value": "5555555555554444",
-          "aliases": ["5555555555554445", "5555555555554446"]
-        },
-        "bank_account": {
-          "value": "6212260202020202020",
-          "aliases": ["6212260202020202021", "6212260202020202022"]
-        },
-        "passport_number": {
-          "value": "K76543210",
-          "aliases": ["K76543211", "K76543212"]
-        },
-        "driver_license": {
-          "value": "110101198812123456",
-          "aliases": ["110101198812123457", "110101198812123458"]
-        },
-        "email": {
-          "value": "lisi@example.com",
-          "aliases": ["lisi@example.com.cn", "lisi@example.com.hk"]
-        },
-        "id_number": {
-          "value": "110101198812123456",
-          "aliases": []
-        },
-        "organization": {
-          "value": "北辰教育科技集团",
-          "aliases": ["北辰教育", "北辰科技"]
-        },
-        "address": {
-          "country": {
-            "value": "中国",
-            "aliases": ["中国大陆"]
-          },
-          "province": {
-            "value": "北京市",
-            "aliases": ["北京"]
-          },
-          "city": {
-            "value": "北京市",
-            "aliases": ["北京"]
-          },
-          "district": {
-            "value": "海淀区",
-            "aliases": ["海淀"]
-          },
-          "street": {
-            "value": "知春路88号",
-            "aliases": ["知春路"]
-          },
-          "building": {
-            "value": "1号楼",
-            "aliases": ["一号楼"]
-          },
-          "room": {
-            "value": "101室",
-            "aliases": ["101"]
+        "name": [
+          {
+            "value": "Avery Sample",
+            "aliases": [
+              "A. Sample"
+            ]
           }
-        }
+        ],
+        "location_clue": [
+          {
+            "value": "Sample Harbor",
+            "aliases": [
+              "Harbor District"
+            ]
+          },
+          {
+            "value": "Demo Square",
+            "aliases": [
+              "Square Block"
+            ]
+          }
+        ],
+        "phone": [
+          {
+            "value": "2025550101",
+            "aliases": []
+          },
+          {
+            "value": "2025550102",
+            "aliases": []
+          }
+        ],
+        "card_number": [
+          {
+            "value": "5555555555554444",
+            "aliases": []
+          },
+          {
+            "value": "4000056655665556",
+            "aliases": []
+          }
+        ],
+        "bank_account": [
+          {
+            "value": "0009876500002001",
+            "aliases": []
+          },
+          {
+            "value": "0009876500002002",
+            "aliases": []
+          }
+        ],
+        "passport_number": [
+          {
+            "value": "P00020001",
+            "aliases": []
+          },
+          {
+            "value": "P00020002",
+            "aliases": []
+          }
+        ],
+        "driver_license": [
+          {
+            "value": "DL-EN-0002-A",
+            "aliases": []
+          },
+          {
+            "value": "DL-EN-0002-B",
+            "aliases": []
+          }
+        ],
+        "email": [
+          {
+            "value": "avery.sample@example.com",
+            "aliases": []
+          },
+          {
+            "value": "avery.sample@example.net",
+            "aliases": []
+          }
+        ],
+        "address": [
+          {
+            "country": {
+              "value": "United States",
+              "aliases": [
+                "USA"
+              ]
+            },
+            "province": {
+              "value": "CA",
+              "aliases": [
+                "California"
+              ]
+            },
+            "city": {
+              "value": "San Diego",
+              "aliases": []
+            },
+            "street": {
+              "value": "1200 Harbor Ave",
+              "aliases": [
+                "Harbor Avenue"
+              ]
+            },
+            "building": {
+              "value": "Apt 7B",
+              "aliases": [
+                "Apartment 7B"
+              ]
+            },
+            "postal_code": {
+              "value": "92101",
+              "aliases": []
+            }
+          },
+          {
+            "country": {
+              "value": "United States",
+              "aliases": [
+                "USA"
+              ]
+            },
+            "province": {
+              "value": "CA",
+              "aliases": [
+                "California"
+              ]
+            },
+            "city": {
+              "value": "San Diego",
+              "aliases": []
+            },
+            "street": {
+              "value": "88 Demo Plaza",
+              "aliases": [
+                "Demo Plaza"
+              ]
+            },
+            "building": {
+              "value": "Suite 210",
+              "aliases": [
+                "Ste 210"
+              ]
+            },
+            "postal_code": {
+              "value": "92108",
+              "aliases": []
+            }
+          }
+        ],
+        "id_number": [
+          {
+            "value": "ID-EN-SAMPLE-0002",
+            "aliases": []
+          }
+        ],
+        "organization": [
+          {
+            "value": "Northbridge Sample Labs",
+            "aliases": [
+              "Northbridge Labs",
+              "NSL"
+            ]
+          }
+        ]
       },
       "stats": {
         "total": {
-          "exposure_count": 0,
-          "last_exposed_turn_id": 3
+          "exposure_count": 0
         }
+      },
+      "metadata": {
+        "locale": "en_us",
+        "profile_kind": "synthetic_sample"
       }
     }
   ]

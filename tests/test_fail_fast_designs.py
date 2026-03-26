@@ -33,7 +33,10 @@ class PersonaRepoStub:
         persona = self.get_persona(persona_id)
         if persona is None:
             return None
-        return persona.slots.get(attr_type)
+        values = persona.slots.get(attr_type)
+        if not values:
+            return None
+        return values[0]
 
     def get_slot_replacement_text(
         self,

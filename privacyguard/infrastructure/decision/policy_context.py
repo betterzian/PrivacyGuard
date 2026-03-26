@@ -332,7 +332,7 @@ def _build_persona_view(
     exposure_bucket = _bucket_count(exposure_count)
     supported_attr_mask = {attr.value: attr in supported_attrs for attr in PIIAttributeType}
     available_slot_mask = {
-        attr.value: bool(str(persona.slots.get(attr, "")).strip()) if attr in supported_attrs else False
+        attr.value: any(str(value).strip() for value in persona.slots.get(attr, [])) if attr in supported_attrs else False
         for attr in PIIAttributeType
     }
     attr_exposure_buckets = {
@@ -346,7 +346,7 @@ def _build_persona_view(
         "available_slot_mask": available_slot_mask,
         "attr_exposure_buckets": attr_exposure_buckets,
         "matched_candidate_attr_count": len(candidate_attrs.intersection(supported_attrs)),
-        "_slot_count": len(persona.slots),
+        "_slot_count": sum(len(values) for values in persona.slots.values()),
         "_display_name": persona.display_name,
         "_exposure_count": exposure_count,
         "_last_exposed_session_id": _stats_value_as_str(persona.stats.get("last_exposed_session_id")),

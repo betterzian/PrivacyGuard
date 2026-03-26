@@ -171,15 +171,17 @@ result = guard.write_privacy_repository(
                 "persona_id": "demo_user",
                 "display_name": "演示用户",
                 "slots": {
-                    "name": {"value": "张三", "aliases": ["李四"]},
-                    "phone": {"value": "13800138000", "aliases": []},
-                    "email": {"value": "zhangsan@example.com", "aliases": []},
-                    "address": {
-                        "street": {
-                            "value": "上海市浦东新区世纪大道100号",
-                            "aliases": [],
+                    "name": [{"value": "张三", "aliases": ["阿三"]}],
+                    "phone": [{"value": "13800138000", "aliases": []}],
+                    "email": [{"value": "zhangsan@example.com", "aliases": []}],
+                    "address": [
+                        {
+                            "street": {
+                                "value": "上海市浦东新区世纪大道100号",
+                                "aliases": [],
+                            }
                         }
-                    },
+                    ],
                 },
             }
         ]

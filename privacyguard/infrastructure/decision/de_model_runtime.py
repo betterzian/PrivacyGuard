@@ -215,7 +215,7 @@ class TinyPolicyRuntime:
         """基于上下文与压缩特征生成占位策略输出。"""
         resolved_policy = policy or derive_policy_context(context)
         active_persona_id, persona_scores = self._select_persona(context=context, policy=resolved_policy)
-        persona_slots: dict[PIIAttributeType, str] = {}
+        persona_slots: dict[PIIAttributeType, list[str]] = {}
         for item in context.persona_profiles:
             if item.persona_id == active_persona_id:
                 persona_slots = item.slots
@@ -299,7 +299,7 @@ class TinyPolicyRuntime:
         *,
         feature: dict[str, object],
         active_persona_id: str | None,
-        persona_slots: dict[PIIAttributeType, str],
+        persona_slots: dict[PIIAttributeType, list[str]],
         page_vector: list[float],
     ) -> dict[ActionType, float]:
         prompt_digit_bias = page_vector[6] if len(page_vector) > 6 else 0.0
