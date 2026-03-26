@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import re
 from pathlib import Path
 from typing import Any
+
+from pydantic import ValidationError
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.models.persona import PersonaProfile
@@ -23,7 +26,13 @@ from privacyguard.infrastructure.repository.schemas import (
     SharedSlotStorage,
     SlotStats,
 )
-from privacyguard.utils.pii_value import parse_address_components
+from privacyguard.utils.pii_value import (
+    AddressComponents,
+    address_components_from_levels,
+    parse_address_components,
+    render_address_components,
+    render_address_like_source,
+)
 
 DEFAULT_PERSONA_REPOSITORY_PATH = "data/persona_repository.json"
 DEFAULT_PERSONA_SAMPLE_PATH = "data/personas.sample.json"
@@ -47,7 +56,7 @@ PROFILE_KEY_TO_ATTR_TYPE = {
 }
 
 ATTR_TYPE_TO_PROFILE_KEY = {value: key for key, value in PROFILE_KEY_TO_ATTR_TYPE.items()}
-_ADDRESS_RENDER_ORDER = ("province", "city", "district", "street", "building", "room")
+_ADDRESS_RENDER_ORDER = ("country", "province", "city", "district", "street", "building", "room", "postal_code")
 
 
 def _runtime_stats_to_persona_stats(stats_data: dict[str, object] | object) -> PersonaStats:
@@ -73,6 +82,19 @@ def _runtime_stats_to_persona_stats(stats_data: dict[str, object] | object) -> P
     return PersonaStats(total=total)
 
 
+def _normalize_runtime_slot_values(raw: object, *, field_name: str) -> list[str]:
+    if not isinstance(raw, list):
+        raise ValueError(f"PersonaProfile.slots[{field_name}] 必须是字符串列表")
+    values: list[str] = []
+    for item in raw:
+        text = str(item).strip()
+        if text:
+            values.append(text)
+    if not values:
+        raise ValueError(f"PersonaProfile.slots[{field_name}] 不能为空")
+    return values
+
+
 def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocument:
     """将 ``PersonaProfile`` 转为 ``PersonaDocument``（扁平槽位写入 storage slot）。"""
     slot_values: dict[str, object] = {}
@@ -80,21 +102,20 @@ def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocu
         raw = persona.slots.get(attr_type)
         if raw is None:
             continue
-        text = str(raw).strip()
-        if not text:
-            continue
+        values = _normalize_runtime_slot_values(raw, field_name=key)
         if attr_type == PIIAttributeType.ADDRESS:
-            slot_values["address"] = AddressSlotStorage(
-                street=SharedSlotStorage(value=text, aliases=[]),
-            )
+            slot_values["address"] = [
+                _address_components_to_storage_slot(parse_address_components(text))
+                for text in values
+            ]
         else:
-            slot_values[key] = SharedSlotStorage(value=text, aliases=[])
+            slot_values[key] = [SharedSlotStorage(value=text, aliases=[]) for text in values]
     if not slot_values:
         raise ValueError("PersonaProfile must contain at least one non-empty slot for storage")
     slots = PersonaSlots(**slot_values)
     display_name = persona.display_name
     if not display_name and slots.name:
-        display_name = slots.name.value
+        display_name = slots.name[0].value
     if not display_name:
         display_name = persona.persona_id
     meta: dict[str, str] = {}
@@ -151,6 +172,7 @@ def _merge_address_stats(left: AddressStats, right: AddressStats) -> AddressStat
             street=_merge_exposure_info(left.levels.street, right.levels.street),
             building=_merge_exposure_info(left.levels.building, right.levels.building),
             room=_merge_exposure_info(left.levels.room, right.levels.room),
+            postal_code=_merge_exposure_info(left.levels.postal_code, right.levels.postal_code),
         ),
     )
 
@@ -227,6 +249,17 @@ def _split_country_prefix(source_text: str | None) -> tuple[bool, str]:
     return (False, compact)
 
 
+def _address_components_to_storage_slot(components: AddressComponents) -> AddressSlotStorage:
+    slot_values: dict[str, SharedSlotStorage] = {}
+    for field_name in ("country", "province", "city", "district", "street", "building", "room", "postal_code"):
+        field_value = getattr(components, f"{field_name}_text", None)
+        if field_value:
+            slot_values[field_name] = SharedSlotStorage(value=field_value, aliases=[])
+    if not slot_values and components.original_text:
+        slot_values["street"] = SharedSlotStorage(value=components.original_text, aliases=[])
+    return AddressSlotStorage(**slot_values)
+
+
 class JsonPersonaRepository:
     """从本地 JSON 加载并查询 persona 数据。"""
 
@@ -267,12 +300,18 @@ class JsonPersonaRepository:
         """加载 persona 仓库文档（``fake_personas``）。"""
         if not isinstance(raw_payload, dict):
             raise InvalidPersonaRepositoryError("persona 仓库顶层必须是 JSON 对象")
-        return PersonaRepositoryDocument.model_validate(raw_payload)
+        try:
+            return PersonaRepositoryDocument.model_validate(raw_payload)
+        except ValidationError as exc:
+            raise InvalidPersonaRepositoryError(
+                'persona_repository 必须包含 {"fake_personas": [...]}'
+            ) from exc
 
     def _build_runtime_persona(self, stored_persona: PersonaDocument) -> PersonaProfile:
         """将 storage persona 投影为现有 runtime PersonaProfile。"""
         slots = self._flatten_runtime_slots(stored_persona)
-        display_name = stored_persona.display_name or slots.get(PIIAttributeType.NAME) or stored_persona.persona_id
+        name_values = slots.get(PIIAttributeType.NAME, [])
+        display_name = stored_persona.display_name or (name_values[0] if name_values else "") or stored_persona.persona_id
         return PersonaProfile(
             persona_id=stored_persona.persona_id,
             display_name=display_name,
@@ -281,20 +320,20 @@ class JsonPersonaRepository:
             stats=self._flatten_runtime_stats(stored_persona.stats),
         )
 
-    def _flatten_runtime_slots(self, stored_persona: PersonaDocument) -> dict[PIIAttributeType, str]:
+    def _flatten_runtime_slots(self, stored_persona: PersonaDocument) -> dict[PIIAttributeType, list[str]]:
         """将 structured slots 扁平化为当前 runtime 仍在消费的字符串槽位。"""
-        slots: dict[PIIAttributeType, str] = {}
+        slots: dict[PIIAttributeType, list[str]] = {}
 
         for attr_type, key in ATTR_TYPE_TO_PROFILE_KEY.items():
             if attr_type == PIIAttributeType.ADDRESS:
-                address_text = self._render_address_slot(stored_persona.slots.address, randomize=False)
-                if address_text:
-                    slots[attr_type] = address_text
+                address_texts = self._render_address_slot_values(stored_persona.slots.address)
+                if address_texts:
+                    slots[attr_type] = address_texts
                 continue
 
-            raw_slot = getattr(stored_persona.slots, key, None)
-            if raw_slot is not None:
-                slots[attr_type] = raw_slot.value
+            raw_slots = getattr(stored_persona.slots, key, None)
+            if raw_slots:
+                slots[attr_type] = [slot.value for slot in raw_slots]
 
         return slots
 
@@ -311,119 +350,76 @@ class JsonPersonaRepository:
             return slot.value
         return self._rng.choice([slot.value, *slot.aliases])
 
+    def _slot_index(self, *, source_text: str | None, slot_count: int) -> int:
+        if slot_count <= 1:
+            return 0
+        compact = str(source_text or "").strip()
+        if not compact:
+            return 0
+        digest = hashlib.sha256(compact.encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], "big") % slot_count
+
+    def _pick_storage_slot(
+        self,
+        slots: list[SharedSlotStorage] | None,
+        *,
+        source_text: str | None = None,
+    ) -> SharedSlotStorage | None:
+        if not slots:
+            return None
+        return slots[self._slot_index(source_text=source_text, slot_count=len(slots))]
+
+    def _pick_address_storage_slot(
+        self,
+        slots: list[AddressSlotStorage] | None,
+        *,
+        source_text: str | None = None,
+    ) -> AddressSlotStorage | None:
+        if not slots:
+            return None
+        return slots[self._slot_index(source_text=source_text, slot_count=len(slots))]
+
+    def _render_address_slot_values(self, slots: list[AddressSlotStorage] | None) -> list[str]:
+        rendered_values: list[str] = []
+        for slot in slots or []:
+            rendered = self._render_address_slot([slot], randomize=False)
+            if rendered:
+                rendered_values.append(rendered)
+        return rendered_values
+
     def _render_address_slot(
         self,
-        slot: AddressSlotStorage | None,
+        slots: list[AddressSlotStorage] | None,
         *,
         source_text: str | None = None,
         randomize: bool,
     ) -> str | None:
+        slot = self._pick_address_storage_slot(slots, source_text=source_text)
         if slot is None:
             return None
-
-        if not source_text:
-            parts = []
-            province = self._pick_render_text(slot.province, randomize=randomize) if slot.province else None
-            city = self._pick_render_text(slot.city, randomize=randomize) if slot.city else None
-            district = self._pick_render_text(slot.district, randomize=randomize) if slot.district else None
-            street = self._pick_render_text(slot.street, randomize=randomize) if slot.street else None
-            building = self._pick_render_text(slot.building, randomize=randomize) if slot.building else None
-            room = self._pick_render_text(slot.room, randomize=randomize) if slot.room else None
-
-            if province:
-                parts.append(province)
-            if city and city != province:
-                parts.append(city)
-            if district:
-                parts.append(district)
-            for value in (street, building, room):
-                if value:
-                    parts.append(value)
-            rendered = "".join(parts)
-            return rendered or None
-
-        source_has_country, source_remainder = _split_country_prefix(source_text)
-        source_components = parse_address_components(source_remainder)
-        detail_mode = _detail_fragment_mode(source_components.detail_text)
-
         selected = {
             level_name: self._pick_render_text(level_slot, randomize=randomize)
             for level_name in _ADDRESS_RENDER_ORDER
-            if (level_slot := getattr(slot, level_name)) is not None
+            if (level_slot := getattr(slot, level_name, None)) is not None
         }
-
-        parts: list[str] = []
-        province = selected.get("province")
-        city = selected.get("city")
-        district = selected.get("district")
-
-        if source_has_country and slot.country is not None:
-            parts.append(self._pick_render_text(slot.country, randomize=randomize))
-
-        include_province = source_components.province_text is not None
-        include_city = source_components.city_text is not None and bool(_ADDRESS_CITY_SIGNAL_RE.search(source_text))
-        include_district = source_components.district_text is not None and (
-            bool(_ADDRESS_DISTRICT_SIGNAL_RE.search(source_text))
-            or include_province
-            or include_city
+        slot_components = address_components_from_levels(
+            country_text=selected.get("country"),
+            province_text=selected.get("province"),
+            city_text=selected.get("city"),
+            district_text=selected.get("district"),
+            street_text=selected.get("street"),
+            building_text=selected.get("building"),
+            room_text=selected.get("room"),
+            postal_code_text=selected.get("postal_code"),
         )
-
-        if include_province and province:
-            parts.append(province)
-        if include_city and city and city != province:
-            parts.append(city)
-        if include_district and district:
-            parts.append(district)
-
-        if detail_mode == "street":
-            for level_name in ("street",):
-                value = selected.get(level_name)
-                if value:
-                    parts.append(value)
-        elif detail_mode == "building_room":
-            for level_name in ("building", "room"):
-                value = selected.get(level_name)
-                if value:
-                    parts.append(value)
-        elif detail_mode == "tail":
-            for level_name in ("street", "building", "room"):
-                value = selected.get(level_name)
-                if value:
-                    parts.append(value)
-        elif not any((source_has_country, include_province, include_city, include_district)):
-            for level_name in ("street", "building", "room"):
-                value = selected.get(level_name)
-                if value:
-                    parts.append(value)
-
-        rendered = "".join(parts)
+        if not source_text:
+            rendered = render_address_components(slot_components, granularity="detail")
+            return rendered or None
+        source_components = parse_address_components(source_text)
+        rendered = render_address_like_source(slot_components, source_components)
         if rendered:
             return rendered
-
-        if source_has_country:
-            if not source_remainder:
-                for level_name in ("province", "city", "district"):
-                    value = selected.get(level_name)
-                    if value:
-                        return value
-            fallback_country_parts = [
-                selected.get("province"),
-                selected.get("city") if selected.get("city") != selected.get("province") else None,
-                selected.get("district"),
-            ]
-            fallback_country = "".join(part for part in fallback_country_parts if part)
-            if fallback_country:
-                return fallback_country
-
-        fallback_parts = [
-            selected.get("province"),
-            selected.get("city") if selected.get("city") != selected.get("province") else None,
-            selected.get("district"),
-            selected.get("street"),
-            selected.get("building"),
-            selected.get("room"),
-        ]
-        fallback = "".join(part for part in fallback_parts if part)
+        fallback = render_address_components(slot_components, granularity="detail")
         return fallback or None
 
     def _to_storage_document(self) -> PersonaRepositoryDocument:
@@ -459,9 +455,9 @@ class JsonPersonaRepository:
                 continue
 
             if attr_type == PIIAttributeType.ADDRESS:
-                current_value = self._render_address_slot(current_slot, randomize=False)
+                current_value = self._render_address_slot_values(current_slot)
             else:
-                current_value = current_slot.value if current_slot is not None else None
+                current_value = [slot.value for slot in current_slot] if current_slot else []
 
             if current_slot is not None and runtime_value == current_value:
                 merged_slot_values[key] = current_slot
@@ -500,14 +496,14 @@ class JsonPersonaRepository:
             item["metadata"] = dict(persona.metadata)
         return item
 
-    def _serialize_profile(self, persona: PersonaProfile) -> dict[str, str]:
-        """将 runtime persona 槽位转换为字符串字典。"""
-        slots: dict[str, str] = {}
+    def _serialize_profile(self, persona: PersonaProfile) -> dict[str, list[str]]:
+        """将 runtime persona 槽位转换为字符串列表字典。"""
+        slots: dict[str, list[str]] = {}
         for attr_type, key in ATTR_TYPE_TO_PROFILE_KEY.items():
             value = persona.slots.get(attr_type)
             if value is None:
                 continue
-            slots[key] = value
+            slots[key] = list(value)
         return slots
 
     def _serialize_stats(self, stats_data: dict[str, object] | object) -> dict[str, int | str | None]:
@@ -572,7 +568,10 @@ class JsonPersonaRepository:
         persona = self.get_persona(persona_id)
         if persona is None:
             return None
-        return persona.slots.get(attr_type)
+        values = persona.slots.get(attr_type)
+        if not values:
+            return None
+        return values[0]
 
     def get_slot_replacement_text(
         self,
@@ -599,7 +598,10 @@ class JsonPersonaRepository:
         if slot_key is None:
             return self.get_slot_value(persona_id, attr_type)
 
-        slot = getattr(stored_persona.slots, slot_key, None)
+        slot = self._pick_storage_slot(
+            getattr(stored_persona.slots, slot_key, None),
+            source_text=source_text,
+        )
         if slot is None:
             return self.get_slot_value(persona_id, attr_type)
         return self._pick_render_text(slot, randomize=True)

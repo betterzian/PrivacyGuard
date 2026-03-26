@@ -26,6 +26,9 @@ class InvalidPrivacyRepositoryError(ValueError):
     """磁盘或 patch 中的 JSON 不符合 privacy 文档 schema。"""
 
 
+_ADDRESS_LEVEL_KEYS = ("country", "province", "city", "district", "street", "building", "room", "postal_code")
+
+
 def parse_privacy_repository_document(payload: dict[str, Any] | None) -> PrivacyRepositoryDocument:
     """校验并返回文档；空 payload 视为空词库。"""
     if not payload:
@@ -40,6 +43,10 @@ def parse_privacy_repository_document(payload: dict[str, Any] | None) -> Privacy
 
 def _is_storage_slot_dict(value: Any) -> bool:
     return isinstance(value, dict) and "value" in value and set(value).issubset({"value", "aliases"})
+
+
+def _is_address_slot_dict(value: Any) -> bool:
+    return isinstance(value, dict) and bool(value) and set(value).issubset(set(_ADDRESS_LEVEL_KEYS))
 
 
 def _dedupe_str_list(values: list[str]) -> list[str]:
@@ -64,27 +71,84 @@ def _as_str_list(value: Any) -> list[str]:
     return []
 
 
-def _is_flat_str_list(items: list[Any]) -> bool:
-    return all(isinstance(x, (str, int, float)) for x in items)
+def _merge_storage_slot_dicts(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    old_value = str(old.get("value") or "").strip()
+    new_value = str(new.get("value") or "").strip()
+    primary = old_value or new_value
+    aliases = _dedupe_str_list(
+        [
+            *(_as_str_list(old.get("aliases"))),
+            *(_as_str_list(new.get("aliases"))),
+        ]
+    )
+    return {
+        "value": primary,
+        "aliases": [alias for alias in aliases if alias and alias != primary],
+    }
+
+
+def _storage_slot_identity(item: dict[str, Any]) -> str:
+    return str(item.get("value") or "").strip()
+
+
+def _address_slot_identity(item: dict[str, Any]) -> tuple[str, ...]:
+    values: list[str] = []
+    for key in _ADDRESS_LEVEL_KEYS:
+        level = item.get(key)
+        if not _is_storage_slot_dict(level):
+            continue
+        values.append(f"{key}:{str(level.get('value') or '').strip()}")
+    return tuple(values)
+
+
+def _merge_address_slot_dicts(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(old)
+    for key, value in new.items():
+        if key in merged and _is_storage_slot_dict(merged[key]) and _is_storage_slot_dict(value):
+            merged[key] = _merge_storage_slot_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _merge_storage_slot_list(old: list[dict[str, Any]], new: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    ordered_keys: list[str] = []
+    for item in [*old, *new]:
+        if not _is_storage_slot_dict(item):
+            continue
+        key = _storage_slot_identity(item)
+        if not key:
+            continue
+        if key in merged:
+            merged[key] = _merge_storage_slot_dicts(merged[key], item)
+            continue
+        merged[key] = dict(item)
+        ordered_keys.append(key)
+    return [merged[key] for key in ordered_keys]
+
+
+def _merge_address_slot_list(old: list[dict[str, Any]], new: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    ordered_keys: list[tuple[str, ...]] = []
+    for item in [*old, *new]:
+        if not _is_address_slot_dict(item):
+            continue
+        key = _address_slot_identity(item)
+        if not key:
+            continue
+        if key in merged:
+            merged[key] = _merge_address_slot_dicts(merged[key], item)
+            continue
+        merged[key] = dict(item)
+        ordered_keys.append(key)
+    return [merged[key] for key in ordered_keys]
 
 
 def _deep_merge_value(old: Any, new: Any) -> Any:
     if isinstance(old, dict) and isinstance(new, dict):
         if _is_storage_slot_dict(old) and _is_storage_slot_dict(new):
-            old_value = str(old.get("value") or "").strip()
-            new_value = str(new.get("value") or "").strip()
-            primary = old_value or new_value
-            aliases = _dedupe_str_list(
-                [
-                    *(_as_str_list(old.get("aliases"))),
-                    *([new_value] if new_value and new_value != primary else []),
-                    *(_as_str_list(new.get("aliases"))),
-                ]
-            )
-            return {
-                "value": primary,
-                "aliases": [alias for alias in aliases if alias and alias != primary],
-            }
+            return _merge_storage_slot_dicts(old, new)
         merged = dict(old)
         for key, value in new.items():
             if key in merged:
@@ -93,8 +157,10 @@ def _deep_merge_value(old: Any, new: Any) -> Any:
                 merged[key] = value
         return merged
     if isinstance(old, list) and isinstance(new, list):
-        if _is_flat_str_list(old) and _is_flat_str_list(new):
-            return _dedupe_str_list([str(item).strip() for item in old + new if str(item).strip()])
+        if all(_is_storage_slot_dict(item) for item in [*old, *new]):
+            return _merge_storage_slot_list(old, new)
+        if all(_is_address_slot_dict(item) for item in [*old, *new]):
+            return _merge_address_slot_list(old, new)
         return list(old) + list(new)
     return new
 
@@ -157,6 +223,7 @@ def _merge_address_stats(left: AddressStats, right: AddressStats) -> AddressStat
             street=_merge_exposure_info(left.levels.street, right.levels.street),
             building=_merge_exposure_info(left.levels.building, right.levels.building),
             room=_merge_exposure_info(left.levels.room, right.levels.room),
+            postal_code=_merge_exposure_info(left.levels.postal_code, right.levels.postal_code),
         ),
     )
 

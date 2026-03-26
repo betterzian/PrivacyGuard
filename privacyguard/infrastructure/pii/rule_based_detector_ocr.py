@@ -621,7 +621,10 @@ def _looks_like_ocr_preview_text(self, text: str) -> bool:
         return False
     if re.fullmatch(r"[\d+＋]+", compact):
         return False
-    return any(self._is_cjk_char(char) for char in compact)
+    if any(self._is_cjk_char(char) for char in compact):
+        return True
+    alpha_count = sum(char.isalpha() for char in compact)
+    return alpha_count >= 4
 
 def _looks_like_ui_time_metadata(self, text: str) -> bool:
     compact = re.sub(r"\s+", "", self._clean_extracted_value(text))
@@ -638,6 +641,14 @@ def _looks_like_ui_time_metadata(self, text: str) -> bool:
     if re.fullmatch(
         r"(?:昨天|今天|前天|明天|星期[一二三四五六日天]|周[一二三四五六日天])(?:凌晨|早上|上午|中午|下午|傍晚|晚上)?\d{0,2}(?::\d{2})?",
         compact,
+    ):
+        return True
+    if re.fullmatch(r"(?:yesterday|today|tomorrow|justnow|now|mon|tue|wed|thu|fri|sat|sun|am|pm)", compact, re.IGNORECASE):
+        return True
+    if re.fullmatch(
+        r"(?:yesterday|today|tomorrow|mon|tue|wed|thu|fri|sat|sun)?(?:am|pm)?\d{1,2}(?::\d{2})?",
+        compact,
+        re.IGNORECASE,
     ):
         return True
     return False

@@ -258,15 +258,11 @@ def _split_text_proportionally(
 def _address_units(self, text: str) -> list[str]:
     """把地址文本拆成省/市/区/详情语义组件。"""
     components = parse_address_components(text)
-    units: list[str] = []
-    if components.province_text:
-        units.append(components.province_text)
-    if components.city_text and components.city_text != components.province_text:
-        units.append(components.city_text)
-    if components.district_text:
-        units.append(components.district_text)
-    if components.detail_text:
-        units.append(components.detail_text)
+    units = address_display_units(
+        components,
+        include_country=bool(components.country_text),
+        granularity="detail",
+    )
     if units:
         return units
     return [text] if text else []

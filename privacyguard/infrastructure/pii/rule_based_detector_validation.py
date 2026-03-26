@@ -19,6 +19,15 @@ def _clean_extracted_value(self, value: str) -> str:
     cleaned = self._strip_ocr_break_edge_noise(cleaned)
     return cleaned.strip()
 
+def _clean_phone_candidate(self, value: str) -> str:
+    """为电话 regex 命中保留括号与国际区号前缀。"""
+    cleaned = value.strip()
+    cleaned = self._strip_ocr_break_edge_noise(cleaned)
+    cleaned = re.sub(r"^[\s\[{<（【「『\"'`]+", "", cleaned)
+    cleaned = re.sub(r"[\s\]}>）】」』\"'`.,，;；、。！？!?]+$", "", cleaned)
+    cleaned = self._strip_ocr_break_edge_noise(cleaned)
+    return cleaned.strip()
+
 def _strip_ocr_break_edge_noise(self, value: str) -> str:
     cleaned = value.strip()
     token = _OCR_SEMANTIC_BREAK_TOKEN.strip()
@@ -35,6 +44,7 @@ def _clean_address_candidate(self, value: str) -> str:
     """清理地址候选前后的连接词与标点。"""
     cleaned = self._clean_extracted_value(value)
     cleaned = _LEADING_ADDRESS_NOISE_PATTERN.sub("", cleaned)
+    cleaned = _LEADING_ADDRESS_NOISE_PATTERN_EN.sub("", cleaned)
     cleaned = re.sub(r"^(?:地址|住址|详细地址|联系地址|收货地址|户籍地址)\s*(?:[:：=])?\s*", "", cleaned)
     return cleaned.strip()
 
@@ -42,7 +52,9 @@ def _clean_organization_candidate(self, value: str) -> str:
     """清理机构候选前后的上下文噪声。"""
     cleaned = self._clean_extracted_value(value)
     cleaned = _LEADING_ORGANIZATION_NOISE_PATTERN.sub("", cleaned)
+    cleaned = _LEADING_ORGANIZATION_NOISE_PATTERN_EN.sub("", cleaned)
     cleaned = _ORGANIZATION_FIELD_PREFIX_PATTERN.sub("", cleaned)
+    cleaned = _ORGANIZATION_FIELD_PREFIX_PATTERN_EN.sub("", cleaned)
     cleaned = re.sub(r"^(?:加入|进入|任职|就职|供职|实习|毕业|就读)\s*", "", cleaned)
     return cleaned.strip()
 
@@ -87,15 +99,16 @@ def _starts_with_geo_or_activity(self, value: str) -> bool:
     compact = re.sub(rf"^[\s{re.escape(_OCR_FRAGMENT_DELIMITERS)}:：,，;；]+", "", value)
     if not compact:
         return False
-    if any(compact.startswith(token) for token in _LOCATION_ACTIVITY_TOKENS):
+    compact_lower = compact.lower()
+    if any(compact.startswith(token) or compact_lower.startswith(token.lower()) for token in _LOCATION_ACTIVITY_TOKENS):
         return True
-    return any(compact.startswith(token) for token in _LOCATION_CLUE_TOKENS)
+    return any(compact.startswith(token) or compact_lower.startswith(token.lower()) for token in _LOCATION_CLUE_TOKENS)
 
 def _is_ui_operation_name_token(self, value: str) -> bool:
     compact = re.sub(r"\s+", "", self._clean_extracted_value(value))
     if not compact:
         return False
-    return compact in _UI_OPERATION_NAME_WHITELIST
+    return compact in _UI_OPERATION_NAME_WHITELIST or compact.lower() in _UI_OPERATION_NAME_WHITELIST
 
 def _generic_name_confidence(
     self,
@@ -256,16 +269,36 @@ def _compact_name_value(self, value: str, *, allow_ocr_noise: bool) -> str:
         compact = re.sub(r"[0-9０-９]+", "", compact)
     return compact
 
+def _is_en_phone_candidate(
+    self,
+    value: str,
+    *,
+    allow_plain_local: bool,
+) -> bool:
+    if not self._supports_en():
+        return False
+    digits = re.sub(r"\D", "", self._clean_extracted_value(value))
+    if re.fullmatch(r"1[2-9]\d{9}", digits):
+        return digits[1] not in {"0", "1"} and digits[4] not in {"0", "1"}
+    if allow_plain_local and re.fullmatch(r"[2-9]\d{9}", digits):
+        return digits[0] not in {"0", "1"} and digits[3] not in {"0", "1"}
+    return False
+
 def _is_phone_candidate(self, value: str) -> bool:
     """判断是否为手机号或座机片段。"""
     compact = compact_phone_value(value)
-    return bool(
+    if bool(
         re.fullmatch(r"1[3-9]\d{9}", compact)
         or re.fullmatch(r"1[3-9]\d[*＊xX]{4}\d{4}", compact)
         or re.fullmatch(r"1[3-9]\d[*＊xX]{8}", compact)
         or re.fullmatch(r"[*＊xX]{7}\d{4}", compact)
         or re.fullmatch(r"0\d{9,11}", compact)
-    )
+    ):
+        return True
+    return self._is_en_phone_candidate(value, allow_plain_local=False)
+
+def _is_context_phone_candidate(self, value: str) -> bool:
+    return self._is_phone_candidate(value) or self._is_en_phone_candidate(value, allow_plain_local=True)
 
 def _is_card_number_candidate(self, value: str) -> bool:
     """判断是否为银行卡/信用卡号。"""
@@ -415,11 +448,14 @@ def _is_name_candidate(self, value: str) -> bool:
     """判断是否像姓名。"""
     cleaned = self._clean_extracted_value(value)
     compact = cleaned.replace(" ", "")
+    compact_lower = compact.lower()
     if not compact or compact in _NAME_BLACKLIST:
         return False
     if self._is_ui_operation_name_token(compact):
         return False
     if compact in _NON_PERSON_TOKENS:
+        return False
+    if compact_lower in _NON_PERSON_TOKENS_EN:
         return False
     if any(char.isdigit() for char in compact):
         return False
@@ -432,7 +468,19 @@ def _is_name_candidate(self, value: str) -> bool:
     if self._looks_like_address_candidate(compact):
         return False
     if re.fullmatch(r"[A-Za-z][A-Za-z .'\-]{1,40}", cleaned):
-        return True
+        tokens = [token for token in re.split(r"\s+", cleaned.strip()) if token]
+        if not tokens or len(tokens) > 3:
+            return False
+        if any(token.lower() in _NON_PERSON_TOKENS_EN for token in tokens):
+            return False
+        if any(
+            token.lower().rstrip(".") in {suffix.rstrip(".").lower() for suffix in (*_EN_ORGANIZATION_STRONG_SUFFIXES, *_EN_ORGANIZATION_WEAK_SUFFIXES)}
+            for token in tokens
+        ):
+            return False
+        if len(tokens) >= 2 and all(re.fullmatch(r"[A-Za-z][A-Za-z'\-]{0,20}", token) for token in tokens):
+            return True
+        return len(tokens) == 1 and len(tokens[0]) >= 3
     if re.fullmatch(r"[一-龥][*＊xX某]{1,3}", compact):
         return True
     if "·" in compact and re.fullmatch(r"[一-龥]{1,4}·[一-龥]{1,6}", compact):
@@ -443,6 +491,35 @@ def _is_name_candidate(self, value: str) -> bool:
         return compact[0] in _COMMON_SINGLE_CHAR_SURNAMES and 2 <= len(compact) <= 4
     return False
 
+def _has_en_organization_suffix(self, value: str, *, allow_weak_suffix: bool) -> tuple[bool, bool]:
+    compact = re.sub(r"\s+", " ", self._clean_organization_candidate(value)).strip().lower()
+    if not compact:
+        return (False, False)
+    for suffix in _EN_ORGANIZATION_STRONG_SUFFIXES:
+        normalized = suffix.rstrip(".").lower()
+        if compact.endswith(f" {normalized}") or compact == normalized:
+            return (True, False)
+    if allow_weak_suffix:
+        for suffix in _EN_ORGANIZATION_WEAK_SUFFIXES:
+            normalized = suffix.rstrip(".").lower()
+            if compact.endswith(f" {normalized}") or compact == normalized:
+                return (False, True)
+    return (False, False)
+
+def _is_context_organization_candidate(self, value: str) -> bool:
+    cleaned = self._clean_organization_candidate(value)
+    compact = re.sub(r"\s+", "", cleaned)
+    if not compact or compact in _ORGANIZATION_BLACKLIST:
+        return False
+    if self._looks_like_address_candidate(compact):
+        return False
+    if self._is_name_candidate(cleaned):
+        return False
+    if self._supports_en() and re.fullmatch(r"[A-Za-z][A-Za-z0-9 .&'\-]{2,64}", cleaned):
+        tokens = [token for token in re.split(r"\s+", cleaned.strip()) if token]
+        return bool(tokens) and len(tokens) <= 8
+    return self._is_organization_candidate(value, allow_weak_suffix=True)
+
 def _is_organization_candidate(self, value: str, *, allow_weak_suffix: bool = True) -> bool:
     """判断是否像机构名。"""
     cleaned = self._clean_organization_candidate(value)
@@ -451,12 +528,14 @@ def _is_organization_candidate(self, value: str, *, allow_weak_suffix: bool = Tr
         return False
     if compact in _ADDRESS_FIELD_KEYWORDS or compact in _NAME_FIELD_KEYWORDS:
         return False
-    if re.fullmatch(r"[A-Za-z][A-Za-z0-9 .&'\-]{2,40}", cleaned):
-        return len(cleaned.replace(" ", "")) >= 4
     if self._looks_like_address_candidate(compact):
         return False
-    if self._is_name_candidate(compact):
+    if self._is_name_candidate(cleaned):
         return False
+    if self._supports_en() and re.fullmatch(r"[A-Za-z][A-Za-z0-9 .&'\-]{2,64}", cleaned):
+        strong_en, weak_en = self._has_en_organization_suffix(cleaned, allow_weak_suffix=allow_weak_suffix)
+        if strong_en or weak_en:
+            return len(cleaned.replace(" ", "")) >= 4
     if _ORGANIZATION_STRONG_SUFFIX_PATTERN.search(compact):
         return len(compact) >= 3
     if _ORGANIZATION_WEAK_SUFFIX_PATTERN.search(compact):
@@ -486,11 +565,27 @@ def _organization_has_explicit_context(self, raw_text: str, span_start: int, spa
             "当前在",
             "目前在",
             "曾在",
+            "work at",
+            "works at",
+            "worked at",
+            "study at",
+            "studies at",
+            "studied at",
+            "employed by",
+            "currently at",
+            "previously at",
         )
     )
 
 def _looks_like_name_with_title(self, value: str) -> bool:
     """判断是否为带敬称的姓名片段。"""
+    if self._supports_en() and re.fullmatch(
+        r"(?:mr|mrs|ms|miss|dr|prof)\.?\s+[A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+){0,2}",
+        value,
+        re.IGNORECASE,
+    ):
+        core = re.sub(r"^(?:mr|mrs|ms|miss|dr|prof)\.?\s+", "", value, flags=re.IGNORECASE)
+        return self._is_name_candidate(core)
     if not re.fullmatch(rf"[一-龥·]{{1,5}}(?:{'|'.join(map(re.escape, _NAME_HONORIFICS))})", value):
         return False
     core = value
@@ -554,6 +649,28 @@ def _geo_fragment_confidence(
     if rule_profile.level == ProtectionLevel.STRONG and (is_builtin_token or len(value) >= 3):
         return 0.72
     return 0.0
+
+def _english_address_confidence(self, value: str) -> float:
+    cleaned = self._clean_address_candidate(value)
+    if not cleaned or not self._supports_en():
+        return 0.0
+    score = 0.0
+    lowered = cleaned.lower()
+    if _EN_PO_BOX_PATTERN.search(cleaned):
+        score += 0.62
+    if _EN_ADDRESS_NUMBER_PATTERN.search(cleaned):
+        score += 0.24
+    if _EN_ADDRESS_SUFFIX_PATTERN.search(cleaned):
+        score += 0.32
+    if _EN_ADDRESS_UNIT_PATTERN.search(cleaned):
+        score += 0.12
+    if _EN_STATE_OR_REGION_PATTERN.search(cleaned):
+        score += 0.12
+    if _EN_POSTAL_CODE_PATTERN.search(cleaned):
+        score += 0.14
+    if any(keyword in lowered for keyword in ("address", "street", "road", "avenue", "boulevard", "drive", "lane", "suite", "unit")):
+        score += 0.08
+    return min(0.96, score)
 
 def _looks_like_address_candidate(self, value: str, *, min_confidence: float = 0.45) -> bool:
     """判断是否像地址或地址碎片。"""
@@ -646,6 +763,7 @@ def _address_confidence(self, value: str) -> float:
         score += 0.08
     if re.fullmatch(r"(?:\d{1,5}|[A-Za-z]\d{1,5})(?:号院|号楼|栋|幢|座|单元|室|层|号|户)(?:\d{0,4}(?:室|层|户))?", cleaned):
         score += 0.20
+    score = max(score, self._english_address_confidence(cleaned))
     return min(0.96, score)
 
 def _organization_confidence(self, value: str, *, allow_weak_suffix: bool = True) -> float:
@@ -655,15 +773,22 @@ def _organization_confidence(self, value: str, *, allow_weak_suffix: bool = True
     if not compact:
         return 0.0
     score = 0.0
-    if _ORGANIZATION_STRONG_SUFFIX_PATTERN.search(compact):
+    strong_en, weak_en = self._has_en_organization_suffix(cleaned, allow_weak_suffix=allow_weak_suffix)
+    if _ORGANIZATION_STRONG_SUFFIX_PATTERN.search(compact) or strong_en:
         score += 0.62
-    elif _ORGANIZATION_WEAK_SUFFIX_PATTERN.search(compact):
+    elif _ORGANIZATION_WEAK_SUFFIX_PATTERN.search(compact) or weak_en:
         if not allow_weak_suffix:
             return 0.0
         score += 0.48
     if re.search(r"[A-Za-z]", cleaned):
         score += 0.08
-    if any(token in compact for token in ("大学", "学院", "医院", "银行", "公司", "集团", "法院", "研究院")):
+    if any(
+        token in compact
+        for token in ("大学", "学院", "医院", "银行", "公司", "集团", "法院", "研究院")
+    ) or any(
+        token in cleaned.lower()
+        for token in ("university", "college", "hospital", "bank", "company", "corporation", "institute")
+    ):
         score += 0.12
     if len(compact) >= 6:
         score += 0.08
@@ -687,7 +812,10 @@ def _upsert_candidate(
     skip_spans: list[tuple[int, int]] | None = None,
 ) -> None:
     """插入候选，或更新已存在候选的置信度与元信息。"""
-    cleaned_text = self._clean_extracted_value(matched_text)
+    if attr_type == PIIAttributeType.PHONE:
+        cleaned_text = self._clean_phone_candidate(matched_text)
+    else:
+        cleaned_text = self._clean_extracted_value(matched_text)
     if not cleaned_text:
         return
     if skip_spans and span_start is not None and span_end is not None:

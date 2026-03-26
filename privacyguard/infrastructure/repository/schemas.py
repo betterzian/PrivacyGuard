@@ -28,6 +28,7 @@ class AddressLevel(str, Enum):
     STREET = "street"
     BUILDING = "building"
     ROOM = "room"
+    POSTAL_CODE = "postal_code"
 
 
 class ExposureInfo(RepositoryBaseModel):
@@ -45,6 +46,7 @@ class AddressLevelExposureStats(RepositoryBaseModel):
     street: ExposureInfo = Field(default_factory=ExposureInfo)
     building: ExposureInfo = Field(default_factory=ExposureInfo)
     room: ExposureInfo = Field(default_factory=ExposureInfo)
+    postal_code: ExposureInfo = Field(default_factory=ExposureInfo)
 
 
 class AddressStats(RepositoryBaseModel):
@@ -93,7 +95,7 @@ class SharedSlotStorage(RepositoryBaseModel):
 
 
 AtomicSlotStorage = SharedSlotStorage
-StorageSlot = SharedSlotStorage
+StorageSlot = list[SharedSlotStorage]
 
 
 def _validate_address_levels(
@@ -104,8 +106,9 @@ def _validate_address_levels(
     street: SharedSlotStorage | SharedSlotRuntime | None,
     building: SharedSlotStorage | SharedSlotRuntime | None,
     room: SharedSlotStorage | SharedSlotRuntime | None,
+    postal_code: SharedSlotStorage | SharedSlotRuntime | None,
 ) -> None:
-    if not any((country, province, city, district, street, building, room)):
+    if not any((country, province, city, district, street, building, room, postal_code)):
         raise ValueError("地址不能为空")
     if room and not building:
         raise ValueError("有房间则必须有楼栋")
@@ -121,6 +124,7 @@ class AddressSlotStorage(RepositoryBaseModel):
     street: SharedSlotStorage | None = None
     building: SharedSlotStorage | None = None
     room: SharedSlotStorage | None = None
+    postal_code: SharedSlotStorage | None = None
 
     @model_validator(mode="after")
     def _validate_address(self) -> "AddressSlotStorage":
@@ -132,6 +136,7 @@ class AddressSlotStorage(RepositoryBaseModel):
             self.street,
             self.building,
             self.room,
+            self.postal_code,
         )
         return self
 
@@ -143,7 +148,21 @@ class SharedSlotRuntime(RepositoryBaseModel):
 
 
 AtomicSlotRuntime = SharedSlotRuntime
-RuntimeSlot = SharedSlotRuntime
+RuntimeSlot = list[SharedSlotRuntime]
+
+
+def _validate_slot_list(values: list[SharedSlotStorage] | list[SharedSlotRuntime] | None, *, field_name: str) -> None:
+    if values is None:
+        return
+    if not values:
+        raise ValueError(f"{field_name} 不能为空列表")
+
+
+def _validate_address_slot_list(values: list[AddressSlotStorage] | list[AddressSlotRuntime] | None, *, field_name: str) -> None:
+    if values is None:
+        return
+    if not values:
+        raise ValueError(f"{field_name} 不能为空列表")
 
 
 class AddressSlotRuntime(RepositoryBaseModel):
@@ -154,6 +173,7 @@ class AddressSlotRuntime(RepositoryBaseModel):
     street: SharedSlotRuntime | None = None
     building: SharedSlotRuntime | None = None
     room: SharedSlotRuntime | None = None
+    postal_code: SharedSlotRuntime | None = None
 
     @model_validator(mode="after")
     def _validate_address(self) -> "AddressSlotRuntime":
@@ -165,25 +185,37 @@ class AddressSlotRuntime(RepositoryBaseModel):
             self.street,
             self.building,
             self.room,
+            self.postal_code,
         )
         return self
 
 
 class PersonaSlots(RepositoryBaseModel):
-    name: SharedSlotStorage | None = None
-    location_clue: SharedSlotStorage | None = None
-    phone: SharedSlotStorage | None = None
-    card_number: SharedSlotStorage | None = None
-    bank_account: SharedSlotStorage | None = None
-    passport_number: SharedSlotStorage | None = None
-    driver_license: SharedSlotStorage | None = None
-    email: SharedSlotStorage | None = None
-    address: AddressSlotStorage | None = None
-    id_number: SharedSlotStorage | None = None
-    organization: SharedSlotStorage | None = None
+    name: list[SharedSlotStorage] | None = None
+    location_clue: list[SharedSlotStorage] | None = None
+    phone: list[SharedSlotStorage] | None = None
+    card_number: list[SharedSlotStorage] | None = None
+    bank_account: list[SharedSlotStorage] | None = None
+    passport_number: list[SharedSlotStorage] | None = None
+    driver_license: list[SharedSlotStorage] | None = None
+    email: list[SharedSlotStorage] | None = None
+    address: list[AddressSlotStorage] | None = None
+    id_number: list[SharedSlotStorage] | None = None
+    organization: list[SharedSlotStorage] | None = None
 
     @model_validator(mode="after")
     def _validate_non_empty(self) -> "PersonaSlots":
+        _validate_slot_list(self.name, field_name="name")
+        _validate_slot_list(self.location_clue, field_name="location_clue")
+        _validate_slot_list(self.phone, field_name="phone")
+        _validate_slot_list(self.card_number, field_name="card_number")
+        _validate_slot_list(self.bank_account, field_name="bank_account")
+        _validate_slot_list(self.passport_number, field_name="passport_number")
+        _validate_slot_list(self.driver_license, field_name="driver_license")
+        _validate_slot_list(self.email, field_name="email")
+        _validate_address_slot_list(self.address, field_name="address")
+        _validate_slot_list(self.id_number, field_name="id_number")
+        _validate_slot_list(self.organization, field_name="organization")
         if not any(
             (
                 self.name,
@@ -204,17 +236,17 @@ class PersonaSlots(RepositoryBaseModel):
 
 
 class PersonaSlotsRuntime(RepositoryBaseModel):
-    name: SharedSlotRuntime | None = None
-    location_clue: SharedSlotRuntime | None = None
-    phone: SharedSlotRuntime | None = None
-    card_number: SharedSlotRuntime | None = None
-    bank_account: SharedSlotRuntime | None = None
-    passport_number: SharedSlotRuntime | None = None
-    driver_license: SharedSlotRuntime | None = None
-    email: SharedSlotRuntime | None = None
-    address: AddressSlotRuntime | None = None
-    id_number: SharedSlotRuntime | None = None
-    organization: SharedSlotRuntime | None = None
+    name: list[SharedSlotRuntime] | None = None
+    location_clue: list[SharedSlotRuntime] | None = None
+    phone: list[SharedSlotRuntime] | None = None
+    card_number: list[SharedSlotRuntime] | None = None
+    bank_account: list[SharedSlotRuntime] | None = None
+    passport_number: list[SharedSlotRuntime] | None = None
+    driver_license: list[SharedSlotRuntime] | None = None
+    email: list[SharedSlotRuntime] | None = None
+    address: list[AddressSlotRuntime] | None = None
+    id_number: list[SharedSlotRuntime] | None = None
+    organization: list[SharedSlotRuntime] | None = None
 
 
 RepositorySlots = PersonaSlots
@@ -273,35 +305,42 @@ def _project_scalar_slot_to_runtime(slot: SharedSlotStorage, alias_role: AliasRo
 
 
 def project_storage_slot_to_runtime(
-    slot: StorageSlot | AddressSlotStorage,
+    slot: StorageSlot | list[AddressSlotStorage],
     alias_role: AliasRole,
-) -> RuntimeSlot | AddressSlotRuntime:
-    if isinstance(slot, AddressSlotStorage):
-        return AddressSlotRuntime(
-            country=_project_scalar_slot_to_runtime(slot.country, alias_role) if slot.country else None,
-            province=_project_scalar_slot_to_runtime(slot.province, alias_role) if slot.province else None,
-            city=_project_scalar_slot_to_runtime(slot.city, alias_role) if slot.city else None,
-            district=_project_scalar_slot_to_runtime(slot.district, alias_role) if slot.district else None,
-            street=_project_scalar_slot_to_runtime(slot.street, alias_role) if slot.street else None,
-            building=_project_scalar_slot_to_runtime(slot.building, alias_role) if slot.building else None,
-            room=_project_scalar_slot_to_runtime(slot.room, alias_role) if slot.room else None,
-        )
-    return _project_scalar_slot_to_runtime(slot, alias_role)
+) -> RuntimeSlot | list[AddressSlotRuntime]:
+    if not slot:
+        return []
+    first = slot[0]
+    if isinstance(first, AddressSlotStorage):
+        return [
+            AddressSlotRuntime(
+                country=_project_scalar_slot_to_runtime(item.country, alias_role) if item.country else None,
+                province=_project_scalar_slot_to_runtime(item.province, alias_role) if item.province else None,
+                city=_project_scalar_slot_to_runtime(item.city, alias_role) if item.city else None,
+                district=_project_scalar_slot_to_runtime(item.district, alias_role) if item.district else None,
+                street=_project_scalar_slot_to_runtime(item.street, alias_role) if item.street else None,
+                building=_project_scalar_slot_to_runtime(item.building, alias_role) if item.building else None,
+                room=_project_scalar_slot_to_runtime(item.room, alias_role) if item.room else None,
+                postal_code=_project_scalar_slot_to_runtime(item.postal_code, alias_role) if item.postal_code else None,
+            )
+            for item in slot
+        ]
+    return [_project_scalar_slot_to_runtime(item, alias_role) for item in slot]
 
 
 def _project_slots_to_runtime(slots: PersonaSlots, alias_role: AliasRole) -> PersonaSlotsRuntime:
     return PersonaSlotsRuntime(
-        name=_project_scalar_slot_to_runtime(slots.name, alias_role) if slots.name else None,
-        location_clue=_project_scalar_slot_to_runtime(slots.location_clue, alias_role) if slots.location_clue else None,
-        phone=_project_scalar_slot_to_runtime(slots.phone, alias_role) if slots.phone else None,
-        card_number=_project_scalar_slot_to_runtime(slots.card_number, alias_role) if slots.card_number else None,
-        bank_account=_project_scalar_slot_to_runtime(slots.bank_account, alias_role) if slots.bank_account else None,
-        passport_number=_project_scalar_slot_to_runtime(slots.passport_number, alias_role) if slots.passport_number else None,
-        driver_license=_project_scalar_slot_to_runtime(slots.driver_license, alias_role) if slots.driver_license else None,
-        email=_project_scalar_slot_to_runtime(slots.email, alias_role) if slots.email else None,
+        name=project_storage_slot_to_runtime(slots.name, alias_role) if slots.name else None,
+        location_clue=project_storage_slot_to_runtime(slots.location_clue, alias_role) if slots.location_clue else None,
+        phone=project_storage_slot_to_runtime(slots.phone, alias_role) if slots.phone else None,
+        card_number=project_storage_slot_to_runtime(slots.card_number, alias_role) if slots.card_number else None,
+        bank_account=project_storage_slot_to_runtime(slots.bank_account, alias_role) if slots.bank_account else None,
+        passport_number=project_storage_slot_to_runtime(slots.passport_number, alias_role) if slots.passport_number else None,
+        driver_license=project_storage_slot_to_runtime(slots.driver_license, alias_role) if slots.driver_license else None,
+        email=project_storage_slot_to_runtime(slots.email, alias_role) if slots.email else None,
         address=project_storage_slot_to_runtime(slots.address, alias_role) if slots.address else None,
-        id_number=_project_scalar_slot_to_runtime(slots.id_number, alias_role) if slots.id_number else None,
-        organization=_project_scalar_slot_to_runtime(slots.organization, alias_role) if slots.organization else None,
+        id_number=project_storage_slot_to_runtime(slots.id_number, alias_role) if slots.id_number else None,
+        organization=project_storage_slot_to_runtime(slots.organization, alias_role) if slots.organization else None,
     )
 
 

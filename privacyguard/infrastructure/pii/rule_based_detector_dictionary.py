@@ -34,18 +34,23 @@ def _load_privacy_dictionary(self, content: dict[str, object]) -> dict[PIIAttrib
             attr_type = self._to_attr_type(raw_key)
             if attr_type is None:
                 continue
+            if not isinstance(values, list):
+                continue
             if attr_type == PIIAttributeType.ADDRESS:
+                expanded_values: list[object] = []
+                for address_slot in values:
+                    expanded_values.extend(self._expand_structured_address_slot(address_slot))
                 self._append_dictionary_values(
                     mapped=mapped,
                     attr_type=attr_type,
-                    values=self._expand_structured_address_slot(values),
+                    values=expanded_values,
                     entity_id=entity_id,
                 )
                 continue
             self._append_dictionary_values(
                 mapped=mapped,
                 attr_type=attr_type,
-                values=[values],
+                values=values,
                 entity_id=entity_id,
             )
     return mapped
@@ -54,32 +59,36 @@ def _expand_structured_address_slot(self, address_slot) -> list[object]:
     if not isinstance(address_slot, dict):
         return []
 
-    rendered_parts: list[str] = []
     aliases: list[str] = []
     expanded: list[object] = []
-    province_value: str | None = None
-    country_value: str | None = None
-
-    for level_name in ("country", "province", "city", "district", "street", "building", "room"):
+    selected_values: dict[str, str] = {}
+    for level_name in ("country", "province", "city", "district", "street", "building", "room", "postal_code"):
         level = address_slot.get(level_name)
         if not isinstance(level, dict):
             continue
         value = str(level.get("value") or "").strip()
         if not value:
             continue
-        if level_name == "country":
-            country_value = value
-        if level_name == "province":
-            province_value = value
-        if level_name == "country":
-            rendered_parts.append(value)
-        elif level_name != "city" or value != province_value:
-            rendered_parts.append(value)
+        selected_values[level_name] = value
         aliases.extend(self._normalize_aliases(level.get("aliases")))
         expanded.append(level)
 
-    full_value = "".join(rendered_parts)
+    full_value = render_address_components(
+        address_components_from_levels(
+            country_text=selected_values.get("country"),
+            province_text=selected_values.get("province"),
+            city_text=selected_values.get("city"),
+            district_text=selected_values.get("district"),
+            street_text=selected_values.get("street"),
+            building_text=selected_values.get("building"),
+            room_text=selected_values.get("room"),
+            postal_code_text=selected_values.get("postal_code"),
+        ),
+        include_country=False,
+        granularity="detail",
+    )
     unique_aliases = [alias for alias in dict.fromkeys(aliases) if alias and alias != full_value]
+    country_value = selected_values.get("country")
     if country_value and country_value != full_value:
         unique_aliases.append(country_value)
     if full_value:

@@ -19,6 +19,8 @@ from privacyguard.infrastructure.pii.json_privacy_repository import (
 )
 from privacyguard.utils.aho_matcher import AhoCorasickMatcher
 from privacyguard.utils.pii_value import (
+    address_components_from_levels,
+    render_address_components,
     build_match_text,
     classify_content_shape_attr,
     compact_bank_account_value,
@@ -259,6 +261,29 @@ _NON_PERSON_TOKENS = {
     "老板",
     "助理",
 }
+_NON_PERSON_TOKENS_EN = {
+    "account",
+    "address",
+    "admin",
+    "agent",
+    "alert",
+    "contact",
+    "customer",
+    "dashboard",
+    "editor",
+    "help",
+    "home",
+    "message",
+    "notification",
+    "profile",
+    "project",
+    "service",
+    "settings",
+    "system",
+    "support",
+    "team",
+    "user",
+}
 _UI_OPERATION_NAME_WHITELIST = {
     "公告",
     "通知",
@@ -287,6 +312,25 @@ _UI_OPERATION_NAME_WHITELIST = {
     "保存",
     "上传",
     "下载",
+    "add",
+    "back",
+    "cancel",
+    "close",
+    "copy",
+    "delete",
+    "download",
+    "edit",
+    "file",
+    "forward",
+    "open",
+    "refresh",
+    "reply",
+    "save",
+    "search",
+    "send",
+    "settings",
+    "share",
+    "upload",
 }
 _LOCATION_ACTIVITY_TOKENS = (
     "拼车",
@@ -307,6 +351,17 @@ _LOCATION_ACTIVITY_TOKENS = (
     "上班",
     "夜跑",
     "搭子",
+    "airport",
+    "checkin",
+    "commute",
+    "hotel",
+    "office",
+    "pickup",
+    "ride",
+    "school",
+    "travel",
+    "trip",
+    "work",
 )
 _OCR_FRAGMENT_DELIMITERS = "-－—_/|｜"
 _OCR_SEMANTIC_BREAK_TOKEN = " <OCR_BREAK> "
@@ -503,6 +558,19 @@ _NAME_HONORIFICS = (
     "警官",
     "同学",
 )
+_EN_NAME_HONORIFICS = (
+    "mr",
+    "mr.",
+    "mrs",
+    "mrs.",
+    "ms",
+    "ms.",
+    "miss",
+    "dr",
+    "dr.",
+    "prof",
+    "prof.",
+)
 _NAME_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000·•・")
 _NAME_DICTIONARY_ALLOWED_NEXT_CHARS = (
     set("的了呢吗吧啊呀哦哈呗嘛是在于与和及并或给让把将向从到回处办找发传交送问说看来去要想会能可应需请先再就已未还都也被把按")
@@ -568,6 +636,15 @@ _NAME_STANDALONE_NEGATIVE_SUFFIXES = (
     "册",
     "表",
 )
+_NAME_STANDALONE_NEGATIVE_SUFFIXES_EN = (
+    "app",
+    "bot",
+    "group",
+    "menu",
+    "page",
+    "room",
+    "tab",
+)
 _GEO_NEGATIVE_RIGHT_CONTEXT_TOKENS = (
     "大学",
     "学院",
@@ -582,6 +659,13 @@ _GEO_NEGATIVE_RIGHT_CONTEXT_TOKENS = (
     "药店",
     "超市",
     "门店",
+    "bank",
+    "college",
+    "company",
+    "hospital",
+    "institute",
+    "school",
+    "university",
 )
 _ORGANIZATION_BLACKLIST = {
     "机构",
@@ -601,6 +685,15 @@ _ORGANIZATION_BLACKLIST = {
     "事务所",
     "委员会",
     "科技",
+    "company",
+    "corporation",
+    "group",
+    "hospital",
+    "institute",
+    "organization",
+    "school",
+    "team",
+    "university",
 }
 _ORGANIZATION_SENTENCE_NOISE_TOKENS = {
     "这个",
@@ -616,8 +709,86 @@ _ORGANIZATION_SENTENCE_NOISE_TOKENS = {
     "真",
     "非常",
     "比较",
+    "feature",
+    "platform",
+    "product",
+    "service",
+    "system",
 }
 _REGION_TOKENS = set(_BUILTIN_GEO_LEXICON.provinces)
+_EN_ADDRESS_STREET_SUFFIXES = (
+    "street",
+    "st",
+    "road",
+    "rd",
+    "avenue",
+    "ave",
+    "boulevard",
+    "blvd",
+    "drive",
+    "dr",
+    "lane",
+    "ln",
+    "court",
+    "ct",
+    "place",
+    "pl",
+    "parkway",
+    "pkwy",
+    "terrace",
+    "ter",
+    "circle",
+    "cir",
+    "way",
+    "highway",
+    "hwy",
+)
+_EN_ADDRESS_UNIT_TOKENS = (
+    "apartment",
+    "apt",
+    "suite",
+    "ste",
+    "unit",
+    "floor",
+    "fl",
+    "room",
+    "rm",
+)
+_EN_ADDRESS_SUFFIX_PATTERN = re.compile(
+    rf"\b(?:{'|'.join(map(re.escape, _EN_ADDRESS_STREET_SUFFIXES))})\.?\b",
+    re.IGNORECASE,
+)
+_EN_ADDRESS_UNIT_PATTERN = re.compile(
+    rf"(?:\b(?:{'|'.join(map(re.escape, _EN_ADDRESS_UNIT_TOKENS))})\.?\b|\#)\s*[A-Za-z0-9\-]+",
+    re.IGNORECASE,
+)
+_EN_ADDRESS_NUMBER_PATTERN = re.compile(
+    r"\b\d{1,6}(?:-\d{1,6})?\b",
+    re.IGNORECASE,
+)
+_EN_PO_BOX_PATTERN = re.compile(
+    r"\bP\.?\s*O\.?\s*Box\s+\d{1,10}\b",
+    re.IGNORECASE,
+)
+_EN_STATE_OR_REGION_PATTERN = re.compile(
+    r"\b(?:AL|AK|AZ|AR|CA|CO|CT|DC|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\b",
+    re.IGNORECASE,
+)
+_EN_POSTAL_CODE_PATTERN = re.compile(
+    r"\b\d{5}(?:-\d{4})?\b",
+    re.IGNORECASE,
+)
+_EN_ADDRESS_SPAN_PATTERNS = (
+    re.compile(
+        rf"\b\d{{1,6}}(?:-\d{{1,6}})?\s+[A-Za-z0-9][A-Za-z0-9.'\- ]{{1,48}}?\s+"
+        rf"(?:{'|'.join(map(re.escape, _EN_ADDRESS_STREET_SUFFIXES))})\.?"
+        rf"(?:\s*,?\s*(?:{'|'.join(map(re.escape, _EN_ADDRESS_UNIT_TOKENS))}|#)\.?\s*[A-Za-z0-9\-]+)?"
+        rf"(?:\s*,?\s*[A-Za-z .'\-]{{2,32}})?"
+        rf"(?:\s*,?\s*(?:[A-Z]{{2}}|\d{{5}}(?:-\d{{4}})?))?",
+        re.IGNORECASE,
+    ),
+    _EN_PO_BOX_PATTERN,
+)
 _ADDRESS_SUFFIX_PATTERN = re.compile(
     r"(?:特别行政区|自治区|自治州|盟|省|市|区|县|旗|乡|镇|街道|村|屯|组|路|街|巷|弄|胡同|大道|道|"
     r"社区|小区|公寓|大厦|广场|花园|家园|苑|庭|府|湾|城|里|园区|校区|宿舍|号院|号楼|栋|幢|座|单元|室|层|号)"
@@ -653,6 +824,10 @@ _GENERIC_NUMBER_PATTERN = re.compile(r"(?<!\d)(?:\d(?:[\s\-－—_.,，。·•]
 _LEADING_ADDRESS_NOISE_PATTERN = re.compile(
     r"^(?:请)?(?:在|住在|我住在|我住|位于|位于中国|地址在|住址在|家住|家住在|现住|居住于|收货到|寄往|寄到|送到|派送至|发往|前往|来自|来自于|发自|到达)\s*"
 )
+_LEADING_ADDRESS_NOISE_PATTERN_EN = re.compile(
+    r"^(?:address|addr|location|located at|live at|lives at|resides at|ship to|send to|deliver to|from)\s*(?:[:=,-]|is|at)?\s*",
+    re.IGNORECASE,
+)
 _ORGANIZATION_STRONG_SUFFIXES = (
     "有限责任公司",
     "股份有限公司",
@@ -680,6 +855,43 @@ _ORGANIZATION_STRONG_SUFFIXES = (
     "工作室",
     "公司",
 )
+_EN_ORGANIZATION_STRONG_SUFFIXES = (
+    "inc",
+    "inc.",
+    "corp",
+    "corp.",
+    "corporation",
+    "company",
+    "co.",
+    "llc",
+    "ltd",
+    "ltd.",
+    "bank",
+    "hospital",
+    "university",
+    "college",
+    "school",
+    "institute",
+    "foundation",
+    "association",
+    "laboratory",
+    "lab",
+    "clinic",
+    "group",
+)
+_EN_ORGANIZATION_WEAK_SUFFIXES = (
+    "analytics",
+    "consulting",
+    "design",
+    "digital",
+    "media",
+    "network",
+    "software",
+    "studio",
+    "systems",
+    "technology",
+    "tech",
+)
 _ORGANIZATION_WEAK_SUFFIXES = (
     "科技",
     "信息",
@@ -706,14 +918,29 @@ _ORGANIZATION_SPAN_PATTERNS = (
         rf"(?:{'|'.join(map(re.escape, _ORGANIZATION_STRONG_SUFFIXES + _ORGANIZATION_WEAK_SUFFIXES))})"
     ),
 )
+_EN_ORGANIZATION_SPAN_PATTERNS = (
+    re.compile(
+        rf"\b[A-Za-z][A-Za-z0-9&().,'\- ]{{1,64}}?\s+"
+        rf"(?:{'|'.join(map(re.escape, _EN_ORGANIZATION_STRONG_SUFFIXES + _EN_ORGANIZATION_WEAK_SUFFIXES))})\b",
+        re.IGNORECASE,
+    ),
+)
 _LEADING_ORGANIZATION_NOISE_PATTERN = re.compile(
     r"^(?:(?:我|你|他|她|其|本人|我们|他们|她们)\s*)?"
     r"(?:在|于|来自|来自于|就职于|任职于|供职于|实习于|毕业于|就读于|所在|所在的|当前在|目前在|曾在|曾就职于|曾任职于)\s*"
 )
+_LEADING_ORGANIZATION_NOISE_PATTERN_EN = re.compile(
+    r"^(?:(?:i|we|they|he|she)\s+)?(?:work(?:s|ed)?\s+at|study(?:s|ied)?\s+at|from|joined|joining|employed by|currently at|previously at)\s+",
+    re.IGNORECASE,
+)
 _ORGANIZATION_FIELD_PREFIX_PATTERN = re.compile(
     r"^(?:机构|组织|单位|公司|企业|工作单位|所在单位|任职单位|就职公司|学校|医院|银行|毕业院校|就读学校)\s*(?:[:：=]|是|为)?\s*"
 )
-_FIELD_LABEL_CONNECTOR_PATTERN = re.compile(r"^\s*(?:[:：=]|是|为)")
+_ORGANIZATION_FIELD_PREFIX_PATTERN_EN = re.compile(
+    r"^(?:organization|organisation|org|company|employer|institution|school|college|university|hospital|bank)\s*(?:[:：=]|is|was|at)?\s*",
+    re.IGNORECASE,
+)
+_FIELD_LABEL_CONNECTOR_PATTERN = re.compile(r"^\s*(?:[:：=]|是|为|is|was|at)", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -876,6 +1103,7 @@ _RULE_PROFILES = {
 
 _TUNABLE_RULE_ATTR_TYPES = {
     PIIAttributeType.NAME,
+    PIIAttributeType.LOCATION_CLUE,
     PIIAttributeType.ADDRESS,
     PIIAttributeType.ORGANIZATION,
     PIIAttributeType.OTHER,

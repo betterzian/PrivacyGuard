@@ -257,7 +257,8 @@ def _collect_regex_hits(
     for attr_type, rule_items in self.patterns.items():
         for pattern, matched_by, confidence in rule_items:
             for match in pattern.finditer(raw_text):
-                extracted = self._extract_match(raw_text, *match.span(0))
+                cleaner = self._clean_phone_candidate if attr_type == PIIAttributeType.PHONE else None
+                extracted = self._extract_match(raw_text, *match.span(0), cleaner=cleaner)
                 if extracted is None:
                     continue
                 matched_text, span_start, span_end = extracted
@@ -500,7 +501,11 @@ def _resolve_regex_match(
 ) -> tuple[PIIAttributeType, str, float, dict[str, list[str]] | None] | None:
     """对 regex 命中的高精度字段做二次校验与歧义降级。"""
     if attr_type == PIIAttributeType.PHONE:
-        return (attr_type, matched_by, confidence, None) if self._is_phone_candidate(matched_text) else None
+        if self._is_phone_candidate(matched_text):
+            return (attr_type, matched_by, confidence, None)
+        if matched_by.startswith("regex_phone_us") and self._is_en_phone_candidate(matched_text, allow_plain_local=True):
+            return (attr_type, matched_by, confidence, None)
+        return None
     if attr_type == PIIAttributeType.EMAIL:
         return (attr_type, matched_by, confidence, None) if self._is_email_candidate(matched_text) else None
     if attr_type == PIIAttributeType.PASSPORT_NUMBER:
@@ -759,40 +764,46 @@ def _collect_name_hits(
                     skip_spans=skip_spans,
                 )
     if rule_profile.enable_honorific_name_pattern:
-        for match in self.name_title_pattern.finditer(raw_text):
-            extracted = self._extract_match(
-                raw_text,
-                *match.span("value"),
-                original_text=original_text,
-                shadow_index_map=shadow_index_map,
-            )
-            if extracted is None:
-                continue
-            value, span_start, span_end = extracted
-            if self._is_repeated_mask_text(value, min_run=2, allow_alpha_masks=True):
-                continue
-            canonical_source_text = self._canonical_name_source_text(
-                value,
-                allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
-            )
-            validator_value = canonical_source_text or value
-            if not self._looks_like_name_with_title(validator_value):
-                continue
-            self._upsert_candidate(
-                collected=collected,
-                text=raw_text,
-                matched_text=value,
-                attr_type=PIIAttributeType.NAME,
-                source=source,
-                bbox=bbox,
-                block_id=block_id,
-                span_start=span_start,
-                span_end=span_end,
-                confidence=0.72,
-                matched_by="regex_name_honorific",
-                canonical_source_text=canonical_source_text,
-                skip_spans=skip_spans,
-            )
+        honorific_patterns: list[tuple[re.Pattern[str], str, float]] = []
+        if self._supports_zh():
+            honorific_patterns.append((self.name_title_pattern, "regex_name_honorific", 0.72))
+        if self._supports_en():
+            honorific_patterns.append((self.en_name_title_pattern, "regex_name_honorific_en", 0.78))
+        for pattern, matched_by, confidence in honorific_patterns:
+            for match in pattern.finditer(raw_text):
+                extracted = self._extract_match(
+                    raw_text,
+                    *match.span("value"),
+                    original_text=original_text,
+                    shadow_index_map=shadow_index_map,
+                )
+                if extracted is None:
+                    continue
+                value, span_start, span_end = extracted
+                if self._is_repeated_mask_text(value, min_run=2, allow_alpha_masks=True):
+                    continue
+                canonical_source_text = self._canonical_name_source_text(
+                    value,
+                    allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+                )
+                validator_value = canonical_source_text or value
+                if not self._looks_like_name_with_title(validator_value):
+                    continue
+                self._upsert_candidate(
+                    collected=collected,
+                    text=raw_text,
+                    matched_text=value,
+                    attr_type=PIIAttributeType.NAME,
+                    source=source,
+                    bbox=bbox,
+                    block_id=block_id,
+                    span_start=span_start,
+                    span_end=span_end,
+                    confidence=confidence,
+                    matched_by=matched_by,
+                    canonical_source_text=canonical_source_text,
+                    skip_spans=skip_spans,
+                )
     self._collect_generic_name_fragment_hits(
         collected,
         raw_text,
@@ -957,7 +968,10 @@ def _collect_address_hits(
                 matched_by="heuristic_address_fragment",
                 skip_spans=skip_spans,
             )
-    for pattern in _ADDRESS_SPAN_PATTERNS:
+    address_patterns = list(_ADDRESS_SPAN_PATTERNS)
+    if self._supports_en():
+        address_patterns.extend(_EN_ADDRESS_SPAN_PATTERNS)
+    for pattern in address_patterns:
         for match in pattern.finditer(raw_text):
             extracted = self._extract_match(
                 raw_text,
@@ -1103,7 +1117,10 @@ def _collect_organization_hits(
     shadow_index_map: tuple[int | None, ...] | None = None,
 ) -> None:
     """收集机构名后缀与就业/就读语境下的机构命中。"""
-    for pattern in _ORGANIZATION_SPAN_PATTERNS:
+    organization_patterns = list(_ORGANIZATION_SPAN_PATTERNS)
+    if self._supports_en():
+        organization_patterns.extend(_EN_ORGANIZATION_SPAN_PATTERNS)
+    for pattern in organization_patterns:
         for match in pattern.finditer(raw_text):
             extracted = self._extract_match(
                 raw_text,

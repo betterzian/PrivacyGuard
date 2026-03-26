@@ -4,30 +4,56 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import *
 
 def _build_patterns(self) -> dict[PIIAttributeType, list[tuple[re.Pattern[str], str, float]]]:
     """构建正则规则集合。"""
+    phone_patterns: list[tuple[re.Pattern[str], str, float]] = []
+    if self._supports_zh():
+        phone_patterns.extend(
+            [
+                (re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"), "regex_phone_mobile", 0.86),
+                (
+                    re.compile(r"(?<!\d)1[3-9]\d(?:[\s\-－—_.,，。·•()（）]?\d{4}){2}(?!\d)"),
+                    "regex_phone_mobile_sep",
+                    0.84,
+                ),
+                (
+                    re.compile(r"(?<!\d)0\d{2,3}(?:[\s\-－—_.,，。·•]?\d){7,8}(?!\d)"),
+                    "regex_phone_landline",
+                    0.78,
+                ),
+                (
+                    re.compile(rf"(?<!\d)1[3-9]\d(?:[\s\-－—_.,，。·•]?{_MASK_CHAR_CLASS_WITH_X}{{4}})(?:[\s\-－—_.,，。·•]?\d{{4}})(?!\d)"),
+                    "regex_phone_masked",
+                    0.82,
+                ),
+                (
+                    re.compile(rf"(?<!\d)1[3-9]\d(?:[\s\-－—_.,，。·•]?{_MASK_CHAR_CLASS_WITH_X}){{8}}(?!\d)"),
+                    "regex_phone_masked_prefix_only",
+                    0.8,
+                ),
+            ]
+        )
+    if self._supports_en():
+        phone_patterns.extend(
+            [
+                (
+                    re.compile(
+                        r"(?<!\w)(?:\+?1[\s\-._()]*)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[\s\-._()]*[2-9]\d{2}[\s\-._()]*\d{4}(?!\w)"
+                    ),
+                    "regex_phone_us",
+                    0.84,
+                ),
+                (
+                    re.compile(
+                        rf"(?<!\w)(?:\+?1[\s\-._()]*)?(?:\([2-9]\d{{2}}\)|[2-9]\d{{2}})[\s\-._()]*"
+                        rf"(?:[2-9]\d{{2}}|\d{{2}}{_MASK_CHAR_CLASS_WITH_X}{{1}})[\s\-._()]*"
+                        rf"(?:\d{{4}}|\d{{2}}{_MASK_CHAR_CLASS_WITH_X}{{2}})(?!\w)"
+                    ),
+                    "regex_phone_us_masked",
+                    0.8,
+                ),
+            ]
+        )
     return {
-        PIIAttributeType.PHONE: [
-            (re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"), "regex_phone_mobile", 0.86),
-            (
-                re.compile(r"(?<!\d)1[3-9]\d(?:[\s\-－—_.,，。·•()（）]?\d{4}){2}(?!\d)"),
-                "regex_phone_mobile_sep",
-                0.84,
-            ),
-            (
-                re.compile(r"(?<!\d)0\d{2,3}(?:[\s\-－—_.,，。·•]?\d){7,8}(?!\d)"),
-                "regex_phone_landline",
-                0.78,
-            ),
-            (
-                re.compile(rf"(?<!\d)1[3-9]\d(?:[\s\-－—_.,，。·•]?{_MASK_CHAR_CLASS_WITH_X}{{4}})(?:[\s\-－—_.,，。·•]?\d{{4}})(?!\d)"),
-                "regex_phone_masked",
-                0.82,
-            ),
-            (
-                re.compile(rf"(?<!\d)1[3-9]\d(?:[\s\-－—_.,，。·•]?{_MASK_CHAR_CLASS_WITH_X}){{8}}(?!\d)"),
-                "regex_phone_masked_prefix_only",
-                0.8,
-            ),
-        ],
+        PIIAttributeType.PHONE: phone_patterns,
         PIIAttributeType.CARD_NUMBER: [
             (
                 re.compile(r"(?<![A-Za-z0-9])(?:\d[\s\-－—_.,，。·•]?){13,19}(?![A-Za-z0-9])"),
@@ -168,7 +194,7 @@ def _build_context_rules(self) -> list[tuple[PIIAttributeType, re.Pattern[str], 
             value_pattern=rf"[0-9*＊+＋\-－—_.,，。·•/\\()（）\s{_MASK_CHAR_CLASS_WITH_X[1:-1]}]{{7,32}}",
             confidence=0.88,
             matched_by="context_phone_field",
-            validator=self._is_phone_candidate,
+            validator=self._is_context_phone_candidate,
         ),
         self._build_context_rule(
             keywords=_CARD_FIELD_KEYWORDS,
@@ -232,24 +258,35 @@ def _build_context_rules(self) -> list[tuple[PIIAttributeType, re.Pattern[str], 
             value_pattern=r"[A-Za-z0-9&()（）·\s一-龥]{2,80}",
             confidence=0.86,
             matched_by="context_organization_field",
-            validator=self._is_organization_candidate,
+            validator=self._is_context_organization_candidate,
         ),
     ]
 
 def _build_self_name_patterns(self) -> list[tuple[re.Pattern[str], str, float]]:
     """构建自我介绍与口语化姓名规则。"""
-    return [
-        (
-            re.compile(rf"(?:我叫|名叫|叫做|我的名字是)\s*(?P<value>[一-龥·\s0-9]{{2,10}}|[一-龥][*＊xX某]{{1,3}}|{_TEXT_MASK_CHAR_CLASS}{{2,10}})"),
-            "context_name_self_intro",
-            0.78,
-        ),
-        (
-            re.compile(r"(?:my\s+name\s+is)\s*(?P<value>[A-Za-z][A-Za-z .'\-]{1,40})", re.IGNORECASE),
-            "context_name_self_intro_en",
-            0.76,
-        ),
-    ]
+    patterns: list[tuple[re.Pattern[str], str, float]] = []
+    if self._supports_zh():
+        patterns.append(
+            (
+                re.compile(rf"(?:我叫|名叫|叫做|我的名字是)\s*(?P<value>[一-龥·\s0-9]{{2,10}}|[一-龥][*＊xX某]{{1,3}}|{_TEXT_MASK_CHAR_CLASS}{{2,10}})"),
+                "context_name_self_intro",
+                0.78,
+            )
+        )
+    if self._supports_en():
+        patterns.extend(
+            [
+                (
+                    re.compile(
+                        r"(?:my\s+name\s+is|i\s+am|i'm|this\s+is)\s*(?P<value>[A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+){0,2})",
+                        re.IGNORECASE,
+                    ),
+                    "context_name_self_intro_en",
+                    0.76,
+                ),
+            ]
+        )
+    return patterns
 
 def _build_masked_text_pattern(self) -> re.Pattern[str]:
     """构建通用重复掩码字符检测模式。"""
@@ -267,7 +304,7 @@ def _build_context_rule(
     """根据关键词动态构建上下文字段规则。"""
     keyword_pattern = "|".join(sorted((re.escape(item) for item in keywords), key=len, reverse=True))
     pattern = re.compile(
-        rf"(?:^|[\s{{\[\(（【<「『\"',，;；])(?:{keyword_pattern})\s*(?:[:：=]|是|为)?\s*(?P<value>{value_pattern})",
+        rf"(?:^|[\s{{\[\(（【<「『\"',，;；])(?:{keyword_pattern})\s*(?:[:：=]|是|为|is|was|at)?\s*(?P<value>{value_pattern})",
         re.IGNORECASE,
     )
     return (attr_type, pattern, matched_by, confidence, validator)
@@ -276,7 +313,7 @@ def _build_field_label_pattern(self) -> re.Pattern[str]:
     """构建用于识别字段标签边界的通用模式。"""
     keyword_pattern = "|".join(sorted((re.escape(item) for item in self._all_field_keywords()), key=len, reverse=True))
     return re.compile(
-        rf"(?:^|[\s{{\[\(（【<「『\"',，;；])(?P<label>{keyword_pattern})\s*(?:[:：=]|是|为)",
+        rf"(?:^|[\s{{\[\(（【<「『\"',，;；])(?P<label>{keyword_pattern})\s*(?:[:：=]|是|为|is|was|at)",
         re.IGNORECASE,
     )
 

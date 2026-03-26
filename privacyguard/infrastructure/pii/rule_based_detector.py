@@ -14,11 +14,13 @@ class RuleBasedPIIDetector:
         self,
         privacy_repository_path: str | Path | None = None,
         detector_mode: str = "rule_based",
+        locale_profile: str = "mixed",
         mapping_store: MappingStore | None = None,
         min_confidence_by_attr: dict[PIIAttributeType | str, float] | None = None,
     ) -> None:
         """初始化规则、词典与候选解析服务。"""
         self.detector_mode = detector_mode
+        self.locale_profile = self._normalize_locale_profile(locale_profile)
         self.privacy_repository_path = self._resolve_privacy_repository_path(privacy_repository_path)
         self.dictionary = self._load_dictionary(self.privacy_repository_path)
         self.dictionary_index = self._build_dictionary_index(self.dictionary)
@@ -38,6 +40,10 @@ class RuleBasedPIIDetector:
         self.name_title_pattern = re.compile(
             rf"(?P<value>(?:(?:{compound_surname_pattern})[一-龥·]{{1,3}}|(?:{single_surname_pattern})[一-龥·]{{0,2}})"
             rf"(?:{'|'.join(map(re.escape, _NAME_HONORIFICS))}))"
+        )
+        self.en_name_title_pattern = re.compile(
+            r"(?P<value>(?:mr|mrs|ms|miss|dr|prof)\.?\s+[A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+){0,2})",
+            re.IGNORECASE,
         )
         self.generic_name_pattern = re.compile(
             rf"(?=(?P<value>(?:(?:{compound_surname_pattern})[一-龥·]{{1,2}}|(?:{single_surname_pattern})[一-龥·]{{1,3}})))"
@@ -83,6 +89,18 @@ class RuleBasedPIIDetector:
         """从 `privacy_repository_path` 重新加载词典与索引；路径未设置或文件缺失时与构造时行为一致。"""
         self.dictionary = self._load_dictionary(self.privacy_repository_path)
         self.dictionary_index = self._build_dictionary_index(self.dictionary)
+
+    def _normalize_locale_profile(self, locale_profile: str) -> str:
+        normalized = str(locale_profile or "mixed").strip().lower()
+        if normalized not in {"zh_cn", "en_us", "mixed"}:
+            raise ValueError(f"unsupported locale_profile: {locale_profile}")
+        return normalized
+
+    def _supports_zh(self) -> bool:
+        return self.locale_profile in {"zh_cn", "mixed"}
+
+    def _supports_en(self) -> bool:
+        return self.locale_profile in {"en_us", "mixed"}
 
     _resolve_privacy_repository_path = _dictionary._resolve_privacy_repository_path
     _load_dictionary = _dictionary._load_dictionary
@@ -178,6 +196,7 @@ class RuleBasedPIIDetector:
     _protected_spans_from_candidates = _collectors._protected_spans_from_candidates
     _meets_confidence_threshold = _validation._meets_confidence_threshold
     _clean_extracted_value = _validation._clean_extracted_value
+    _clean_phone_candidate = _validation._clean_phone_candidate
     _strip_ocr_break_edge_noise = _validation._strip_ocr_break_edge_noise
     _clean_address_candidate = _validation._clean_address_candidate
     _clean_organization_candidate = _validation._clean_organization_candidate
@@ -194,7 +213,9 @@ class RuleBasedPIIDetector:
     _is_cjk_char = _validation._is_cjk_char
     _canonical_name_source_text = _validation._canonical_name_source_text
     _compact_name_value = _validation._compact_name_value
+    _is_en_phone_candidate = _validation._is_en_phone_candidate
     _is_phone_candidate = _validation._is_phone_candidate
+    _is_context_phone_candidate = _validation._is_context_phone_candidate
     _is_card_number_candidate = _validation._is_card_number_candidate
     _is_context_card_number_candidate = _validation._is_context_card_number_candidate
     _is_bank_account_candidate = _validation._is_bank_account_candidate
@@ -205,15 +226,18 @@ class RuleBasedPIIDetector:
     _is_other_candidate = _validation._is_other_candidate
     _passes_luhn = _validation._passes_luhn
     _is_name_candidate = _validation._is_name_candidate
+    _is_context_organization_candidate = _validation._is_context_organization_candidate
     _is_organization_candidate = _validation._is_organization_candidate
     _organization_has_explicit_context = _validation._organization_has_explicit_context
     _looks_like_name_with_title = _validation._looks_like_name_with_title
     _geo_candidate_attr_type = _validation._geo_candidate_attr_type
     _geo_fragment_confidence = _validation._geo_fragment_confidence
+    _english_address_confidence = _validation._english_address_confidence
     _looks_like_address_candidate = _validation._looks_like_address_candidate
     _looks_like_masked_address_candidate = _validation._looks_like_masked_address_candidate
     _should_collect_full_text_address = _validation._should_collect_full_text_address
     _address_confidence = _validation._address_confidence
+    _has_en_organization_suffix = _validation._has_en_organization_suffix
     _organization_confidence = _validation._organization_confidence
     _upsert_candidate = _validation._upsert_candidate
     _normalize_fallback_attr_type = _validation._normalize_fallback_attr_type
