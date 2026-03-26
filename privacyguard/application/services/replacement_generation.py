@@ -72,9 +72,20 @@ class ReplacementGenerationService:
             persona_id,
             candidate.attr_type,
             candidate.text,
+            metadata=candidate.metadata,
         )
         text = replacement_text or slot_value
-        return action.model_copy(update={"replacement_text": text}, deep=True)
+        merged_metadata = dict(action.metadata)
+        for key, values in candidate.metadata.items():
+            merged_metadata.setdefault(key, [])
+            merged_metadata[key] = sorted(set(merged_metadata[key]) | set(values))
+        return action.model_copy(
+            update={
+                "replacement_text": text,
+                "metadata": merged_metadata,
+            },
+            deep=True,
+        )
 
 
 def apply_post_decision_steps(

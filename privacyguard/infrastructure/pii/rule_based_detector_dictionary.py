@@ -36,6 +36,17 @@ def _load_privacy_dictionary(self, content: dict[str, object]) -> dict[PIIAttrib
                 continue
             if not isinstance(values, list):
                 continue
+            if attr_type == PIIAttributeType.NAME:
+                expanded_values: list[object] = []
+                for name_slot in values:
+                    expanded_values.extend(self._expand_structured_name_slot(name_slot))
+                self._append_dictionary_values(
+                    mapped=mapped,
+                    attr_type=attr_type,
+                    values=expanded_values,
+                    entity_id=entity_id,
+                )
+                continue
             if attr_type == PIIAttributeType.ADDRESS:
                 expanded_values: list[object] = []
                 for address_slot in values:
@@ -54,6 +65,28 @@ def _load_privacy_dictionary(self, content: dict[str, object]) -> dict[PIIAttrib
                 entity_id=entity_id,
             )
     return mapped
+
+
+def _expand_structured_name_slot(self, name_slot) -> list[object]:
+    if not isinstance(name_slot, dict):
+        return []
+    expanded: list[object] = []
+    for component_name in ("full", "family", "given", "middle"):
+        component = name_slot.get(component_name)
+        if not isinstance(component, dict):
+            continue
+        value = str(component.get("value") or "").strip()
+        if not value:
+            continue
+        aliases = self._normalize_aliases(component.get("aliases"))
+        expanded.append(
+            {
+                "value": value,
+                "aliases": aliases,
+                "metadata": {"name_component": [component_name]},
+            }
+        )
+    return expanded
 
 def _expand_structured_address_slot(self, address_slot) -> list[object]:
     if not isinstance(address_slot, dict):
@@ -111,7 +144,7 @@ def _append_dictionary_values(
     else:
         return
     for item in entries:
-        value, aliases = self._parse_dictionary_item(item, default_aliases=default_aliases)
+        value, aliases, metadata = self._parse_dictionary_item(item, default_aliases=default_aliases)
         if not value:
             continue
         source_term = canonicalize_pii_value(attr_type, value)
@@ -127,6 +160,7 @@ def _append_dictionary_values(
                 local_entity_ids=local_entity_ids,
                 matched_by="dictionary_local",
                 confidence=0.99 if entity_id else 0.98,
+                metadata=metadata,
             )
         )
 
@@ -159,6 +193,9 @@ def _session_dictionary_entries(
     session_entries: dict[PIIAttributeType, list[_LocalDictionaryEntry]] = {}
     for (attr_type, canonical), record in aggregated.items():
         metadata = {"session_turn_ids": sorted(turn_index.get((attr_type, canonical), set()))}
+        name_component = str(record.metadata.get("name_component") or "").strip().lower()
+        if name_component:
+            metadata["name_component"] = [name_component]
         canonical_source_text = record.canonical_source_text or self._canonical_dictionary_source_text(
             attr_type,
             record.source_text,
@@ -260,19 +297,24 @@ def _build_dictionary_index(
         )
     return compiled
 
-def _parse_dictionary_item(self, item, default_aliases=None) -> tuple[str, tuple[str, ...]]:
-    """把词库 JSON 中的一项解析成 (value, aliases)。"""
+def _parse_dictionary_item(self, item, default_aliases=None) -> tuple[str, tuple[str, ...], dict[str, list[str]]]:
+    """把词库 JSON 中的一项解析成 (value, aliases, metadata)。"""
     aliases: list[str] = []
+    metadata: dict[str, list[str]] = {}
     if default_aliases is not None:
         aliases.extend(self._normalize_aliases(default_aliases))
     if isinstance(item, dict):
         raw_value = item.get("value") or item.get("text") or item.get("source")
         aliases.extend(self._normalize_aliases(item.get("aliases")))
+        for key, values in (item.get("metadata") or {}).items():
+            normalized = self._normalize_aliases(values)
+            if normalized:
+                metadata[str(key)] = normalized
     else:
         raw_value = item
     value = str(raw_value).strip() if raw_value is not None else ""
     unique_aliases = tuple(dict.fromkeys(alias for alias in aliases if alias and alias != value))
-    return value, unique_aliases
+    return value, unique_aliases, metadata
 
 def _normalize_aliases(self, raw_aliases) -> list[str]:
     if raw_aliases is None:

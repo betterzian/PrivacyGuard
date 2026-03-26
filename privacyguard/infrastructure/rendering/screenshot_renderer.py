@@ -45,10 +45,17 @@ class ScreenshotRenderer:
     _resolve_cross_block_ids = _draw_items._resolve_cross_block_ids
     _build_cross_block_draw_items = _draw_items._build_cross_block_draw_items
     _split_cross_block_replacement = _draw_items._split_cross_block_replacement
+    _split_name_replacement_across_blocks = _draw_items._split_name_replacement_across_blocks
     _split_address_replacement_across_blocks = _draw_items._split_address_replacement_across_blocks
+    _assign_name_units_by_source_overlap = _draw_items._assign_name_units_by_source_overlap
     _assign_address_units_by_source_overlap = _draw_items._assign_address_units_by_source_overlap
+    _group_name_units_by_block_capacity = _draw_items._group_name_units_by_block_capacity
     _group_units_by_block_capacity = _draw_items._group_units_by_block_capacity
     _split_text_proportionally = _draw_items._split_text_proportionally
+    _compact_name_segment = _draw_items._compact_name_segment
+    _append_name_unit = _draw_items._append_name_unit
+    _join_name_units = _draw_items._join_name_units
+    _decorate_name_chunks = _draw_items._decorate_name_chunks
     _address_units = _draw_items._address_units
     _segment_ranges = _draw_items._segment_ranges
     _best_overlap_block = _draw_items._best_overlap_block

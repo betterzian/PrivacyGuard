@@ -6,10 +6,22 @@
       "slots": {
         "name": [
           {
-            "value": "林样本",
-            "aliases": [
-              "林示例"
-            ]
+            "full": {
+              "value": "林样本",
+              "aliases": [
+                "林示例"
+              ]
+            },
+            "family": {
+              "value": "林",
+              "aliases": []
+            },
+            "given": {
+              "value": "样本",
+              "aliases": [
+                "示例"
+              ]
+            }
           }
         ],
         "location_clue": [
@@ -196,10 +208,20 @@
       "slots": {
         "name": [
           {
-            "value": "Jordan Demo",
-            "aliases": [
-              "J. Demo"
-            ]
+            "full": {
+              "value": "Jordan Demo",
+              "aliases": [
+                "J. Demo"
+              ]
+            },
+            "family": {
+              "value": "Demo",
+              "aliases": []
+            },
+            "given": {
+              "value": "Jordan",
+              "aliases": []
+            }
           }
         ],
         "location_clue": [

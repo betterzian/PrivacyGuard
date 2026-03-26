@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from re import Pattern
+
+
+@dataclass(frozen=True, slots=True)
+class AddressInput:
+    text: str
+    has_ocr_breaks: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AddressSeed:
+    start: int
+    end: int
+    seed_type: str
+    matched_by: str
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class AddressComponentMatch:
+    component_type: str
+    start: int
+    end: int
+    text: str
+    strength: str = "medium"
+
+
+@dataclass(frozen=True, slots=True)
+class AddressSpanDraft:
+    start: int
+    end: int
+    window_start: int
+    window_end: int
+    seed: AddressSeed
+    terminated_by: str = "stream_end"
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AddressSpan:
+    start: int
+    end: int
+    text: str
+    matched_by: str
+    confidence: float
+    terminated_by: str
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AddressComponent:
+    component_type: str
+    text: str
+    start_offset: int
+    end_offset: int
+    privacy_level: str
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class AddressParseResult:
+    span: AddressSpan
+    components: tuple[AddressComponent, ...]
+    address_kind: str
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class AddressParseConfig:
+    locale_profile: str
+    min_confidence: float
+    field_label_pattern: Pattern[str] | None = None
+    emit_component_candidates: bool = True
+    emit_location_candidates: bool = False
+    extra_metadata: dict[str, list[str]] = field(default_factory=dict)

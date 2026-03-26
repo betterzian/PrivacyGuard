@@ -18,6 +18,7 @@ from privacyguard.infrastructure.repository.schemas import (
     AddressSlotStorage,
     AddressStats,
     ExposureInfo,
+    NameSlotStorage,
     PersonaDocument,
     PersonaRepositoryDocument,
     PersonaSlots,
@@ -28,10 +29,13 @@ from privacyguard.infrastructure.repository.schemas import (
 )
 from privacyguard.utils.pii_value import (
     AddressComponents,
+    NameComponents,
     address_components_from_levels,
     parse_address_components,
+    parse_name_components,
     render_address_components,
     render_address_like_source,
+    render_name_like_source,
 )
 
 DEFAULT_PERSONA_REPOSITORY_PATH = "data/persona_repository.json"
@@ -95,6 +99,18 @@ def _normalize_runtime_slot_values(raw: object, *, field_name: str) -> list[str]
     return values
 
 
+def _name_components_to_storage_slot(components: NameComponents) -> NameSlotStorage:
+    full_text = components.full_text or components.original_text
+    if not full_text:
+        raise ValueError("姓名不能为空")
+    return NameSlotStorage(
+        full=SharedSlotStorage(value=full_text, aliases=[]),
+        family=SharedSlotStorage(value=components.family_text, aliases=[]) if components.family_text else None,
+        given=SharedSlotStorage(value=components.given_text, aliases=[]) if components.given_text else None,
+        middle=SharedSlotStorage(value=components.middle_text, aliases=[]) if components.middle_text else None,
+    )
+
+
 def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocument:
     """将 ``PersonaProfile`` 转为 ``PersonaDocument``（扁平槽位写入 storage slot）。"""
     slot_values: dict[str, object] = {}
@@ -108,6 +124,11 @@ def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocu
                 _address_components_to_storage_slot(parse_address_components(text))
                 for text in values
             ]
+        elif attr_type == PIIAttributeType.NAME:
+            slot_values["name"] = [
+                _name_components_to_storage_slot(parse_name_components(text))
+                for text in values
+            ]
         else:
             slot_values[key] = [SharedSlotStorage(value=text, aliases=[]) for text in values]
     if not slot_values:
@@ -115,7 +136,7 @@ def _persona_profile_to_persona_document(persona: PersonaProfile) -> PersonaDocu
     slots = PersonaSlots(**slot_values)
     display_name = persona.display_name
     if not display_name and slots.name:
-        display_name = slots.name[0].value
+        display_name = slots.name[0].full.value
     if not display_name:
         display_name = persona.persona_id
     meta: dict[str, str] = {}
@@ -330,6 +351,11 @@ class JsonPersonaRepository:
                 if address_texts:
                     slots[attr_type] = address_texts
                 continue
+            if attr_type == PIIAttributeType.NAME:
+                name_texts = self._render_name_slot_values(stored_persona.slots.name)
+                if name_texts:
+                    slots[attr_type] = name_texts
+                continue
 
             raw_slots = getattr(stored_persona.slots, key, None)
             if raw_slots:
@@ -369,6 +395,16 @@ class JsonPersonaRepository:
             return None
         return slots[self._slot_index(source_text=source_text, slot_count=len(slots))]
 
+    def _pick_name_storage_slot(
+        self,
+        slots: list[NameSlotStorage] | None,
+        *,
+        source_text: str | None = None,
+    ) -> NameSlotStorage | None:
+        if not slots:
+            return None
+        return slots[self._slot_index(source_text=source_text, slot_count=len(slots))]
+
     def _pick_address_storage_slot(
         self,
         slots: list[AddressSlotStorage] | None,
@@ -386,6 +422,48 @@ class JsonPersonaRepository:
             if rendered:
                 rendered_values.append(rendered)
         return rendered_values
+
+    def _render_name_slot_values(self, slots: list[NameSlotStorage] | None) -> list[str]:
+        return [slot.full.value for slot in (slots or []) if slot.full.value]
+
+    def _name_component_hint(self, metadata: dict[str, list[str]] | None) -> str | None:
+        if not metadata:
+            return None
+        values = metadata.get("name_component", [])
+        if not values:
+            return None
+        normalized = [str(value).strip().lower() for value in values if str(value).strip()]
+        for preferred in ("family", "given", "middle", "full"):
+            if preferred in normalized:
+                return preferred
+        return normalized[0] if normalized else None
+
+    def _render_name_slot(
+        self,
+        slots: list[NameSlotStorage] | None,
+        *,
+        source_text: str | None = None,
+        metadata: dict[str, list[str]] | None = None,
+        randomize: bool,
+    ) -> str | None:
+        slot = self._pick_name_storage_slot(slots, source_text=source_text)
+        if slot is None:
+            return None
+        target_components = NameComponents(
+            original_text=slot.full.value,
+            locale=parse_name_components(slot.full.value).locale,
+            full_text=self._pick_render_text(slot.full, randomize=randomize),
+            family_text=self._pick_render_text(slot.family, randomize=randomize) if slot.family else None,
+            given_text=self._pick_render_text(slot.given, randomize=randomize) if slot.given else None,
+            middle_text=self._pick_render_text(slot.middle, randomize=randomize) if slot.middle else None,
+        )
+        source_components = parse_name_components(source_text or "")
+        rendered = render_name_like_source(
+            target_components,
+            source_components,
+            component_hint=self._name_component_hint(metadata),
+        )
+        return rendered or target_components.full_text
 
     def _render_address_slot(
         self,
@@ -456,6 +534,8 @@ class JsonPersonaRepository:
 
             if attr_type == PIIAttributeType.ADDRESS:
                 current_value = self._render_address_slot_values(current_slot)
+            elif attr_type == PIIAttributeType.NAME:
+                current_value = self._render_name_slot_values(current_slot)
             else:
                 current_value = [slot.value for slot in current_slot] if current_slot else []
 
@@ -578,10 +658,22 @@ class JsonPersonaRepository:
         persona_id: str,
         attr_type: PIIAttributeType,
         source_text: str,
+        metadata: dict[str, list[str]] | None = None,
     ) -> str | None:
         """按源文本粒度与 render aliases 返回替换文本。"""
         stored_persona = self._stored_fake_personas.get(persona_id)
         if stored_persona is None:
+            return self.get_slot_value(persona_id, attr_type)
+
+        if attr_type == PIIAttributeType.NAME:
+            rendered = self._render_name_slot(
+                stored_persona.slots.name,
+                source_text=source_text,
+                metadata=metadata,
+                randomize=True,
+            )
+            if rendered:
+                return rendered
             return self.get_slot_value(persona_id, attr_type)
 
         if attr_type == PIIAttributeType.ADDRESS:

@@ -99,7 +99,11 @@ def test_rule_based_detector_prefers_local_dictionary_over_english_name_rule() -
                     "persona_id": "persona-en",
                     "display_name": "English Persona",
                     "slots": {
-                        "name": [{"value": "Alice Johnson", "aliases": []}],
+                        "name": [{
+                            "full": {"value": "Alice Johnson", "aliases": []},
+                            "family": {"value": "Johnson", "aliases": []},
+                            "given": {"value": "Alice", "aliases": []},
+                        }],
                     },
                 }
             ]
@@ -122,6 +126,7 @@ def test_rule_based_detector_prefers_local_dictionary_over_english_name_rule() -
     assert name_candidate.confidence == 0.99
     assert name_candidate.metadata["matched_by"] == ["dictionary_local"]
     assert name_candidate.metadata["local_entity_ids"] == ["persona-en"]
+    assert name_candidate.metadata["name_component"] == ["full"]
 
 
 def test_rule_based_detector_gates_english_self_intro_by_strength() -> None:
@@ -178,9 +183,13 @@ def test_rule_based_detector_detects_english_phone_organization_and_address() ->
     assert organization_candidate.metadata["matched_by"] == ["regex_organization_suffix"]
 
     assert address_candidate is not None
-    assert address_candidate.text == "123 Main St Apt 4B"
-    assert address_candidate.confidence == 0.9
+    assert address_candidate.text == "123 Main St Apt 4B, Springfield, IL 62704"
+    assert address_candidate.confidence == 0.97
     assert address_candidate.metadata["matched_by"] == ["context_address_field"]
+    assert address_candidate.metadata["address_kind"] == ["private_address"]
+    by_text = {candidate.text: candidate for candidate in address_candidates if candidate.attr_type == PIIAttributeType.ADDRESS}
+    assert by_text["123 Main St"].metadata["matched_by"] == ["address_component_street"]
+    assert by_text["Apt 4B"].metadata["matched_by"] == ["address_component_unit"]
 
 
 def test_rule_based_detector_supports_english_repository_address_entity() -> None:
@@ -253,3 +262,69 @@ def test_rule_based_detector_rejects_legacy_scalar_privacy_repository_slots() ->
     except InvalidPrivacyRepositoryError:
         return
     raise AssertionError("legacy scalar privacy_repository slots should be rejected")
+
+
+def test_rule_based_detector_detects_english_given_and_family_name_fields() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="First name: Alice\nLast name: Johnson",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    by_text = {candidate.text: candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME}
+    assert "context_name_given_field" in by_text["Alice"].metadata["matched_by"]
+    assert by_text["Alice"].metadata["name_component"] == ["given"]
+    assert by_text["Alice"].canonical_source_text == "Alice"
+    assert "context_name_family_field" in by_text["Johnson"].metadata["matched_by"]
+    assert by_text["Johnson"].metadata["name_component"] == ["family"]
+    assert by_text["Johnson"].canonical_source_text == "Johnson"
+
+
+def test_rule_based_detector_keeps_store_name_out_of_address_candidates() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="上海路店",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert _find_candidate(candidates, PIIAttributeType.ADDRESS) is None
+
+
+def test_rule_based_detector_handles_masked_truncated_address_tail() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="上海市浦东新区世纪大道XX小区3号楼1201室...",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    address_candidate = _find_candidate(candidates, PIIAttributeType.ADDRESS)
+
+    assert address_candidate is not None
+    assert address_candidate.text == "上海市浦东新区世纪大道XX小区3号楼1201室"
+    assert address_candidate.metadata["address_terminated_by"] == ["masked_end"]
+    by_text = {candidate.text: candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS}
+    assert by_text["3号楼"].metadata["matched_by"] == ["address_component_building"]
+    assert by_text["1201室"].metadata["matched_by"] == ["address_component_room"]
+
+
+def test_rule_based_detector_trims_narrative_tail_after_address() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="我在上海浦东的世纪大道的小区里吃饭",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    address_candidate = _find_candidate(candidates, PIIAttributeType.ADDRESS)
+
+    assert address_candidate is not None
+    assert address_candidate.text.endswith("小区")
+    assert "吃饭" not in address_candidate.text
+    assert not address_candidate.text.endswith("里")

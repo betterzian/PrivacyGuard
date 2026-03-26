@@ -2,6 +2,152 @@
 
 from privacyguard.infrastructure.pii.rule_based_detector_shared import *
 
+
+@dataclass(frozen=True, slots=True)
+class _OCRLabelSpec:
+    attr_type: PIIAttributeType
+    matched_by: str
+    keywords: tuple[str, ...]
+    name_component: str | None = None
+    base_confidence: float = 0.96
+
+
+_OCR_LABEL_DECORATION_PATTERN = re.compile(r"[\s:：=*_?？!！,，.。;；/\\|｜()\[\]{}<>《》【】\"'`·•_\-]+")
+_OCR_LABEL_FULL_NAME_KEYWORDS = (
+    "name",
+    "full name",
+    "username",
+    "realname",
+    "real name",
+    "真实姓名",
+    "姓名",
+    "住客姓名",
+    "昵称",
+    "称呼",
+    "联系人",
+    "联系人姓名",
+    "收件人",
+    "收货人",
+    "寄件人",
+    "收件姓名",
+    "申请人",
+    "委托人",
+    "监护人",
+    "法定代表人",
+    "户主",
+    "住户",
+    "本人",
+    "客户",
+    "用户",
+    "病人姓名",
+    "患者姓名",
+)
+_OCR_LABEL_GIVEN_NAME_KEYWORDS = (
+    "first name",
+    "given name",
+    "名",
+)
+_OCR_LABEL_SPECS = (
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.NAME,
+        matched_by="ocr_label_name_family_field",
+        keywords=_NAME_FAMILY_FIELD_KEYWORDS,
+        name_component="family",
+        base_confidence=0.98,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.NAME,
+        matched_by="ocr_label_name_given_field",
+        keywords=_OCR_LABEL_GIVEN_NAME_KEYWORDS,
+        name_component="given",
+        base_confidence=0.98,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.NAME,
+        matched_by="ocr_label_name_middle_field",
+        keywords=_NAME_MIDDLE_FIELD_KEYWORDS,
+        name_component="middle",
+        base_confidence=0.97,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.NAME,
+        matched_by="ocr_label_name_field",
+        keywords=_OCR_LABEL_FULL_NAME_KEYWORDS,
+        name_component="full",
+        base_confidence=0.97,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.PHONE,
+        matched_by="ocr_label_phone_field",
+        keywords=_PHONE_FIELD_KEYWORDS,
+        base_confidence=0.98,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.EMAIL,
+        matched_by="ocr_label_email_field",
+        keywords=_EMAIL_FIELD_KEYWORDS,
+        base_confidence=0.98,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.ADDRESS,
+        matched_by="ocr_label_address_field",
+        keywords=_ADDRESS_FIELD_KEYWORDS,
+        base_confidence=0.86,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.ID_NUMBER,
+        matched_by="ocr_label_id_field",
+        keywords=_ID_FIELD_KEYWORDS,
+        base_confidence=0.98,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.CARD_NUMBER,
+        matched_by="ocr_label_card_field",
+        keywords=_CARD_FIELD_KEYWORDS,
+        base_confidence=0.98,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.BANK_ACCOUNT,
+        matched_by="ocr_label_bank_account_field",
+        keywords=_BANK_ACCOUNT_FIELD_KEYWORDS,
+        base_confidence=0.98,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.PASSPORT_NUMBER,
+        matched_by="ocr_label_passport_field",
+        keywords=_PASSPORT_FIELD_KEYWORDS,
+        base_confidence=0.98,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.DRIVER_LICENSE,
+        matched_by="ocr_label_driver_license_field",
+        keywords=_DRIVER_LICENSE_FIELD_KEYWORDS,
+        base_confidence=0.98,
+    ),
+    _OCRLabelSpec(
+        attr_type=PIIAttributeType.ORGANIZATION,
+        matched_by="ocr_label_organization_field",
+        keywords=_ORGANIZATION_FIELD_KEYWORDS,
+        base_confidence=0.88,
+    ),
+)
+
+
+def _normalize_ocr_label_token(value: str) -> str:
+    return _OCR_LABEL_DECORATION_PATTERN.sub("", str(value or "").strip().lower())
+
+
+_OCR_LABEL_SPEC_LOOKUP: dict[str, tuple[_OCRLabelSpec, ...]] = {}
+for _spec in _OCR_LABEL_SPECS:
+    for _keyword in _spec.keywords:
+        _normalized_keyword = _normalize_ocr_label_token(_keyword)
+        if not _normalized_keyword:
+            continue
+        _OCR_LABEL_SPEC_LOOKUP.setdefault(_normalized_keyword, tuple())
+        if _spec not in _OCR_LABEL_SPEC_LOOKUP[_normalized_keyword]:
+            _OCR_LABEL_SPEC_LOOKUP[_normalized_keyword] = _OCR_LABEL_SPEC_LOOKUP[_normalized_keyword] + (_spec,)
+
+
 def _build_ocr_page_document(self, ocr_blocks: list[OCRTextBlock]) -> _OCRPageDocument | None:
     """把整页 OCR block 聚合成单个扫描文档，减少重复扫描成本。"""
     if not ocr_blocks:
@@ -473,6 +619,510 @@ def _ocr_candidate_block_indices(
     if not indices and len(document.blocks) == 1:
         return (0,)
     return tuple(dict.fromkeys(indices))
+
+
+def _ocr_candidate_signature(self, candidate: PIICandidate) -> tuple[str, str, tuple[str, ...]]:
+    block_ids = tuple(
+        dict.fromkeys(
+            block_id
+            for block_id in [*candidate.metadata.get("ocr_block_ids", []), candidate.block_id]
+            if block_id
+        )
+    )
+    return candidate.attr_type.value, candidate.normalized_text, block_ids
+
+
+def _collect_ocr_label_adjacency_candidates(
+    self,
+    document: _OCRPageDocument,
+    scene_index: _OCRSceneIndex,
+    rule_profile: _RuleStrengthProfile,
+) -> list[PIICandidate]:
+    candidates: list[PIICandidate] = []
+    seen_signatures: set[tuple[str, str, tuple[str, ...]]] = set()
+    for block_index, block in enumerate(document.blocks):
+        if block.bbox is None or not block.text.strip():
+            continue
+        for spec in self._ocr_label_specs_for_block(block):
+            candidate = self._build_ocr_label_adjacency_candidate(
+                document,
+                scene_index,
+                label_block_index=block_index,
+                spec=spec,
+                rule_profile=rule_profile,
+            )
+            if candidate is None:
+                continue
+            signature = self._ocr_candidate_signature(candidate)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            candidates.append(candidate)
+    return candidates
+
+
+def _ocr_label_specs_for_block(self, block: OCRTextBlock) -> tuple[_OCRLabelSpec, ...]:
+    normalized = _normalize_ocr_label_token(block.text)
+    if not normalized:
+        return ()
+    return _OCR_LABEL_SPEC_LOOKUP.get(normalized, ())
+
+
+def _is_ocr_pure_label_block(self, block: OCRTextBlock) -> bool:
+    return bool(self._ocr_label_specs_for_block(block))
+
+
+def _build_ocr_label_adjacency_candidate(
+    self,
+    document: _OCRPageDocument,
+    scene_index: _OCRSceneIndex,
+    *,
+    label_block_index: int,
+    spec: _OCRLabelSpec,
+    rule_profile: _RuleStrengthProfile,
+) -> PIICandidate | None:
+    candidate_options: list[PIICandidate] = []
+    right_option = self._collect_ocr_right_value_chain(document, scene_index, label_block_index, spec)
+    if right_option is not None:
+        candidate = self._validate_ocr_label_value_chain(
+            document,
+            block_indices=right_option[0],
+            relation_score=right_option[1],
+            spec=spec,
+            rule_profile=rule_profile,
+        )
+        if candidate is not None:
+            candidate_options.append(candidate)
+    down_option = self._collect_ocr_down_value_chain(document, scene_index, label_block_index, spec)
+    if down_option is not None:
+        candidate = self._validate_ocr_label_value_chain(
+            document,
+            block_indices=down_option[0],
+            relation_score=down_option[1],
+            spec=spec,
+            rule_profile=rule_profile,
+        )
+        if candidate is not None:
+            candidate_options.append(candidate)
+    if not candidate_options:
+        return None
+    candidate_options.sort(
+        key=lambda item: (
+            item.confidence,
+            len(item.metadata.get("ocr_block_ids", [])),
+            -(item.bbox.y if item.bbox is not None else 0),
+        ),
+        reverse=True,
+    )
+    return candidate_options[0]
+
+
+def _collect_ocr_right_value_chain(
+    self,
+    document: _OCRPageDocument,
+    scene_index: _OCRSceneIndex,
+    label_block_index: int,
+    spec: _OCRLabelSpec,
+) -> tuple[tuple[int, ...], float] | None:
+    position = scene_index.position_by_block_index.get(label_block_index)
+    label_block = document.blocks[label_block_index]
+    if position is None or label_block.bbox is None:
+        return None
+    line_index, item_index = position
+    line = scene_index.lines[line_index]
+    best_anchor: tuple[int, float] | None = None
+    for next_block_index in line[item_index + 1 :]:
+        block = document.blocks[next_block_index]
+        if self._is_ocr_pure_label_block(block):
+            break
+        score = self._score_ocr_label_right_neighbor(label_block, block, spec)
+        if score is None:
+            continue
+        if best_anchor is None or score > best_anchor[1]:
+            best_anchor = (next_block_index, score)
+    if best_anchor is None:
+        return None
+    continuation_blocks, continuation_score = self._collect_ocr_same_line_continuation(
+        document,
+        scene_index,
+        anchor_block_index=best_anchor[0],
+        spec=spec,
+    )
+    block_indices = (best_anchor[0], *continuation_blocks)
+    relation_score = best_anchor[1] if continuation_score is None else best_anchor[1] * 0.7 + continuation_score * 0.3
+    return tuple(dict.fromkeys(block_indices)), relation_score
+
+
+def _collect_ocr_down_value_chain(
+    self,
+    document: _OCRPageDocument,
+    scene_index: _OCRSceneIndex,
+    label_block_index: int,
+    spec: _OCRLabelSpec,
+) -> tuple[tuple[int, ...], float] | None:
+    position = scene_index.position_by_block_index.get(label_block_index)
+    label_block = document.blocks[label_block_index]
+    if position is None or label_block.bbox is None:
+        return None
+    line_index, _ = position
+    best_anchor: tuple[int, float] | None = None
+    for next_line_index in range(line_index + 1, min(len(scene_index.lines), line_index + 5)):
+        line = scene_index.lines[next_line_index]
+        line_blocks = [document.blocks[index] for index in line]
+        if not line_blocks:
+            continue
+        if self._is_ocr_pure_label_block(line_blocks[0]):
+            break
+        for candidate_index in line:
+            block = document.blocks[candidate_index]
+            if self._is_ocr_pure_label_block(block):
+                continue
+            score = self._score_ocr_label_down_neighbor(label_block, block, spec)
+            if score is None:
+                continue
+            if best_anchor is None or score > best_anchor[1]:
+                best_anchor = (candidate_index, score)
+        if best_anchor is not None:
+            break
+    if best_anchor is None:
+        return None
+    continuation_blocks, continuation_score = self._collect_ocr_same_line_continuation(
+        document,
+        scene_index,
+        anchor_block_index=best_anchor[0],
+        spec=spec,
+    )
+    block_indices = (best_anchor[0], *continuation_blocks)
+    relation_score = best_anchor[1] if continuation_score is None else best_anchor[1] * 0.68 + continuation_score * 0.32
+    return tuple(dict.fromkeys(block_indices)), relation_score
+
+
+def _collect_ocr_same_line_continuation(
+    self,
+    document: _OCRPageDocument,
+    scene_index: _OCRSceneIndex,
+    *,
+    anchor_block_index: int,
+    spec: _OCRLabelSpec,
+) -> tuple[tuple[int, ...], float | None]:
+    position = scene_index.position_by_block_index.get(anchor_block_index)
+    if position is None:
+        return (), None
+    line_index, item_index = position
+    line = scene_index.lines[line_index]
+    collected: list[int] = []
+    scores: list[float] = []
+    previous_block = document.blocks[anchor_block_index]
+    for next_block_index in line[item_index + 1 :]:
+        block = document.blocks[next_block_index]
+        if self._is_ocr_pure_label_block(block):
+            break
+        if self._score_ocr_label_value_block(block, spec) is None:
+            break
+        successor_score = self._score_horizontal_successor(previous_block, block)
+        if successor_score is None or successor_score < 0.42:
+            break
+        collected.append(next_block_index)
+        scores.append(successor_score)
+        previous_block = block
+    if not scores:
+        return tuple(collected), None
+    return tuple(collected), sum(scores) / len(scores)
+
+
+def _score_ocr_label_value_block(self, block: OCRTextBlock, spec: _OCRLabelSpec) -> float | None:
+    cleaned = self._clean_extracted_value(block.text)
+    if not cleaned:
+        return None
+    if self._is_ocr_pure_label_block(block):
+        return None
+    if len(cleaned) <= 2 and re.fullmatch(r"[\W_?？!！·•]+", cleaned):
+        return None
+    if spec.attr_type in {PIIAttributeType.NAME, PIIAttributeType.ADDRESS, PIIAttributeType.ORGANIZATION}:
+        if self._looks_like_ui_time_metadata(cleaned):
+            return None
+    if spec.attr_type == PIIAttributeType.NAME:
+        if self._is_ui_operation_name_token(cleaned):
+            return None
+        alpha_or_cjk = sum(1 for char in cleaned if char.isalpha() or self._is_cjk_char(char))
+        if alpha_or_cjk == 0:
+            return None
+        return min(1.0, 0.6 + alpha_or_cjk * 0.08)
+    if spec.attr_type in {
+        PIIAttributeType.PHONE,
+        PIIAttributeType.CARD_NUMBER,
+        PIIAttributeType.BANK_ACCOUNT,
+        PIIAttributeType.ID_NUMBER,
+    }:
+        digit_count = sum(char.isdigit() for char in cleaned)
+        if digit_count < 4:
+            return None
+        return min(1.0, 0.58 + digit_count * 0.04)
+    if spec.attr_type == PIIAttributeType.EMAIL:
+        return 1.0 if "@" in cleaned else 0.52
+    if spec.attr_type == PIIAttributeType.ADDRESS:
+        score = self._address_confidence(cleaned)
+        return score if score > 0 else 0.48
+    if spec.attr_type == PIIAttributeType.ORGANIZATION:
+        score = self._organization_confidence(cleaned, allow_weak_suffix=True)
+        return score if score > 0 else 0.5
+    return 0.6
+
+
+def _score_ocr_label_right_neighbor(
+    self,
+    label_block: OCRTextBlock,
+    value_block: OCRTextBlock,
+    spec: _OCRLabelSpec,
+) -> float | None:
+    if label_block.bbox is None or value_block.bbox is None:
+        return None
+    if value_block.bbox.x + value_block.bbox.width <= label_block.bbox.x:
+        return None
+    value_score = self._score_ocr_label_value_block(value_block, spec)
+    if value_score is None:
+        return None
+    avg_height = (label_block.bbox.height + value_block.bbox.height) / 2
+    gap = max(0.0, float(value_block.bbox.x - (label_block.bbox.x + label_block.bbox.width)))
+    center_delta = abs(self._bbox_center_y(label_block.bbox) - self._bbox_center_y(value_block.bbox))
+    gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=2.4, min_px=12.0, max_px=72.0)
+    center_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.85, min_px=8.0, max_px=28.0)
+    if gap > gap_threshold * 1.8 or center_delta > center_threshold * 1.45:
+        return None
+    min_height = float(min(label_block.bbox.height, value_block.bbox.height))
+    max_height = float(max(label_block.bbox.height, value_block.bbox.height))
+    height_ratio = max_height / max(1.0, min_height)
+    score = 1.0
+    score -= 0.42 * min(1.0, gap / max(1.0, gap_threshold))
+    score -= 0.24 * min(1.0, center_delta / max(1.0, center_threshold))
+    score -= 0.12 * min(1.0, max(0.0, height_ratio - 1.0) / 1.0)
+    score += 0.14 * max(0.0, value_score - 0.5)
+    score += 0.04 if value_block.score >= 0.94 else 0.0
+    return score if score >= 0.42 else None
+
+
+def _score_ocr_label_down_neighbor(
+    self,
+    label_block: OCRTextBlock,
+    value_block: OCRTextBlock,
+    spec: _OCRLabelSpec,
+) -> float | None:
+    if label_block.bbox is None or value_block.bbox is None:
+        return None
+    if self._bbox_center_y(value_block.bbox) <= self._bbox_center_y(label_block.bbox):
+        return None
+    value_score = self._score_ocr_label_value_block(value_block, spec)
+    if value_score is None:
+        return None
+    avg_height = (label_block.bbox.height + value_block.bbox.height) / 2
+    vertical_gap = max(0.0, float(value_block.bbox.y - (label_block.bbox.y + label_block.bbox.height)))
+    vertical_threshold = self._clamped_ocr_tolerance(avg_height, ratio=2.8, min_px=10.0, max_px=84.0)
+    if vertical_gap > vertical_threshold * 1.8:
+        return None
+    left_delta = abs(label_block.bbox.x - value_block.bbox.x)
+    center_x_delta = abs(
+        (label_block.bbox.x + label_block.bbox.width / 2) - (value_block.bbox.x + value_block.bbox.width / 2)
+    )
+    align_threshold = self._clamped_ocr_tolerance(avg_height, ratio=1.2, min_px=12.0, max_px=48.0)
+    horizontal_overlap = max(
+        0,
+        min(label_block.bbox.x + label_block.bbox.width, value_block.bbox.x + value_block.bbox.width)
+        - max(label_block.bbox.x, value_block.bbox.x),
+    )
+    min_width = float(min(label_block.bbox.width, value_block.bbox.width))
+    overlap_ratio = horizontal_overlap / max(1.0, min_width)
+    if left_delta > align_threshold and center_x_delta > align_threshold and overlap_ratio < 0.18:
+        return None
+    score = 1.0
+    score -= 0.34 * min(1.0, vertical_gap / max(1.0, vertical_threshold))
+    score -= 0.2 * min(1.0, min(left_delta, center_x_delta) / max(1.0, align_threshold))
+    score += 0.1 * min(1.0, overlap_ratio)
+    score += 0.14 * max(0.0, value_score - 0.5)
+    score += 0.04 if value_block.score >= 0.94 else 0.0
+    return score if score >= 0.42 else None
+
+
+def _validate_ocr_label_value_chain(
+    self,
+    document: _OCRPageDocument,
+    *,
+    block_indices: tuple[int, ...],
+    relation_score: float,
+    spec: _OCRLabelSpec,
+    rule_profile: _RuleStrengthProfile,
+) -> PIICandidate | None:
+    raw_text = self._join_ocr_block_text(document, block_indices)
+    cleaned_text = self._clean_phone_candidate(raw_text) if spec.attr_type == PIIAttributeType.PHONE else self._clean_extracted_value(raw_text)
+    if not cleaned_text:
+        return None
+    allow_ocr_noise = rule_profile.level == ProtectionLevel.STRONG
+    canonical_source_text: str | None = None
+    confidence = spec.base_confidence
+    if spec.attr_type == PIIAttributeType.NAME:
+        component = spec.name_component or "full"
+        if component == "full":
+            canonical_source_text = self._canonical_name_source_text(cleaned_text, allow_ocr_noise=allow_ocr_noise)
+        else:
+            canonical_source_text = self._canonical_name_component_source_text(
+                cleaned_text,
+                component=component,
+                allow_ocr_noise=allow_ocr_noise,
+            )
+        if canonical_source_text is None:
+            return None
+    elif spec.attr_type == PIIAttributeType.PHONE:
+        if not self._is_context_phone_candidate(cleaned_text):
+            return None
+        canonical_source_text = cleaned_text
+    elif spec.attr_type == PIIAttributeType.EMAIL:
+        if not self._is_email_candidate(cleaned_text):
+            return None
+        canonical_source_text = cleaned_text
+    elif spec.attr_type == PIIAttributeType.ADDRESS:
+        if not self._looks_like_address_candidate(cleaned_text, min_confidence=rule_profile.address_min_confidence):
+            return None
+        canonical_source_text = self._clean_address_candidate(cleaned_text)
+        confidence = max(confidence, min(0.96, self._address_confidence(cleaned_text) + 0.08))
+    elif spec.attr_type == PIIAttributeType.ID_NUMBER:
+        if not self._is_id_candidate(cleaned_text):
+            return None
+        canonical_source_text = cleaned_text
+    elif spec.attr_type == PIIAttributeType.CARD_NUMBER:
+        if not self._is_context_card_number_candidate(cleaned_text):
+            return None
+        canonical_source_text = cleaned_text
+    elif spec.attr_type == PIIAttributeType.BANK_ACCOUNT:
+        if not self._is_bank_account_candidate(cleaned_text):
+            return None
+        canonical_source_text = cleaned_text
+    elif spec.attr_type == PIIAttributeType.PASSPORT_NUMBER:
+        if not self._is_passport_candidate(cleaned_text):
+            return None
+        canonical_source_text = cleaned_text
+    elif spec.attr_type == PIIAttributeType.DRIVER_LICENSE:
+        if not self._is_driver_license_candidate(cleaned_text):
+            return None
+        canonical_source_text = cleaned_text
+    elif spec.attr_type == PIIAttributeType.ORGANIZATION:
+        if not self._is_context_organization_candidate(cleaned_text):
+            return None
+        canonical_source_text = self._clean_organization_candidate(cleaned_text)
+        confidence = max(
+            confidence,
+            min(0.94, self._organization_confidence(cleaned_text, allow_weak_suffix=rule_profile.allow_weak_org_suffix) + 0.08),
+        )
+    confidence = min(0.99, max(confidence, confidence * 0.84 + relation_score * 0.16))
+    return self._build_ocr_block_candidate(
+        document,
+        block_indices=block_indices,
+        text=raw_text,
+        attr_type=spec.attr_type,
+        confidence=confidence,
+        canonical_source_text=canonical_source_text,
+        metadata=self._merge_candidate_metadata(
+            {
+                "matched_by": [spec.matched_by],
+                "ocr_block_ids": [
+                    document.blocks[index].block_id
+                    for index in block_indices
+                    if document.blocks[index].block_id
+                ],
+            },
+            self._name_component_metadata(spec.name_component) if spec.name_component else None,
+        ),
+    )
+
+
+def _join_ocr_block_text(self, document: _OCRPageDocument, block_indices: tuple[int, ...]) -> str:
+    if not block_indices:
+        return ""
+    parts: list[str] = []
+    previous_block: OCRTextBlock | None = None
+    for block_index in block_indices:
+        block = document.blocks[block_index]
+        if previous_block is not None:
+            separator = self._block_join_separator(previous_block, block)
+            if separator == _OCR_SEMANTIC_BREAK_TOKEN:
+                separator = "\n"
+            parts.append(separator)
+        parts.append(block.text)
+        previous_block = block
+    return "".join(parts)
+
+
+def _build_ocr_block_candidate(
+    self,
+    document: _OCRPageDocument,
+    *,
+    block_indices: tuple[int, ...],
+    text: str,
+    attr_type: PIIAttributeType,
+    confidence: float,
+    canonical_source_text: str | None,
+    metadata: dict[str, list[str]] | None = None,
+) -> PIICandidate | None:
+    if not block_indices:
+        return None
+    cleaned_text = self._clean_phone_candidate(text) if attr_type == PIIAttributeType.PHONE else self._clean_extracted_value(text)
+    if not cleaned_text:
+        return None
+    normalized = canonicalize_pii_value(attr_type, cleaned_text)
+    blocks = [document.blocks[index] for index in block_indices]
+    if len(blocks) == 1:
+        block = blocks[0]
+        if block.block_id is None:
+            return None
+        entity_id = self.resolver.build_candidate_id(
+            self.detector_mode,
+            PIISourceType.OCR.value,
+            normalized,
+            attr_type.value,
+            block_id=block.block_id,
+            span_start=0,
+            span_end=len(block.text),
+        )
+        return PIICandidate(
+            entity_id=entity_id,
+            text=cleaned_text,
+            canonical_source_text=canonical_source_text,
+            normalized_text=normalized,
+            attr_type=attr_type,
+            source=PIISourceType.OCR,
+            bbox=block.bbox,
+            block_id=block.block_id,
+            span_start=0,
+            span_end=len(block.text),
+            confidence=confidence,
+            metadata=metadata or {},
+        )
+    combined_bbox = self._combine_bboxes(block.bbox for block in blocks if block.bbox is not None)
+    merge_block_id = "ocr-merge-" + "-".join(
+        block.block_id or f"{document.line_index}-{block_index}"
+        for block_index, block in zip(block_indices, blocks, strict=False)
+    )
+    entity_id = self.resolver.build_candidate_id(
+        self.detector_mode,
+        PIISourceType.OCR.value,
+        normalized,
+        attr_type.value,
+        block_id=merge_block_id,
+        span_start=None,
+        span_end=None,
+    )
+    return PIICandidate(
+        entity_id=entity_id,
+        text=cleaned_text,
+        canonical_source_text=canonical_source_text,
+        normalized_text=normalized,
+        attr_type=attr_type,
+        source=PIISourceType.OCR,
+        bbox=combined_bbox,
+        block_id=merge_block_id,
+        span_start=None,
+        span_end=None,
+        confidence=confidence,
+        metadata=metadata or {},
+    )
 
 def _refine_ocr_name_candidate(
     self,

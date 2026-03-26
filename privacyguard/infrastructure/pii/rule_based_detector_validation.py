@@ -262,12 +262,31 @@ def _canonical_name_source_text(
         return None
     return compact
 
+
+def _canonical_name_component_source_text(
+    self,
+    value: str,
+    *,
+    component: str,
+    allow_ocr_noise: bool = False,
+) -> str | None:
+    compact = self._compact_name_value(value, allow_ocr_noise=allow_ocr_noise)
+    if not compact:
+        return None
+    if component == "family":
+        return compact if self._is_family_name_candidate(compact) else None
+    if component == "given":
+        return compact if self._is_given_name_candidate(compact) else None
+    if component == "middle":
+        return compact if self._is_middle_name_candidate(compact) else None
+    return self._canonical_name_source_text(compact, allow_ocr_noise=allow_ocr_noise)
+
 def _compact_name_value(self, value: str, *, allow_ocr_noise: bool) -> str:
-    cleaned = self._clean_extracted_value(value)
-    compact = "".join(char for char in cleaned if char not in _NAME_MATCH_IGNORABLE)
-    if allow_ocr_noise:
-        compact = re.sub(r"[0-9０-９]+", "", compact)
-    return compact
+    return canonicalize_name_text(
+        value,
+        allow_ocr_noise=allow_ocr_noise,
+        lower_ascii=False,
+    )
 
 def _is_en_phone_candidate(
     self,
@@ -491,6 +510,45 @@ def _is_name_candidate(self, value: str) -> bool:
         return compact[0] in _COMMON_SINGLE_CHAR_SURNAMES and 2 <= len(compact) <= 4
     return False
 
+
+def _is_family_name_candidate(self, value: str) -> bool:
+    cleaned = self._clean_extracted_value(value)
+    compact = cleaned.replace(" ", "")
+    compact_lower = compact.lower()
+    if not compact or compact in _NAME_BLACKLIST or any(char.isdigit() for char in compact):
+        return False
+    if self._is_ui_operation_name_token(compact):
+        return False
+    if compact_lower in _NON_PERSON_TOKENS_EN or compact in _NON_PERSON_TOKENS:
+        return False
+    if compact[:2] in _COMMON_COMPOUND_SURNAMES and len(compact) == 2:
+        return True
+    if len(compact) == 1 and compact[0] in _COMMON_SINGLE_CHAR_SURNAMES:
+        return True
+    return bool(re.fullmatch(r"[A-Za-z][A-Za-z'\-]{1,24}", cleaned))
+
+
+def _is_given_name_candidate(self, value: str) -> bool:
+    cleaned = self._clean_extracted_value(value)
+    compact = cleaned.replace(" ", "")
+    compact_lower = compact.lower()
+    if not compact or compact in _NAME_BLACKLIST or any(char.isdigit() for char in compact):
+        return False
+    if self._is_ui_operation_name_token(compact):
+        return False
+    if compact_lower in _NON_PERSON_TOKENS_EN or compact in _NON_PERSON_TOKENS:
+        return False
+    if re.fullmatch(r"[一-龥·]{1,6}", compact):
+        return True
+    return bool(re.fullmatch(r"[A-Za-z][A-Za-z'\-]{1,24}", cleaned))
+
+
+def _is_middle_name_candidate(self, value: str) -> bool:
+    cleaned = self._clean_extracted_value(value)
+    if not cleaned or any(char.isdigit() for char in cleaned):
+        return False
+    return bool(re.fullmatch(r"[A-Za-z][A-Za-z'\-]{1,24}(?:\s+[A-Za-z][A-Za-z'\-]{1,24}){0,2}", cleaned))
+
 def _has_en_organization_suffix(self, value: str, *, allow_weak_suffix: bool) -> tuple[bool, bool]:
     compact = re.sub(r"\s+", " ", self._clean_organization_candidate(value)).strip().lower()
     if not compact:
@@ -600,11 +658,6 @@ def _looks_like_name_with_title(self, value: str) -> bool:
     return self._is_name_candidate(core)
 
 def _geo_candidate_attr_type(self, value: str) -> PIIAttributeType:
-    compact = self._clean_extracted_value(value)
-    if compact in _BUILTIN_GEO_LEXICON.address_tokens:
-        return PIIAttributeType.ADDRESS
-    if compact.endswith(("区", "县", "旗", "乡", "镇", "街道", *_GEO_ADDRESS_SUFFIXES)):
-        return PIIAttributeType.ADDRESS
     return PIIAttributeType.LOCATION_CLUE
 
 def _geo_fragment_confidence(
@@ -913,6 +966,13 @@ def _merge_candidate_metadata(
     for source in (left or {}, right or {}):
         for key, values in source.items():
             merged[key] = sorted(set(merged.get(key, [])) | set(values))
+    name_components = set(merged.get("name_component", []))
+    if name_components:
+        specific = [item for item in ("family", "given", "middle") if item in name_components]
+        if specific:
+            merged["name_component"] = specific
+        else:
+            merged["name_component"] = [item for item in ("full",) if item in name_components] or sorted(name_components)
     return merged
 
 def _to_attr_type(self, raw_key: str | PIIAttributeType) -> PIIAttributeType | None:

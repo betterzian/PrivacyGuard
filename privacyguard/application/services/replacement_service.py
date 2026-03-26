@@ -6,6 +6,20 @@ from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.pii import PIICandidate
 
 
+def _record_metadata_from_action(action: DecisionAction) -> dict[str, str]:
+    metadata = {"reason": action.reason}
+    normalized = [
+        str(value).strip().lower()
+        for value in action.metadata.get("name_component", [])
+        if str(value).strip()
+    ]
+    for preferred in ("family", "given", "middle", "full"):
+        if preferred in normalized:
+            metadata["name_component"] = preferred
+            break
+    return metadata
+
+
 class ReplacementService:
     """将 DecisionAction 与候选实体转换为 ReplacementRecord。"""
 
@@ -41,7 +55,7 @@ class ReplacementService:
                     span_end=action.span_end if action.span_end is not None else candidate.span_end,
                     persona_id=action.persona_id,
                     source=action.source,
-                    metadata={"reason": action.reason},
+                    metadata=_record_metadata_from_action(action),
                 )
             )
         return records

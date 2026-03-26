@@ -43,7 +43,9 @@ class PersonaRepoStub:
         persona_id: str,
         attr_type: PIIAttributeType,
         source_text: str,
+        metadata: dict[str, list[str]] | None = None,
     ) -> str | None:
+        _ = metadata
         return self.get_slot_value(persona_id, attr_type)
 
 

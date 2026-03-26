@@ -98,6 +98,19 @@ AtomicSlotStorage = SharedSlotStorage
 StorageSlot = list[SharedSlotStorage]
 
 
+class NameSlotStorage(RepositoryBaseModel):
+    full: SharedSlotStorage
+    family: SharedSlotStorage | None = None
+    given: SharedSlotStorage | None = None
+    middle: SharedSlotStorage | None = None
+
+    @model_validator(mode="after")
+    def _validate_name(self) -> "NameSlotStorage":
+        if not any((self.family, self.given, self.middle)):
+            raise ValueError("姓名必须至少包含一个拆分字段")
+        return self
+
+
 def _validate_address_levels(
     country: SharedSlotStorage | SharedSlotRuntime | None,
     province: SharedSlotStorage | SharedSlotRuntime | None,
@@ -151,6 +164,19 @@ AtomicSlotRuntime = SharedSlotRuntime
 RuntimeSlot = list[SharedSlotRuntime]
 
 
+class NameSlotRuntime(RepositoryBaseModel):
+    full: SharedSlotRuntime
+    family: SharedSlotRuntime | None = None
+    given: SharedSlotRuntime | None = None
+    middle: SharedSlotRuntime | None = None
+
+    @model_validator(mode="after")
+    def _validate_name(self) -> "NameSlotRuntime":
+        if not any((self.family, self.given, self.middle)):
+            raise ValueError("姓名必须至少包含一个拆分字段")
+        return self
+
+
 def _validate_slot_list(values: list[SharedSlotStorage] | list[SharedSlotRuntime] | None, *, field_name: str) -> None:
     if values is None:
         return
@@ -191,7 +217,7 @@ class AddressSlotRuntime(RepositoryBaseModel):
 
 
 class PersonaSlots(RepositoryBaseModel):
-    name: list[SharedSlotStorage] | None = None
+    name: list[NameSlotStorage] | None = None
     location_clue: list[SharedSlotStorage] | None = None
     phone: list[SharedSlotStorage] | None = None
     card_number: list[SharedSlotStorage] | None = None
@@ -236,7 +262,7 @@ class PersonaSlots(RepositoryBaseModel):
 
 
 class PersonaSlotsRuntime(RepositoryBaseModel):
-    name: list[SharedSlotRuntime] | None = None
+    name: list[NameSlotRuntime] | None = None
     location_clue: list[SharedSlotRuntime] | None = None
     phone: list[SharedSlotRuntime] | None = None
     card_number: list[SharedSlotRuntime] | None = None
@@ -304,13 +330,24 @@ def _project_scalar_slot_to_runtime(slot: SharedSlotStorage, alias_role: AliasRo
     return SharedSlotRuntime(value=slot.value, **_project_aliases(slot, alias_role))
 
 
+def _project_name_slot_to_runtime(slot: NameSlotStorage, alias_role: AliasRole) -> NameSlotRuntime:
+    return NameSlotRuntime(
+        full=_project_scalar_slot_to_runtime(slot.full, alias_role),
+        family=_project_scalar_slot_to_runtime(slot.family, alias_role) if slot.family else None,
+        given=_project_scalar_slot_to_runtime(slot.given, alias_role) if slot.given else None,
+        middle=_project_scalar_slot_to_runtime(slot.middle, alias_role) if slot.middle else None,
+    )
+
+
 def project_storage_slot_to_runtime(
-    slot: StorageSlot | list[AddressSlotStorage],
+    slot: StorageSlot | list[AddressSlotStorage] | list[NameSlotStorage],
     alias_role: AliasRole,
-) -> RuntimeSlot | list[AddressSlotRuntime]:
+) -> RuntimeSlot | list[AddressSlotRuntime] | list[NameSlotRuntime]:
     if not slot:
         return []
     first = slot[0]
+    if isinstance(first, NameSlotStorage):
+        return [_project_name_slot_to_runtime(item, alias_role) for item in slot]
     if isinstance(first, AddressSlotStorage):
         return [
             AddressSlotRuntime(
@@ -372,6 +409,8 @@ __all__ = [
     "AtomicSlotRuntime",
     "AtomicSlotStorage",
     "ExposureInfo",
+    "NameSlotRuntime",
+    "NameSlotStorage",
     "PersonaDocument",
     "PersonaRepositoryDocument",
     "PersonaRuntime",

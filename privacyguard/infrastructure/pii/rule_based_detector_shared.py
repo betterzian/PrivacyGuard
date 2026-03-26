@@ -23,6 +23,7 @@ from privacyguard.utils.pii_value import (
     render_address_components,
     build_match_text,
     classify_content_shape_attr,
+    canonicalize_name_text,
     compact_bank_account_value,
     canonicalize_pii_value,
     compact_card_number_value,
@@ -277,6 +278,8 @@ _NON_PERSON_TOKENS_EN = {
     "notification",
     "profile",
     "project",
+    "pronoun",
+    "pronouns",
     "service",
     "settings",
     "system",
@@ -374,15 +377,22 @@ _LOCATION_CLUE_MATCHER = AhoCorasickMatcher(_LOCATION_CLUE_TOKENS)
 _TITLE_SEGMENT_PATTERN = re.compile(r"[-—_|｜/／]")
 _NAME_FIELD_KEYWORDS = (
     "name",
+    "full name",
     "username",
     "realname",
+    "real name",
+    "真实姓名",
     "姓名",
+    "住客姓名",
     "名字",
     "昵称",
     "称呼",
     "联系人",
+    "联系人姓名",
     "收件人",
+    "收货人",
     "寄件人",
+    "收件姓名",
     "申请人",
     "委托人",
     "监护人",
@@ -395,9 +405,29 @@ _NAME_FIELD_KEYWORDS = (
     "病人姓名",
     "患者姓名",
 )
+_NAME_FAMILY_FIELD_KEYWORDS = (
+    "family name",
+    "last name",
+    "surname",
+    "姓",
+    "姓氏",
+)
+_NAME_GIVEN_FIELD_KEYWORDS = (
+    "first name",
+    "given name",
+    "名字",
+    "名",
+)
+_NAME_MIDDLE_FIELD_KEYWORDS = (
+    "middle name",
+    "middle",
+    "中间名",
+)
 _ADDRESS_FIELD_KEYWORDS = (
     "address",
     "addr",
+    "mailing address",
+    "shipping address",
     "location",
     "所在地",
     "地址",
@@ -421,11 +451,16 @@ _ADDRESS_FIELD_KEYWORDS = (
 )
 _PHONE_FIELD_KEYWORDS = (
     "phone",
+    "phone number",
     "mobile",
+    "mobile number",
     "tel",
+    "telephone",
     "联系电话",
     "联系电话码",
+    "联系电话号码",
     "联系号码",
+    "联系手机",
     "手机号",
     "手机号码",
     "电话",
@@ -486,6 +521,7 @@ _DRIVER_LICENSE_FIELD_KEYWORDS = (
 )
 _EMAIL_FIELD_KEYWORDS = (
     "email",
+    "e-mail",
     "mail",
     "邮箱",
     "电子邮箱",
@@ -493,6 +529,9 @@ _EMAIL_FIELD_KEYWORDS = (
 )
 _ID_FIELD_KEYWORDS = (
     "id",
+    "id no",
+    "id number",
+    "identity number",
     "idno",
     "id_number",
     "身份证",

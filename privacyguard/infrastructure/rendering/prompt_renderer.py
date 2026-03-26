@@ -9,6 +9,20 @@ from privacyguard.domain.models.ocr import ImageLike, OCRTextBlock
 from privacyguard.infrastructure.rendering.screenshot_renderer import ScreenshotRenderer
 
 
+def _record_metadata_from_action(action) -> dict[str, str]:
+    metadata = {"reason": action.reason}
+    normalized = [
+        str(value).strip().lower()
+        for value in action.metadata.get("name_component", [])
+        if str(value).strip()
+    ]
+    for preferred in ("family", "given", "middle", "full"):
+        if preferred in normalized:
+            metadata["name_component"] = preferred
+            break
+    return metadata
+
+
 class PromptRenderer:
     """应用决策计划到 prompt 与 screenshot 的统一渲染器。"""
 
@@ -59,7 +73,7 @@ class PromptRenderer:
                     span_end=action.span_end,
                     persona_id=action.persona_id,
                     source=action.source,
-                    metadata={"reason": action.reason},
+                    metadata=_record_metadata_from_action(action),
                 )
             )
         return records

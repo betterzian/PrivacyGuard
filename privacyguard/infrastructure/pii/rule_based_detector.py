@@ -1,5 +1,6 @@
 """基于规则与字典的 PII 检测器。"""
 
+import privacyguard.infrastructure.pii.address as _address_pipeline
 from privacyguard.infrastructure.pii.rule_based_detector_shared import *
 import privacyguard.infrastructure.pii.rule_based_detector_collectors as _collectors
 import privacyguard.infrastructure.pii.rule_based_detector_dictionary as _dictionary
@@ -112,6 +113,7 @@ class RuleBasedPIIDetector:
     _rule_profile = _dictionary._rule_profile
     _normalize_confidence_overrides = _dictionary._normalize_confidence_overrides
     _build_dictionary_index = _dictionary._build_dictionary_index
+    _expand_structured_name_slot = _dictionary._expand_structured_name_slot
     _parse_dictionary_item = _dictionary._parse_dictionary_item
     _normalize_aliases = _dictionary._normalize_aliases
     _build_patterns = _patterns._build_patterns
@@ -142,6 +144,20 @@ class RuleBasedPIIDetector:
     _score_vertical_block_successor = _ocr._score_vertical_block_successor
     _looks_like_short_numeric_metadata = _ocr._looks_like_short_numeric_metadata
     _ocr_candidate_block_indices = _ocr._ocr_candidate_block_indices
+    _ocr_candidate_signature = _ocr._ocr_candidate_signature
+    _collect_ocr_label_adjacency_candidates = _ocr._collect_ocr_label_adjacency_candidates
+    _ocr_label_specs_for_block = _ocr._ocr_label_specs_for_block
+    _is_ocr_pure_label_block = _ocr._is_ocr_pure_label_block
+    _build_ocr_label_adjacency_candidate = _ocr._build_ocr_label_adjacency_candidate
+    _collect_ocr_right_value_chain = _ocr._collect_ocr_right_value_chain
+    _collect_ocr_down_value_chain = _ocr._collect_ocr_down_value_chain
+    _collect_ocr_same_line_continuation = _ocr._collect_ocr_same_line_continuation
+    _score_ocr_label_value_block = _ocr._score_ocr_label_value_block
+    _score_ocr_label_right_neighbor = _ocr._score_ocr_label_right_neighbor
+    _score_ocr_label_down_neighbor = _ocr._score_ocr_label_down_neighbor
+    _validate_ocr_label_value_chain = _ocr._validate_ocr_label_value_chain
+    _join_ocr_block_text = _ocr._join_ocr_block_text
+    _build_ocr_block_candidate = _ocr._build_ocr_block_candidate
     _refine_ocr_name_candidate = _ocr._refine_ocr_name_candidate
     _ocr_name_scene_confidence = _ocr._ocr_name_scene_confidence
     _same_line_has_right_time_metadata = _ocr._same_line_has_right_time_metadata
@@ -156,6 +172,8 @@ class RuleBasedPIIDetector:
     _derive_address_block_candidates = _ocr._derive_address_block_candidates
     _build_shadow_text = _collectors._build_shadow_text
     _shadow_token = _collectors._shadow_token
+    _name_component_from_matched_by = _collectors._name_component_from_matched_by
+    _name_component_metadata = _collectors._name_component_metadata
     _collect_dictionary_hits = _collectors._collect_dictionary_hits
     _collect_context_hits = _collectors._collect_context_hits
     _trim_context_value = _collectors._trim_context_value
@@ -183,6 +201,7 @@ class RuleBasedPIIDetector:
     _collect_name_hits = _collectors._collect_name_hits
     _collect_generic_name_fragment_hits = _collectors._collect_generic_name_fragment_hits
     _collect_masked_text_hits = _collectors._collect_masked_text_hits
+    _collect_address_candidates = _address_pipeline.collect_address_candidates
     _collect_address_hits = _collectors._collect_address_hits
     _collect_geo_fragment_hits = _collectors._collect_geo_fragment_hits
     _collect_organization_hits = _collectors._collect_organization_hits
@@ -212,6 +231,7 @@ class RuleBasedPIIDetector:
     _strong_standalone_name_confidence = _validation._strong_standalone_name_confidence
     _is_cjk_char = _validation._is_cjk_char
     _canonical_name_source_text = _validation._canonical_name_source_text
+    _canonical_name_component_source_text = _validation._canonical_name_component_source_text
     _compact_name_value = _validation._compact_name_value
     _is_en_phone_candidate = _validation._is_en_phone_candidate
     _is_phone_candidate = _validation._is_phone_candidate
@@ -226,6 +246,9 @@ class RuleBasedPIIDetector:
     _is_other_candidate = _validation._is_other_candidate
     _passes_luhn = _validation._passes_luhn
     _is_name_candidate = _validation._is_name_candidate
+    _is_family_name_candidate = _validation._is_family_name_candidate
+    _is_given_name_candidate = _validation._is_given_name_candidate
+    _is_middle_name_candidate = _validation._is_middle_name_candidate
     _is_context_organization_candidate = _validation._is_context_organization_candidate
     _is_organization_candidate = _validation._is_organization_candidate
     _organization_has_explicit_context = _validation._organization_has_explicit_context

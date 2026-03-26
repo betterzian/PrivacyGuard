@@ -1,5 +1,7 @@
 """ScreenshotRenderer internal helper functions."""
 
+import re
+
 from privacyguard.infrastructure.rendering.screenshot_renderer_shared import *
 
 def _build_draw_items(self, plan: DecisionPlan, ocr_blocks: list[OCRTextBlock]) -> list[_DrawItem]:
@@ -134,12 +136,50 @@ def _split_cross_block_replacement(
     if action.action_type == ActionType.GENERICIZE:
         return [replacement_text] + [""] * (len(blocks) - 1)
     if action.action_type == ActionType.PERSONA_SLOT:
+        if action.attr_type == PIIAttributeType.NAME:
+            name_chunks = self._split_name_replacement_across_blocks(action, blocks)
+            if name_chunks is not None:
+                return name_chunks
         if action.attr_type == PIIAttributeType.ADDRESS:
             address_chunks = self._split_address_replacement_across_blocks(action, blocks)
             if address_chunks is not None:
                 return address_chunks
         return self._split_text_proportionally(replacement_text, blocks)
     return [replacement_text] + [""] * (len(blocks) - 1)
+
+
+def _split_name_replacement_across_blocks(
+    self,
+    action: DecisionAction,
+    blocks: list[OCRTextBlock],
+) -> list[str] | None:
+    """姓名 persona 替换优先按姓/名顺序切分到各 block。"""
+    source_components = parse_name_components(action.source_text or "".join(block.text for block in blocks))
+    replacement_components = parse_name_components(action.replacement_text or "")
+    source_order = name_component_order(source_components)
+    source_units = name_display_units(source_components, order=source_order)
+    replacement_units = name_display_units(replacement_components, order=source_order)
+    if not source_units or not replacement_units:
+        return None
+    if len(source_units) == len(replacement_units):
+        aligned = self._assign_name_units_by_source_overlap(
+            source_units,
+            replacement_units,
+            blocks,
+            source_components=source_components,
+        )
+        if aligned is not None:
+            return self._decorate_name_chunks(aligned, source_components=source_components)
+    if len(blocks) == len(replacement_units):
+        return self._decorate_name_chunks(replacement_units, source_components=source_components)
+    return self._decorate_name_chunks(
+        self._group_name_units_by_block_capacity(
+            replacement_units,
+            blocks,
+            source_components=source_components,
+        ),
+        source_components=source_components,
+    )
 
 def _split_address_replacement_across_blocks(
     self,
@@ -266,6 +306,130 @@ def _address_units(self, text: str) -> list[str]:
     if units:
         return units
     return [text] if text else []
+
+
+def _compact_name_segment(self, text: str) -> str:
+    """把姓名片段压平成便于 block 对齐的匹配串。"""
+    return re.sub(r"[\s,，·]+", "", text or "")
+
+
+def _append_name_unit(self, rendered: str, unit: str, *, source_components) -> str:
+    """把姓名组件追加到已有片段，保留中英文分隔习惯。"""
+    if not rendered:
+        return unit
+    if source_components.locale == "zh_cn":
+        separator = "·" if "·" in (source_components.original_text or "") else ""
+        return f"{rendered}{separator}{unit}"
+    return f"{rendered} {unit}"
+
+
+def _join_name_units(self, units: list[str], *, source_components) -> str:
+    """按源姓名样式拼接多个姓名组件。"""
+    if not units:
+        return ""
+    rendered = units[0]
+    for unit in units[1:]:
+        rendered = self._append_name_unit(rendered, unit, source_components=source_components)
+    return rendered
+
+
+def _decorate_name_chunks(self, chunks: list[str], *, source_components) -> list[str]:
+    """把 family/given 边界上的逗号或间隔点补回到跨 block 输出。"""
+    decorated = list(chunks)
+    non_empty_indices = [index for index, chunk in enumerate(decorated) if chunk]
+    if len(non_empty_indices) < 2:
+        return decorated
+    first_index = non_empty_indices[0]
+    if source_components.locale == "en_us" and "," in (source_components.original_text or ""):
+        if not decorated[first_index].endswith(","):
+            decorated[first_index] = f"{decorated[first_index]},"
+        return decorated
+    if source_components.locale == "zh_cn" and "·" in (source_components.original_text or ""):
+        if not decorated[first_index].endswith("·"):
+            decorated[first_index] = f"{decorated[first_index]}·"
+    return decorated
+
+
+def _assign_name_units_by_source_overlap(
+    self,
+    source_units: list[str],
+    replacement_units: list[str],
+    blocks: list[OCRTextBlock],
+    *,
+    source_components,
+) -> list[str] | None:
+    """根据源姓名组件在各 block 的覆盖关系，把目标姓名组件映射回去。"""
+    compact_block_segments = [self._compact_name_segment(block.text) for block in blocks]
+    compact_unit_segments = [self._compact_name_segment(unit) for unit in source_units]
+    combined_block_text = "".join(compact_block_segments)
+    combined_source_text = "".join(compact_unit_segments)
+    if not combined_block_text or combined_block_text != combined_source_text:
+        return None
+    block_ranges = self._segment_ranges(compact_block_segments)
+    unit_ranges = self._segment_ranges(compact_unit_segments)
+    assigned = [""] * len(blocks)
+    for index, unit_range in enumerate(unit_ranges):
+        target_block = self._best_overlap_block(unit_range, block_ranges)
+        if target_block is None:
+            return None
+        assigned[target_block] = self._append_name_unit(
+            assigned[target_block],
+            replacement_units[index],
+            source_components=source_components,
+        )
+    if any(not chunk for chunk in assigned):
+        return None
+    return assigned
+
+
+def _group_name_units_by_block_capacity(
+    self,
+    units: list[str],
+    blocks: list[OCRTextBlock],
+    *,
+    source_components,
+) -> list[str]:
+    """在无法精确对齐源组件时，按 block 容量分配姓名组件。"""
+    if not units:
+        return [""] * len(blocks)
+    if len(blocks) == 1:
+        return [self._join_name_units(units, source_components=source_components)]
+    if len(blocks) > len(units):
+        return self._split_text_proportionally(
+            self._join_name_units(units, source_components=source_components),
+            blocks,
+        )
+
+    capacities = [self._block_capacity(block) for block in blocks]
+    total_capacity = sum(capacities) or len(blocks)
+    unit_lengths: list[int] = []
+    running = 0
+    for unit in units:
+        running += len(unit)
+        unit_lengths.append(running)
+
+    grouped: list[str] = []
+    start = 0
+    consumed_capacity = 0
+    total_text_len = unit_lengths[-1]
+    for index, capacity in enumerate(capacities[:-1]):
+        consumed_capacity += capacity
+        remaining_blocks = len(capacities) - index - 1
+        min_cut = start + 1
+        max_cut = len(units) - remaining_blocks
+        ideal_cumulative = round(total_text_len * consumed_capacity / total_capacity)
+        best_cut = min_cut
+        best_score: tuple[int, int] | None = None
+        for cut in range(min_cut, max_cut + 1):
+            cumulative = unit_lengths[cut - 1]
+            score = (abs(cumulative - ideal_cumulative), cut)
+            if best_score is None or score < best_score:
+                best_cut = cut
+                best_score = score
+        grouped.append(self._join_name_units(units[start:best_cut], source_components=source_components))
+        start = best_cut
+    grouped.append(self._join_name_units(units[start:], source_components=source_components))
+    return grouped
 
 def _segment_ranges(self, segments: list[str]) -> list[tuple[int, int]]:
     """把顺序文本段映射成拼接串中的闭开区间。"""

@@ -23,5 +23,6 @@ class PersonaRepository(Protocol):
         persona_id: str,
         attr_type: PIIAttributeType,
         source_text: str,
+        metadata: dict[str, list[str]] | None = None,
     ) -> str | None:
         """按源文本粒度与仓库渲染规则返回替换值。"""

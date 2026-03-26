@@ -78,8 +78,15 @@ class PlaceholderPersonaRepository:
         """占位读取槽位。"""
         return None
 
-    def get_slot_replacement_text(self, persona_id: str, attr_type: Any, source_text: str) -> str | None:
+    def get_slot_replacement_text(
+        self,
+        persona_id: str,
+        attr_type: Any,
+        source_text: str,
+        metadata: dict[str, list[str]] | None = None,
+    ) -> str | None:
         """占位读取替换文本。"""
+        _ = metadata
         return self.get_slot_value(persona_id, attr_type)
 
 

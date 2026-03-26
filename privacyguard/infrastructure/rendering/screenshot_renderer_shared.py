@@ -11,7 +11,13 @@ from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.interfaces.screenshot_fill_strategy import ScreenshotFillStrategy
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock, PolygonPoint
 from privacyguard.infrastructure.rendering.fill_strategies import MixFillStrategy
-from privacyguard.utils.pii_value import address_display_units, parse_address_components
+from privacyguard.utils.pii_value import (
+    address_display_units,
+    name_component_order,
+    name_display_units,
+    parse_address_components,
+    parse_name_components,
+)
 
 # 常见系统字体路径。优先贴近 Android 默认无衬线风格；本机缺少 Android 字体时回退到 macOS 的中文黑体。
 _CJK_FONT_PATHS = [

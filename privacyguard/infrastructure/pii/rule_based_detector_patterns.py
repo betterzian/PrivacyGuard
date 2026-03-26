@@ -173,20 +173,36 @@ def _build_context_rules(self) -> list[tuple[PIIAttributeType, re.Pattern[str], 
     """构建基于字段上下文的检测规则。"""
     return [
         self._build_context_rule(
+            keywords=_NAME_FAMILY_FIELD_KEYWORDS,
+            attr_type=PIIAttributeType.NAME,
+            value_pattern=rf"[A-Za-z][A-Za-z'\- ]{{0,40}}|[一-龥·]{{1,4}}|{_TEXT_MASK_CHAR_CLASS}{{1,4}}",
+            confidence=0.92,
+            matched_by="context_name_family_field",
+            validator=self._is_family_name_candidate,
+        ),
+        self._build_context_rule(
+            keywords=_NAME_GIVEN_FIELD_KEYWORDS,
+            attr_type=PIIAttributeType.NAME,
+            value_pattern=rf"[A-Za-z][A-Za-z'\- ]{{0,40}}|[一-龥·]{{1,6}}|{_TEXT_MASK_CHAR_CLASS}{{1,6}}",
+            confidence=0.92,
+            matched_by="context_name_given_field",
+            validator=self._is_given_name_candidate,
+        ),
+        self._build_context_rule(
+            keywords=_NAME_MIDDLE_FIELD_KEYWORDS,
+            attr_type=PIIAttributeType.NAME,
+            value_pattern=r"[A-Za-z][A-Za-z'\- ]{0,40}",
+            confidence=0.9,
+            matched_by="context_name_middle_field",
+            validator=self._is_middle_name_candidate,
+        ),
+        self._build_context_rule(
             keywords=_NAME_FIELD_KEYWORDS,
             attr_type=PIIAttributeType.NAME,
             value_pattern=rf"[A-Za-z][A-Za-z .'\-]{{1,40}}|[一-龥·\s0-9]{{2,12}}|[一-龥][*＊xX某]{{1,3}}|{_TEXT_MASK_CHAR_CLASS}{{2,12}}",
             confidence=0.90,
             matched_by="context_name_field",
             validator=self._is_name_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_ADDRESS_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.ADDRESS,
-            value_pattern=rf"[A-Za-z0-9#\-－—()（）·\s一-龥{_ADDRESS_MASK_CHAR_CLASS[1:-1]}]{{2,80}}",
-            confidence=0.90,
-            matched_by="context_address_field",
-            validator=self._looks_like_address_candidate,
         ),
         self._build_context_rule(
             keywords=_PHONE_FIELD_KEYWORDS,
@@ -331,6 +347,9 @@ def _all_field_keywords(self) -> tuple[str, ...]:
         dict.fromkeys(
             (
                 *_NAME_FIELD_KEYWORDS,
+                *_NAME_FAMILY_FIELD_KEYWORDS,
+                *_NAME_GIVEN_FIELD_KEYWORDS,
+                *_NAME_MIDDLE_FIELD_KEYWORDS,
                 *_ADDRESS_FIELD_KEYWORDS,
                 *_PHONE_FIELD_KEYWORDS,
                 *_CARD_FIELD_KEYWORDS,

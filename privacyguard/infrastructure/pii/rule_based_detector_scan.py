@@ -77,7 +77,7 @@ def _scan_text(
     )
     protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
     address_shadow = self._build_shadow_text(text, collected)
-    self._collect_address_hits(
+    self._collect_address_candidates(
         collected,
         address_shadow.text,
         source,
@@ -139,6 +139,7 @@ def _scan_ocr_page(
 ) -> list[PIICandidate]:
     """将整页 OCR 聚合成单文档扫描，再映射回原始 block。"""
     remapped_candidates: list[PIICandidate] = []
+    seen_signatures: set[tuple[str, str, tuple[str, ...]]] = set()
     document = self._build_ocr_page_document(ocr_blocks)
     if document is None:
         return remapped_candidates
@@ -157,6 +158,16 @@ def _scan_ocr_page(
         if remapped is not None:
             refined = self._refine_ocr_name_candidate(remapped, document, scene_index, rule_profile)
             if refined is not None:
+                seen_signatures.add(self._ocr_candidate_signature(refined))
                 remapped_candidates.append(refined)
-        remapped_candidates.extend(self._derive_address_block_candidates(candidate, document))
+        derived_candidates = self._derive_address_block_candidates(candidate, document)
+        remapped_candidates.extend(derived_candidates)
+        for derived_candidate in derived_candidates:
+            seen_signatures.add(self._ocr_candidate_signature(derived_candidate))
+    for candidate in self._collect_ocr_label_adjacency_candidates(document, scene_index, rule_profile):
+        signature = self._ocr_candidate_signature(candidate)
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        remapped_candidates.append(candidate)
     return remapped_candidates

@@ -57,6 +57,24 @@ def _shadow_token(self, attr_type: PIIAttributeType) -> str:
     }
     return mapping[attr_type]
 
+
+def _name_component_from_matched_by(self, matched_by: str) -> str | None:
+    if matched_by == "context_name_family_field":
+        return "family"
+    if matched_by == "context_name_given_field":
+        return "given"
+    if matched_by == "context_name_middle_field":
+        return "middle"
+    if matched_by.startswith("context_name_") or matched_by.startswith("regex_name_") or matched_by.startswith("heuristic_name_"):
+        return "full"
+    return None
+
+
+def _name_component_metadata(self, component: str | None) -> dict[str, list[str]] | None:
+    if not component:
+        return None
+    return {"name_component": [component]}
+
 def _collect_dictionary_hits(
     self,
     collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
@@ -87,6 +105,7 @@ def _collect_dictionary_hits(
                 match.span_end,
             ):
                 continue
+            metadata = self._dictionary_match_metadata(match)
             self._upsert_candidate(
                 collected=collected,
                 text=raw_text,
@@ -100,7 +119,7 @@ def _collect_dictionary_hits(
                 confidence=match.confidence,
                 matched_by=match.matched_by,
                 canonical_source_text=canonical_source_text,
-                metadata=self._dictionary_match_metadata(match),
+                metadata=metadata,
                 skip_spans=skip_spans,
             )
 
@@ -128,13 +147,23 @@ def _collect_context_hits(
             value, span_start, span_end = trimmed
             canonical_source_text = None
             validator_value = value
+            metadata = None
             if attr_type == PIIAttributeType.NAME:
                 if self._is_repeated_mask_text(value, min_run=2, allow_alpha_masks=True):
                     continue
-                canonical_source_text = self._canonical_name_source_text(
-                    value,
-                    allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
-                )
+                component = self._name_component_from_matched_by(matched_by)
+                metadata = self._name_component_metadata(component)
+                if component is not None:
+                    canonical_source_text = self._canonical_name_component_source_text(
+                        value,
+                        component=component,
+                        allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+                    )
+                else:
+                    canonical_source_text = self._canonical_name_source_text(
+                        value,
+                        allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+                    )
                 if canonical_source_text:
                     validator_value = canonical_source_text
             if attr_type == PIIAttributeType.ADDRESS and self._contains_mask_char(
@@ -168,6 +197,7 @@ def _collect_context_hits(
                 confidence=candidate_confidence,
                 matched_by=candidate_matched_by,
                 canonical_source_text=canonical_source_text,
+                metadata=metadata,
                 skip_spans=skip_spans,
             )
 
@@ -761,6 +791,7 @@ def _collect_name_hits(
                     confidence=confidence,
                     matched_by=matched_by,
                     canonical_source_text=canonical_source_text,
+                    metadata=self._name_component_metadata("full"),
                     skip_spans=skip_spans,
                 )
     if rule_profile.enable_honorific_name_pattern:
@@ -802,6 +833,7 @@ def _collect_name_hits(
                     confidence=confidence,
                     matched_by=matched_by,
                     canonical_source_text=canonical_source_text,
+                    metadata=self._name_component_metadata("full"),
                     skip_spans=skip_spans,
                 )
     self._collect_generic_name_fragment_hits(
@@ -874,6 +906,7 @@ def _collect_generic_name_fragment_hits(
             confidence=confidence,
             matched_by="heuristic_name_fragment",
             canonical_source_text=canonical_source_text,
+            metadata=self._name_component_metadata("full"),
             skip_spans=local_skip_spans,
         )
         local_skip_spans.append((span_start, span_end))

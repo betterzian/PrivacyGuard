@@ -27,6 +27,7 @@ class InvalidPrivacyRepositoryError(ValueError):
 
 
 _ADDRESS_LEVEL_KEYS = ("country", "province", "city", "district", "street", "building", "room", "postal_code")
+_NAME_SLOT_KEYS = ("full", "family", "given", "middle")
 
 
 def parse_privacy_repository_document(payload: dict[str, Any] | None) -> PrivacyRepositoryDocument:
@@ -47,6 +48,10 @@ def _is_storage_slot_dict(value: Any) -> bool:
 
 def _is_address_slot_dict(value: Any) -> bool:
     return isinstance(value, dict) and bool(value) and set(value).issubset(set(_ADDRESS_LEVEL_KEYS))
+
+
+def _is_name_slot_dict(value: Any) -> bool:
+    return isinstance(value, dict) and "full" in value and set(value).issubset(set(_NAME_SLOT_KEYS))
 
 
 def _dedupe_str_list(values: list[str]) -> list[str]:
@@ -101,7 +106,27 @@ def _address_slot_identity(item: dict[str, Any]) -> tuple[str, ...]:
     return tuple(values)
 
 
+def _name_slot_identity(item: dict[str, Any]) -> tuple[str, ...]:
+    values: list[str] = []
+    for key in _NAME_SLOT_KEYS:
+        level = item.get(key)
+        if not _is_storage_slot_dict(level):
+            continue
+        values.append(f"{key}:{str(level.get('value') or '').strip()}")
+    return tuple(values)
+
+
 def _merge_address_slot_dicts(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(old)
+    for key, value in new.items():
+        if key in merged and _is_storage_slot_dict(merged[key]) and _is_storage_slot_dict(value):
+            merged[key] = _merge_storage_slot_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _merge_name_slot_dicts(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     merged = dict(old)
     for key, value in new.items():
         if key in merged and _is_storage_slot_dict(merged[key]) and _is_storage_slot_dict(value):
@@ -145,6 +170,23 @@ def _merge_address_slot_list(old: list[dict[str, Any]], new: list[dict[str, Any]
     return [merged[key] for key in ordered_keys]
 
 
+def _merge_name_slot_list(old: list[dict[str, Any]], new: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    ordered_keys: list[tuple[str, ...]] = []
+    for item in [*old, *new]:
+        if not _is_name_slot_dict(item):
+            continue
+        key = _name_slot_identity(item)
+        if not key:
+            continue
+        if key in merged:
+            merged[key] = _merge_name_slot_dicts(merged[key], item)
+            continue
+        merged[key] = dict(item)
+        ordered_keys.append(key)
+    return [merged[key] for key in ordered_keys]
+
+
 def _deep_merge_value(old: Any, new: Any) -> Any:
     if isinstance(old, dict) and isinstance(new, dict):
         if _is_storage_slot_dict(old) and _is_storage_slot_dict(new):
@@ -159,6 +201,8 @@ def _deep_merge_value(old: Any, new: Any) -> Any:
     if isinstance(old, list) and isinstance(new, list):
         if all(_is_storage_slot_dict(item) for item in [*old, *new]):
             return _merge_storage_slot_list(old, new)
+        if all(_is_name_slot_dict(item) for item in [*old, *new]):
+            return _merge_name_slot_list(old, new)
         if all(_is_address_slot_dict(item) for item in [*old, *new]):
             return _merge_address_slot_list(old, new)
         return list(old) + list(new)

@@ -207,6 +207,70 @@ _EN_US_STATE_ALIASES.update(
         for key, value in _EN_US_STATE_NAMES.items()
     }
 )
+_COMMON_COMPOUND_SURNAMES = {
+    "欧阳",
+    "太史",
+    "端木",
+    "上官",
+    "司马",
+    "东方",
+    "独孤",
+    "南宫",
+    "万俟",
+    "闻人",
+    "夏侯",
+    "诸葛",
+    "尉迟",
+    "公羊",
+    "赫连",
+    "澹台",
+    "皇甫",
+    "宗政",
+    "濮阳",
+    "公冶",
+    "太叔",
+    "申屠",
+    "公孙",
+    "慕容",
+    "仲孙",
+    "钟离",
+    "长孙",
+    "宇文",
+    "司徒",
+    "鲜于",
+    "司空",
+    "闾丘",
+    "子车",
+    "亓官",
+    "司寇",
+    "巫马",
+    "公西",
+    "颛孙",
+    "壤驷",
+    "公良",
+    "漆雕",
+    "乐正",
+    "宰父",
+    "谷梁",
+    "拓跋",
+    "夹谷",
+    "轩辕",
+    "令狐",
+    "段干",
+    "百里",
+    "呼延",
+    "东郭",
+    "南门",
+    "羊舌",
+    "微生",
+    "公户",
+    "公玉",
+    "梁丘",
+    "左丘",
+    "东门",
+    "西门",
+    "第五",
+}
 _CITY_PATTERN = re.compile(r"^(?P<city>[^0-9]{1,16}?(?:自治州|地区|盟|市))")
 _DISTRICT_PATTERN = re.compile(r"^(?P<district>[^0-9]{1,16}?(?:新区|自治县|自治旗|区|县|旗|市))")
 _ZH_BUILDING_PATTERN = re.compile(r"(?P<building>[0-9A-Za-z一二三四五六七八九十百零两]+(?:号楼|栋|幢|座|单元))$")
@@ -233,7 +297,8 @@ _EN_US_STATE_PATTERN = re.compile(
     rf"|{'|'.join(sorted(_EN_US_STATE_NAMES.keys(), key=len, reverse=True))}))$",
     re.IGNORECASE,
 )
-_NAME_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000·•・0123456789０１２３４５６７８９")
+_NAME_SPACE_CHARS = set(" \t\r\n\f\v\u3000")
+_NAME_MATCH_IGNORABLE = _NAME_SPACE_CHARS | set("·•・0123456789０１２３４５６７８９")
 _PHONE_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：+＋")
 _CARD_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
 _BANK_ACCOUNT_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
@@ -317,6 +382,18 @@ class AddressComponents:
         return "raw"
 
 
+@dataclass(slots=True)
+class NameComponents:
+    """结构化姓名组件。"""
+
+    original_text: str
+    locale: str = "raw"
+    full_text: str = ""
+    family_text: str | None = None
+    given_text: str | None = None
+    middle_text: str | None = None
+
+
 def classify_content_shape_attr(value: str | None) -> PIIAttributeType:
     """按内容形态粗分为 TIME / NUMERIC / TEXTUAL；其余一律为 OTHER（兜底）。
 
@@ -347,11 +424,11 @@ def classify_content_shape_attr(value: str | None) -> PIIAttributeType:
 
 def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
     """按属性类型返回稳定 canonical key。"""
+    if attr_type == PIIAttributeType.NAME:
+        return canonicalize_name_text(value)
     cleaned = _compact_text(value)
     if not cleaned:
         return ""
-    if attr_type == PIIAttributeType.NAME:
-        return cleaned.replace(" ", "")
     if attr_type == PIIAttributeType.LOCATION_CLUE:
         return canonicalize_location_clue_text(cleaned)
     if attr_type == PIIAttributeType.ORGANIZATION:
@@ -557,6 +634,13 @@ def persona_slot_replacement(attr_type: PIIAttributeType, source_text: str, slot
 
 def build_match_text(attr_type: PIIAttributeType, value: str) -> tuple[str, list[int]]:
     """构造用于容错匹配的压缩文本及其到原文的索引映射。"""
+    if attr_type == PIIAttributeType.NAME:
+        return _build_name_match_text(value)
+    return _build_generic_match_text(attr_type, value)
+
+
+def _build_generic_match_text(attr_type: PIIAttributeType, value: str) -> tuple[str, list[int]]:
+    """构造非姓名类型的容错匹配文本。"""
     match_chars: list[str] = []
     index_map: list[int] = []
     for index, char in enumerate(str(value)):
@@ -568,6 +652,70 @@ def build_match_text(attr_type: PIIAttributeType, value: str) -> tuple[str, list
             match_chars.append(normalized_char.lower() if normalized_char.isascii() else normalized_char)
             index_map.append(index)
     return ("".join(match_chars), index_map)
+
+
+def _build_name_match_text(value: str) -> tuple[str, list[int]]:
+    """构造姓名匹配文本。
+
+    中文姓名继续忽略空格与中点类噪声；英文姓名保留 token 间空格，
+    不再把 ``Alice Johnson`` 压成 ``alicejohnson``。
+    """
+    raw_value = str(value or "")
+    if parse_name_components(raw_value).locale != "en_us":
+        return _build_generic_match_text(PIIAttributeType.NAME, raw_value)
+
+    match_chars: list[str] = []
+    index_map: list[int] = []
+    previous_is_space = True
+    for index, char in enumerate(raw_value):
+        normalized = unicodedata.normalize("NFKC", char)
+        for normalized_char in normalized:
+            if normalized_char in _NAME_SPACE_CHARS:
+                if not match_chars or previous_is_space:
+                    continue
+                match_chars.append(" ")
+                index_map.append(index)
+                previous_is_space = True
+                continue
+            normalized_char = _normalize_match_char(PIIAttributeType.NAME, normalized_char)
+            if normalized_char in (_NAME_MATCH_IGNORABLE - _NAME_SPACE_CHARS):
+                continue
+            match_chars.append(normalized_char.lower() if normalized_char.isascii() else normalized_char)
+            index_map.append(index)
+            previous_is_space = False
+    if match_chars and match_chars[-1] == " ":
+        match_chars.pop()
+        index_map.pop()
+    return ("".join(match_chars), index_map)
+
+
+def canonicalize_name_text(
+    value: str,
+    *,
+    allow_ocr_noise: bool = False,
+    lower_ascii: bool = True,
+) -> str:
+    """按中英文差异归一姓名文本。
+
+    中文姓名沿用紧凑形式；英文姓名保留 token 间空格，不再生成无空格主规范形。
+    """
+    original = unicodedata.normalize("NFKC", str(value or ""))
+    components = parse_name_components(original)
+    if components.locale == "en_us":
+        normalized = re.sub(r"\s+", " ", original).strip()
+        if allow_ocr_noise:
+            normalized = re.sub(r"[0-9０-９]+", "", normalized)
+            normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized.lower() if lower_ascii else normalized
+
+    compact = "".join(
+        char
+        for char in re.sub(r"\s+", "", original).strip()
+        if char not in _NAME_MATCH_IGNORABLE
+    )
+    if allow_ocr_noise:
+        compact = re.sub(r"[0-9０-９]+", "", compact)
+    return compact.lower() if lower_ascii and re.search(r"[A-Za-z]", compact) else compact
 
 
 def dictionary_match_variants(attr_type: PIIAttributeType, value: str) -> set[str]:
@@ -698,6 +846,75 @@ def parse_address_components(value: str) -> AddressComponents:
     return _parse_zh_address_components(original)
 
 
+def parse_name_components(value: str) -> NameComponents:
+    """按中英文常见顺序拆解姓名。"""
+    original = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not original:
+        return NameComponents(original_text="", full_text="")
+    if re.fullmatch(r"[A-Za-z][A-Za-z ,.'\-]{0,80}", original):
+        return _parse_en_name_components(original)
+    compact = re.sub(r"\s+", "", original)
+    if re.fullmatch(r"[一-龥·]{1,8}", compact):
+        return _parse_zh_name_components(compact)
+    return NameComponents(original_text=original, full_text=original)
+
+
+def name_component_order(components: NameComponents) -> tuple[str, ...]:
+    """根据源文本样式返回姓名组件顺序。"""
+    if components.locale == "zh_cn":
+        return ("family", "given")
+    if components.locale == "en_us":
+        if "," in (components.original_text or ""):
+            return ("family", "given", "middle")
+        return ("given", "middle", "family")
+    return ("full",)
+
+
+def name_display_units(
+    components: NameComponents,
+    *,
+    order: tuple[str, ...] | list[str] | None = None,
+) -> list[str]:
+    """将姓名组件转换为指定顺序上的文本单元。"""
+    resolved_order = tuple(order) if order is not None else name_component_order(components)
+    units: list[str] = []
+    for component_name in resolved_order:
+        if component_name == "full":
+            if components.full_text:
+                units.append(components.full_text)
+            continue
+        if component_name == "family" and components.family_text:
+            units.append(components.family_text)
+            continue
+        if component_name == "given" and components.given_text:
+            units.append(components.given_text)
+            continue
+        if component_name == "middle" and components.middle_text:
+            units.append(components.middle_text)
+    return units or ([components.full_text] if components.full_text else [])
+
+
+def render_name_like_source(
+    target_components: NameComponents,
+    source_components: NameComponents,
+    *,
+    component_hint: str | None = None,
+) -> str | None:
+    """根据源姓名粒度返回目标姓名的对应片段。"""
+    if not target_components.full_text:
+        return None
+    resolved_hint = component_hint or _infer_name_component_hint(source_components)
+    if resolved_hint == "family" and target_components.family_text:
+        return target_components.family_text
+    if resolved_hint == "given" and target_components.given_text:
+        return target_components.given_text
+    if resolved_hint == "middle" and target_components.middle_text:
+        return target_components.middle_text
+    if resolved_hint == "full" and target_components.full_text:
+        return _render_full_name_like_source(target_components, source_components) or target_components.full_text
+    return target_components.full_text
+
+
 def address_display_units(
     components: AddressComponents,
     *,
@@ -756,6 +973,114 @@ def render_address_components(
     if components.locale == "en_us":
         return ", ".join(unit for unit in units if unit)
     return "".join(unit for unit in units if unit)
+
+
+def _parse_zh_name_components(value: str) -> NameComponents:
+    full_text = re.sub(r"\s+", "", value)
+    if not full_text:
+        return NameComponents(original_text="", full_text="")
+    if "·" in full_text:
+        family_text, given_text = full_text.split("·", 1)
+        return NameComponents(
+            original_text=full_text,
+            locale="zh_cn",
+            full_text=full_text,
+            family_text=family_text or None,
+            given_text=given_text or None,
+        )
+    if len(full_text) == 1:
+        return NameComponents(
+            original_text=full_text,
+            locale="zh_cn",
+            full_text=full_text,
+            given_text=full_text,
+        )
+    if len(full_text) >= 3 and full_text[:2] in _COMMON_COMPOUND_SURNAMES:
+        return NameComponents(
+            original_text=full_text,
+            locale="zh_cn",
+            full_text=full_text,
+            family_text=full_text[:2],
+            given_text=full_text[2:] or None,
+        )
+    return NameComponents(
+        original_text=full_text,
+        locale="zh_cn",
+        full_text=full_text,
+        family_text=full_text[:1],
+        given_text=full_text[1:] or None,
+    )
+
+
+def _parse_en_name_components(value: str) -> NameComponents:
+    normalized = re.sub(r"\s+", " ", value).strip()
+    if not normalized:
+        return NameComponents(original_text="", full_text="")
+    if "," in normalized:
+        family_raw, remainder = [part.strip() for part in normalized.split(",", 1)]
+        tokens = [token for token in re.split(r"\s+", remainder) if token]
+        given_text = tokens[0] if tokens else None
+        middle_text = " ".join(tokens[1:]) or None
+        return NameComponents(
+            original_text=normalized,
+            locale="en_us",
+            full_text=normalized,
+            family_text=family_raw or None,
+            given_text=given_text,
+            middle_text=middle_text,
+        )
+    tokens = [token for token in re.split(r"\s+", normalized) if token]
+    if len(tokens) == 1:
+        return NameComponents(
+            original_text=normalized,
+            locale="en_us",
+            full_text=normalized,
+            given_text=tokens[0],
+        )
+    return NameComponents(
+        original_text=normalized,
+        locale="en_us",
+        full_text=normalized,
+        family_text=tokens[-1],
+        given_text=tokens[0],
+        middle_text=" ".join(tokens[1:-1]) or None,
+    )
+
+
+def _infer_name_component_hint(components: NameComponents) -> str | None:
+    if not components.full_text:
+        return None
+    if components.family_text and components.given_text:
+        return "full"
+    if components.family_text and not components.given_text:
+        return "family"
+    if components.given_text and not components.family_text:
+        return "given"
+    if components.middle_text and not components.family_text and not components.given_text:
+        return "middle"
+    return None
+
+
+def _render_full_name_like_source(
+    target_components: NameComponents,
+    source_components: NameComponents,
+) -> str | None:
+    units = name_display_units(
+        target_components,
+        order=name_component_order(source_components),
+    )
+    if not units:
+        return target_components.full_text
+    if source_components.locale == "zh_cn":
+        separator = "·" if "·" in (source_components.original_text or "") and len(units) >= 2 else ""
+        return separator.join(units)
+    if source_components.locale == "en_us":
+        if "," in (source_components.original_text or "") and units:
+            head = units[0]
+            tail = " ".join(units[1:])
+            return f"{head}, {tail}" if tail else head
+        return " ".join(units)
+    return target_components.full_text
 
 
 def render_address_like_source(slot_components: AddressComponents, source_components: AddressComponents) -> str:

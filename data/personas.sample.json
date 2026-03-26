@@ -6,10 +6,22 @@
       "slots": {
         "name": [
           {
-            "value": "陈示例",
-            "aliases": [
-              "陈样本"
-            ]
+            "full": {
+              "value": "陈示例",
+              "aliases": [
+                "陈样本"
+              ]
+            },
+            "family": {
+              "value": "陈",
+              "aliases": []
+            },
+            "given": {
+              "value": "示例",
+              "aliases": [
+                "样本"
+              ]
+            }
           }
         ],
         "location_clue": [
@@ -202,10 +214,20 @@
       "slots": {
         "name": [
           {
-            "value": "Avery Sample",
-            "aliases": [
-              "A. Sample"
-            ]
+            "full": {
+              "value": "Avery Sample",
+              "aliases": [
+                "A. Sample"
+              ]
+            },
+            "family": {
+              "value": "Sample",
+              "aliases": []
+            },
+            "given": {
+              "value": "Avery",
+              "aliases": []
+            }
           }
         ],
         "location_clue": [
