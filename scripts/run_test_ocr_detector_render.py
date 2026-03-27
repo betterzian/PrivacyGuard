@@ -3,7 +3,7 @@
 This script is intentionally evaluation-oriented:
 
 - OCR runs once per image and is saved to disk.
-- The same OCR blocks are reused for detector runs under weak/balanced/strong.
+- The same OCR blocks are reused for detector runs (strong profile only).
 - Detector outputs, decision/replacement plans, applied records, and rendered images
   are all persisted locally for inspection.
 """
@@ -168,7 +168,7 @@ def run_for_image(
 
     level_summaries: dict[str, Any] = {}
     level_timings: dict[str, Any] = {}
-    for protection_level in (ProtectionLevel.WEAK, ProtectionLevel.BALANCED, ProtectionLevel.STRONG):
+    for protection_level in (ProtectionLevel.STRONG,):
         level_start = perf_counter()
         level_name = protection_level.value
         session_id = f"{image_path.stem}-{level_name}"
@@ -316,7 +316,7 @@ def _aggregate_timing_summary(image_summaries: list[dict[str, Any]]) -> dict[str
         "ocr_seconds": 0.0,
         "image_total_seconds": 0.0,
     }
-    for level_name in ("weak", "balanced", "strong"):
+    for level_name in ("strong",):
         for key in (
             "detector_seconds",
             "decision_context_seconds",

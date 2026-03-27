@@ -191,13 +191,23 @@ def _classify_address_kind(span: AddressSpan, components: tuple[AddressComponent
     if components:
         if len(components) >= 2 and not _components_follow_expected_order(text, components):
             return "unknown"
-        if len(components) == 1 and not allow_single_component_address(
-            components[0].component_type,
-            components[0].text,
-            matched_by=span.matched_by,
-            source_text=text,
-        ):
-            return "unknown"
+        if len(components) == 1:
+            only = components[0]
+            # grow 左扩行政前缀后 span 可能长于唯一 compound，仍应视为有效地址。
+            if (
+                only.component_type == "compound"
+                and span.matched_by == "event_stream_address"
+                and only.start_offset > 0
+                and text[: only.start_offset].strip()
+            ):
+                pass
+            elif not allow_single_component_address(
+                only.component_type,
+                only.text,
+                matched_by=span.matched_by,
+                source_text=text,
+            ):
+                return "unknown"
         if organization_like and not any(item in component_types for item in address_like_types - {"compound"}):
             return "organization_like"
         return "private_address"

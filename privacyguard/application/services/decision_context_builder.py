@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from privacyguard.domain.enums import ProtectionLevel
+from privacyguard.domain.enums import ProtectionLevel, normalize_protection_level
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.models.decision_context import DecisionContext
@@ -25,7 +25,7 @@ class DecisionContextBuilder:
         session_id: str,
         turn_id: int,
         prompt_text: str = "",
-        protection_level: ProtectionLevel | str = ProtectionLevel.BALANCED,
+        protection_level: ProtectionLevel | str = ProtectionLevel.STRONG,
         detector_overrides: dict[object, float] | None = None,
         ocr_blocks: list[OCRTextBlock] | None = None,
         candidates: list[PIICandidate] | None = None,
@@ -53,10 +53,7 @@ class DecisionContextBuilder:
         return sorted(personas, key=lambda item: int(item.stats.get("exposure_count", 0) or 0))
 
     def _normalize_protection_level(self, protection_level: ProtectionLevel | str) -> ProtectionLevel:
-        if isinstance(protection_level, ProtectionLevel):
-            return protection_level
-        normalized = str(protection_level or ProtectionLevel.BALANCED.value).strip().lower()
-        return ProtectionLevel(normalized)
+        return normalize_protection_level(protection_level)
 
     def _normalize_detector_overrides(
         self,

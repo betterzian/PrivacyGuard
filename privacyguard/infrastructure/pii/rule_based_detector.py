@@ -64,7 +64,7 @@ class RuleBasedPIIDetector:
         *,
         session_id: str | None = None,
         turn_id: int | None = None,
-        protection_level: ProtectionLevel | str = ProtectionLevel.BALANCED,
+        protection_level: ProtectionLevel | str = ProtectionLevel.STRONG,
         detector_overrides: dict[PIIAttributeType | str, float] | None = None,
     ) -> list[PIICandidate]:
         """对 prompt 与 OCR 两路输入执行候选识别。"""
@@ -226,7 +226,6 @@ class RuleBasedPIIDetector:
     _collect_generic_name_fragment_hits = _collectors._collect_generic_name_fragment_hits
     _collect_masked_text_hits = _collectors._collect_masked_text_hits
     _collect_address_candidates = _address_pipeline.collect_address_candidates
-    _collect_geo_fragment_hits = _collectors._collect_geo_fragment_hits
     _collect_organization_hits = _collectors._collect_organization_hits
     _extract_match = _collectors._extract_match
     _remap_shadow_span = _collectors._remap_shadow_span

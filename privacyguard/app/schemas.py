@@ -1,10 +1,10 @@
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from privacyguard.api.dto import RestoreRequest, RestoreResponse, SanitizeRequest, SanitizeResponse
-from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
+from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel, normalize_protection_level
 
 
 class DetectorOverridesModel(BaseModel):
@@ -43,8 +43,17 @@ class SanitizePayloadModel(BaseModel):
     turn_id: int = Field(default=0, ge=0)
     prompt_text: str
     screenshot: Any | None = None
-    protection_level: ProtectionLevel = ProtectionLevel.BALANCED
+    protection_level: ProtectionLevel = ProtectionLevel.STRONG
     detector_overrides: DetectorOverridesModel | None = None
+
+    @field_validator("protection_level", mode="before")
+    @classmethod
+    def _coerce_protection_level(cls, v: object) -> ProtectionLevel:
+        if isinstance(v, ProtectionLevel):
+            return normalize_protection_level(v)
+        if v is None:
+            return normalize_protection_level(None)
+        return normalize_protection_level(str(v))
 
 
 class RestorePayloadModel(BaseModel):
@@ -74,7 +83,7 @@ class SanitizeRequestModel:
     turn_id: int
     prompt_text: str
     screenshot: Any | None = None
-    protection_level: ProtectionLevel = ProtectionLevel.BALANCED
+    protection_level: ProtectionLevel = ProtectionLevel.STRONG
     detector_overrides: dict[PIIAttributeType, float] = field(default_factory=dict)
 
     @classmethod

@@ -429,7 +429,7 @@ def _standalone_name_confidence(
     rule_profile: _RuleStrengthProfile,
 ) -> float:
     cleaned = self._clean_extracted_value(value)
-    compact = self._compact_name_value(cleaned, allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG)
+    compact = self._compact_name_value(cleaned, allow_ocr_noise=True)
     if not compact:
         return 0.0
     if self._is_ui_operation_name_token(compact):
@@ -463,8 +463,6 @@ def _english_standalone_name_confidence(
     source: PIISourceType,
     rule_profile: _RuleStrengthProfile,
 ) -> float:
-    if rule_profile.level == ProtectionLevel.WEAK:
-        return 0.0
     if self._is_blacklisted_english_name_phrase(value):
         return 0.0
     tokens = self._split_en_name_tokens(value)
@@ -525,10 +523,6 @@ def _zh_standalone_name_confidence(
     source: PIISourceType,
     rule_profile: _RuleStrengthProfile,
 ) -> float:
-    if source != PIISourceType.OCR and rule_profile.level != ProtectionLevel.STRONG:
-        return 0.0
-    if source == PIISourceType.OCR and rule_profile.level == ProtectionLevel.WEAK:
-        return 0.0
     if any(value.endswith(suffix) for suffix in _NAME_STANDALONE_NEGATIVE_SUFFIXES):
         return 0.0
     if any(token in value for token in _NON_PERSON_TOKENS):
@@ -547,14 +541,12 @@ def _zh_standalone_name_confidence(
     full_text = self._clean_extracted_value(raw_text)
     if full_text == value:
         if source == PIISourceType.OCR:
-            base = 0.74 if rule_profile.level == ProtectionLevel.BALANCED else 0.82
-            return min(0.9, base + pii_support)
+            return min(0.9, 0.82 + pii_support)
         return 0.9
     if source == PIISourceType.OCR:
         window = self._clean_extracted_value(raw_text[max(0, span_start - 2):min(len(raw_text), span_end + 2)])
         if value in window and len(window) <= len(value) + 2:
-            base = 0.68 if rule_profile.level == ProtectionLevel.BALANCED else 0.78
-            return min(0.88, base + pii_support)
+            return min(0.88, 0.78 + pii_support)
     return 0.0
 
 
@@ -584,9 +576,9 @@ def _generic_name_confidence(
     if any(right_context.startswith(token) for token in _NAME_NEGATIVE_RIGHT_CONTEXT_TOKENS) and not left_support:
         return 0.0
     if left_support and (right_support or source == PIISourceType.OCR):
-        return 0.96 if rule_profile.level == ProtectionLevel.WEAK else 0.94
+        return 0.94
     if self._starts_with_geo_or_activity(right_context):
-        return 0.96 if rule_profile.level == ProtectionLevel.WEAK else 0.92
+        return 0.92
     standalone = (left_char is None or not self._is_cjk_char(left_char)) and (
         right_char is None or not self._is_cjk_char(right_char)
     )
@@ -605,7 +597,7 @@ def _generic_name_confidence(
             if self._looks_like_ui_time_metadata(ocr_suffix):
                 return 0.0
         if left_support or left_char is None or not self._is_cjk_char(left_char):
-            return 0.96 if rule_profile.level == ProtectionLevel.WEAK else 0.94
+            return 0.94
         return 0.0
     return 0.0
 
@@ -1128,14 +1120,10 @@ def _geo_fragment_confidence(
     if attr_type == PIIAttributeType.ADDRESS:
         if left_open or right_open:
             return 0.9 if is_builtin_token else 0.82
-        if rule_profile.level == ProtectionLevel.STRONG:
-            return 0.76 if is_builtin_token else 0.72
-        if rule_profile.level == ProtectionLevel.BALANCED:
-            return 0.72 if is_builtin_token else 0.66
-        return 0.0
+        return 0.76 if is_builtin_token else 0.72
     if left_open or right_open:
         return 0.86 if is_builtin_token else 0.78
-    if rule_profile.level == ProtectionLevel.STRONG and (is_builtin_token or len(value) >= 3):
+    if is_builtin_token or len(value) >= 3:
         return 0.72
     return 0.0
 

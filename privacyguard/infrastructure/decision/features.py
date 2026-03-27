@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
+from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.infrastructure.decision.policy_context import (
     DerivedDecisionPolicyContext,
@@ -56,7 +56,8 @@ PAGE_FEATURE_NAMES: tuple[str, ...] = (
 )
 ATTR_FEATURE_ORDER: tuple[str, ...] = tuple(attr.value for attr in PIIAttributeType)
 SOURCE_FEATURE_ORDER: tuple[str, ...] = ("prompt", "ocr")
-PROTECTION_LEVEL_ORDER: tuple[str, ...] = tuple(level.value for level in ProtectionLevel)
+# 与 `ProtectionLevel` 成员解耦，固定三维以保持 candidate 向量宽度（弱/中/强槽位）；运行时恒为 strong。
+PROTECTION_LEVEL_ORDER: tuple[str, ...] = ("weak", "balanced", "strong")
 TEXT_SIGNATURE_DIM = 5
 PAGE_FEATURE_DIM = len(PAGE_FEATURE_NAMES)
 ATTR_ONE_HOT_DIM = len(ATTR_FEATURE_ORDER)

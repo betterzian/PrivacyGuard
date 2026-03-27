@@ -17,7 +17,7 @@ class DecisionContext(BaseModel):
     session_id: str
     turn_id: int = Field(ge=0)
     prompt_text: str = ""
-    protection_level: ProtectionLevel = ProtectionLevel.BALANCED
+    protection_level: ProtectionLevel = ProtectionLevel.STRONG
     detector_overrides: dict[PIIAttributeType, float] = Field(default_factory=dict)
     ocr_blocks: list[OCRTextBlock] = Field(default_factory=list)
     candidates: list[PIICandidate] = Field(default_factory=list)

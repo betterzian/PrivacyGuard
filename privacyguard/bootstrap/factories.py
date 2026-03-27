@@ -48,7 +48,7 @@ class PlaceholderPIIDetector:
         *,
         session_id: str | None = None,
         turn_id: int | None = None,
-        protection_level: ProtectionLevel | str = ProtectionLevel.BALANCED,
+        protection_level: ProtectionLevel | str = ProtectionLevel.STRONG,
         detector_overrides: dict[PIIAttributeType | str, float] | None = None,
     ) -> list[Any]:
         """占位检测函数。"""

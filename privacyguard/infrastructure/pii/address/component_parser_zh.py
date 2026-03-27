@@ -19,6 +19,9 @@ from privacyguard.infrastructure.pii.address.lexicon import (
 )
 from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressComponentMatch
 
+# 向「区」左合并政区名时不在此停：已占用的字符、非汉字、空白会自然截断。
+_QU_LEFT_EXTEND_STOP_CHARS = frozenset("在于是的地从向至往及与")
+
 _ZH_COMPONENT_ORDER = {
     "province": 1,
     "city": 2,
@@ -42,6 +45,7 @@ def parse_zh_components(text: str) -> tuple[AddressComponent, ...]:
     matches = [_normalize_match(match) for match in _iter_raw_zh_matches(text)]
     matches = _collapse_adjacent_admin_duplicates(matches)
     matches = _dedupe_overlapping_matches(matches)
+    matches = _append_unmatched_zh_qu_as_district(matches, text)
     components = [
         AddressComponent(
             component_type=match.component_type,
@@ -54,6 +58,38 @@ def parse_zh_components(text: str) -> tuple[AddressComponent, ...]:
         for match in matches
     ]
     return tuple(sorted(components, key=lambda item: (item.start_offset, item.end_offset, item.component_type)))
+
+
+def _append_unmatched_zh_qu_as_district(matches: list[AddressComponentMatch], text: str) -> list[AddressComponentMatch]:
+    """在 geo 与其它规则之后：凡未被覆盖的「区」，连同其左侧连续的未占用汉字合为一项 district（词表不全时的政区后缀）。"""
+    if not text:
+        return matches
+
+    def is_occupied(idx: int) -> bool:
+        return any(m.start <= idx < m.end for m in matches)
+
+    extra: list[AddressComponentMatch] = []
+    for i, ch in enumerate(text):
+        if ch != "区":
+            continue
+        if is_occupied(i):
+            continue
+        start = i
+        j = i - 1
+        while j >= 0 and not is_occupied(j):
+            cj = text[j]
+            if not ("\u4e00" <= cj <= "\u9fff"):
+                break
+            if cj in _QU_LEFT_EXTEND_STOP_CHARS:
+                break
+            start = j
+            j -= 1
+        extra.append(AddressComponentMatch("district", start, i + 1, text[start : i + 1], "medium"))
+    if not extra:
+        return matches
+    combined = matches + extra
+    combined.sort(key=lambda item: (item.start, item.end, item.component_type))
+    return combined
 
 
 def _iter_raw_zh_matches(text: str) -> list[AddressComponentMatch]:

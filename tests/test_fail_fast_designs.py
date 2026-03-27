@@ -65,7 +65,7 @@ def _context(*, candidates: list[PIICandidate] | None = None, personas: list[Per
         session_id="s1",
         turn_id=1,
         prompt_text="Alice",
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
         candidates=list(candidates or []),
         persona_profiles=list(personas or []),
         session_binding=SessionBinding(session_id="s1"),

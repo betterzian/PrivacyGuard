@@ -10,9 +10,9 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
+from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel, normalize_protection_level
 from privacyguard.domain.models.action import RestoredSlot
 from privacyguard.domain.models.mapping import ReplacementRecord
 
@@ -30,11 +30,20 @@ class SanitizeRequest(BaseModel):
     turn_id: int = Field(ge=0)
     prompt_text: str
     screenshot: ImageLike | None = None
-    protection_level: ProtectionLevel = ProtectionLevel.BALANCED
+    protection_level: ProtectionLevel = ProtectionLevel.STRONG
     detector_overrides: dict[PIIAttributeType, float] = Field(
         default_factory=dict,
         description="检测阶段的可选覆盖参数；属于外部请求输入，不承载 de_model 内部层级决策字段。",
     )
+
+    @field_validator("protection_level", mode="before")
+    @classmethod
+    def _coerce_protection_level(cls, v: object) -> ProtectionLevel:
+        if isinstance(v, ProtectionLevel):
+            return normalize_protection_level(v)
+        if v is None:
+            return normalize_protection_level(None)
+        return normalize_protection_level(str(v))
 
 
 class SanitizeResponse(BaseModel):

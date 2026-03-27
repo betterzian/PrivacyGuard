@@ -2,7 +2,7 @@
 
 目标：
 - 遍历 `data/download` 下的截图数据集（默认按 PrivScreen layout：*/images/*.png）
-- 对每张图分别以 ProtectionLevel: strong/balanced/weak 跑一次 sanitize
+- 对每张图以 ProtectionLevel: strong 跑一次 sanitize
 - 存储每张图的：
   - 原图 OCR 输出（blocks）
   - detector 输出（PIICandidate 列表）
@@ -427,9 +427,9 @@ def main() -> None:
         decision_mode="label_only",
         detector_config={"locale_profile": str(args.detector_locale_profile)},
     )
-    levels = [ProtectionLevel.STRONG, ProtectionLevel.BALANCED, ProtectionLevel.WEAK]
+    levels = [ProtectionLevel.STRONG]
 
-    # 原图 OCR 只做一次，三档强度复用
+    # 原图 OCR 只做一次，多档时复用（当前仅 strong）
     ocr_cache: dict[str, list[Any]] = {}
 
     # 输出：每个 level 一个 jsonl + 一个 aggregate.json

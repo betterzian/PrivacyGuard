@@ -284,7 +284,7 @@ def test_rule_based_detector_detects_name_from_vertical_ocr_label_block() -> Non
                 bbox=BoundingBox(x=18, y=42, width=148, height=28),
             ),
         ],
-        protection_level=ProtectionLevel.WEAK,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     name_candidate = next(candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME)
@@ -324,7 +324,7 @@ def test_rule_based_detector_detects_family_and_given_name_from_horizontal_ocr_l
                 bbox=BoundingBox(x=46, y=38, width=64, height=20),
             ),
         ],
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     by_text = {
@@ -356,7 +356,7 @@ def test_rule_based_detector_rejects_pronouns_as_name_label_value() -> None:
                 bbox=BoundingBox(x=12, y=38, width=120, height=26),
             ),
         ],
-        protection_level=ProtectionLevel.WEAK,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     assert not any(candidate.attr_type == PIIAttributeType.NAME for candidate in candidates)
@@ -374,7 +374,7 @@ def test_rule_based_detector_detects_name_from_inline_ocr_label_block() -> None:
                 bbox=BoundingBox(x=12, y=12, width=160, height=24),
             ),
         ],
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     name_candidate = next(candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME)
@@ -404,7 +404,7 @@ def test_rule_based_detector_detects_name_from_large_gap_horizontal_ocr_label() 
                 bbox=BoundingBox(x=216, y=12, width=186, height=24),
             ),
         ],
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     name_candidate = next(candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME)
@@ -429,7 +429,7 @@ def test_rule_based_detector_joins_inline_ocr_name_label_with_right_continuation
                 bbox=BoundingBox(x=118, y=12, width=72, height=22),
             ),
         ],
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     name_candidate = next(candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME and candidate.text == "Brian Foster")
@@ -456,7 +456,7 @@ def test_rule_based_detector_detects_mixed_case_english_ocr_name_with_cross_bloc
                 bbox=BoundingBox(x=18, y=58, width=188, height=22),
             ),
         ],
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     name_candidate = next(
@@ -490,7 +490,7 @@ def test_rule_based_detector_uses_neighbor_ocr_blocks_for_standalone_name_contex
                 bbox=BoundingBox(x=24, y=102, width=156, height=22),
             ),
         ],
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     name_candidate = next(
@@ -529,7 +529,7 @@ def test_rule_based_detector_uses_profile_header_neighbors_for_standalone_name_c
                 bbox=BoundingBox(x=24, y=128, width=160, height=24),
             ),
         ],
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     name_candidate = next(
@@ -576,7 +576,7 @@ def test_rule_based_detector_rejects_english_chat_ui_tokens_as_ocr_names() -> No
                 bbox=BoundingBox(x=20, y=20, width=160, height=28),
             ),
         ],
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     assert not any(candidate.attr_type == PIIAttributeType.NAME for candidate in candidates)
@@ -599,7 +599,7 @@ def test_rule_based_detector_rejects_english_profile_banner_ui_tokens_as_ocr_nam
                 bbox=BoundingBox(x=20, y=60, width=180, height=24),
             ),
         ],
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
     assert not any(candidate.attr_type == PIIAttributeType.NAME for candidate in candidates)

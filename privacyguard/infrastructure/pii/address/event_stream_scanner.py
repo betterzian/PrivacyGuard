@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
+from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.infrastructure.pii.address.lexicon import (
     build_label_pattern,
     find_field_keyword,
@@ -34,6 +34,61 @@ _ORG_SUFFIX_TOKENS = tuple(
 _ZH_PREPOSITIONS = ("的", "在", "于", "在于", "地")
 _EN_PREPOSITIONS = frozenset({"of", "in", "at", "on", "for", "to", "from", "by", "with"})
 _TRAILING_ROOM_DIGITS_PATTERN = re.compile(r"^\s*(\d{1,4})(?!\d)")
+# 与 lexicon 中「名字+关键词」绑定后缀一致：左边界微调仅当组件由该类后缀触发时启用。
+_ZH_ADDRESS_KEYWORD_SUFFIXES = tuple(
+    sorted(
+        (
+            "特别行政区",
+            "自治区",
+            "地区",
+            "大道",
+            "小区",
+            "公寓",
+            "大厦",
+            "园区",
+            "社区",
+            "宿舍",
+            "省",
+            "市",
+            "区",
+            "县",
+            "旗",
+            "盟",
+            "路",
+            "街",
+            "道",
+            "巷",
+            "弄",
+        ),
+        key=len,
+        reverse=True,
+    )
+)
+_EN_ADDRESS_KEYWORD_SUFFIXES = tuple(
+    dict.fromkeys(
+        (
+            "boulevard",
+            "blvd",
+            "avenue",
+            "ave",
+            "street",
+            "st",
+            "road",
+            "rd",
+            "lane",
+            "ln",
+            "drive",
+            "dr",
+            "court",
+            "ct",
+            "place",
+            "pl",
+        )
+    )
+)
+_EN_ADDRESS_KEYWORD_SUFFIXES = tuple(sorted(_EN_ADDRESS_KEYWORD_SUFFIXES, key=len, reverse=True))
+# 单字行政后缀会与字段关键词规则误撞，左扩时跳过 find_field_keyword 检验。
+_ZH_SINGLE_ADMIN_CHARS_FOR_LEFT_EXPAND = frozenset("区县市省镇乡村")
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +97,145 @@ class _OrgSuffixEvent:
     end: int
     suffix_text: str
     script: str  # "zh" | "en"
+
+
+def _head_triggered_by_address_keyword(head: AddressComponentMatch) -> bool:
+    raw = head.text.strip()
+    if not raw:
+        return False
+    if any("\u4e00" <= ch <= "\u9fff" for ch in raw):
+        return any(len(raw) > len(suf) and raw.endswith(suf) for suf in _ZH_ADDRESS_KEYWORD_SUFFIXES)
+    lowered = raw.lower()
+    return any(len(raw) > len(suf) and lowered.endswith(suf) for suf in _EN_ADDRESS_KEYWORD_SUFFIXES)
+
+
+def _zh_prep_strictly_before_index(text: str, char_index: int) -> bool:
+    """text[char_index] 左侧、与其之间仅可有空白，且紧挨前缀为中文介词。"""
+    if char_index <= 0:
+        return False
+    pos = char_index - 1
+    while pos >= 0 and text[pos].isspace():
+        pos -= 1
+    if pos < 0:
+        return False
+    end = pos
+    for prep in sorted(_ZH_PREPOSITIONS, key=len, reverse=True):
+        begin = end - len(prep) + 1
+        if begin >= 0 and text[begin : end + 1] == prep:
+            return all(text[k].isspace() for k in range(end + 1, char_index))
+    return False
+
+
+def _en_prep_strictly_before_index(text: str, word_start: int) -> bool:
+    """将要吸收的英文词起始于 word_start；其左侧仅空白后紧挨的 token 须为英文介词。"""
+    if word_start <= 0:
+        return False
+    pos = word_start - 1
+    while pos >= 0 and text[pos].isspace():
+        pos -= 1
+    if pos < 0:
+        return False
+    end = pos + 1
+    while pos >= 0 and text[pos].isascii() and (text[pos].isalnum() or text[pos] in "-'"):
+        pos -= 1
+    token = text[pos + 1 : end].lower()
+    return token in _EN_PREPOSITIONS
+
+
+def _expand_span_start_left_for_keyword_prefix(text: str, start: int, head: AddressComponentMatch) -> int:
+    """左扩：默认最多 2 个汉字或 2 个英文词；第 3、4 个字/词仅当该段左缘「紧挨」介词时才允许。"""
+    if start <= 0 or not _head_triggered_by_address_keyword(head):
+        return start
+    head_cjk = any("\u4e00" <= ch <= "\u9fff" for ch in head.text)
+    pos = start - 1
+    while pos >= 0 and text[pos].isspace():
+        pos -= 1
+    if pos < 0:
+        return start
+    left_cjk = "\u4e00" <= text[pos] <= "\u9fff"
+    left_latin = text[pos].isascii() and text[pos].isalpha()
+    if head_cjk and not left_cjk:
+        return start
+    if not head_cjk and head.text and re.search(r"[A-Za-z]", head.text):
+        if not left_latin:
+            return start
+        return _expand_en_chars_left(text, start)
+    if head_cjk:
+        return _expand_zh_chars_left(text, start)
+    return start
+
+
+def _expand_zh_chars_left(text: str, start: int) -> int:
+    new_start = start
+    pos = start - 1
+    taken = 0
+    while pos >= 0:
+        if taken >= 4:
+            break
+        ch = text[pos]
+        if ch in _HARD_STOP_CHARS:
+            break
+        if text[max(0, pos - len(_OCR_SEMANTIC_BREAK_TOKEN) + 1) : pos + 1] == _OCR_SEMANTIC_BREAK_TOKEN:
+            break
+        if ch.isspace():
+            pos -= 1
+            continue
+        if not ("\u4e00" <= ch <= "\u9fff"):
+            break
+        blocked = False
+        for prep in sorted(_ZH_PREPOSITIONS, key=len, reverse=True):
+            if pos + len(prep) <= len(text) and text.startswith(prep, pos):
+                blocked = True
+                break
+        if blocked:
+            break
+        if taken >= 2 and not _zh_prep_strictly_before_index(text, pos):
+            break
+        segment = text[pos:start]
+        if (
+            not (len(segment) == 1 and segment in _ZH_SINGLE_ADMIN_CHARS_FOR_LEFT_EXPAND)
+            and find_field_keyword(segment) is not None
+        ) or hard_stop_matches(segment):
+            break
+        new_start = pos
+        taken += 1
+        pos -= 1
+    return new_start
+
+
+def _expand_en_chars_left(text: str, start: int) -> int:
+    new_start = start
+    pos = start - 1
+    words = 0
+    while pos >= 0:
+        if words >= 4:
+            break
+        while pos >= 0 and text[pos].isspace():
+            pos -= 1
+        if pos < 0:
+            break
+        ch = text[pos]
+        if ch in _HARD_STOP_CHARS:
+            break
+        if text[max(0, pos - len(_OCR_SEMANTIC_BREAK_TOKEN) + 1) : pos + 1] == _OCR_SEMANTIC_BREAK_TOKEN:
+            break
+        if not (ch.isascii() and (ch.isalnum() or ch in "-'")):
+            break
+        word_end = pos + 1
+        while pos >= 0 and text[pos].isascii() and (text[pos].isalnum() or text[pos] in "-'"):
+            pos -= 1
+        word_start = pos + 1
+        token = text[word_start:word_end].lower()
+        if token in _EN_PREPOSITIONS:
+            break
+        if words >= 2 and not _en_prep_strictly_before_index(text, word_start):
+            break
+        slice_text = text[word_start:start]
+        if find_field_keyword(slice_text) is not None or hard_stop_matches(slice_text):
+            break
+        new_start = word_start
+        words += 1
+    return new_start
 
 
 def scan_address_and_organization(
@@ -132,14 +326,15 @@ def scan_address_and_organization(
                 continue
             break
 
-        # 单组件特判：按 ProtectionLevel 放行；字段语境由 matched_by 决定（本扫描器默认非字段语境）
+        # 单组件特判：字段语境由 matched_by 决定（本扫描器默认非字段语境）
         if len(stack) == 1:
             single = stack[0]
-            if not _allow_single_geo_as_address(single.component_type, config.protection_level):
+            if not _allow_single_geo_as_address(single.component_type):
                 stack = []
 
         if stack:
             start = stack[0].start
+            start = _expand_span_start_left_for_keyword_prefix(text, start, stack[0])
             end = stack[-1].end
             tail_component = stack[-1]
             if tail_component.component_type in {"building", "unit", "floor"}:
@@ -252,13 +447,20 @@ def _looks_like_terminal_mask(text: str) -> bool:
     return bool(stripped) and all(char in ".…*＊xX某 " for char in stripped)
 
 
-def _allow_single_geo_as_address(component_type: str, level: ProtectionLevel) -> bool:
-    if level == ProtectionLevel.STRONG:
-        return component_type in {"province", "city", "district", "county", "state", "compound", "poi", "road", "street", "po_box", "postal_code"}
-    if level == ProtectionLevel.BALANCED:
-        return component_type in {"province", "city", "district", "compound", "poi", "road", "street", "po_box", "postal_code"}
-    # WEAK：更保守
-    return component_type in {"road", "street", "building", "unit", "floor", "room", "po_box", "postal_code"}
+def _allow_single_geo_as_address(component_type: str) -> bool:
+    return component_type in {
+        "province",
+        "city",
+        "district",
+        "county",
+        "state",
+        "compound",
+        "poi",
+        "road",
+        "street",
+        "po_box",
+        "postal_code",
+    }
 
 
 def _span_confidence_from_stack(stack: list[AddressComponentMatch]) -> float:

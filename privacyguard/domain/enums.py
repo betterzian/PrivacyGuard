@@ -19,11 +19,18 @@ class PIISourceType(str, Enum):
 
 
 class ProtectionLevel(str, Enum):
-    """定义规则检测的保护度。"""
+    """规则检测保护度（单档）。
+
+    原先 balanced / weak 已废弃；入参中的 ``balanced`` / ``weak`` 会经
+    `normalize_protection_level` 归一到本值，规则始终以最强档运行。
+    """
 
     STRONG = "strong"
-    BALANCED = "balanced"
-    WEAK = "weak"
+
+
+def normalize_protection_level(_value: ProtectionLevel | str | None = None) -> ProtectionLevel:
+    """将任意历史档位字符串归一为 `STRONG`（单档运行）。"""
+    return ProtectionLevel.STRONG
 
 
 class PIIAttributeType(str, Enum):

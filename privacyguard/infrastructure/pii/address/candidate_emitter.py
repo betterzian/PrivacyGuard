@@ -5,7 +5,6 @@ import re
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressParseConfig, AddressParseResult
-from privacyguard.domain.enums import ProtectionLevel
 
 
 def emit_candidates(
@@ -75,17 +74,7 @@ def _should_emit_whole_address(result: AddressParseResult, *, config: AddressPar
     if len(result.components) == 1:
         single = result.components[0]
         if result.span.matched_by != "context_address_field" and single.component_type in {"province", "city", "district", "county", "state"}:
-            # 单省/市/区作为“单独地址”的放行由 ProtectionLevel 控制：
-            # - STRONG：允许 province/city/district/state/county
-            # - BALANCED：允许 city/district（其余拒绝）
-            # - WEAK：仅允许字段语境（上面已排除）
-            if config.protection_level == ProtectionLevel.STRONG:
-                pass
-            elif config.protection_level == ProtectionLevel.BALANCED:
-                if single.component_type not in {"city", "district"}:
-                    return False
-            else:
-                return False
+            pass
         if (
             result.span.matched_by != "context_address_field"
             and single.component_type == "compound"

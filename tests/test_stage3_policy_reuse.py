@@ -15,7 +15,7 @@ def _empty_context() -> DecisionContext:
         session_id="s1",
         turn_id=1,
         prompt_text="hello",
-        protection_level=ProtectionLevel.BALANCED,
+        protection_level=ProtectionLevel.STRONG,
     )
 
 

@@ -76,19 +76,6 @@ def _scan_text(
         shadow_index_map=address_shadow.index_map,
     )
     protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
-    location_shadow = self._build_shadow_text(text, collected)
-    self._collect_geo_fragment_hits(
-        collected,
-        location_shadow.text,
-        source,
-        bbox,
-        block_id,
-        skip_spans=protected_spans,
-        rule_profile=rule_profile,
-        original_text=text,
-        shadow_index_map=location_shadow.index_map,
-    )
-    protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
     self._collect_generic_number_hits(
         collected,
         text,

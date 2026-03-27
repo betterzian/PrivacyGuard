@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
-from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
+from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel, normalize_protection_level
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
@@ -636,7 +636,4 @@ def _stats_value_as_int(value: object) -> int | None:
 
 
 def _normalize_protection_level(protection_level: ProtectionLevel | str) -> ProtectionLevel:
-    if isinstance(protection_level, ProtectionLevel):
-        return protection_level
-    normalized = str(protection_level or ProtectionLevel.BALANCED.value).strip().lower()
-    return ProtectionLevel(normalized)
+    return normalize_protection_level(protection_level)

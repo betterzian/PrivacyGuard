@@ -842,7 +842,7 @@ def _collect_ocr_standalone_name_candidates(
                     continue
                 canonical_source_text = self._canonical_name_source_text(
                     value,
-                    allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+                    allow_ocr_noise=True,
                 )
                 validator_value = canonical_source_text or value
                 if not self._is_name_candidate(validator_value):
@@ -1416,7 +1416,7 @@ def _validate_ocr_label_value_text(
     cleaned_text = self._clean_phone_candidate(value_text) if spec.attr_type == PIIAttributeType.PHONE else self._clean_extracted_value(value_text)
     if not cleaned_text:
         return None
-    allow_ocr_noise = rule_profile.level == ProtectionLevel.STRONG
+    allow_ocr_noise = True
     canonical_source_text: str | None = None
     confidence = spec.ocr_confidence
     if spec.attr_type == PIIAttributeType.NAME:
@@ -1664,8 +1664,6 @@ def _refine_ocr_name_candidate(
 ) -> PIICandidate | None:
     if candidate.attr_type != PIIAttributeType.NAME or candidate.source != PIISourceType.OCR:
         return candidate
-    if rule_profile.level == ProtectionLevel.WEAK:
-        return candidate
     block_indices = self._ocr_candidate_block_indices(candidate, document)
     if len(block_indices) != 1:
         return candidate
@@ -1673,7 +1671,7 @@ def _refine_ocr_name_candidate(
     block = document.blocks[block_index]
     candidate_compact = self._compact_name_value(
         candidate.canonical_source_text or candidate.text,
-        allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+        allow_ocr_noise=True,
     )
     if not candidate_compact:
         return None
@@ -1738,10 +1736,6 @@ def _ocr_name_scene_confidence(
     if self._looks_like_bracketed_ui_label(block.text):
         score -= 0.6
         scene_tags.append("ui_label_block")
-    if rule_profile.level == ProtectionLevel.BALANCED:
-        if score < 0.48:
-            return 0.0, scene_tags
-        return min(0.86, 0.68 + score * 0.18), scene_tags
     if score < 0.18:
         return 0.0, scene_tags
     return min(0.9, 0.7 + score * 0.18), scene_tags

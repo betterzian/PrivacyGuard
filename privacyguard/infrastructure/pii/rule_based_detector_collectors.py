@@ -157,12 +157,12 @@ def _collect_context_hits(
                     canonical_source_text = self._canonical_name_component_source_text(
                         value,
                         component=component,
-                        allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+                        allow_ocr_noise=True,
                     )
                 else:
                     canonical_source_text = self._canonical_name_source_text(
                         value,
-                        allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+                        allow_ocr_noise=True,
                     )
                 if canonical_source_text:
                     validator_value = canonical_source_text
@@ -771,7 +771,7 @@ def _collect_name_hits(
                 value, span_start, span_end = extracted
                 canonical_source_text = self._canonical_name_source_text(
                     value,
-                    allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+                    allow_ocr_noise=True,
                 )
                 validator_value = canonical_source_text or value
                 if self._is_repeated_mask_text(value, min_run=2, allow_alpha_masks=True):
@@ -815,7 +815,7 @@ def _collect_name_hits(
                     continue
                 canonical_source_text = self._canonical_name_source_text(
                     value,
-                    allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+                    allow_ocr_noise=True,
                 )
                 validator_value = canonical_source_text or value
                 if not self._looks_like_name_with_title(validator_value):
@@ -875,7 +875,7 @@ def _collect_generic_name_fragment_hits(
             continue
         canonical_source_text = self._canonical_name_source_text(
             value,
-            allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+            allow_ocr_noise=True,
         )
         validator_value = canonical_source_text or value
         if not self._is_name_candidate(validator_value):
@@ -954,105 +954,6 @@ def _collect_masked_text_hits(
             matched_by="heuristic_masked_text",
             skip_spans=skip_spans,
         )
-
-def _collect_geo_fragment_hits(
-    self,
-    collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
-    raw_text: str,
-    source: PIISourceType,
-    bbox: object,
-    block_id: str | None,
-    *,
-    skip_spans: list[tuple[int, int]],
-    rule_profile: _RuleStrengthProfile,
-    original_text: str | None = None,
-    shadow_index_map: tuple[int | None, ...] | None = None,
-) -> None:
-    """用内置地名词库和通用地理后缀规则补充 location clue。"""
-    local_skip_spans = list(skip_spans)
-    confidence_text = original_text or raw_text
-    builtin_matches = sorted(
-        _LOCATION_CLUE_MATCHER.finditer(raw_text),
-        key=lambda item: (-(item[1] - item[0]), item[0], item[2]),
-    )
-    for index, end, _token in builtin_matches:
-        extracted = self._extract_match(
-            raw_text,
-            index,
-            end,
-            original_text=original_text,
-            shadow_index_map=shadow_index_map,
-        )
-        if extracted is None:
-            continue
-        value, span_start, span_end = extracted
-        if self._overlaps_any_span(span_start, span_end, local_skip_spans):
-            continue
-        confidence = self._geo_fragment_confidence(
-            confidence_text,
-            span_start,
-            span_end,
-            value=value,
-            attr_type=PIIAttributeType.ADDRESS,
-            is_builtin_token=True,
-            rule_profile=rule_profile,
-        )
-        if confidence <= 0.0:
-            continue
-        self._upsert_candidate(
-            collected=collected,
-            text=raw_text,
-            matched_text=value,
-            attr_type=PIIAttributeType.ADDRESS,
-            source=source,
-            bbox=bbox,
-            block_id=block_id,
-            span_start=span_start,
-            span_end=span_end,
-            confidence=confidence,
-            matched_by="heuristic_geo_lexicon",
-            skip_spans=local_skip_spans,
-        )
-        local_skip_spans.append((span_start, span_end))
-    for pattern in _GENERIC_GEO_FRAGMENT_PATTERNS:
-        for match in pattern.finditer(raw_text):
-            extracted = self._extract_match(
-                raw_text,
-                *match.span(0),
-                original_text=original_text,
-                shadow_index_map=shadow_index_map,
-            )
-            if extracted is None:
-                continue
-            value, span_start, span_end = extracted
-            if self._overlaps_any_span(span_start, span_end, local_skip_spans):
-                continue
-            confidence = self._geo_fragment_confidence(
-                confidence_text,
-                span_start,
-                span_end,
-                value=value,
-                attr_type=PIIAttributeType.ADDRESS,
-                is_builtin_token=False,
-                rule_profile=rule_profile,
-            )
-            if confidence <= 0.0:
-                continue
-            self._upsert_candidate(
-                collected=collected,
-                text=raw_text,
-                matched_text=value,
-                attr_type=PIIAttributeType.ADDRESS,
-                source=source,
-                bbox=bbox,
-                block_id=block_id,
-                span_start=span_start,
-                span_end=span_end,
-                confidence=confidence,
-                matched_by="heuristic_geo_suffix",
-                skip_spans=local_skip_spans,
-            )
-            local_skip_spans.append((span_start, span_end))
 
 def _collect_organization_hits(
     self,

@@ -1,5 +1,6 @@
 """RuleBasedPIIDetector internal helper functions."""
 
+from privacyguard.domain.enums import normalize_protection_level
 from privacyguard.infrastructure.pii.rule_based_detector_shared import *
 
 def _resolve_privacy_repository_path(self, privacy_repository_path: str | Path | None) -> Path | None:
@@ -230,15 +231,9 @@ def _rule_profile(
     protection_level: ProtectionLevel | str,
     detector_overrides: dict[PIIAttributeType | str, float] | None = None,
 ) -> _RuleStrengthProfile:
-    """把入参保护度归一到内部规则强度配置。"""
-    if isinstance(protection_level, ProtectionLevel):
-        base_profile = _RULE_PROFILES[protection_level]
-    else:
-        normalized = str(protection_level or ProtectionLevel.BALANCED.value).strip().lower()
-        try:
-            base_profile = _RULE_PROFILES[ProtectionLevel(normalized)]
-        except ValueError:
-            base_profile = _RULE_PROFILES[ProtectionLevel.BALANCED]
+    """把入参保护度归一到内部规则强度配置（单档 STRONG）。"""
+    normalize_protection_level(protection_level)
+    base_profile = _RULE_PROFILES[ProtectionLevel.STRONG]
     merged = dict(base_profile.min_confidence_by_attr)
     merged.update(self.min_confidence_by_attr)
     merged.update(self._normalize_confidence_overrides(detector_overrides))
