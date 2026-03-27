@@ -47,7 +47,6 @@ class InvalidPersonaRepositoryError(ValueError):
 
 PROFILE_KEY_TO_ATTR_TYPE = {
     "name": PIIAttributeType.NAME,
-    "location_clue": PIIAttributeType.LOCATION_CLUE,
     "phone": PIIAttributeType.PHONE,
     "card_number": PIIAttributeType.CARD_NUMBER,
     "bank_account": PIIAttributeType.BANK_ACCOUNT,
@@ -202,7 +201,6 @@ def _aggregate_repository_stats(personas: list[PersonaDocument]) -> RepositorySt
     total = ExposureInfo()
     slot_totals = {
         "name": ExposureInfo(),
-        "location_clue": ExposureInfo(),
         "phone": ExposureInfo(),
         "card_number": ExposureInfo(),
         "bank_account": ExposureInfo(),
@@ -222,7 +220,6 @@ def _aggregate_repository_stats(personas: list[PersonaDocument]) -> RepositorySt
 
     slots_stats = SlotStats(
         name=slot_totals["name"],
-        location_clue=slot_totals["location_clue"],
         phone=slot_totals["phone"],
         card_number=slot_totals["card_number"],
         bank_account=slot_totals["bank_account"],

@@ -6,7 +6,16 @@ from privacyguard.infrastructure.pii.address.component_parser_zh import parse_zh
 from privacyguard.infrastructure.pii.address.types import AddressComponentMatch, AddressInput, AddressSeed
 
 
-def extract_seeds(address_input: AddressInput, *, locale_profile: str) -> tuple[AddressSeed, ...]:
+def collect_component_matches(address_input: AddressInput, *, locale_profile: str) -> tuple[AddressComponentMatch, ...]:
+    return tuple(_seed_components(address_input.text, locale_profile=locale_profile))
+
+
+def extract_seeds(
+    address_input: AddressInput,
+    *,
+    locale_profile: str,
+    component_matches: tuple[AddressComponentMatch, ...] | None = None,
+) -> tuple[AddressSeed, ...]:
     text = address_input.text
     seeds: list[AddressSeed] = []
     for match in build_label_pattern().finditer(text):
@@ -19,7 +28,8 @@ def extract_seeds(address_input: AddressInput, *, locale_profile: str) -> tuple[
                 confidence=0.9,
             )
         )
-    for component in _seed_components(text, locale_profile=locale_profile):
+    candidates = component_matches if component_matches is not None else tuple(_seed_components(text, locale_profile=locale_profile))
+    for component in candidates:
         seeds.append(
             AddressSeed(
                 start=component.start,

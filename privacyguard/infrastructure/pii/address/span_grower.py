@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from privacyguard.infrastructure.pii.address.component_parser_en import parse_en_components
-from privacyguard.infrastructure.pii.address.component_parser_zh import parse_zh_components
 from privacyguard.infrastructure.pii.address.lexicon import hard_stop_matches, is_connector_text, masked_tail_match
 from privacyguard.infrastructure.pii.address.types import AddressComponentMatch, AddressInput, AddressSeed, AddressSpanDraft
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
@@ -14,33 +12,33 @@ def grow_spans(
     seeds: tuple[AddressSeed, ...],
     *,
     locale_profile: str,
+    component_matches: tuple[AddressComponentMatch, ...] | None = None,
 ) -> tuple[AddressSpanDraft, ...]:
     text = address_input.text
     drafts: list[AddressSpanDraft] = []
+    all_component_matches = component_matches if component_matches is not None else ()
     for seed in seeds:
         window_start = _scan_left_hard_boundary(text, seed.start)
         window_end = _scan_right_hard_boundary(text, seed.end)
-        component_matches = _component_matches(text[window_start:window_end], window_start, locale_profile=locale_profile)
-        draft = _grow_from_seed(text, seed, component_matches, window_start, window_end)
+        window_components = _component_matches(window_start, window_end, all_component_matches, locale_profile=locale_profile)
+        draft = _grow_from_seed(text, seed, window_components, window_start, window_end)
         if draft is not None:
             drafts.append(draft)
     return tuple(_dedupe_drafts(drafts))
 
 
-def _component_matches(text: str, window_start: int, *, locale_profile: str) -> tuple[AddressComponentMatch, ...]:
-    if any("\u4e00" <= char <= "\u9fff" for char in text) or locale_profile == "zh_cn":
-        components = parse_zh_components(text)
-    else:
-        components = parse_en_components(text)
+def _component_matches(
+    window_start: int,
+    window_end: int,
+    all_components: tuple[AddressComponentMatch, ...],
+    *,
+    locale_profile: str,
+) -> tuple[AddressComponentMatch, ...]:
+    del locale_profile  # keep signature stable for now
     return tuple(
-        AddressComponentMatch(
-            component_type=item.component_type,
-            start=item.start_offset + window_start,
-            end=item.end_offset + window_start,
-            text=item.text,
-            strength="strong" if item.confidence >= 0.88 else "medium",
-        )
-        for item in components
+        item
+        for item in all_components
+        if item.start >= window_start and item.end <= window_end
     )
 
 

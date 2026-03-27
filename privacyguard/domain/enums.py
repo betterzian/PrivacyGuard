@@ -40,7 +40,6 @@ class PIIAttributeType(str, Enum):
     """
 
     NAME = "name"
-    LOCATION_CLUE = "location_clue"
     PHONE = "phone"
     CARD_NUMBER = "card_number"
     BANK_ACCOUNT = "bank_account"

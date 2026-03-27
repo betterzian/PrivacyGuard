@@ -613,7 +613,7 @@ def test_rule_based_detector_rejects_english_ui_phrases_as_ocr_names() -> None:
 def test_render_generic_replacement_text_uses_script_specific_indexed_labels() -> None:
     assert render_generic_replacement_text(PIIAttributeType.NAME, source_text="张三", index=1) == "<姓名1>"
     assert render_generic_replacement_text(PIIAttributeType.NAME, source_text="Alice Johnson", index=2) == "<name2>"
-    assert render_generic_replacement_text(PIIAttributeType.LOCATION_CLUE, source_text="Seattle", index=3) == "<address3>"
+    assert render_generic_replacement_text(PIIAttributeType.ADDRESS, source_text="Seattle", index=3) == "<address3>"
     assert render_generic_replacement_text(PIIAttributeType.ADDRESS, source_text="上海浦东", index=4) == "<地址4>"
 
 

@@ -320,7 +320,6 @@ class TinyPolicyRuntime:
         generic_score = 0.24 + confidence * 0.52
         generic_score += min(0.16, history_attr_exposure_count * 0.025)
         if attr_type in {
-            PIIAttributeType.LOCATION_CLUE,
             PIIAttributeType.ID_NUMBER,
             PIIAttributeType.CARD_NUMBER,
             PIIAttributeType.BANK_ACCOUNT,

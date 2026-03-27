@@ -429,8 +429,6 @@ def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
     cleaned = _compact_text(value)
     if not cleaned:
         return ""
-    if attr_type == PIIAttributeType.LOCATION_CLUE:
-        return canonicalize_location_clue_text(cleaned)
     if attr_type == PIIAttributeType.ORGANIZATION:
         return re.sub(r"\s+", "", cleaned)
     if attr_type == PIIAttributeType.PHONE:
@@ -1828,8 +1826,6 @@ def _is_ignorable_match_char(attr_type: PIIAttributeType, char: str) -> bool:
         return char in _ORG_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ADDRESS:
         return char in _ADDRESS_MATCH_IGNORABLE
-    if attr_type == PIIAttributeType.LOCATION_CLUE:
-        return char in _LOCATION_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ORGANIZATION:
         return char in _ORG_MATCH_IGNORABLE
     return char.isspace()

@@ -3,6 +3,7 @@ from __future__ import annotations
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressParseConfig, AddressParseResult
+from privacyguard.domain.enums import ProtectionLevel
 
 
 def emit_candidates(
@@ -35,7 +36,7 @@ def emit_candidates(
                     shadow_index_map=shadow_index_map,
                 )
             continue
-        if not _should_emit_whole_address(result):
+        if not _should_emit_whole_address(result, config=config):
             continue
         whole_candidate = _emit_whole_address_candidate(
             detector,
@@ -66,16 +67,23 @@ def emit_candidates(
             )
 
 
-def _should_emit_whole_address(result: AddressParseResult) -> bool:
+def _should_emit_whole_address(result: AddressParseResult, *, config: AddressParseConfig) -> bool:
     if result.address_kind == "unknown":
         return False
     if len(result.components) == 1:
         single = result.components[0]
-        if (
-            result.span.matched_by != "context_address_field"
-            and single.component_type in {"province", "city", "district", "county", "state"}
-        ):
-            return False
+        if result.span.matched_by != "context_address_field" and single.component_type in {"province", "city", "district", "county", "state"}:
+            # 单省/市/区作为“单独地址”的放行由 ProtectionLevel 控制：
+            # - STRONG：允许 province/city/district/state/county
+            # - BALANCED：允许 city/district（其余拒绝）
+            # - WEAK：仅允许字段语境（上面已排除）
+            if config.protection_level == ProtectionLevel.STRONG:
+                pass
+            elif config.protection_level == ProtectionLevel.BALANCED:
+                if single.component_type not in {"city", "district"}:
+                    return False
+            else:
+                return False
         if (
             result.span.matched_by != "context_address_field"
             and single.component_type == "compound"
@@ -220,7 +228,7 @@ def _emit_location_components(
             collected=collected,
             text=raw_text,
             matched_text=value,
-            attr_type=PIIAttributeType.LOCATION_CLUE,
+            attr_type=PIIAttributeType.ADDRESS,
             source=source,
             bbox=bbox,
             block_id=block_id,

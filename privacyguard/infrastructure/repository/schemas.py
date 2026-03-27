@@ -56,7 +56,6 @@ class AddressStats(RepositoryBaseModel):
 
 class SlotStats(RepositoryBaseModel):
     name: ExposureInfo = Field(default_factory=ExposureInfo)
-    location_clue: ExposureInfo = Field(default_factory=ExposureInfo)
     phone: ExposureInfo = Field(default_factory=ExposureInfo)
     card_number: ExposureInfo = Field(default_factory=ExposureInfo)
     bank_account: ExposureInfo = Field(default_factory=ExposureInfo)
@@ -218,7 +217,6 @@ class AddressSlotRuntime(RepositoryBaseModel):
 
 class PersonaSlots(RepositoryBaseModel):
     name: list[NameSlotStorage] | None = None
-    location_clue: list[SharedSlotStorage] | None = None
     phone: list[SharedSlotStorage] | None = None
     card_number: list[SharedSlotStorage] | None = None
     bank_account: list[SharedSlotStorage] | None = None
@@ -232,7 +230,6 @@ class PersonaSlots(RepositoryBaseModel):
     @model_validator(mode="after")
     def _validate_non_empty(self) -> "PersonaSlots":
         _validate_slot_list(self.name, field_name="name")
-        _validate_slot_list(self.location_clue, field_name="location_clue")
         _validate_slot_list(self.phone, field_name="phone")
         _validate_slot_list(self.card_number, field_name="card_number")
         _validate_slot_list(self.bank_account, field_name="bank_account")
@@ -245,7 +242,6 @@ class PersonaSlots(RepositoryBaseModel):
         if not any(
             (
                 self.name,
-                self.location_clue,
                 self.phone,
                 self.card_number,
                 self.bank_account,
@@ -263,7 +259,6 @@ class PersonaSlots(RepositoryBaseModel):
 
 class PersonaSlotsRuntime(RepositoryBaseModel):
     name: list[NameSlotRuntime] | None = None
-    location_clue: list[SharedSlotRuntime] | None = None
     phone: list[SharedSlotRuntime] | None = None
     card_number: list[SharedSlotRuntime] | None = None
     bank_account: list[SharedSlotRuntime] | None = None
@@ -368,7 +363,6 @@ def project_storage_slot_to_runtime(
 def _project_slots_to_runtime(slots: PersonaSlots, alias_role: AliasRole) -> PersonaSlotsRuntime:
     return PersonaSlotsRuntime(
         name=project_storage_slot_to_runtime(slots.name, alias_role) if slots.name else None,
-        location_clue=project_storage_slot_to_runtime(slots.location_clue, alias_role) if slots.location_clue else None,
         phone=project_storage_slot_to_runtime(slots.phone, alias_role) if slots.phone else None,
         card_number=project_storage_slot_to_runtime(slots.card_number, alias_role) if slots.card_number else None,
         bank_account=project_storage_slot_to_runtime(slots.bank_account, alias_role) if slots.bank_account else None,

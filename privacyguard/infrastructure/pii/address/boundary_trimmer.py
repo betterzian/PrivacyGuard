@@ -60,11 +60,9 @@ def _trim_single(text: str, draft: AddressSpanDraft) -> AddressSpan | None:
     span_text = text[start:span_end]
     if len(span_text.strip()) < 2:
         return None
-    if (
-        draft.seed.matched_by != "context_address_field"
-        and compact_suffix.startswith(("店", "门店", "store", "branch"))
-        and _looks_like_short_store_branch_road(span_text)
-    ):
+    # 组织右邻接回退：当左侧仅为粗粒度地名（省/市/国），且其右侧紧邻一个同语种连续的组织名（以组织后缀结尾），
+    # 则认为这段更像组织名的一部分，丢弃该地址 span（等组织规则处理）。
+    if _should_drop_coarse_geo_before_org(text, span_end, draft):
         return None
     confidence = _span_confidence(span_text, draft)
     return AddressSpan(
@@ -106,6 +104,97 @@ def _looks_like_geo_prefix(text: str) -> bool:
 def _looks_like_short_store_branch_road(text: str) -> bool:
     compact = text.strip()
     return len(compact) <= 3 and compact.endswith(("路", "街"))
+
+
+_EN_PREPOSITIONS = frozenset({"of", "in", "at", "on", "for", "to", "from", "by", "with"})
+
+
+def _should_drop_coarse_geo_before_org(text: str, span_end: int, draft: AddressSpanDraft) -> bool:
+    # 仅对“单个粗粒度地名”触发：来自 seed 或 evidence 中的 province/city/country（本管线里 country 很少出现，先按 city/province 处理）
+    coarse = {"province", "city", "country", "state"}
+    evidence_types = {item for item in draft.evidence if item in coarse or item == "district"}
+    if not evidence_types:
+        return False
+    # 如果 evidence 里出现了 road/building/unit 等细粒度组件，不触发。
+    if any(item in draft.evidence for item in ("road", "street", "building", "unit", "floor", "room", "compound", "poi", "postal_code", "district")):
+        return False
+    # 只允许 city/province/state/country 这类粗粒度参与
+    if not evidence_types.issubset(coarse):
+        return False
+
+    # 严格 gap：组织必须从 span_end 紧邻开始；不允许空格、符号、OCR break、“的”、介词等。
+    if span_end >= len(text):
+        return False
+    first = text[span_end]
+    if first.isspace() or _is_symbol(first):
+        return False
+    if first == "的":
+        return False
+
+    # 取一个同语种连续 run
+    run = _take_contiguous_run(text, span_end, max_len=64)
+    if not run:
+        return False
+
+    # 英文 run：禁止介词（gap 为 0 时主要禁止 “in/of/at ...” 这种开头）
+    lowered = run.lower()
+    if _looks_english_run(run):
+        head = lowered.split(" ", 1)[0]
+        if head in _EN_PREPOSITIONS:
+            return False
+
+    # 必须以组织后缀结尾
+    from privacyguard.infrastructure.pii.rule_based_detector_shared import (
+        _EN_ORGANIZATION_STRONG_SUFFIXES,
+        _EN_ORGANIZATION_WEAK_SUFFIXES,
+        _ORGANIZATION_STRONG_SUFFIXES,
+        _ORGANIZATION_WEAK_SUFFIXES,
+    )
+    suffixes = tuple(
+        dict.fromkeys(
+            [
+                *_ORGANIZATION_STRONG_SUFFIXES,
+                *_ORGANIZATION_WEAK_SUFFIXES,
+                *_EN_ORGANIZATION_STRONG_SUFFIXES,
+                *_EN_ORGANIZATION_WEAK_SUFFIXES,
+            ]
+        )
+    )
+    if not any(lowered.endswith(suf.lower()) for suf in suffixes):
+        return False
+    return True
+
+
+def _is_symbol(char: str) -> bool:
+    # 只要不是字母数字或中日韩统一表意文字，就视为符号（包含各类标点/括号/分隔符）
+    return not (char.isalnum() or ("\u4e00" <= char <= "\u9fff"))
+
+
+def _looks_english_run(text: str) -> bool:
+    return any("a" <= ch.lower() <= "z" for ch in text) and not any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
+def _take_contiguous_run(text: str, start: int, *, max_len: int) -> str:
+    """取从 start 开始的同语种连续文本，禁止符号、空白、OCR break。"""
+    out: list[str] = []
+    has_cjk = False
+    has_alpha = False
+    i = start
+    while i < len(text) and len(out) < max_len:
+        ch = text[i]
+        if ch.isspace() or _is_symbol(ch):
+            break
+        if ch == "<":
+            break
+        if "\u4e00" <= ch <= "\u9fff":
+            has_cjk = True
+        elif ch.isalpha():
+            has_alpha = True
+        out.append(ch)
+        i += 1
+    if has_cjk and has_alpha:
+        return ""
+    return "".join(out).strip()
 
 
 def _span_confidence(span_text: str, draft: AddressSpanDraft) -> float:

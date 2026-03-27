@@ -8,7 +8,7 @@ from privacyguard.infrastructure.pii.address.lexicon import (
     organization_suffix_tokens,
     public_place_suffixes,
 )
-from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressParseConfig, AddressParseResult, AddressSpan
+from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressComponentMatch, AddressParseConfig, AddressParseResult, AddressSpan
 
 _ZH_FINE_COMPOUND_SUFFIXES = ("小区", "公寓", "大厦", "社区", "宿舍", "花园", "家园")
 _ZH_COMPONENT_GROUP_ORDER = {
@@ -57,10 +57,15 @@ def classify_spans(
     *,
     locale_profile: str,
     config: AddressParseConfig,
+    component_matches: tuple[AddressComponentMatch, ...] | None = None,
 ) -> tuple[AddressParseResult, ...]:
     results: list[AddressParseResult] = []
     for span in spans:
-        components = _parse_components(span.text, locale_profile=locale_profile)
+        components = _parse_components_for_span(
+            span,
+            locale_profile=locale_profile,
+            component_matches=component_matches,
+        )
         kind = _classify_address_kind(span, components)
         confidence = _result_confidence(span, components, kind)
         if confidence < config.min_confidence:
@@ -76,12 +81,47 @@ def classify_spans(
     return tuple(_dedupe_results(results))
 
 
+def _parse_components_for_span(
+    span: AddressSpan,
+    *,
+    locale_profile: str,
+    component_matches: tuple[AddressComponentMatch, ...] | None,
+) -> tuple[AddressComponent, ...]:
+    if component_matches is None:
+        return _parse_components(span.text, locale_profile=locale_profile)
+    local: list[AddressComponent] = []
+    for match in component_matches:
+        if match.start < span.start or match.end > span.end:
+            continue
+        local.append(
+            AddressComponent(
+                component_type=match.component_type,
+                text=match.text,
+                start_offset=match.start - span.start,
+                end_offset=match.end - span.start,
+                privacy_level=_privacy_level(match.component_type, match.text),
+                confidence=0.9 if match.strength == "strong" else 0.82,
+            )
+        )
+    return tuple(sorted(local, key=lambda item: (item.start_offset, item.end_offset, item.component_type)))
+
+
 def _parse_components(text: str, *, locale_profile: str) -> tuple[AddressComponent, ...]:
     if any("\u4e00" <= char <= "\u9fff" for char in text):
         return parse_zh_components(text)
     if locale_profile == "zh_cn":
         return parse_zh_components(text)
     return parse_en_components(text)
+
+
+def _privacy_level(component_type: str, text: str) -> str:
+    if component_type in {"building", "unit", "floor", "room"}:
+        return "fine"
+    if component_type == "compound" and text.endswith(_ZH_FINE_COMPOUND_SUFFIXES):
+        return "fine"
+    if component_type in {"street", "road", "postal_code", "city", "district", "county", "town", "street_admin", "village", "poi"}:
+        return "medium"
+    return "coarse"
 
 
 def _classify_address_kind(span: AddressSpan, components: tuple[AddressComponent, ...]) -> str:

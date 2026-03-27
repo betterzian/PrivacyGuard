@@ -49,20 +49,7 @@ def _scan_text(
     )
     protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
     self._collect_regex_hits(collected, text, source, bbox, block_id, skip_spans=protected_spans)
-    protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
-    organization_shadow = self._build_shadow_text(text, collected)
-    self._collect_organization_hits(
-        collected,
-        organization_shadow.text,
-        source,
-        bbox,
-        block_id,
-        skip_spans=protected_spans,
-        rule_profile=rule_profile,
-        original_text=text,
-        shadow_index_map=organization_shadow.index_map,
-    )
-    protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
+    # 组织候选已并入地址事件流扫描（见 address pipeline），此处不再单独扫描。
     name_shadow = self._build_shadow_text(text, collected)
     self._collect_name_hits(
         collected,

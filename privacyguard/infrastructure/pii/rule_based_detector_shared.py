@@ -1380,7 +1380,6 @@ _RULE_PROFILES = {
         allow_alpha_mask_text=True,
         min_confidence_by_attr={
             PIIAttributeType.NAME: 0.72,
-            PIIAttributeType.LOCATION_CLUE: 0.48,
             PIIAttributeType.ADDRESS: 0.35,
             PIIAttributeType.ORGANIZATION: 0.48,
             PIIAttributeType.TIME: 0.76,
@@ -1408,7 +1407,6 @@ _RULE_PROFILES = {
         allow_alpha_mask_text=False,
         min_confidence_by_attr={
             PIIAttributeType.NAME: 0.72,
-            PIIAttributeType.LOCATION_CLUE: 0.52,
             PIIAttributeType.ADDRESS: 0.45,
             PIIAttributeType.ORGANIZATION: 0.48,
             PIIAttributeType.TIME: 0.76,
@@ -1436,7 +1434,6 @@ _RULE_PROFILES = {
         allow_alpha_mask_text=False,
         min_confidence_by_attr={
             PIIAttributeType.NAME: 0.9,
-            PIIAttributeType.LOCATION_CLUE: 0.9,
             PIIAttributeType.ADDRESS: 0.6,
             PIIAttributeType.ORGANIZATION: 0.74,
             PIIAttributeType.TIME: 0.9,
@@ -1456,7 +1453,6 @@ _RULE_PROFILES = {
 
 _TUNABLE_RULE_ATTR_TYPES = {
     PIIAttributeType.NAME,
-    PIIAttributeType.LOCATION_CLUE,
     PIIAttributeType.ADDRESS,
     PIIAttributeType.ORGANIZATION,
     PIIAttributeType.OTHER,

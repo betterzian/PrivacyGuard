@@ -223,7 +223,7 @@ def _detected_candidate_context_score(
         base = 0.12
         if candidate.attr_type in {PIIAttributeType.PHONE, PIIAttributeType.EMAIL, PIIAttributeType.ID_NUMBER, PIIAttributeType.CARD_NUMBER, PIIAttributeType.BANK_ACCOUNT, PIIAttributeType.PASSPORT_NUMBER, PIIAttributeType.DRIVER_LICENSE, PIIAttributeType.ADDRESS}:
             base = 0.18
-        elif candidate.attr_type in {PIIAttributeType.ORGANIZATION, PIIAttributeType.LOCATION_CLUE}:
+        elif candidate.attr_type in {PIIAttributeType.ORGANIZATION, PIIAttributeType.ADDRESS}:
             base = 0.1
         score += base * weight
     return min(0.3, score)
@@ -1106,7 +1106,7 @@ def _geo_fragment_confidence(
     rule_profile: _RuleStrengthProfile,
 ) -> float:
     """根据几何边界和上下文估计地名/地址碎片置信度。"""
-    if attr_type == PIIAttributeType.LOCATION_CLUE and self._is_ui_or_commerce_location_token(value):
+    if attr_type == PIIAttributeType.ADDRESS and self._is_ui_or_commerce_location_token(value):
         return 0.0
     left_char = self._previous_significant_char(raw_text, span_start)
     right_char = self._next_significant_char(raw_text, span_end)
@@ -1117,7 +1117,7 @@ def _geo_fragment_confidence(
     if cleaned_text == value:
         return 0.96 if is_builtin_token else 0.9
     if any(right_context.startswith(token) for token in _GEO_NEGATIVE_RIGHT_CONTEXT_TOKENS):
-        if attr_type == PIIAttributeType.LOCATION_CLUE and not right_open:
+        if attr_type == PIIAttributeType.ADDRESS and not right_open:
             return 0.0
     if left_open and right_open:
         return 0.96 if is_builtin_token else 0.9
@@ -1407,7 +1407,6 @@ def _to_attr_type(self, raw_key: str | PIIAttributeType) -> PIIAttributeType | N
     key = raw_key.strip().lower()
     mapping = {
         "name": PIIAttributeType.NAME,
-        "location_clue": PIIAttributeType.LOCATION_CLUE,
         "phone": PIIAttributeType.PHONE,
         "card_number": PIIAttributeType.CARD_NUMBER,
         "card": PIIAttributeType.CARD_NUMBER,

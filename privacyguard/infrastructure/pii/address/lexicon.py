@@ -495,6 +495,16 @@ def _iter_en_components(text: str) -> Iterable[AddressComponentMatch]:
 def _iter_builtin_geo_tokens(text: str) -> Iterable[AddressComponentMatch]:
     from privacyguard.infrastructure.pii.rule_based_detector_shared import _LOCATION_CLUE_MATCHER
 
+    _ZH_SUFFIX_TO_TYPE = {
+        "省": "province",
+        "市": "city",
+        "区": "district",
+        "县": "district",
+        "旗": "district",
+        "盟": "district",
+        "地区": "district",
+    }
+
     seen: set[tuple[int, int]] = set()
     for start, end, token in _LOCATION_CLUE_MATCHER.finditer(text):
         if (start, end) in seen:
@@ -510,7 +520,21 @@ def _iter_builtin_geo_tokens(text: str) -> Iterable[AddressComponentMatch]:
             component_type = "compound" if token.endswith(("小区", "公寓", "大厦", "园区", "社区", "宿舍")) else "poi"
         else:
             continue
-        yield AddressComponentMatch(component_type, start, end, token, "medium")
+
+        # 支持“北京 市”“海淀 区”这类 OCR/分词断开：若紧随其后是行政后缀（允许空白），归并为单个地名事件。
+        cursor = end
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        merged_type = component_type
+        merged_end = end
+        merged_text = token
+        for suffix, suffix_type in _ZH_SUFFIX_TO_TYPE.items():
+            if cursor + len(suffix) <= len(text) and text[cursor : cursor + len(suffix)] == suffix:
+                merged_type = suffix_type
+                merged_end = cursor + len(suffix)
+                merged_text = re.sub(r"\s+", "", text[start:merged_end])
+                break
+        yield AddressComponentMatch(merged_type, start, merged_end, merged_text, "medium")
 
 
 def _dedupe_component_matches(matches: list[AddressComponentMatch]) -> list[AddressComponentMatch]:

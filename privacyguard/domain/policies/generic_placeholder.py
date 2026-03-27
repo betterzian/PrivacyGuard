@@ -12,7 +12,6 @@ from privacyguard.domain.enums import PIIAttributeType
 # 对外只读：属性类型 → 占位符中的中文标签名（不含尖括号）
 GENERIC_PLACEHOLDER_LABELS_ZH: dict[PIIAttributeType, str] = {
     PIIAttributeType.NAME: "姓名",
-    PIIAttributeType.LOCATION_CLUE: "地址",
     PIIAttributeType.PHONE: "手机号",
     PIIAttributeType.CARD_NUMBER: "卡号",
     PIIAttributeType.BANK_ACCOUNT: "银行账号",
@@ -30,7 +29,6 @@ GENERIC_PLACEHOLDER_LABELS_ZH: dict[PIIAttributeType, str] = {
 
 GENERIC_PLACEHOLDER_LABELS_EN: dict[PIIAttributeType, str] = {
     PIIAttributeType.NAME: "name",
-    PIIAttributeType.LOCATION_CLUE: "address",
     PIIAttributeType.PHONE: "phone",
     PIIAttributeType.CARD_NUMBER: "card",
     PIIAttributeType.BANK_ACCOUNT: "account",

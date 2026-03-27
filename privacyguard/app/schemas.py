@@ -13,7 +13,6 @@ class DetectorOverridesModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: float | None = Field(default=None, ge=0.0, le=1.0)
-    location_clue: float | None = Field(default=None, ge=0.0, le=1.0)
     address: float | None = Field(default=None, ge=0.0, le=1.0)
     organization: float | None = Field(default=None, ge=0.0, le=1.0)
     other: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -21,7 +20,6 @@ class DetectorOverridesModel(BaseModel):
     def to_attr_map(self) -> dict[PIIAttributeType, float]:
         mapping = {
             "name": PIIAttributeType.NAME,
-            "location_clue": PIIAttributeType.LOCATION_CLUE,
             "address": PIIAttributeType.ADDRESS,
             "organization": PIIAttributeType.ORGANIZATION,
             "other": PIIAttributeType.OTHER,

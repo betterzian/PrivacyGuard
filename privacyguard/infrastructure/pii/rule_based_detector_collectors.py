@@ -40,7 +40,6 @@ def _build_shadow_text(
 def _shadow_token(self, attr_type: PIIAttributeType) -> str:
     mapping = {
         PIIAttributeType.NAME: " <NAME> ",
-        PIIAttributeType.LOCATION_CLUE: " <LOC> ",
         PIIAttributeType.PHONE: " <PHONE> ",
         PIIAttributeType.CARD_NUMBER: " <CARD> ",
         PIIAttributeType.BANK_ACCOUNT: " <ACCOUNT> ",
@@ -993,7 +992,7 @@ def _collect_geo_fragment_hits(
             span_start,
             span_end,
             value=value,
-            attr_type=PIIAttributeType.LOCATION_CLUE,
+            attr_type=PIIAttributeType.ADDRESS,
             is_builtin_token=True,
             rule_profile=rule_profile,
         )
@@ -1003,7 +1002,7 @@ def _collect_geo_fragment_hits(
             collected=collected,
             text=raw_text,
             matched_text=value,
-            attr_type=PIIAttributeType.LOCATION_CLUE,
+            attr_type=PIIAttributeType.ADDRESS,
             source=source,
             bbox=bbox,
             block_id=block_id,
@@ -1032,7 +1031,7 @@ def _collect_geo_fragment_hits(
                 span_start,
                 span_end,
                 value=value,
-                attr_type=PIIAttributeType.LOCATION_CLUE,
+                attr_type=PIIAttributeType.ADDRESS,
                 is_builtin_token=False,
                 rule_profile=rule_profile,
             )
@@ -1042,7 +1041,7 @@ def _collect_geo_fragment_hits(
                 collected=collected,
                 text=raw_text,
                 matched_text=value,
-                attr_type=PIIAttributeType.LOCATION_CLUE,
+                attr_type=PIIAttributeType.ADDRESS,
                 source=source,
                 bbox=bbox,
                 block_id=block_id,
