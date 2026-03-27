@@ -5,7 +5,7 @@ from privacyguard.infrastructure.pii.address.candidate_emitter import emit_candi
 from privacyguard.infrastructure.pii.address.event_stream_scanner import scan_address_and_organization
 from privacyguard.infrastructure.pii.address.input_adapter import build_text_input
 from privacyguard.infrastructure.pii.address.span_parse import parse_results_from_spans
-from privacyguard.infrastructure.pii.address.seed_extractor import collect_component_matches, extract_seeds
+from privacyguard.infrastructure.pii.address.seed_extractor import collect_component_matches
 from privacyguard.infrastructure.pii.address.types import AddressParseConfig
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _RuleStrengthProfile
 

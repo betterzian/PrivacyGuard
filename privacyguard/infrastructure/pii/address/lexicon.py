@@ -17,7 +17,6 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import (
     _ID_FIELD_KEYWORDS,
     _OCR_SEMANTIC_BREAK_TOKEN,
     _PHONE_FIELD_KEYWORDS,
-    _org_suffix_token_allowed_after_address_dedupe,
 )
 
 _ZH_CONNECTORS = {"", " ", ",", "，", "、", ":", "：", "-", "－", "—", "/", "#", "的"}
@@ -66,71 +65,6 @@ _EN_CITY_RE = re.compile(
     re.IGNORECASE,
 ) if (_BUILTIN_EN_GEO_LEXICON.tier_b_places or _BUILTIN_EN_GEO_LEXICON.tier_c_places) else re.compile(r"(?!x)x")
 
-_SOFT_STOP_TOKENS = {
-    "branch",
-    "check in",
-    "company",
-    "hospital",
-    "school",
-    "store",
-    "travel",
-    "university",
-    "work",
-    "上班",
-    "公司",
-    "出发",
-    "吃饭",
-    "商店",
-    "大学",
-    "学校",
-    "工作",
-    "店",
-    "医院",
-    "集合",
-}
-_PUBLIC_PLACE_SUFFIXES = (
-    "airport",
-    "park",
-    "plaza",
-    "station",
-    "store",
-    "branch",
-    "机场",
-    "公园",
-    "商圈",
-    "广场",
-    "景区",
-    "站",
-    "车站",
-    "门店",
-)
-_ORG_SUFFIX_TOKENS = tuple(
-    token
-    for token in (
-        "bank",
-        "college",
-        "company",
-        "group",
-        "hospital",
-        "institute",
-        "school",
-        "university",
-        "事务所",
-        "公司",
-        "医院",
-        "大学",
-        "学院",
-        "学校",
-        "工作室",
-        "银行",
-        "集团",
-    )
-    if _org_suffix_token_allowed_after_address_dedupe(token)
-)
-_LEADING_NOISE_RE = re.compile(
-    r"^(?:\s*(?:请)?(?:在|住在|我住在|我住|位于|地址在|住址在|家住|现住|居住于|收货到|寄往|寄到|送到|派送至|发往|前往|来自|发自|located at|live at|lives at|resides at|ship to|send to|deliver to|from)\s*)",
-    re.IGNORECASE,
-)
 _ADDRESS_LABEL_KEYWORDS = next(
     spec.keywords
     for spec in _field_label_specs()
@@ -231,22 +165,6 @@ def find_field_keyword(text: str) -> re.Match[str] | None:
     return _FIELD_KEYWORD_RE.search(text)
 
 
-def public_place_suffixes() -> tuple[str, ...]:
-    return _PUBLIC_PLACE_SUFFIXES
-
-
-def organization_suffix_tokens() -> tuple[str, ...]:
-    return _ORG_SUFFIX_TOKENS
-
-
-def soft_stop_tokens() -> frozenset[str]:
-    return frozenset(_SOFT_STOP_TOKENS)
-
-
-def leading_noise_pattern() -> re.Pattern[str]:
-    return _LEADING_NOISE_RE
-
-
 def _has_zh_single_component_suffix_noise(text: str, *, source_text: str | None = None) -> bool:
     haystacks = tuple(
         dict.fromkeys(
@@ -302,42 +220,6 @@ def _has_en_keyword_expansion_match(source_text: str, match_start: int, match_en
         tail = lowered_source[suffix_start:]
         if any(tail.startswith(expansion) for expansion in expansions):
             return True
-    return False
-
-
-def allow_explicit_label_address_value(text: str) -> bool:
-    cleaned = text.strip()
-    compact = re.sub(r"\s+", "", cleaned)
-    lowered = re.sub(r"\s+", " ", cleaned).strip().lower()
-    if not compact:
-        return False
-    if compact in _ZH_SINGLE_COMPONENT_NEGATIVE_EXACT:
-        return False
-    if _EMAIL_RE.search(cleaned) or _PHONE_RE.search(cleaned) or _TIME_RE.search(cleaned) or _PRICE_RE.search(cleaned):
-        return False
-    if find_field_keyword(cleaned) is not None:
-        return False
-    if any("\u4e00" <= char <= "\u9fff" for char in compact):
-        if _has_zh_single_component_suffix_noise(compact, source_text=compact):
-            return False
-        if any(token in compact for token in _ZH_SINGLE_COMPONENT_NEGATIVE_EXACT):
-            return False
-        if compact in (_BUILTIN_GEO_LEXICON.provinces | _BUILTIN_GEO_LEXICON.cities | _BUILTIN_GEO_LEXICON.districts | _BUILTIN_GEO_LEXICON.local_places):
-            return True
-        if any(pattern.search(compact) for pattern in (_ZH_STREET_ADMIN_RE, _ZH_TOWN_RE, _ZH_VILLAGE_RE, _ZH_ROAD_RE, _ZH_COMPOUND_RE, _ZH_BUILDING_RE, _ZH_UNIT_RE, _ZH_FLOOR_RE, _ZH_ROOM_RE, _ZH_POSTAL_RE)):
-            return True
-        return False
-    if _has_en_single_component_suffix_noise("city", lowered, source_text=lowered) or _has_en_single_component_suffix_noise("state", lowered, source_text=lowered):
-        return False
-    if lowered in (
-        _BUILTIN_EN_GEO_LEXICON.tier_a_state_names
-        | _BUILTIN_EN_GEO_LEXICON.tier_a_state_codes
-        | _BUILTIN_EN_GEO_LEXICON.tier_b_places
-        | _BUILTIN_EN_GEO_LEXICON.tier_c_places
-    ):
-        return True
-    if any(pattern.search(cleaned) for pattern in (_EN_PO_BOX_RE, _EN_STREET_RE, _EN_UNIT_RE, _EN_FLOOR_RE, _EN_ROOM_RE, _EN_POSTAL_RE, _EN_STATE_RE, _EN_STATE_NAME_RE, _EN_CITY_RE)):
-        return True
     return False
 
 

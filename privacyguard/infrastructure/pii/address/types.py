@@ -13,32 +13,12 @@ class AddressInput:
 
 
 @dataclass(frozen=True, slots=True)
-class AddressSeed:
-    start: int
-    end: int
-    seed_type: str
-    matched_by: str
-    confidence: float
-
-
-@dataclass(frozen=True, slots=True)
 class AddressComponentMatch:
     component_type: str
     start: int
     end: int
     text: str
     strength: str = "medium"
-
-
-@dataclass(frozen=True, slots=True)
-class AddressSpanDraft:
-    start: int
-    end: int
-    window_start: int
-    window_end: int
-    seed: AddressSeed
-    terminated_by: str = "stream_end"
-    evidence: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
