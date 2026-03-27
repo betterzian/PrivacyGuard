@@ -49,6 +49,13 @@ class RuleBasedPIIDetector:
         self.generic_name_pattern = re.compile(
             rf"(?=(?P<value>(?:(?:{compound_surname_pattern})[一-龥·]{{1,2}}|(?:{single_surname_pattern})[一-龥·]{{1,3}})))"
         )
+        self.en_standalone_name_pattern = re.compile(
+            r"(?<![A-Za-z])(?P<value>[A-Za-z][A-Za-z'\-]{1,24}(?:[ \t]+[A-Za-z][A-Za-z'\-]{1,24}){1,2})(?![A-Za-z])"
+        )
+        self._active_ocr_page_document: _OCRPageDocument | None = None
+        self._active_ocr_scene_index: _OCRSceneIndex | None = None
+        self._active_standalone_context_text: str | None = None
+        self._active_standalone_context_candidates: tuple[PIICandidate, ...] = ()
 
     def detect(
         self,
@@ -134,18 +141,31 @@ class RuleBasedPIIDetector:
     _horizontal_successor_proposal = _ocr._horizontal_successor_proposal
     _downward_successor_proposal = _ocr._downward_successor_proposal
     _belongs_to_same_page_line = _ocr._belongs_to_same_page_line
+    _ocr_horizontal_gap_thresholds = _ocr._ocr_horizontal_gap_thresholds
+    _classify_ocr_horizontal_gap = _ocr._classify_ocr_horizontal_gap
+    _ocr_pair_geometry = _ocr._ocr_pair_geometry
+    _block_join_separator_by_index = _ocr._block_join_separator_by_index
+    _blocks_semantically_related_by_index = _ocr._blocks_semantically_related_by_index
     _block_join_separator = _ocr._block_join_separator
     _append_ocr_page_separator = _ocr._append_ocr_page_separator
     _line_join_separator = _ocr._line_join_separator
     _blocks_semantically_related = _ocr._blocks_semantically_related
     _lines_semantically_related = _ocr._lines_semantically_related
+    _score_horizontal_successor_by_index = _ocr._score_horizontal_successor_by_index
     _score_horizontal_successor = _ocr._score_horizontal_successor
+    _score_vertical_line_successor_by_indices = _ocr._score_vertical_line_successor_by_indices
     _score_vertical_line_successor = _ocr._score_vertical_line_successor
+    _score_vertical_block_successor_by_index = _ocr._score_vertical_block_successor_by_index
     _score_vertical_block_successor = _ocr._score_vertical_block_successor
     _looks_like_short_numeric_metadata = _ocr._looks_like_short_numeric_metadata
     _ocr_candidate_block_indices = _ocr._ocr_candidate_block_indices
     _ocr_candidate_signature = _ocr._ocr_candidate_signature
     _collect_ocr_label_adjacency_candidates = _ocr._collect_ocr_label_adjacency_candidates
+    _collect_ocr_standalone_name_candidates = _ocr._collect_ocr_standalone_name_candidates
+    _ocr_match_covers_standalone_block = _ocr._ocr_match_covers_standalone_block
+    _ocr_standalone_scene_mode = _ocr._ocr_standalone_scene_mode
+    _ocr_block_is_standalone_name_shape = _ocr._ocr_block_is_standalone_name_shape
+    _ocr_single_name_anchor_binding = _ocr._ocr_single_name_anchor_binding
     _ocr_label_specs_for_block = _ocr._ocr_label_specs_for_block
     _is_ocr_pure_label_block = _ocr._is_ocr_pure_label_block
     _build_ocr_label_adjacency_candidate = _ocr._build_ocr_label_adjacency_candidate
@@ -156,6 +176,10 @@ class RuleBasedPIIDetector:
     _score_ocr_label_right_neighbor = _ocr._score_ocr_label_right_neighbor
     _score_ocr_label_down_neighbor = _ocr._score_ocr_label_down_neighbor
     _validate_ocr_label_value_chain = _ocr._validate_ocr_label_value_chain
+    _validate_ocr_label_value_text = _ocr._validate_ocr_label_value_text
+    _build_ocr_inline_label_candidate = _ocr._build_ocr_inline_label_candidate
+    _build_ocr_inline_value_candidate = _ocr._build_ocr_inline_value_candidate
+    _join_inline_and_ocr_value_text = _ocr._join_inline_and_ocr_value_text
     _join_ocr_block_text = _ocr._join_ocr_block_text
     _build_ocr_block_candidate = _ocr._build_ocr_block_candidate
     _refine_ocr_name_candidate = _ocr._refine_ocr_name_candidate
@@ -202,7 +226,6 @@ class RuleBasedPIIDetector:
     _collect_generic_name_fragment_hits = _collectors._collect_generic_name_fragment_hits
     _collect_masked_text_hits = _collectors._collect_masked_text_hits
     _collect_address_candidates = _address_pipeline.collect_address_candidates
-    _collect_address_hits = _collectors._collect_address_hits
     _collect_geo_fragment_hits = _collectors._collect_geo_fragment_hits
     _collect_organization_hits = _collectors._collect_organization_hits
     _extract_match = _collectors._extract_match
@@ -217,6 +240,13 @@ class RuleBasedPIIDetector:
     _clean_extracted_value = _validation._clean_extracted_value
     _clean_phone_candidate = _validation._clean_phone_candidate
     _strip_ocr_break_edge_noise = _validation._strip_ocr_break_edge_noise
+    _active_ocr_context = _validation._active_ocr_context
+    _ocr_span_block_indices = _validation._ocr_span_block_indices
+    _contains_field_keyword = _validation._contains_field_keyword
+    _ocr_block_pii_context_signal = _validation._ocr_block_pii_context_signal
+    _is_relevant_vertical_ocr_neighbor = _validation._is_relevant_vertical_ocr_neighbor
+    _ocr_neighbor_pii_context_score = _validation._ocr_neighbor_pii_context_score
+    _detected_candidate_context_score = _validation._detected_candidate_context_score
     _clean_address_candidate = _validation._clean_address_candidate
     _clean_organization_candidate = _validation._clean_organization_candidate
     _is_name_dictionary_match_allowed = _validation._is_name_dictionary_match_allowed
@@ -226,6 +256,16 @@ class RuleBasedPIIDetector:
     _right_context = _validation._right_context
     _starts_with_geo_or_activity = _validation._starts_with_geo_or_activity
     _is_ui_operation_name_token = _validation._is_ui_operation_name_token
+    _is_ui_or_commerce_location_token = _validation._is_ui_or_commerce_location_token
+    _split_en_name_tokens = _validation._split_en_name_tokens
+    _is_blacklisted_english_name_phrase = _validation._is_blacklisted_english_name_phrase
+    _english_given_name_weight = _validation._english_given_name_weight
+    _english_surname_weight = _validation._english_surname_weight
+    _english_geo_phrase_weight = _validation._english_geo_phrase_weight
+    _nearby_pii_context_score = _validation._nearby_pii_context_score
+    _standalone_name_confidence = _validation._standalone_name_confidence
+    _english_standalone_name_confidence = _validation._english_standalone_name_confidence
+    _zh_standalone_name_confidence = _validation._zh_standalone_name_confidence
     _generic_name_confidence = _validation._generic_name_confidence
     _ocr_standalone_name_confidence = _validation._ocr_standalone_name_confidence
     _strong_standalone_name_confidence = _validation._strong_standalone_name_confidence
@@ -253,12 +293,10 @@ class RuleBasedPIIDetector:
     _is_organization_candidate = _validation._is_organization_candidate
     _organization_has_explicit_context = _validation._organization_has_explicit_context
     _looks_like_name_with_title = _validation._looks_like_name_with_title
-    _geo_candidate_attr_type = _validation._geo_candidate_attr_type
     _geo_fragment_confidence = _validation._geo_fragment_confidence
     _english_address_confidence = _validation._english_address_confidence
     _looks_like_address_candidate = _validation._looks_like_address_candidate
     _looks_like_masked_address_candidate = _validation._looks_like_masked_address_candidate
-    _should_collect_full_text_address = _validation._should_collect_full_text_address
     _address_confidence = _validation._address_confidence
     _has_en_organization_suffix = _validation._has_en_organization_suffix
     _organization_confidence = _validation._organization_confidence

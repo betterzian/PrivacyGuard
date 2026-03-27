@@ -3,73 +3,82 @@ from __future__ import annotations
 import re
 
 from privacyguard.infrastructure.pii.address.lexicon import iter_address_components
-from privacyguard.infrastructure.pii.address.types import AddressComponent
+from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressComponentMatch
+
+_EN_COMPONENT_ORDER = {
+    "country": 1,
+    "po_box": 2,
+    "street": 3,
+    "road": 3,
+    "city": 4,
+    "district": 4,
+    "county": 4,
+    "state": 5,
+    "postal_code": 6,
+    "unit": 7,
+    "floor": 8,
+    "room": 9,
+}
 
 
 def parse_en_components(text: str) -> tuple[AddressComponent, ...]:
-    components: list[AddressComponent] = []
-    street_match = None
-    unit_match = None
-    postal_match = None
-    state_match = None
-    for match in iter_address_components(text, locale_profile="en_us"):
-        if match.component_type == "street" and street_match is None:
-            street_match = match
-        elif match.component_type == "unit" and unit_match is None:
-            unit_match = match
-        elif match.component_type == "postal_code" and postal_match is None:
-            postal_match = match
-        elif match.component_type == "state" and state_match is None:
-            state_match = match
-        elif match.component_type == "po_box":
-            components.append(_component("po_box", match.text, match.start, match.end, "medium", 0.9))
-    if street_match is not None:
-        components.append(_component("street", street_match.text, street_match.start, street_match.end, "medium", 0.9))
-    if unit_match is not None:
-        kind = "floor" if re.match(r"(?i)(floor|fl)\b", unit_match.text) else "unit"
-        components.append(_component(kind, unit_match.text, unit_match.start, unit_match.end, "fine", 0.88))
-    if state_match is not None:
-        components.append(_component("state", state_match.text, state_match.start, state_match.end, "coarse", 0.82))
-    if postal_match is not None:
-        components.append(_component("postal_code", postal_match.text, postal_match.start, postal_match.end, "medium", 0.84))
-    city_component = _city_component(text, components)
-    if city_component is not None:
-        components.append(city_component)
-    return tuple(sorted(components, key=lambda item: (item.start_offset, item.end_offset)))
+    matches = [_normalize_match(match) for match in iter_address_components(text, locale_profile="en_us")]
+    matches = _dedupe_overlaps(matches)
+    components = [
+        AddressComponent(
+            component_type=match.component_type,
+            text=match.text,
+            start_offset=match.start,
+            end_offset=match.end,
+            privacy_level=_privacy_level(match.component_type),
+            confidence=0.9 if match.strength == "strong" else 0.82,
+        )
+        for match in matches
+    ]
+    return tuple(sorted(components, key=lambda item: (item.start_offset, item.end_offset, item.component_type)))
 
 
-def _city_component(text: str, components: list[AddressComponent]) -> AddressComponent | None:
-    trailing = sorted(
-        (item.start_offset, item.end_offset)
-        for item in components
-        if item.component_type in {"state", "postal_code"}
-    )
-    leading = sorted(
-        (item.start_offset, item.end_offset)
-        for item in components
-        if item.component_type in {"street", "unit", "floor", "room", "po_box"}
-    )
-    if not trailing:
-        return None
-    start = max((end for _, end in leading), default=0)
-    end = min(start_offset for start_offset, _ in trailing)
-    if end <= start:
-        return None
-    candidate = text[start:end].strip(" ,")
-    if not candidate:
-        return None
-    match = re.search(r"[A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){0,3}", candidate)
-    if match is None:
-        return None
-    return _component("city", match.group(0), start + match.start(), start + match.end(), "coarse", 0.8)
-
-
-def _component(component_type: str, text: str, start: int, end: int, privacy_level: str, confidence: float) -> AddressComponent:
-    return AddressComponent(
+def _normalize_match(match: AddressComponentMatch) -> AddressComponentMatch:
+    component_type = match.component_type
+    if component_type == "unit" and re.match(r"(?i)(floor|fl)\b", match.text):
+        component_type = "floor"
+    elif component_type == "unit" and re.match(r"(?i)(room|rm)\b", match.text):
+        component_type = "room"
+    return AddressComponentMatch(
         component_type=component_type,
-        text=text,
-        start_offset=start,
-        end_offset=end,
-        privacy_level=privacy_level,
-        confidence=confidence,
+        start=match.start,
+        end=match.end,
+        text=match.text,
+        strength=match.strength,
     )
+
+
+def _dedupe_overlaps(matches: list[AddressComponentMatch]) -> list[AddressComponentMatch]:
+    kept: list[AddressComponentMatch] = []
+    for candidate in sorted(matches, key=lambda item: (item.start, item.end, _component_priority(item.component_type))):
+        if not kept:
+            kept.append(candidate)
+            continue
+        previous = kept[-1]
+        if candidate.start >= previous.end:
+            kept.append(candidate)
+            continue
+        if candidate.start == previous.start and candidate.end == previous.end:
+            if _component_priority(candidate.component_type) >= _component_priority(previous.component_type):
+                kept[-1] = candidate
+            continue
+        if _component_priority(candidate.component_type) > _component_priority(previous.component_type):
+            kept[-1] = candidate
+    return kept
+
+
+def _component_priority(component_type: str) -> int:
+    return _EN_COMPONENT_ORDER.get(component_type, 0)
+
+
+def _privacy_level(component_type: str) -> str:
+    if component_type in {"unit", "floor", "room"}:
+        return "fine"
+    if component_type in {"street", "road", "postal_code", "city", "district", "county"}:
+        return "medium"
+    return "coarse"

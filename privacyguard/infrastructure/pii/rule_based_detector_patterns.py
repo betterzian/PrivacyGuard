@@ -1,5 +1,6 @@
 """RuleBasedPIIDetector internal helper functions."""
 
+from privacyguard.infrastructure.pii.rule_based_detector_labels import _field_label_specs
 from privacyguard.infrastructure.pii.rule_based_detector_shared import *
 
 def _build_patterns(self) -> dict[PIIAttributeType, list[tuple[re.Pattern[str], str, float]]]:
@@ -171,112 +172,22 @@ def _build_patterns(self) -> dict[PIIAttributeType, list[tuple[re.Pattern[str], 
 
 def _build_context_rules(self) -> list[tuple[PIIAttributeType, re.Pattern[str], str, float, Callable[[str], bool]]]:
     """构建基于字段上下文的检测规则。"""
-    return [
-        self._build_context_rule(
-            keywords=_NAME_FAMILY_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.NAME,
-            value_pattern=rf"[A-Za-z][A-Za-z'\- ]{{0,40}}|[一-龥·]{{1,4}}|{_TEXT_MASK_CHAR_CLASS}{{1,4}}",
-            confidence=0.92,
-            matched_by="context_name_family_field",
-            validator=self._is_family_name_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_NAME_GIVEN_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.NAME,
-            value_pattern=rf"[A-Za-z][A-Za-z'\- ]{{0,40}}|[一-龥·]{{1,6}}|{_TEXT_MASK_CHAR_CLASS}{{1,6}}",
-            confidence=0.92,
-            matched_by="context_name_given_field",
-            validator=self._is_given_name_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_NAME_MIDDLE_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.NAME,
-            value_pattern=r"[A-Za-z][A-Za-z'\- ]{0,40}",
-            confidence=0.9,
-            matched_by="context_name_middle_field",
-            validator=self._is_middle_name_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_NAME_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.NAME,
-            value_pattern=rf"[A-Za-z][A-Za-z .'\-]{{1,40}}|[一-龥·\s0-9]{{2,12}}|[一-龥][*＊xX某]{{1,3}}|{_TEXT_MASK_CHAR_CLASS}{{2,12}}",
-            confidence=0.90,
-            matched_by="context_name_field",
-            validator=self._is_name_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_PHONE_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.PHONE,
-            value_pattern=rf"[0-9*＊+＋\-－—_.,，。·•/\\()（）\s{_MASK_CHAR_CLASS_WITH_X[1:-1]}]{{7,32}}",
-            confidence=0.88,
-            matched_by="context_phone_field",
-            validator=self._is_context_phone_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_CARD_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.CARD_NUMBER,
-            value_pattern=rf"[0-9*＊xX\s\-－—_.,，。·•/\\()（）{_MASK_CHAR_CLASS_COMMON[1:-1]}]{{13,40}}",
-            confidence=0.9,
-            matched_by="context_card_field",
-            validator=self._is_context_card_number_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_BANK_ACCOUNT_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.BANK_ACCOUNT,
-            value_pattern=rf"[0-9*＊xX\s\-－—_.,，。·•/\\()（）{_MASK_CHAR_CLASS_COMMON[1:-1]}]{{8,40}}",
-            confidence=0.9,
-            matched_by="context_bank_account_field",
-            validator=self._is_bank_account_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_PASSPORT_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.PASSPORT_NUMBER,
-            value_pattern=rf"[A-Za-z0-9*＊xX\s\-－—_.,，。·•/\\()（）{_MASK_CHAR_CLASS_COMMON[1:-1]}]{{5,24}}",
-            confidence=0.9,
-            matched_by="context_passport_field",
-            validator=self._is_passport_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_DRIVER_LICENSE_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.DRIVER_LICENSE,
-            value_pattern=rf"[A-Za-z0-9Xx*＊\s\-－—_.,，。·•/\\()（）{_MASK_CHAR_CLASS_COMMON[1:-1]}]{{8,32}}",
-            confidence=0.9,
-            matched_by="context_driver_license_field",
-            validator=self._is_driver_license_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_EMAIL_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.EMAIL,
-            value_pattern=rf"[A-Za-z0-9._%+\-*＊@＠,，。．、·•\s{_MASK_CHAR_CLASS_COMMON[1:-1]}]{{5,80}}",
-            confidence=0.90,
-            matched_by="context_email_field",
-            validator=self._is_email_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_ID_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.ID_NUMBER,
-            value_pattern=rf"[0-9Xx*＊\s\-－—_.,，。·•/\\()（）{_MASK_CHAR_CLASS_COMMON[1:-1]}]{{6,40}}",
-            confidence=0.90,
-            matched_by="context_id_field",
-            validator=self._is_id_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_OTHER_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.OTHER,
-            value_pattern=r"[A-Za-z0-9一-龥\-\s－—_.,，。·•:：/\\()（）]{4,40}",
-            confidence=0.76,
-            matched_by="context_other_field",
-            validator=self._is_other_candidate,
-        ),
-        self._build_context_rule(
-            keywords=_ORGANIZATION_FIELD_KEYWORDS,
-            attr_type=PIIAttributeType.ORGANIZATION,
-            value_pattern=r"[A-Za-z0-9&()（）·\s一-龥]{2,80}",
-            confidence=0.86,
-            matched_by="context_organization_field",
-            validator=self._is_context_organization_candidate,
-        ),
-    ]
+    rules: list[tuple[PIIAttributeType, re.Pattern[str], str, float, Callable[[str], bool]]] = []
+    for spec in _field_label_specs():
+        if not spec.include_in_context_rules:
+            continue
+        validator = getattr(self, spec.validator_name)
+        rules.append(
+            self._build_context_rule(
+                keywords=spec.keywords,
+                attr_type=spec.attr_type,
+                value_pattern=spec.value_pattern,
+                confidence=spec.context_confidence,
+                matched_by=spec.context_matched_by,
+                validator=validator,
+            )
+        )
+    return rules
 
 def _build_self_name_patterns(self) -> list[tuple[re.Pattern[str], str, float]]:
     """构建自我介绍与口语化姓名规则。"""

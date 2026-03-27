@@ -3,16 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from privacyguard.application.services.placeholder_allocator import SessionPlaceholderAllocator
 from privacyguard.application.services.replacement_service import ReplacementService
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType, ProtectionLevel
-from privacyguard.domain.models.decision import DecisionAction
+from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.domain.policies.generic_placeholder import render_generic_replacement_text
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
 from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector
+from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
 from privacyguard.infrastructure.rendering.screenshot_renderer import ScreenshotRenderer
 from privacyguard.utils.pii_value import build_match_text, canonicalize_pii_value
 
@@ -352,3 +355,361 @@ def test_rule_based_detector_rejects_pronouns_as_name_label_value() -> None:
     )
 
     assert not any(candidate.attr_type == PIIAttributeType.NAME for candidate in candidates)
+
+
+def test_rule_based_detector_detects_name_from_inline_ocr_label_block() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=[
+            OCRTextBlock(
+                text="Name Brian Foster",
+                block_id="ocr-inline-name",
+                bbox=BoundingBox(x=12, y=12, width=160, height=24),
+            ),
+        ],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    name_candidate = next(candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME)
+
+    assert name_candidate.text == "Brian Foster"
+    assert name_candidate.block_id == "ocr-inline-name"
+    assert "ocr_label_name_field" in name_candidate.metadata["matched_by"]
+    assert name_candidate.metadata["name_component"] == ["full"]
+    assert name_candidate.metadata["ocr_block_ids"] == ["ocr-inline-name"]
+    assert name_candidate.span_start == len("Name ")
+
+
+def test_rule_based_detector_detects_name_from_large_gap_horizontal_ocr_label() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=[
+            OCRTextBlock(
+                text="Name",
+                block_id="ocr-name-label",
+                bbox=BoundingBox(x=12, y=12, width=54, height=22),
+            ),
+            OCRTextBlock(
+                text="CaROlIne mCinTyRe",
+                block_id="ocr-name-value",
+                bbox=BoundingBox(x=216, y=12, width=186, height=24),
+            ),
+        ],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    name_candidate = next(candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME)
+    assert name_candidate.text == "CaROlIne mCinTyRe"
+    assert name_candidate.metadata["matched_by"] == ["ocr_label_name_field"]
+
+
+def test_rule_based_detector_joins_inline_ocr_name_label_with_right_continuation() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=[
+            OCRTextBlock(
+                text="Name Brian",
+                block_id="ocr-inline-label",
+                bbox=BoundingBox(x=12, y=12, width=96, height=22),
+            ),
+            OCRTextBlock(
+                text="Foster",
+                block_id="ocr-inline-right",
+                bbox=BoundingBox(x=118, y=12, width=72, height=22),
+            ),
+        ],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    name_candidate = next(candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME and candidate.text == "Brian Foster")
+
+    assert "ocr_label_name_field" in name_candidate.metadata["matched_by"]
+    assert name_candidate.metadata["name_component"] == ["full"]
+    assert name_candidate.metadata["ocr_block_ids"] == ["ocr-inline-label", "ocr-inline-right"]
+
+
+def test_rule_based_detector_detects_mixed_case_english_ocr_name_with_cross_block_context() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=[
+            OCRTextBlock(
+                text="bRiAn FoSTER",
+                block_id="ocr-name",
+                bbox=BoundingBox(x=18, y=18, width=132, height=28),
+            ),
+            OCRTextBlock(
+                text="Weixin ID: 0513 499 990",
+                block_id="ocr-id",
+                bbox=BoundingBox(x=18, y=58, width=188, height=22),
+            ),
+        ],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    name_candidate = next(
+        candidate
+        for candidate in candidates
+        if candidate.attr_type == PIIAttributeType.NAME and candidate.text == "bRiAn FoSTER"
+    )
+
+    assert "heuristic_name_fragment_en" in name_candidate.metadata["matched_by"]
+
+
+def test_rule_based_detector_uses_neighbor_ocr_blocks_for_standalone_name_context() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=[
+            OCRTextBlock(
+                text="bRiAn FoSTER",
+                block_id="ocr-name",
+                bbox=BoundingBox(x=24, y=24, width=160, height=28),
+            ),
+            OCRTextBlock(
+                text="A very long neutral filler line that should push the plain text context window far away from the id field",
+                block_id="ocr-filler",
+                bbox=BoundingBox(x=24, y=64, width=720, height=22),
+            ),
+            OCRTextBlock(
+                text="User ID: 12345",
+                block_id="ocr-id",
+                bbox=BoundingBox(x=24, y=102, width=156, height=22),
+            ),
+        ],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    name_candidate = next(
+        candidate
+        for candidate in candidates
+        if candidate.attr_type == PIIAttributeType.NAME and candidate.text == "bRiAn FoSTER"
+    )
+
+    assert "heuristic_name_fragment_en" in name_candidate.metadata["matched_by"]
+
+
+def test_rule_based_detector_uses_profile_header_neighbors_for_standalone_name_context() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=[
+            OCRTextBlock(
+                text="bRENda fULleR",
+                block_id="ocr-name",
+                bbox=BoundingBox(x=24, y=24, width=180, height=28),
+            ),
+            OCRTextBlock(
+                text="Following",
+                block_id="ocr-following",
+                bbox=BoundingBox(x=24, y=92, width=120, height=22),
+            ),
+            OCRTextBlock(
+                text="Followers",
+                block_id="ocr-followers",
+                bbox=BoundingBox(x=180, y=92, width=120, height=22),
+            ),
+            OCRTextBlock(
+                text="Edit profile",
+                block_id="ocr-edit",
+                bbox=BoundingBox(x=24, y=128, width=160, height=24),
+            ),
+        ],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    name_candidate = next(
+        candidate
+        for candidate in candidates
+        if candidate.attr_type == PIIAttributeType.NAME and candidate.text == "bRENda fULleR"
+    )
+
+    assert "heuristic_name_fragment_en" in name_candidate.metadata["matched_by"]
+
+
+def test_rule_based_detector_rejects_chinese_ui_tokens_as_ocr_names() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=[
+            OCRTextBlock(
+                text="管理",
+                block_id="ocr-manage",
+                bbox=BoundingBox(x=20, y=20, width=80, height=28),
+            ),
+            OCRTextBlock(
+                text="公司",
+                block_id="ocr-company",
+                bbox=BoundingBox(x=20, y=60, width=80, height=28),
+            ),
+        ],
+        protection_level=ProtectionLevel.STRONG,
+    )
+
+    assert not any(candidate.attr_type == PIIAttributeType.NAME for candidate in candidates)
+
+
+def test_rule_based_detector_rejects_english_chat_ui_tokens_as_ocr_names() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=[
+            OCRTextBlock(
+                text="New chat",
+                block_id="ocr-new-chat",
+                bbox=BoundingBox(x=20, y=20, width=160, height=28),
+            ),
+        ],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(candidate.attr_type == PIIAttributeType.NAME for candidate in candidates)
+
+
+def test_rule_based_detector_rejects_english_profile_banner_ui_tokens_as_ocr_names() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="",
+        ocr_blocks=[
+            OCRTextBlock(
+                text="Show Threadsbanner",
+                block_id="ocr-banner",
+                bbox=BoundingBox(x=20, y=20, width=220, height=28),
+            ),
+            OCRTextBlock(
+                text="Edit profile",
+                block_id="ocr-edit",
+                bbox=BoundingBox(x=20, y=60, width=180, height=24),
+            ),
+        ],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(candidate.attr_type == PIIAttributeType.NAME for candidate in candidates)
+
+
+def test_rule_based_detector_rejects_english_ui_phrases_as_ocr_names() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    assert detector._is_blacklisted_english_name_phrase("Buy Again")
+    assert detector._is_blacklisted_english_name_phrase("Switch Accounts")
+    assert detector._is_blacklisted_english_name_phrase("Sign Out")
+    assert detector._is_blacklisted_english_name_phrase("Your personal info")
+    assert detector._is_blacklisted_english_name_phrase("New community")
+
+
+def test_render_generic_replacement_text_uses_script_specific_indexed_labels() -> None:
+    assert render_generic_replacement_text(PIIAttributeType.NAME, source_text="张三", index=1) == "<姓名1>"
+    assert render_generic_replacement_text(PIIAttributeType.NAME, source_text="Alice Johnson", index=2) == "<name2>"
+    assert render_generic_replacement_text(PIIAttributeType.LOCATION_CLUE, source_text="Seattle", index=3) == "<address3>"
+    assert render_generic_replacement_text(PIIAttributeType.ADDRESS, source_text="上海浦东", index=4) == "<地址4>"
+
+
+def test_session_placeholder_allocator_uses_global_cross_script_indices() -> None:
+    mapping_store = InMemoryMappingStore()
+    mapping_store.save_replacements(
+        "session-placeholder",
+        1,
+        [
+            ReplacementRecord(
+                session_id="session-placeholder",
+                turn_id=1,
+                candidate_id="c-existing",
+                source_text="张三",
+                canonical_source_text="张三",
+                replacement_text="<姓名1>",
+                attr_type=PIIAttributeType.NAME,
+                action_type=ActionType.GENERICIZE,
+            )
+        ],
+    )
+    allocator = SessionPlaceholderAllocator(mapping_store)
+    plan = DecisionPlan(
+        session_id="session-placeholder",
+        turn_id=2,
+        actions=[
+            DecisionAction(
+                candidate_id="c-zh",
+                action_type=ActionType.GENERICIZE,
+                attr_type=PIIAttributeType.NAME,
+                source_text="张三",
+            ),
+            DecisionAction(
+                candidate_id="c-en",
+                action_type=ActionType.GENERICIZE,
+                attr_type=PIIAttributeType.NAME,
+                source_text="Alice Johnson",
+            ),
+            DecisionAction(
+                candidate_id="c-address",
+                action_type=ActionType.GENERICIZE,
+                attr_type=PIIAttributeType.ADDRESS,
+                source_text="上海浦东新区",
+            ),
+        ],
+    )
+
+    assigned = allocator.assign(plan)
+    by_candidate = {action.candidate_id: action.replacement_text for action in assigned.actions}
+
+    assert by_candidate["c-zh"] == "<姓名1>"
+    assert by_candidate["c-en"] == "<name2>"
+    assert by_candidate["c-address"] == "<地址3>"
+
+
+def test_ocr_page_document_uses_space_for_word_gap_between_english_tokens() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+    scene_index = detector._build_ocr_scene_index(
+        (
+            OCRTextBlock(
+                text="Main",
+                block_id="ocr-main",
+                bbox=BoundingBox(x=10, y=10, width=40, height=20),
+            ),
+            OCRTextBlock(
+                text="Number",
+                block_id="ocr-number",
+                bbox=BoundingBox(x=59, y=10, width=72, height=20),
+            ),
+        )
+    )
+
+    document = detector._build_ocr_page_document(scene_index)
+
+    assert document is not None
+    assert document.text == "Main Number"
+
+
+def test_ocr_page_document_uses_break_for_column_gap_between_english_tokens() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+    scene_index = detector._build_ocr_scene_index(
+        (
+            OCRTextBlock(
+                text="Main",
+                block_id="ocr-main",
+                bbox=BoundingBox(x=10, y=10, width=40, height=20),
+            ),
+            OCRTextBlock(
+                text="Number",
+                block_id="ocr-number",
+                bbox=BoundingBox(x=86, y=10, width=72, height=20),
+            ),
+        )
+    )
+
+    document = detector._build_ocr_page_document(scene_index)
+
+    assert document is not None
+    assert document.text == f"Main{_OCR_SEMANTIC_BREAK_TOKEN}Number"

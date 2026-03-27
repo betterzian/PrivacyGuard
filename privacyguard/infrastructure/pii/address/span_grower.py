@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from privacyguard.infrastructure.pii.address.lexicon import (
-    hard_stop_matches,
-    is_connector_text,
-    iter_address_components,
-    masked_tail_match,
-)
+from privacyguard.infrastructure.pii.address.component_parser_en import parse_en_components
+from privacyguard.infrastructure.pii.address.component_parser_zh import parse_zh_components
+from privacyguard.infrastructure.pii.address.lexicon import hard_stop_matches, is_connector_text, masked_tail_match
 from privacyguard.infrastructure.pii.address.types import AddressComponentMatch, AddressInput, AddressSeed, AddressSpanDraft
+from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
 
 _HARD_STOP_CHARS = "。！？!?;\n\r"
 
@@ -22,20 +20,28 @@ def grow_spans(
     for seed in seeds:
         window_start = _scan_left_hard_boundary(text, seed.start)
         window_end = _scan_right_hard_boundary(text, seed.end)
-        component_matches = tuple(
-            AddressComponentMatch(
-                component_type=item.component_type,
-                start=item.start + window_start,
-                end=item.end + window_start,
-                text=item.text,
-                strength=item.strength,
-            )
-            for item in iter_address_components(text[window_start:window_end], locale_profile=locale_profile)
-        )
+        component_matches = _component_matches(text[window_start:window_end], window_start, locale_profile=locale_profile)
         draft = _grow_from_seed(text, seed, component_matches, window_start, window_end)
         if draft is not None:
             drafts.append(draft)
     return tuple(_dedupe_drafts(drafts))
+
+
+def _component_matches(text: str, window_start: int, *, locale_profile: str) -> tuple[AddressComponentMatch, ...]:
+    if any("\u4e00" <= char <= "\u9fff" for char in text) or locale_profile == "zh_cn":
+        components = parse_zh_components(text)
+    else:
+        components = parse_en_components(text)
+    return tuple(
+        AddressComponentMatch(
+            component_type=item.component_type,
+            start=item.start_offset + window_start,
+            end=item.end_offset + window_start,
+            text=item.text,
+            strength="strong" if item.confidence >= 0.88 else "medium",
+        )
+        for item in components
+    )
 
 
 def _grow_from_seed(
@@ -46,7 +52,20 @@ def _grow_from_seed(
     window_end: int,
 ) -> AddressSpanDraft | None:
     if not component_matches:
-        return None
+        if seed.seed_type != "label_value" or seed.start >= window_end:
+            return None
+        end = _label_value_end(text, seed.start, window_end)
+        if end <= seed.start:
+            return None
+        return AddressSpanDraft(
+            start=seed.start,
+            end=end,
+            window_start=window_start,
+            window_end=window_end,
+            seed=seed,
+            terminated_by="stream_end",
+            evidence=(seed.matched_by,),
+        )
     anchor_index = _anchor_component_index(seed, component_matches)
     if anchor_index is None:
         return None
@@ -91,7 +110,7 @@ def _anchor_component_index(seed: AddressSeed, component_matches: tuple[AddressC
     for index, component in enumerate(component_matches):
         if seed.seed_type == "label_value" and component.end <= seed.start:
             continue
-        if component.start <= seed.start <= component.end or component.start <= seed.end <= component.end:
+        if component.start <= seed.start < component.end or component.start < seed.end <= component.end:
             return index
         distance = (abs(component.start - seed.start), abs(component.end - seed.end))
         if best_distance is None or distance < best_distance:
@@ -114,9 +133,20 @@ def _looks_like_terminal_mask(text: str) -> bool:
     return bool(stripped) and all(char in ".…*＊xX某 " for char in stripped)
 
 
+def _label_value_end(text: str, start: int, window_end: int) -> int:
+    end = start
+    while end < window_end and text[end] not in _HARD_STOP_CHARS:
+        end += 1
+    return end
+
+
 def _scan_left_hard_boundary(text: str, index: int) -> int:
     cursor = max(0, min(index, len(text)))
-    while cursor > 0:
+    left_limit = 0
+    break_index = text.rfind(_OCR_SEMANTIC_BREAK_TOKEN, 0, cursor)
+    if break_index >= 0:
+        left_limit = break_index + len(_OCR_SEMANTIC_BREAK_TOKEN)
+    while cursor > left_limit:
         if text[cursor - 1] in _HARD_STOP_CHARS:
             break
         cursor -= 1

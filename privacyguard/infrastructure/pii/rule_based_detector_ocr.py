@@ -1,201 +1,67 @@
 """RuleBasedPIIDetector internal helper functions."""
 
+from privacyguard.infrastructure.pii.rule_based_detector_labels import (
+    _FieldLabelSpec,
+    _match_inline_field_labels,
+    _match_pure_field_labels,
+)
 from privacyguard.infrastructure.pii.rule_based_detector_shared import *
 
 
-@dataclass(frozen=True, slots=True)
-class _OCRLabelSpec:
-    attr_type: PIIAttributeType
-    matched_by: str
-    keywords: tuple[str, ...]
-    name_component: str | None = None
-    base_confidence: float = 0.96
-
-
-_OCR_LABEL_DECORATION_PATTERN = re.compile(r"[\s:：=*_?？!！,，.。;；/\\|｜()\[\]{}<>《》【】\"'`·•_\-]+")
-_OCR_LABEL_FULL_NAME_KEYWORDS = (
-    "name",
-    "full name",
-    "username",
-    "realname",
-    "real name",
-    "真实姓名",
-    "姓名",
-    "住客姓名",
-    "昵称",
-    "称呼",
-    "联系人",
-    "联系人姓名",
-    "收件人",
-    "收货人",
-    "寄件人",
-    "收件姓名",
-    "申请人",
-    "委托人",
-    "监护人",
-    "法定代表人",
-    "户主",
-    "住户",
-    "本人",
-    "客户",
-    "用户",
-    "病人姓名",
-    "患者姓名",
-)
-_OCR_LABEL_GIVEN_NAME_KEYWORDS = (
-    "first name",
-    "given name",
-    "名",
-)
-_OCR_LABEL_SPECS = (
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.NAME,
-        matched_by="ocr_label_name_family_field",
-        keywords=_NAME_FAMILY_FIELD_KEYWORDS,
-        name_component="family",
-        base_confidence=0.98,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.NAME,
-        matched_by="ocr_label_name_given_field",
-        keywords=_OCR_LABEL_GIVEN_NAME_KEYWORDS,
-        name_component="given",
-        base_confidence=0.98,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.NAME,
-        matched_by="ocr_label_name_middle_field",
-        keywords=_NAME_MIDDLE_FIELD_KEYWORDS,
-        name_component="middle",
-        base_confidence=0.97,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.NAME,
-        matched_by="ocr_label_name_field",
-        keywords=_OCR_LABEL_FULL_NAME_KEYWORDS,
-        name_component="full",
-        base_confidence=0.97,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.PHONE,
-        matched_by="ocr_label_phone_field",
-        keywords=_PHONE_FIELD_KEYWORDS,
-        base_confidence=0.98,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.EMAIL,
-        matched_by="ocr_label_email_field",
-        keywords=_EMAIL_FIELD_KEYWORDS,
-        base_confidence=0.98,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.ADDRESS,
-        matched_by="ocr_label_address_field",
-        keywords=_ADDRESS_FIELD_KEYWORDS,
-        base_confidence=0.86,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.ID_NUMBER,
-        matched_by="ocr_label_id_field",
-        keywords=_ID_FIELD_KEYWORDS,
-        base_confidence=0.98,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.CARD_NUMBER,
-        matched_by="ocr_label_card_field",
-        keywords=_CARD_FIELD_KEYWORDS,
-        base_confidence=0.98,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.BANK_ACCOUNT,
-        matched_by="ocr_label_bank_account_field",
-        keywords=_BANK_ACCOUNT_FIELD_KEYWORDS,
-        base_confidence=0.98,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.PASSPORT_NUMBER,
-        matched_by="ocr_label_passport_field",
-        keywords=_PASSPORT_FIELD_KEYWORDS,
-        base_confidence=0.98,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.DRIVER_LICENSE,
-        matched_by="ocr_label_driver_license_field",
-        keywords=_DRIVER_LICENSE_FIELD_KEYWORDS,
-        base_confidence=0.98,
-    ),
-    _OCRLabelSpec(
-        attr_type=PIIAttributeType.ORGANIZATION,
-        matched_by="ocr_label_organization_field",
-        keywords=_ORGANIZATION_FIELD_KEYWORDS,
-        base_confidence=0.88,
-    ),
-)
-
-
-def _normalize_ocr_label_token(value: str) -> str:
-    return _OCR_LABEL_DECORATION_PATTERN.sub("", str(value or "").strip().lower())
-
-
-_OCR_LABEL_SPEC_LOOKUP: dict[str, tuple[_OCRLabelSpec, ...]] = {}
-for _spec in _OCR_LABEL_SPECS:
-    for _keyword in _spec.keywords:
-        _normalized_keyword = _normalize_ocr_label_token(_keyword)
-        if not _normalized_keyword:
-            continue
-        _OCR_LABEL_SPEC_LOOKUP.setdefault(_normalized_keyword, tuple())
-        if _spec not in _OCR_LABEL_SPEC_LOOKUP[_normalized_keyword]:
-            _OCR_LABEL_SPEC_LOOKUP[_normalized_keyword] = _OCR_LABEL_SPEC_LOOKUP[_normalized_keyword] + (_spec,)
-
-
-def _build_ocr_page_document(self, ocr_blocks: list[OCRTextBlock]) -> _OCRPageDocument | None:
+def _build_ocr_page_document(
+    self,
+    ocr_blocks: list[OCRTextBlock] | tuple[OCRTextBlock, ...] | _OCRSceneIndex,
+) -> _OCRPageDocument | None:
     """把整页 OCR block 聚合成单个扫描文档，减少重复扫描成本。"""
-    if not ocr_blocks:
+    if isinstance(ocr_blocks, _OCRSceneIndex):
+        scene_index = ocr_blocks
+    else:
+        if not ocr_blocks:
+            return None
+        scene_index = self._build_ocr_scene_index(tuple(ocr_blocks))
+    if not scene_index.blocks:
         return None
     merged_chars: list[str] = []
     char_refs: list[tuple[int, int] | None] = []
-    ordered_blocks: list[OCRTextBlock] = []
-    lines = self._group_blocks_by_page_line(ocr_blocks)
-    assigned_blocks = {id(block) for line in lines for block in line if block.text.strip()}
-    chains = self._collect_ocr_block_chains(lines)
+    visited: set[int] = set()
+    chains = self._collect_ocr_block_chains(scene_index)
     line_count = 0
     for chain in chains:
         if not chain:
             continue
         if line_count > 0:
             self._append_ocr_page_separator(merged_chars, char_refs, _OCR_SEMANTIC_BREAK_TOKEN)
-        for block, separator in chain:
+        for block_index, separator in chain:
             if separator:
                 self._append_ocr_page_separator(merged_chars, char_refs, separator)
-            block_index = len(ordered_blocks)
-            ordered_blocks.append(block)
+            block = scene_index.blocks[block_index]
+            visited.add(block_index)
             for char_index, char in enumerate(block.text):
                 merged_chars.append(char)
                 char_refs.append((block_index, char_index))
         line_count += 1
-    for block in ocr_blocks:
-        if id(block) in assigned_blocks or not block.text.strip():
+    for block_index, block in enumerate(scene_index.blocks):
+        if block_index in visited or not block.text.strip():
             continue
         if line_count > 0:
             self._append_ocr_page_separator(merged_chars, char_refs, "\n")
-        block_index = len(ordered_blocks)
-        ordered_blocks.append(block)
         for char_index, char in enumerate(block.text):
             merged_chars.append(char)
             char_refs.append((block_index, char_index))
         line_count += 1
-    if not ordered_blocks:
+    if not visited and not any(block.text.strip() for block in scene_index.blocks):
         return None
     return _OCRPageDocument(
         line_index=0,
-        blocks=tuple(ordered_blocks),
+        blocks=scene_index.blocks,
         text="".join(merged_chars),
         char_refs=tuple(char_refs),
     )
 
-def _build_ocr_scene_index(self, blocks: tuple[OCRTextBlock, ...]) -> _OCRSceneIndex:
-    lines = self._group_blocks_by_page_line(list(blocks))
-    block_index_by_identity = {id(block): index for index, block in enumerate(blocks)}
+def _build_ocr_scene_index(self, blocks: tuple[OCRTextBlock, ...] | list[OCRTextBlock]) -> _OCRSceneIndex:
+    block_tuple = tuple(blocks)
+    lines = self._group_blocks_by_page_line(list(block_tuple))
+    block_index_by_identity = {id(block): index for index, block in enumerate(block_tuple)}
     indexed_lines: list[tuple[int, ...]] = []
     position_by_block_index: dict[int, tuple[int, int]] = {}
     assigned: set[int] = set()
@@ -210,12 +76,16 @@ def _build_ocr_scene_index(self, blocks: tuple[OCRTextBlock, ...]) -> _OCRSceneI
             assigned.add(block_index)
         if indexed_line:
             indexed_lines.append(tuple(indexed_line))
-    for block_index in range(len(blocks)):
+    for block_index in range(len(block_tuple)):
         if block_index in assigned:
             continue
         position_by_block_index[block_index] = (len(indexed_lines), 0)
         indexed_lines.append((block_index,))
-    return _OCRSceneIndex(lines=tuple(indexed_lines), position_by_block_index=position_by_block_index)
+    return _OCRSceneIndex(
+        blocks=block_tuple,
+        lines=tuple(indexed_lines),
+        position_by_block_index=position_by_block_index,
+    )
 
 def _group_blocks_by_page_line(self, ocr_blocks: list[OCRTextBlock]) -> list[list[OCRTextBlock]]:
     """按 bbox 的垂直重叠关系将 OCR block 近似聚成页面文本行。"""
@@ -234,26 +104,16 @@ def _group_blocks_by_page_line(self, ocr_blocks: list[OCRTextBlock]) -> list[lis
             lines.append([block])
     return lines
 
-def _collect_ocr_block_chains(self, lines: list[list[OCRTextBlock]]) -> list[list[tuple[OCRTextBlock, str]]]:
+def _collect_ocr_block_chains(self, scene_index: _OCRSceneIndex) -> list[list[tuple[int, str]]]:
     """按 block 级别选择右邻或下邻后继，构建 OCR 阅读链。"""
-    indexed_lines = [
-        [
-            ((line_index, block_index), block)
-            for block_index, block in enumerate(line)
-            if block.text.strip()
-        ]
-        for line_index, line in enumerate(lines)
-    ]
-    indexed_lines = [line for line in indexed_lines if line]
-    if not indexed_lines:
+    if not scene_index.lines:
         return []
-    page_order = [key for line in indexed_lines for key, _ in line]
-    block_by_key = {key: block for line in indexed_lines for key, block in line}
-    position_by_key = {key: index for index, key in enumerate(page_order)}
-    proposals = self._collect_ocr_successor_proposals(indexed_lines)
-    accepted: dict[tuple[int, int], tuple[tuple[int, int], str]] = {}
-    used_sources: set[tuple[int, int]] = set()
-    used_targets: set[tuple[int, int]] = set()
+    page_order = [block_index for line in scene_index.lines for block_index in line]
+    position_by_key = {block_index: index for index, block_index in enumerate(page_order)}
+    proposals = self._collect_ocr_successor_proposals(scene_index)
+    accepted: dict[int, tuple[int, str]] = {}
+    used_sources: set[int] = set()
+    used_targets: set[int] = set()
     for source_key, target_key, separator, score in sorted(
         proposals,
         key=lambda item: (-item[3], position_by_key[item[0]], position_by_key[item[1]]),
@@ -265,17 +125,17 @@ def _collect_ocr_block_chains(self, lines: list[list[OCRTextBlock]]) -> list[lis
         used_targets.add(target_key)
 
     start_keys = [key for key in page_order if key not in used_targets]
-    visited: set[tuple[int, int]] = set()
-    chains: list[list[tuple[OCRTextBlock, str]]] = []
+    visited: set[int] = set()
+    chains: list[list[tuple[int, str]]] = []
     for start_key in start_keys:
         if start_key in visited:
             continue
-        chain: list[tuple[OCRTextBlock, str]] = []
+        chain: list[tuple[int, str]] = []
         current_key = start_key
         separator = ""
         while current_key not in visited:
             visited.add(current_key)
-            chain.append((block_by_key[current_key], separator))
+            chain.append((current_key, separator))
             next_item = accepted.get(current_key)
             if next_item is None:
                 break
@@ -285,63 +145,70 @@ def _collect_ocr_block_chains(self, lines: list[list[OCRTextBlock]]) -> list[lis
     for key in page_order:
         if key in visited:
             continue
-        chains.append([(block_by_key[key], "")])
+        chains.append([(key, "")])
         visited.add(key)
     return chains
 
 def _collect_ocr_successor_proposals(
     self,
-    indexed_lines: list[list[tuple[tuple[int, int], OCRTextBlock]]],
-) -> list[tuple[tuple[int, int], tuple[int, int], str, float]]:
+    scene_index: _OCRSceneIndex,
+) -> list[tuple[int, int, str, float]]:
     """为每个 block 提议右邻/下邻后继，再交给贪心匹配挑选。"""
-    proposals: list[tuple[tuple[int, int], tuple[int, int], str, float]] = []
-    for line_index, line in enumerate(indexed_lines):
-        for block_index, (source_key, source_block) in enumerate(line):
-            right_candidate = self._horizontal_successor_proposal(line, block_index)
+    proposals: list[tuple[int, int, str, float]] = []
+    for line_index, line in enumerate(scene_index.lines):
+        for item_index, source_block_index in enumerate(line):
+            right_candidate = self._horizontal_successor_proposal(scene_index, line_index, item_index)
             if right_candidate is not None:
-                proposals.append((source_key, right_candidate[0], right_candidate[1], right_candidate[2]))
-            down_candidate = self._downward_successor_proposal(indexed_lines, line_index, block_index)
+                proposals.append((source_block_index, right_candidate[0], right_candidate[1], right_candidate[2]))
+            down_candidate = self._downward_successor_proposal(scene_index, line_index, item_index)
             if down_candidate is not None:
-                proposals.append((source_key, down_candidate[0], down_candidate[1], down_candidate[2]))
+                proposals.append((source_block_index, down_candidate[0], down_candidate[1], down_candidate[2]))
     return proposals
 
 def _horizontal_successor_proposal(
     self,
-    line: list[tuple[tuple[int, int], OCRTextBlock]],
-    block_index: int,
-) -> tuple[tuple[int, int], str, float] | None:
+    scene_index: _OCRSceneIndex,
+    line_index: int,
+    item_index: int,
+) -> tuple[int, str, float] | None:
     """提议同一行内的右侧后继。"""
-    if block_index + 1 >= len(line):
+    line = scene_index.lines[line_index]
+    if item_index + 1 >= len(line):
         return None
-    _, source_block = line[block_index]
-    target_key, target_block = line[block_index + 1]
-    score = self._score_horizontal_successor(source_block, target_block)
+    source_block_index = line[item_index]
+    target_block_index = line[item_index + 1]
+    score = self._score_horizontal_successor_by_index(scene_index, source_block_index, target_block_index)
     if score is None:
         return None
-    return target_key, self._block_join_separator(source_block, target_block), score
+    return target_block_index, self._block_join_separator_by_index(scene_index, source_block_index, target_block_index), score
 
 def _downward_successor_proposal(
     self,
-    indexed_lines: list[list[tuple[tuple[int, int], OCRTextBlock]]],
+    scene_index: _OCRSceneIndex,
     line_index: int,
-    block_index: int,
-) -> tuple[tuple[int, int], str, float] | None:
+    item_index: int,
+) -> tuple[int, str, float] | None:
     """提议更像是纵向续写的下方后继。"""
-    source_key, source_block = indexed_lines[line_index][block_index]
-    source_prefix = [block for _, block in indexed_lines[line_index][: block_index + 1]]
-    best_target: tuple[tuple[int, int], str, float] | None = None
-    for next_line in indexed_lines[line_index + 1 :]:
-        next_blocks = [block for _, block in next_line]
-        line_score = self._score_vertical_line_successor(source_prefix, next_blocks)
+    source_line = scene_index.lines[line_index]
+    source_block_index = source_line[item_index]
+    source_prefix = source_line[: item_index + 1]
+    best_target: tuple[int, str, float] | None = None
+    for next_line_index in range(line_index + 1, len(scene_index.lines)):
+        next_line = scene_index.lines[next_line_index]
+        line_score = self._score_vertical_line_successor_by_indices(scene_index, source_prefix, next_line)
         if line_score is None:
             continue
-        for target_key, target_block in next_line:
-            block_score = self._score_vertical_block_successor(source_block, target_block)
+        for target_block_index in next_line:
+            block_score = self._score_vertical_block_successor_by_index(
+                scene_index,
+                source_block_index,
+                target_block_index,
+            )
             if block_score is None:
                 continue
             score = line_score * 0.45 + block_score * 0.55
             if best_target is None or score > best_target[2]:
-                best_target = (target_key, "\n", score)
+                best_target = (target_block_index, "\n", score)
         if best_target is not None:
             return best_target
     return None
@@ -371,28 +238,255 @@ def _belongs_to_same_page_line(self, line: list[OCRTextBlock], block: OCRTextBlo
     )
     return overlap >= max(1, int(min_height * 0.35)) or center_delta <= center_delta_threshold
 
-def _block_join_separator(self, left: OCRTextBlock, right: OCRTextBlock) -> str:
-    """决定两个相邻 OCR block 在拼接时是否需要补空格。"""
-    if not self._blocks_semantically_related(left, right):
+def _ocr_horizontal_gap_thresholds(self, *, min_height: float, avg_height: float) -> tuple[float, float]:
+    token_gap = self._clamped_ocr_tolerance(min_height, ratio=0.4, min_px=6.0, max_px=12.0)
+    word_gap = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=8.0, max_px=18.0)
+    return token_gap, max(token_gap, word_gap)
+
+
+def _classify_ocr_horizontal_gap(self, *, gap: float, min_height: float, avg_height: float) -> str:
+    token_gap, word_gap = self._ocr_horizontal_gap_thresholds(min_height=min_height, avg_height=avg_height)
+    if gap <= token_gap:
+        return "token"
+    if gap <= word_gap:
+        return "word"
+    return "column"
+
+
+def _ocr_pair_geometry(
+    self,
+    scene_index: _OCRSceneIndex,
+    source_block_index: int,
+    target_block_index: int,
+    *,
+    direction: str,
+) -> _OCRPairGeometry | None:
+    cache_key = (source_block_index, target_block_index, direction)
+    cached = scene_index.pair_geometry_cache.get(cache_key)
+    if cache_key in scene_index.pair_geometry_cache:
+        return cached
+    if (
+        source_block_index < 0
+        or target_block_index < 0
+        or source_block_index >= len(scene_index.blocks)
+        or target_block_index >= len(scene_index.blocks)
+    ):
+        scene_index.pair_geometry_cache[cache_key] = None
+        return None
+    source_block = scene_index.blocks[source_block_index]
+    target_block = scene_index.blocks[target_block_index]
+    if source_block.bbox is None or target_block.bbox is None:
+        scene_index.pair_geometry_cache[cache_key] = None
+        return None
+    source_box = source_block.bbox
+    target_box = target_block.bbox
+    min_height = float(min(source_box.height, target_box.height))
+    max_height = float(max(source_box.height, target_box.height))
+    avg_height = (source_box.height + target_box.height) / 2
+    horizontal_gap = max(0.0, float(target_box.x - (source_box.x + source_box.width)))
+    vertical_gap = max(0.0, float(target_box.y - (source_box.y + source_box.height)))
+    center_delta = abs(self._bbox_center_y(source_box) - self._bbox_center_y(target_box))
+    left_edge_delta = abs(source_box.x - target_box.x)
+    vertical_overlap = max(
+        0,
+        min(source_box.y + source_box.height, target_box.y + target_box.height) - max(source_box.y, target_box.y),
+    )
+    vertical_overlap_ratio = vertical_overlap / max(1.0, min_height)
+    horizontal_overlap = max(
+        0,
+        min(source_box.x + source_box.width, target_box.x + target_box.width) - max(source_box.x, target_box.x),
+    )
+    horizontal_overlap_ratio = horizontal_overlap / max(1.0, float(min(source_box.width, target_box.width)))
+    gap_kind = None
+    if direction == "right":
+        gap_kind = self._classify_ocr_horizontal_gap(
+            gap=horizontal_gap,
+            min_height=min_height,
+            avg_height=avg_height,
+        )
+    geometry = _OCRPairGeometry(
+        source_block_index=source_block_index,
+        target_block_index=target_block_index,
+        direction=direction,
+        min_height_px=min_height,
+        avg_height_px=avg_height,
+        max_height_px=max_height,
+        gap_px=horizontal_gap,
+        vertical_gap_px=vertical_gap,
+        center_delta_px=center_delta,
+        left_edge_delta_px=left_edge_delta,
+        vertical_overlap_ratio=vertical_overlap_ratio,
+        horizontal_overlap_ratio=horizontal_overlap_ratio,
+        height_ratio=max_height / max(1.0, min_height),
+        gap_kind=gap_kind,
+    )
+    scene_index.pair_geometry_cache[cache_key] = geometry
+    return geometry
+
+
+def _block_join_separator_by_index(
+    self,
+    scene_index: _OCRSceneIndex,
+    left_block_index: int,
+    right_block_index: int,
+) -> str:
+    if not self._blocks_semantically_related_by_index(scene_index, left_block_index, right_block_index):
         return _OCR_SEMANTIC_BREAK_TOKEN
-    if left.bbox is None or right.bbox is None:
-        return ""
+    left = scene_index.blocks[left_block_index]
+    right = scene_index.blocks[right_block_index]
     left_char = left.text[-1:] if left.text else ""
     right_char = right.text[:1] if right.text else ""
     if not left_char or not right_char:
         return ""
-    gap = right.bbox.x - (left.bbox.x + left.bbox.width)
-    threshold = int(
-        self._clamped_ocr_tolerance(
-            float(min(left.bbox.height, right.bbox.height)),
-            ratio=0.4,
-            min_px=6.0,
-            max_px=12.0,
-        )
-    )
-    if gap <= threshold:
+    geometry = self._ocr_pair_geometry(scene_index, left_block_index, right_block_index, direction="right")
+    if geometry is None or geometry.gap_kind == "token":
         return ""
-    if left_char.isascii() and left_char.isalnum() and right_char.isascii() and right_char.isalnum():
+    if geometry.gap_kind == "word" and left_char.isascii() and left_char.isalnum() and right_char.isascii() and right_char.isalnum():
+        return " "
+    return ""
+
+
+def _blocks_semantically_related_by_index(
+    self,
+    scene_index: _OCRSceneIndex,
+    left_block_index: int,
+    right_block_index: int,
+) -> bool:
+    geometry = self._ocr_pair_geometry(scene_index, left_block_index, right_block_index, direction="right")
+    if geometry is None:
+        left = scene_index.blocks[left_block_index]
+        right = scene_index.blocks[right_block_index]
+        return left.bbox is None or right.bbox is None
+    if geometry.gap_kind == "column":
+        return False
+    left_box = scene_index.blocks[left_block_index].bbox
+    right_box = scene_index.blocks[right_block_index].bbox
+    if left_box is None or right_box is None:
+        return True
+    top_delta = abs(left_box.y - right_box.y)
+    bottom_delta = abs((left_box.y + left_box.height) - (right_box.y + right_box.height))
+    center_delta_threshold = self._clamped_ocr_tolerance(geometry.avg_height_px, ratio=0.3, min_px=4.0, max_px=10.0)
+    left_edge_threshold = self._clamped_ocr_tolerance(geometry.min_height_px, ratio=0.35, min_px=6.0, max_px=12.0)
+    vertical_delta_threshold = self._clamped_ocr_tolerance(geometry.max_height_px, ratio=0.2, min_px=4.0, max_px=8.0)
+    overlap_center_threshold = self._clamped_ocr_tolerance(geometry.avg_height_px, ratio=0.22, min_px=4.0, max_px=8.0)
+    left_edge_aligned = geometry.left_edge_delta_px <= left_edge_threshold
+    if geometry.vertical_overlap_ratio < 0.38 and geometry.center_delta_px > center_delta_threshold:
+        return False
+    if left_edge_aligned and (
+        geometry.height_ratio >= 1.55
+        or top_delta > vertical_delta_threshold
+        or bottom_delta > vertical_delta_threshold
+    ):
+        return False
+    if geometry.horizontal_overlap_ratio >= 0.45 and geometry.center_delta_px > overlap_center_threshold:
+        return False
+    return True
+
+
+def _score_horizontal_successor_by_index(
+    self,
+    scene_index: _OCRSceneIndex,
+    left_block_index: int,
+    right_block_index: int,
+) -> float | None:
+    geometry = self._ocr_pair_geometry(scene_index, left_block_index, right_block_index, direction="right")
+    if geometry is None or not self._blocks_semantically_related_by_index(scene_index, left_block_index, right_block_index):
+        return None
+    if geometry.gap_kind == "column":
+        return None
+    _, word_gap = self._ocr_horizontal_gap_thresholds(
+        min_height=geometry.min_height_px,
+        avg_height=geometry.avg_height_px,
+    )
+    center_threshold = self._clamped_ocr_tolerance(geometry.avg_height_px, ratio=0.3, min_px=4.0, max_px=10.0)
+    score = 1.0
+    score -= 0.55 * min(1.0, geometry.gap_px / max(1.0, word_gap))
+    score -= 0.3 * min(1.0, geometry.center_delta_px / max(1.0, center_threshold))
+    score -= 0.15 * min(1.0, max(0.0, geometry.height_ratio - 1.0) / 0.45)
+    if geometry.gap_kind == "token":
+        score += 0.06
+    return max(0.0, score)
+
+
+def _score_vertical_line_successor_by_indices(
+    self,
+    scene_index: _OCRSceneIndex,
+    previous_line_indices: tuple[int, ...],
+    current_line_indices: tuple[int, ...],
+) -> float | None:
+    if not previous_line_indices or not current_line_indices:
+        return None
+    previous_line = [scene_index.blocks[index] for index in previous_line_indices]
+    current_line = [scene_index.blocks[index] for index in current_line_indices]
+    if not self._lines_semantically_related(previous_line, current_line):
+        return None
+    previous_box = self._combine_bboxes(block.bbox for block in previous_line if block.bbox is not None)
+    current_box = self._combine_bboxes(block.bbox for block in current_line if block.bbox is not None)
+    if previous_box is None or current_box is None:
+        return None
+    avg_height = (previous_box.height + current_box.height) / 2
+    vertical_gap = max(0.0, float(current_box.y - (previous_box.y + previous_box.height)))
+    left_edge_delta = abs(previous_box.x - current_box.x)
+    gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=6.0, max_px=16.0)
+    left_edge_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=8.0, max_px=18.0)
+    score = 1.0
+    score -= 0.45 * min(1.0, vertical_gap / max(1.0, gap_threshold))
+    score -= 0.45 * min(1.0, left_edge_delta / max(1.0, left_edge_threshold))
+    previous_text = "".join(block.text.strip() for block in previous_line)
+    current_text = "".join(block.text.strip() for block in current_line)
+    if self._looks_like_short_numeric_metadata(current_text) and len(previous_text) >= 6:
+        score -= 0.25
+    return max(0.0, score)
+
+
+def _score_vertical_block_successor_by_index(
+    self,
+    scene_index: _OCRSceneIndex,
+    upper_block_index: int,
+    lower_block_index: int,
+) -> float | None:
+    geometry = self._ocr_pair_geometry(scene_index, upper_block_index, lower_block_index, direction="down")
+    if geometry is None:
+        return None
+    upper = scene_index.blocks[upper_block_index]
+    lower = scene_index.blocks[lower_block_index]
+    if upper.bbox is None or lower.bbox is None:
+        return None
+    if self._bbox_center_y(lower.bbox) <= self._bbox_center_y(upper.bbox):
+        return None
+    if self._looks_like_short_numeric_metadata(lower.text.strip()) and len(upper.text.strip()) >= 6:
+        return None
+    left_edge_threshold = self._clamped_ocr_tolerance(geometry.avg_height_px, ratio=0.35, min_px=6.0, max_px=12.0)
+    if geometry.left_edge_delta_px > left_edge_threshold and geometry.horizontal_overlap_ratio < 0.35:
+        return None
+    vertical_gap_threshold = self._clamped_ocr_tolerance(geometry.avg_height_px, ratio=0.4, min_px=4.0, max_px=10.0)
+    if geometry.height_ratio > 1.35:
+        return None
+    score = 1.0
+    score -= 0.4 * min(1.0, geometry.left_edge_delta_px / max(1.0, left_edge_threshold))
+    score -= 0.35 * min(1.0, geometry.vertical_gap_px / max(1.0, vertical_gap_threshold))
+    score -= 0.15 * min(1.0, max(0.0, geometry.height_ratio - 1.0) / 0.35)
+    score += 0.1 * min(1.0, geometry.horizontal_overlap_ratio)
+    return max(0.0, score)
+
+
+def _block_join_separator(self, left: OCRTextBlock, right: OCRTextBlock) -> str:
+    """决定两个相邻 OCR block 在拼接时是否需要补空格。"""
+    if left.bbox is None or right.bbox is None:
+        return ""
+    if not self._blocks_semantically_related(left, right):
+        return _OCR_SEMANTIC_BREAK_TOKEN
+    left_char = left.text[-1:] if left.text else ""
+    right_char = right.text[:1] if right.text else ""
+    if not left_char or not right_char:
+        return ""
+    min_height = float(min(left.bbox.height, right.bbox.height))
+    avg_height = (left.bbox.height + right.bbox.height) / 2
+    gap = max(0.0, float(right.bbox.x - (left.bbox.x + left.bbox.width)))
+    gap_kind = self._classify_ocr_horizontal_gap(gap=gap, min_height=min_height, avg_height=avg_height)
+    if gap_kind == "token":
+        return ""
+    if gap_kind == "word" and left_char.isascii() and left_char.isalnum() and right_char.isascii() and right_char.isalnum():
         return " "
     return ""
 
@@ -433,7 +527,7 @@ def _blocks_semantically_related(self, left: OCRTextBlock, right: OCRTextBlock) 
     vertical_overlap = max(0, min(left_box.y + left_box.height, right_box.y + right_box.height) - max(left_box.y, right_box.y))
     vertical_overlap_ratio = vertical_overlap / max(1.0, min_height)
     height_ratio = max_height / max(1.0, min_height)
-    gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=8.0, max_px=18.0)
+    gap_kind = self._classify_ocr_horizontal_gap(gap=gap, min_height=min_height, avg_height=avg_height)
     center_delta_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.3, min_px=4.0, max_px=10.0)
     left_edge_threshold = self._clamped_ocr_tolerance(min_height, ratio=0.35, min_px=6.0, max_px=12.0)
     vertical_delta_threshold = self._clamped_ocr_tolerance(max_height, ratio=0.2, min_px=4.0, max_px=8.0)
@@ -442,7 +536,7 @@ def _blocks_semantically_related(self, left: OCRTextBlock, right: OCRTextBlock) 
     horizontal_overlap = max(0, min(left_box.x + left_box.width, right_box.x + right_box.width) - max(left_box.x, right_box.x))
     horizontal_overlap_ratio = horizontal_overlap / max(1.0, float(min(left_box.width, right_box.width)))
 
-    if gap > gap_threshold:
+    if gap_kind == "column":
         return False
     if vertical_overlap_ratio < 0.38 and center_delta > center_delta_threshold:
         return False
@@ -509,17 +603,22 @@ def _score_horizontal_successor(self, left: OCRTextBlock, right: OCRTextBlock) -
     if not self._blocks_semantically_related(left, right):
         return None
     avg_height = (left.bbox.height + right.bbox.height) / 2
+    min_height = float(min(left.bbox.height, right.bbox.height))
     gap = max(0.0, float(right.bbox.x - (left.bbox.x + left.bbox.width)))
-    gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.55, min_px=8.0, max_px=18.0)
+    gap_kind = self._classify_ocr_horizontal_gap(gap=gap, min_height=min_height, avg_height=avg_height)
+    if gap_kind == "column":
+        return None
+    _, gap_threshold = self._ocr_horizontal_gap_thresholds(min_height=min_height, avg_height=avg_height)
     center_delta = abs(self._bbox_center_y(left.bbox) - self._bbox_center_y(right.bbox))
     center_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.3, min_px=4.0, max_px=10.0)
-    min_height = float(min(left.bbox.height, right.bbox.height))
     max_height = float(max(left.bbox.height, right.bbox.height))
     height_ratio = max_height / max(1.0, min_height)
     score = 1.0
     score -= 0.55 * min(1.0, gap / max(1.0, gap_threshold))
     score -= 0.3 * min(1.0, center_delta / max(1.0, center_threshold))
     score -= 0.15 * min(1.0, max(0.0, height_ratio - 1.0) / 0.45)
+    if gap_kind == "token":
+        score += 0.06
     return max(0.0, score)
 
 def _score_vertical_line_successor(
@@ -643,6 +742,23 @@ def _collect_ocr_label_adjacency_candidates(
     for block_index, block in enumerate(document.blocks):
         if block.bbox is None or not block.text.strip():
             continue
+        for spec, inline_value, start_offset in _match_inline_field_labels(block.text):
+            candidate = self._build_ocr_inline_label_candidate(
+                document,
+                scene_index,
+                label_block_index=block_index,
+                spec=spec,
+                inline_value=inline_value,
+                inline_start_offset=start_offset,
+                rule_profile=rule_profile,
+            )
+            if candidate is None:
+                continue
+            signature = self._ocr_candidate_signature(candidate)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            candidates.append(candidate)
         for spec in self._ocr_label_specs_for_block(block):
             candidate = self._build_ocr_label_adjacency_candidate(
                 document,
@@ -661,11 +777,262 @@ def _collect_ocr_label_adjacency_candidates(
     return candidates
 
 
-def _ocr_label_specs_for_block(self, block: OCRTextBlock) -> tuple[_OCRLabelSpec, ...]:
-    normalized = _normalize_ocr_label_token(block.text)
-    if not normalized:
-        return ()
-    return _OCR_LABEL_SPEC_LOOKUP.get(normalized, ())
+def _collect_ocr_standalone_name_candidates(
+    self,
+    document: _OCRPageDocument,
+    scene_index: _OCRSceneIndex,
+    existing_candidates: tuple[PIICandidate, ...],
+    rule_profile: _RuleStrengthProfile,
+) -> list[PIICandidate]:
+    page_ranges: dict[int, tuple[int, int]] = {}
+    for page_index, ref in enumerate(document.char_refs):
+        if ref is None:
+            continue
+        block_index, _ = ref
+        current = page_ranges.get(block_index)
+        if current is None:
+            page_ranges[block_index] = (page_index, page_index + 1)
+        else:
+            page_ranges[block_index] = (current[0], page_index + 1)
+    consumed_name_blocks: set[int] = set()
+    for candidate in existing_candidates:
+        if candidate.attr_type != PIIAttributeType.NAME or candidate.source != PIISourceType.OCR:
+            continue
+        consumed_name_blocks.update(self._ocr_candidate_block_indices(candidate, document))
+    previous_context_text = getattr(self, "_active_standalone_context_text", None)
+    previous_context_candidates = getattr(self, "_active_standalone_context_candidates", ())
+    self._active_standalone_context_text = document.text
+    self._active_standalone_context_candidates = tuple(existing_candidates)
+    try:
+        candidates: list[PIICandidate] = []
+        seen_signatures: set[tuple[str, str, tuple[str, ...]]] = set()
+        bound_anchor_keys: set[str] = set()
+        for block_index, block in enumerate(document.blocks):
+            if (
+                block_index in consumed_name_blocks
+                or not block.text.strip()
+                or self._is_ocr_pure_label_block(block)
+                or self._contains_field_keyword(block.text)
+                or self._looks_like_ui_time_metadata(block.text)
+                or self._looks_like_bracketed_ui_label(block.text)
+            ):
+                continue
+            page_span = page_ranges.get(block_index)
+            if page_span is None:
+                continue
+            scene_mode, scene_bonus = self._ocr_standalone_scene_mode(document, scene_index, block_index)
+            local_skip_spans: list[tuple[int, int]] = []
+            name_matches: list[tuple[re.Match[str], str]] = [
+                (match, "heuristic_name_fragment")
+                for match in self.generic_name_pattern.finditer(block.text)
+            ]
+            if self._supports_en():
+                name_matches.extend(
+                    (match, "heuristic_name_fragment_en")
+                    for match in self.en_standalone_name_pattern.finditer(block.text)
+                )
+            for match, matched_by in name_matches:
+                extracted = self._extract_match(block.text, *match.span("value"))
+                if extracted is None:
+                    continue
+                value, local_start, local_end = extracted
+                if self._overlaps_any_span(local_start, local_end, local_skip_spans):
+                    continue
+                if not self._ocr_match_covers_standalone_block(block.text, local_start, local_end):
+                    continue
+                canonical_source_text = self._canonical_name_source_text(
+                    value,
+                    allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG,
+                )
+                validator_value = canonical_source_text or value
+                if not self._is_name_candidate(validator_value):
+                    continue
+                page_start = page_span[0] + local_start
+                page_end = page_span[0] + local_end
+                confidence = self._generic_name_confidence(
+                    document.text,
+                    page_start,
+                    page_end,
+                    value=validator_value,
+                    source=PIISourceType.OCR,
+                    rule_profile=rule_profile,
+                )
+                anchor_key = None
+                if scene_mode == "multi_name":
+                    confidence = max(confidence, min(0.9, 0.74 + scene_bonus))
+                else:
+                    anchor_key, anchor_bonus = self._ocr_single_name_anchor_binding(
+                        document,
+                        scene_index,
+                        block_index=block_index,
+                        existing_candidates=existing_candidates,
+                    )
+                    if anchor_key is None and confidence <= 0.0:
+                        continue
+                    if anchor_key is not None and anchor_key in bound_anchor_keys:
+                        continue
+                    confidence = max(confidence, min(0.92, confidence + anchor_bonus))
+                if confidence <= 0.0:
+                    continue
+                candidate = self._build_ocr_inline_value_candidate(
+                    document,
+                    block_index=block_index,
+                    text=value,
+                    attr_type=PIIAttributeType.NAME,
+                    confidence=confidence,
+                    canonical_source_text=canonical_source_text,
+                    span_start=local_start,
+                    span_end=local_end,
+                    metadata=self._merge_candidate_metadata(
+                        {
+                            "matched_by": [matched_by],
+                            "ocr_block_ids": [block.block_id] if block.block_id else [],
+                            "ocr_postpass": ["standalone_name"],
+                            "ocr_standalone_scene": [scene_mode],
+                        },
+                        self._name_component_metadata("full"),
+                    ),
+                )
+                if candidate is None:
+                    continue
+                if anchor_key is not None:
+                    candidate.metadata = self._merge_candidate_metadata(
+                        candidate.metadata,
+                        {"ocr_anchor_entity_id": [anchor_key]},
+                    )
+                signature = self._ocr_candidate_signature(candidate)
+                if signature in seen_signatures:
+                    continue
+                seen_signatures.add(signature)
+                candidates.append(candidate)
+                if anchor_key is not None:
+                    bound_anchor_keys.add(anchor_key)
+                local_skip_spans.append((local_start, local_end))
+        return candidates
+    finally:
+        self._active_standalone_context_text = previous_context_text
+        self._active_standalone_context_candidates = previous_context_candidates
+
+
+def _ocr_match_covers_standalone_block(
+    self,
+    block_text: str,
+    span_start: int,
+    span_end: int,
+) -> bool:
+    prefix = block_text[:span_start]
+    suffix = block_text[span_end:]
+    allowed_noise = r"[\s:：,，.。;；/\\|｜()\[\]{}<>《》【】\"'`·•_\-]*"
+    return re.fullmatch(allowed_noise, prefix or "") is not None and re.fullmatch(allowed_noise, suffix or "") is not None
+
+
+def _ocr_standalone_scene_mode(
+    self,
+    document: _OCRPageDocument,
+    scene_index: _OCRSceneIndex,
+    block_index: int,
+) -> tuple[str, float]:
+    position = scene_index.position_by_block_index.get(block_index)
+    block = document.blocks[block_index]
+    if position is None or block.bbox is None:
+        return "single_name", 0.0
+    line_index, _ = position
+    peer_count = 0
+    for line_offset in (-3, -2, -1, 1, 2, 3):
+        peer_line_index = line_index + line_offset
+        if not 0 <= peer_line_index < len(scene_index.lines):
+            continue
+        for peer_index in scene_index.lines[peer_line_index]:
+            if peer_index == block_index:
+                continue
+            peer_block = document.blocks[peer_index]
+            if not self._ocr_block_is_standalone_name_shape(peer_block):
+                continue
+            if peer_block.bbox is None:
+                continue
+            height_ratio = peer_block.bbox.height / max(1.0, float(block.bbox.height))
+            if not 0.7 <= height_ratio <= 1.45:
+                continue
+            left_delta = abs(peer_block.bbox.x - block.bbox.x)
+            left_threshold = self._clamped_ocr_tolerance(float(block.bbox.height), ratio=2.4, min_px=22.0, max_px=120.0)
+            if left_delta > left_threshold:
+                continue
+            peer_count += 1
+            if peer_count >= 2:
+                return "multi_name", 0.14 + min(0.1, 0.03 * peer_count)
+    return "single_name", 0.0
+
+
+def _ocr_block_is_standalone_name_shape(self, block: OCRTextBlock) -> bool:
+    text = self._clean_extracted_value(block.text)
+    if not text or self._contains_field_keyword(text) or self._looks_like_ui_time_metadata(text) or self._looks_like_bracketed_ui_label(text):
+        return False
+    for match in self.generic_name_pattern.finditer(text):
+        if self._ocr_match_covers_standalone_block(text, *match.span("value")):
+            return True
+    if self._supports_en():
+        for match in self.en_standalone_name_pattern.finditer(text):
+            if self._ocr_match_covers_standalone_block(text, *match.span("value")):
+                return True
+    return False
+
+
+def _ocr_single_name_anchor_binding(
+    self,
+    document: _OCRPageDocument,
+    scene_index: _OCRSceneIndex,
+    *,
+    block_index: int,
+    existing_candidates: tuple[PIICandidate, ...],
+) -> tuple[str | None, float]:
+    position = scene_index.position_by_block_index.get(block_index)
+    if position is None:
+        return None, 0.0
+    line_index, item_index = position
+    best_anchor: tuple[str, float] | None = None
+    strong_types = {
+        PIIAttributeType.PHONE,
+        PIIAttributeType.EMAIL,
+        PIIAttributeType.ID_NUMBER,
+        PIIAttributeType.CARD_NUMBER,
+        PIIAttributeType.BANK_ACCOUNT,
+        PIIAttributeType.PASSPORT_NUMBER,
+        PIIAttributeType.DRIVER_LICENSE,
+        PIIAttributeType.ADDRESS,
+    }
+    for candidate in existing_candidates:
+        if candidate.attr_type not in strong_types:
+            continue
+        candidate_blocks = self._ocr_candidate_block_indices(candidate, document)
+        if not candidate_blocks:
+            continue
+        distances: list[float] = []
+        for candidate_block_index in candidate_blocks:
+            candidate_position = scene_index.position_by_block_index.get(candidate_block_index)
+            if candidate_position is None:
+                continue
+            candidate_line, candidate_item = candidate_position
+            line_delta = abs(candidate_line - line_index)
+            item_delta = abs(candidate_item - item_index)
+            if line_delta > 2 and item_delta > 2:
+                continue
+            distances.append(line_delta * 1.2 + item_delta * 0.35)
+        if not distances:
+            continue
+        distance = min(distances)
+        score = max(0.0, 0.18 - min(0.12, distance * 0.04))
+        if score <= 0.0:
+            continue
+        anchor_key = candidate.entity_id
+        if best_anchor is None or score > best_anchor[1]:
+            best_anchor = (anchor_key, score)
+    if best_anchor is None:
+        return None, 0.0
+    return best_anchor
+
+
+def _ocr_label_specs_for_block(self, block: OCRTextBlock) -> tuple[_FieldLabelSpec, ...]:
+    return _match_pure_field_labels(block.text)
 
 
 def _is_ocr_pure_label_block(self, block: OCRTextBlock) -> bool:
@@ -678,7 +1045,7 @@ def _build_ocr_label_adjacency_candidate(
     scene_index: _OCRSceneIndex,
     *,
     label_block_index: int,
-    spec: _OCRLabelSpec,
+    spec: _FieldLabelSpec,
     rule_profile: _RuleStrengthProfile,
 ) -> PIICandidate | None:
     candidate_options: list[PIICandidate] = []
@@ -717,12 +1084,84 @@ def _build_ocr_label_adjacency_candidate(
     return candidate_options[0]
 
 
+def _build_ocr_inline_label_candidate(
+    self,
+    document: _OCRPageDocument,
+    scene_index: _OCRSceneIndex,
+    *,
+    label_block_index: int,
+    spec: _FieldLabelSpec,
+    inline_value: str,
+    inline_start_offset: int,
+    rule_profile: _RuleStrengthProfile,
+) -> PIICandidate | None:
+    inline_end_offset = inline_start_offset + len(inline_value)
+    candidate_options: list[PIICandidate] = []
+    direct_candidate = self._validate_ocr_label_value_text(
+        document,
+        block_indices=(label_block_index,),
+        value_text=inline_value,
+        relation_score=1.0,
+        spec=spec,
+        rule_profile=rule_profile,
+        inline_span=(inline_start_offset, inline_end_offset),
+    )
+    if direct_candidate is not None:
+        candidate_options.append(direct_candidate)
+
+    right_option = self._collect_ocr_right_value_chain(document, scene_index, label_block_index, spec)
+    if right_option is not None:
+        joined_text = self._join_inline_and_ocr_value_text(
+            inline_value,
+            self._join_ocr_block_text(document, right_option[0]),
+        )
+        candidate = self._validate_ocr_label_value_text(
+            document,
+            block_indices=(label_block_index, *right_option[0]),
+            value_text=joined_text,
+            relation_score=right_option[1],
+            spec=spec,
+            rule_profile=rule_profile,
+        )
+        if candidate is not None:
+            candidate_options.append(candidate)
+
+    down_option = self._collect_ocr_down_value_chain(document, scene_index, label_block_index, spec)
+    if down_option is not None:
+        joined_text = self._join_inline_and_ocr_value_text(
+            inline_value,
+            self._join_ocr_block_text(document, down_option[0]),
+        )
+        candidate = self._validate_ocr_label_value_text(
+            document,
+            block_indices=(label_block_index, *down_option[0]),
+            value_text=joined_text,
+            relation_score=down_option[1],
+            spec=spec,
+            rule_profile=rule_profile,
+        )
+        if candidate is not None:
+            candidate_options.append(candidate)
+
+    if not candidate_options:
+        return None
+    candidate_options.sort(
+        key=lambda item: (
+            item.confidence,
+            len(item.metadata.get("ocr_block_ids", [])),
+            -(item.bbox.y if item.bbox is not None else 0),
+        ),
+        reverse=True,
+    )
+    return candidate_options[0]
+
+
 def _collect_ocr_right_value_chain(
     self,
     document: _OCRPageDocument,
     scene_index: _OCRSceneIndex,
     label_block_index: int,
-    spec: _OCRLabelSpec,
+    spec: _FieldLabelSpec,
 ) -> tuple[tuple[int, ...], float] | None:
     position = scene_index.position_by_block_index.get(label_block_index)
     label_block = document.blocks[label_block_index]
@@ -732,10 +1171,10 @@ def _collect_ocr_right_value_chain(
     line = scene_index.lines[line_index]
     best_anchor: tuple[int, float] | None = None
     for next_block_index in line[item_index + 1 :]:
-        block = document.blocks[next_block_index]
+        block = scene_index.blocks[next_block_index]
         if self._is_ocr_pure_label_block(block):
             break
-        score = self._score_ocr_label_right_neighbor(label_block, block, spec)
+        score = self._score_ocr_label_right_neighbor(scene_index, label_block_index, next_block_index, spec)
         if score is None:
             continue
         if best_anchor is None or score > best_anchor[1]:
@@ -758,7 +1197,7 @@ def _collect_ocr_down_value_chain(
     document: _OCRPageDocument,
     scene_index: _OCRSceneIndex,
     label_block_index: int,
-    spec: _OCRLabelSpec,
+    spec: _FieldLabelSpec,
 ) -> tuple[tuple[int, ...], float] | None:
     position = scene_index.position_by_block_index.get(label_block_index)
     label_block = document.blocks[label_block_index]
@@ -768,16 +1207,16 @@ def _collect_ocr_down_value_chain(
     best_anchor: tuple[int, float] | None = None
     for next_line_index in range(line_index + 1, min(len(scene_index.lines), line_index + 5)):
         line = scene_index.lines[next_line_index]
-        line_blocks = [document.blocks[index] for index in line]
+        line_blocks = [scene_index.blocks[index] for index in line]
         if not line_blocks:
             continue
         if self._is_ocr_pure_label_block(line_blocks[0]):
             break
         for candidate_index in line:
-            block = document.blocks[candidate_index]
+            block = scene_index.blocks[candidate_index]
             if self._is_ocr_pure_label_block(block):
                 continue
-            score = self._score_ocr_label_down_neighbor(label_block, block, spec)
+            score = self._score_ocr_label_down_neighbor(scene_index, label_block_index, candidate_index, spec)
             if score is None:
                 continue
             if best_anchor is None or score > best_anchor[1]:
@@ -803,7 +1242,7 @@ def _collect_ocr_same_line_continuation(
     scene_index: _OCRSceneIndex,
     *,
     anchor_block_index: int,
-    spec: _OCRLabelSpec,
+    spec: _FieldLabelSpec,
 ) -> tuple[tuple[int, ...], float | None]:
     position = scene_index.position_by_block_index.get(anchor_block_index)
     if position is None:
@@ -812,25 +1251,25 @@ def _collect_ocr_same_line_continuation(
     line = scene_index.lines[line_index]
     collected: list[int] = []
     scores: list[float] = []
-    previous_block = document.blocks[anchor_block_index]
+    previous_block_index = anchor_block_index
     for next_block_index in line[item_index + 1 :]:
-        block = document.blocks[next_block_index]
+        block = scene_index.blocks[next_block_index]
         if self._is_ocr_pure_label_block(block):
             break
         if self._score_ocr_label_value_block(block, spec) is None:
             break
-        successor_score = self._score_horizontal_successor(previous_block, block)
-        if successor_score is None or successor_score < 0.42:
+        successor_score = self._score_horizontal_successor_by_index(scene_index, previous_block_index, next_block_index)
+        if successor_score is None or successor_score < 0.34:
             break
         collected.append(next_block_index)
         scores.append(successor_score)
-        previous_block = block
+        previous_block_index = next_block_index
     if not scores:
         return tuple(collected), None
     return tuple(collected), sum(scores) / len(scores)
 
 
-def _score_ocr_label_value_block(self, block: OCRTextBlock, spec: _OCRLabelSpec) -> float | None:
+def _score_ocr_label_value_block(self, block: OCRTextBlock, spec: _FieldLabelSpec) -> float | None:
     cleaned = self._clean_extracted_value(block.text)
     if not cleaned:
         return None
@@ -871,10 +1310,16 @@ def _score_ocr_label_value_block(self, block: OCRTextBlock, spec: _OCRLabelSpec)
 
 def _score_ocr_label_right_neighbor(
     self,
-    label_block: OCRTextBlock,
-    value_block: OCRTextBlock,
-    spec: _OCRLabelSpec,
+    scene_index: _OCRSceneIndex,
+    label_block_index: int,
+    value_block_index: int,
+    spec: _FieldLabelSpec,
 ) -> float | None:
+    geometry = self._ocr_pair_geometry(scene_index, label_block_index, value_block_index, direction="right")
+    if geometry is None:
+        return None
+    label_block = scene_index.blocks[label_block_index]
+    value_block = scene_index.blocks[value_block_index]
     if label_block.bbox is None or value_block.bbox is None:
         return None
     if value_block.bbox.x + value_block.bbox.width <= label_block.bbox.x:
@@ -882,31 +1327,33 @@ def _score_ocr_label_right_neighbor(
     value_score = self._score_ocr_label_value_block(value_block, spec)
     if value_score is None:
         return None
-    avg_height = (label_block.bbox.height + value_block.bbox.height) / 2
-    gap = max(0.0, float(value_block.bbox.x - (label_block.bbox.x + label_block.bbox.width)))
-    center_delta = abs(self._bbox_center_y(label_block.bbox) - self._bbox_center_y(value_block.bbox))
-    gap_threshold = self._clamped_ocr_tolerance(avg_height, ratio=2.4, min_px=12.0, max_px=72.0)
-    center_threshold = self._clamped_ocr_tolerance(avg_height, ratio=0.85, min_px=8.0, max_px=28.0)
-    if gap > gap_threshold * 1.8 or center_delta > center_threshold * 1.45:
+    gap_threshold = self._clamped_ocr_tolerance(geometry.avg_height_px, ratio=6.0, min_px=28.0, max_px=220.0)
+    center_threshold = self._clamped_ocr_tolerance(geometry.avg_height_px, ratio=1.5, min_px=12.0, max_px=52.0)
+    if geometry.gap_px > gap_threshold * 1.6 or geometry.center_delta_px > center_threshold * 2.0:
         return None
-    min_height = float(min(label_block.bbox.height, value_block.bbox.height))
-    max_height = float(max(label_block.bbox.height, value_block.bbox.height))
-    height_ratio = max_height / max(1.0, min_height)
     score = 1.0
-    score -= 0.42 * min(1.0, gap / max(1.0, gap_threshold))
-    score -= 0.24 * min(1.0, center_delta / max(1.0, center_threshold))
-    score -= 0.12 * min(1.0, max(0.0, height_ratio - 1.0) / 1.0)
+    score -= 0.18 * min(1.0, geometry.gap_px / max(1.0, gap_threshold))
+    score -= 0.18 * min(1.0, geometry.center_delta_px / max(1.0, center_threshold))
+    score -= 0.12 * min(1.0, max(0.0, geometry.height_ratio - 1.0) / 1.0)
     score += 0.14 * max(0.0, value_score - 0.5)
+    if geometry.gap_kind == "token":
+        score += 0.04
     score += 0.04 if value_block.score >= 0.94 else 0.0
-    return score if score >= 0.42 else None
+    return score if score >= 0.34 else None
 
 
 def _score_ocr_label_down_neighbor(
     self,
-    label_block: OCRTextBlock,
-    value_block: OCRTextBlock,
-    spec: _OCRLabelSpec,
+    scene_index: _OCRSceneIndex,
+    label_block_index: int,
+    value_block_index: int,
+    spec: _FieldLabelSpec,
 ) -> float | None:
+    geometry = self._ocr_pair_geometry(scene_index, label_block_index, value_block_index, direction="down")
+    if geometry is None:
+        return None
+    label_block = scene_index.blocks[label_block_index]
+    value_block = scene_index.blocks[value_block_index]
     if label_block.bbox is None or value_block.bbox is None:
         return None
     if self._bbox_center_y(value_block.bbox) <= self._bbox_center_y(label_block.bbox):
@@ -914,32 +1361,26 @@ def _score_ocr_label_down_neighbor(
     value_score = self._score_ocr_label_value_block(value_block, spec)
     if value_score is None:
         return None
-    avg_height = (label_block.bbox.height + value_block.bbox.height) / 2
-    vertical_gap = max(0.0, float(value_block.bbox.y - (label_block.bbox.y + label_block.bbox.height)))
-    vertical_threshold = self._clamped_ocr_tolerance(avg_height, ratio=2.8, min_px=10.0, max_px=84.0)
-    if vertical_gap > vertical_threshold * 1.8:
+    vertical_threshold = self._clamped_ocr_tolerance(geometry.avg_height_px, ratio=4.0, min_px=18.0, max_px=120.0)
+    if geometry.vertical_gap_px > vertical_threshold * 1.8:
         return None
-    left_delta = abs(label_block.bbox.x - value_block.bbox.x)
     center_x_delta = abs(
         (label_block.bbox.x + label_block.bbox.width / 2) - (value_block.bbox.x + value_block.bbox.width / 2)
     )
-    align_threshold = self._clamped_ocr_tolerance(avg_height, ratio=1.2, min_px=12.0, max_px=48.0)
-    horizontal_overlap = max(
-        0,
-        min(label_block.bbox.x + label_block.bbox.width, value_block.bbox.x + value_block.bbox.width)
-        - max(label_block.bbox.x, value_block.bbox.x),
-    )
-    min_width = float(min(label_block.bbox.width, value_block.bbox.width))
-    overlap_ratio = horizontal_overlap / max(1.0, min_width)
-    if left_delta > align_threshold and center_x_delta > align_threshold and overlap_ratio < 0.18:
+    align_threshold = self._clamped_ocr_tolerance(geometry.avg_height_px, ratio=2.2, min_px=18.0, max_px=84.0)
+    if (
+        geometry.left_edge_delta_px > align_threshold * 1.8
+        and center_x_delta > align_threshold * 1.8
+        and geometry.horizontal_overlap_ratio < 0.18
+    ):
         return None
     score = 1.0
-    score -= 0.34 * min(1.0, vertical_gap / max(1.0, vertical_threshold))
-    score -= 0.2 * min(1.0, min(left_delta, center_x_delta) / max(1.0, align_threshold))
-    score += 0.1 * min(1.0, overlap_ratio)
+    score -= 0.2 * min(1.0, geometry.vertical_gap_px / max(1.0, vertical_threshold))
+    score -= 0.14 * min(1.0, min(geometry.left_edge_delta_px, center_x_delta) / max(1.0, align_threshold))
+    score += 0.1 * min(1.0, geometry.horizontal_overlap_ratio)
     score += 0.14 * max(0.0, value_score - 0.5)
     score += 0.04 if value_block.score >= 0.94 else 0.0
-    return score if score >= 0.42 else None
+    return score if score >= 0.34 else None
 
 
 def _validate_ocr_label_value_chain(
@@ -948,16 +1389,36 @@ def _validate_ocr_label_value_chain(
     *,
     block_indices: tuple[int, ...],
     relation_score: float,
-    spec: _OCRLabelSpec,
+    spec: _FieldLabelSpec,
     rule_profile: _RuleStrengthProfile,
 ) -> PIICandidate | None:
-    raw_text = self._join_ocr_block_text(document, block_indices)
-    cleaned_text = self._clean_phone_candidate(raw_text) if spec.attr_type == PIIAttributeType.PHONE else self._clean_extracted_value(raw_text)
+    return self._validate_ocr_label_value_text(
+        document,
+        block_indices=block_indices,
+        value_text=self._join_ocr_block_text(document, block_indices),
+        relation_score=relation_score,
+        spec=spec,
+        rule_profile=rule_profile,
+    )
+
+
+def _validate_ocr_label_value_text(
+    self,
+    document: _OCRPageDocument,
+    *,
+    block_indices: tuple[int, ...],
+    value_text: str,
+    relation_score: float,
+    spec: _FieldLabelSpec,
+    rule_profile: _RuleStrengthProfile,
+    inline_span: tuple[int, int] | None = None,
+) -> PIICandidate | None:
+    cleaned_text = self._clean_phone_candidate(value_text) if spec.attr_type == PIIAttributeType.PHONE else self._clean_extracted_value(value_text)
     if not cleaned_text:
         return None
     allow_ocr_noise = rule_profile.level == ProtectionLevel.STRONG
     canonical_source_text: str | None = None
-    confidence = spec.base_confidence
+    confidence = spec.ocr_confidence
     if spec.attr_type == PIIAttributeType.NAME:
         component = spec.name_component or "full"
         if component == "full":
@@ -1012,25 +1473,95 @@ def _validate_ocr_label_value_chain(
             min(0.94, self._organization_confidence(cleaned_text, allow_weak_suffix=rule_profile.allow_weak_org_suffix) + 0.08),
         )
     confidence = min(0.99, max(confidence, confidence * 0.84 + relation_score * 0.16))
+    metadata = self._merge_candidate_metadata(
+        {
+            "matched_by": [spec.ocr_matched_by],
+            "ocr_block_ids": [
+                document.blocks[index].block_id
+                for index in tuple(dict.fromkeys(block_indices))
+                if 0 <= index < len(document.blocks) and document.blocks[index].block_id
+            ],
+        },
+        self._name_component_metadata(spec.name_component) if spec.name_component else None,
+    )
+    unique_block_indices = tuple(dict.fromkeys(block_indices))
+    if inline_span is not None and len(unique_block_indices) == 1:
+        return self._build_ocr_inline_value_candidate(
+            document,
+            block_index=unique_block_indices[0],
+            text=cleaned_text,
+            attr_type=spec.attr_type,
+            confidence=confidence,
+            canonical_source_text=canonical_source_text,
+            span_start=inline_span[0],
+            span_end=inline_span[1],
+            metadata=metadata,
+        )
     return self._build_ocr_block_candidate(
         document,
-        block_indices=block_indices,
-        text=raw_text,
+        block_indices=unique_block_indices,
+        text=cleaned_text,
         attr_type=spec.attr_type,
         confidence=confidence,
         canonical_source_text=canonical_source_text,
-        metadata=self._merge_candidate_metadata(
-            {
-                "matched_by": [spec.matched_by],
-                "ocr_block_ids": [
-                    document.blocks[index].block_id
-                    for index in block_indices
-                    if document.blocks[index].block_id
-                ],
-            },
-            self._name_component_metadata(spec.name_component) if spec.name_component else None,
-        ),
+        metadata=metadata,
     )
+
+
+def _build_ocr_inline_value_candidate(
+    self,
+    document: _OCRPageDocument,
+    *,
+    block_index: int,
+    text: str,
+    attr_type: PIIAttributeType,
+    confidence: float,
+    canonical_source_text: str | None,
+    span_start: int,
+    span_end: int,
+    metadata: dict[str, list[str]] | None = None,
+) -> PIICandidate | None:
+    if block_index < 0 or block_index >= len(document.blocks):
+        return None
+    block = document.blocks[block_index]
+    if block.block_id is None:
+        return None
+    normalized = canonicalize_pii_value(attr_type, text)
+    entity_id = self.resolver.build_candidate_id(
+        self.detector_mode,
+        PIISourceType.OCR.value,
+        normalized,
+        attr_type.value,
+        block_id=block.block_id,
+        span_start=span_start,
+        span_end=span_end,
+    )
+    return PIICandidate(
+        entity_id=entity_id,
+        text=text,
+        canonical_source_text=canonical_source_text,
+        normalized_text=normalized,
+        attr_type=attr_type,
+        source=PIISourceType.OCR,
+        bbox=block.bbox,
+        block_id=block.block_id,
+        span_start=span_start,
+        span_end=span_end,
+        confidence=confidence,
+        metadata=metadata or {},
+    )
+
+
+def _join_inline_and_ocr_value_text(self, inline_value: str, continuation_text: str) -> str:
+    left = self._clean_extracted_value(inline_value)
+    right = self._clean_extracted_value(continuation_text)
+    if not left:
+        return right
+    if not right:
+        return left
+    if left[-1:].isascii() and left[-1:].isalnum() and right[:1].isascii() and right[:1].isalnum():
+        return f"{left} {right}"
+    return f"{left}{right}"
 
 
 def _join_ocr_block_text(self, document: _OCRPageDocument, block_indices: tuple[int, ...]) -> str:
@@ -1307,8 +1838,14 @@ def _looks_like_bracketed_ui_label(self, text: str) -> bool:
     stripped = text.strip()
     if re.match(r"^[\[\(（【<《].{1,8}[\]\)）】>》]", stripped):
         return True
-    compact = re.sub(r"\s+", "", self._clean_extracted_value(stripped))
-    return any(compact.startswith(token) for token in _UI_OPERATION_NAME_WHITELIST)
+    cleaned = self._clean_extracted_value(stripped)
+    compact = re.sub(r"\s+", "", cleaned)
+    lowered = re.sub(r"\s+", " ", cleaned).strip().lower()
+    if compact in _UI_NEGATIVE_TERMS_ZH or cleaned in _UI_NEGATIVE_PHRASES_ZH:
+        return True
+    if lowered in _UI_NEGATIVE_PHRASES_EN:
+        return True
+    return any(lowered.startswith(token) for token in _UI_NEGATIVE_TERMS_EN)
 
 def _remap_ocr_page_candidate(
     self,

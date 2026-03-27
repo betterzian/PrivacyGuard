@@ -836,18 +836,6 @@ def _collect_name_hits(
                     metadata=self._name_component_metadata("full"),
                     skip_spans=skip_spans,
                 )
-    self._collect_generic_name_fragment_hits(
-        collected,
-        raw_text,
-        source,
-        bbox,
-        block_id,
-        skip_spans=skip_spans,
-        rule_profile=rule_profile,
-        original_text=original_text,
-        shadow_index_map=shadow_index_map,
-    )
-
 def _collect_generic_name_fragment_hits(
     self,
     collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
@@ -862,7 +850,16 @@ def _collect_generic_name_fragment_hits(
     shadow_index_map: tuple[int | None, ...] | None = None,
 ) -> None:
     local_skip_spans = list(skip_spans)
-    for match in self.generic_name_pattern.finditer(raw_text):
+    name_matches: list[tuple[re.Match[str], str]] = [
+        (match, "heuristic_name_fragment")
+        for match in self.generic_name_pattern.finditer(raw_text)
+    ]
+    if self._supports_en():
+        name_matches.extend(
+            (match, "heuristic_name_fragment_en")
+            for match in self.en_standalone_name_pattern.finditer(raw_text)
+        )
+    for match, matched_by in name_matches:
         extracted = self._extract_match(
             raw_text,
             *match.span("value"),
@@ -904,7 +901,7 @@ def _collect_generic_name_fragment_hits(
             span_start=span_start,
             span_end=span_end,
             confidence=confidence,
-            matched_by="heuristic_name_fragment",
+            matched_by=matched_by,
             canonical_source_text=canonical_source_text,
             metadata=self._name_component_metadata("full"),
             skip_spans=local_skip_spans,
@@ -958,83 +955,6 @@ def _collect_masked_text_hits(
             skip_spans=skip_spans,
         )
 
-def _collect_address_hits(
-    self,
-    collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
-    raw_text: str,
-    source: PIISourceType,
-    bbox: object,
-    block_id: str | None,
-    *,
-    skip_spans: list[tuple[int, int]],
-    rule_profile: _RuleStrengthProfile,
-    original_text: str | None = None,
-    shadow_index_map: tuple[int | None, ...] | None = None,
-) -> None:
-    """收集地址整段与碎片命中。"""
-    full_text_candidate = self._clean_address_candidate(raw_text)
-    if self._contains_mask_char(full_text_candidate, allow_alpha_masks=True) and not rule_profile.enable_context_masked_text:
-        full_text_candidate = ""
-    if rule_profile.enable_full_text_address and self._should_collect_full_text_address(raw_text, full_text_candidate, rule_profile=rule_profile):
-        extracted = self._extract_match(
-            raw_text,
-            0,
-            len(raw_text),
-            cleaner=self._clean_address_candidate,
-            original_text=original_text,
-            shadow_index_map=shadow_index_map,
-        )
-        if extracted is not None:
-            matched_text, span_start, span_end = extracted
-            confidence = self._address_confidence(full_text_candidate)
-            self._upsert_candidate(
-                collected=collected,
-                text=raw_text,
-                matched_text=matched_text,
-                attr_type=PIIAttributeType.ADDRESS,
-                source=source,
-                bbox=bbox,
-                block_id=block_id,
-                span_start=span_start,
-                span_end=span_end,
-                confidence=confidence,
-                matched_by="heuristic_address_fragment",
-                skip_spans=skip_spans,
-            )
-    address_patterns = list(_ADDRESS_SPAN_PATTERNS)
-    if self._supports_en():
-        address_patterns.extend(_EN_ADDRESS_SPAN_PATTERNS)
-    for pattern in address_patterns:
-        for match in pattern.finditer(raw_text):
-            extracted = self._extract_match(
-                raw_text,
-                *match.span(0),
-                cleaner=self._clean_address_candidate,
-                original_text=original_text,
-                shadow_index_map=shadow_index_map,
-            )
-            if extracted is None:
-                continue
-            value, span_start, span_end = extracted
-            if self._contains_mask_char(value, allow_alpha_masks=True) and not rule_profile.enable_context_masked_text:
-                continue
-            if not self._looks_like_address_candidate(value, min_confidence=rule_profile.address_min_confidence):
-                continue
-            self._upsert_candidate(
-                collected=collected,
-                text=raw_text,
-                matched_text=value,
-                attr_type=PIIAttributeType.ADDRESS,
-                source=source,
-                bbox=bbox,
-                block_id=block_id,
-                span_start=span_start,
-                span_end=span_end,
-                confidence=self._address_confidence(value),
-                matched_by="regex_address_span",
-                skip_spans=skip_spans,
-            )
-
 def _collect_geo_fragment_hits(
     self,
     collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
@@ -1048,7 +968,7 @@ def _collect_geo_fragment_hits(
     original_text: str | None = None,
     shadow_index_map: tuple[int | None, ...] | None = None,
 ) -> None:
-    """用内置地名词库和通用地理后缀规则补充地址/地名碎片。"""
+    """用内置地名词库和通用地理后缀规则补充 location clue。"""
     local_skip_spans = list(skip_spans)
     confidence_text = original_text or raw_text
     builtin_matches = sorted(
@@ -1068,13 +988,12 @@ def _collect_geo_fragment_hits(
         value, span_start, span_end = extracted
         if self._overlaps_any_span(span_start, span_end, local_skip_spans):
             continue
-        attr_type = self._geo_candidate_attr_type(value)
         confidence = self._geo_fragment_confidence(
             confidence_text,
             span_start,
             span_end,
             value=value,
-            attr_type=attr_type,
+            attr_type=PIIAttributeType.LOCATION_CLUE,
             is_builtin_token=True,
             rule_profile=rule_profile,
         )
@@ -1084,7 +1003,7 @@ def _collect_geo_fragment_hits(
             collected=collected,
             text=raw_text,
             matched_text=value,
-            attr_type=attr_type,
+            attr_type=PIIAttributeType.LOCATION_CLUE,
             source=source,
             bbox=bbox,
             block_id=block_id,
@@ -1108,13 +1027,12 @@ def _collect_geo_fragment_hits(
             value, span_start, span_end = extracted
             if self._overlaps_any_span(span_start, span_end, local_skip_spans):
                 continue
-            attr_type = self._geo_candidate_attr_type(value)
             confidence = self._geo_fragment_confidence(
                 confidence_text,
                 span_start,
                 span_end,
                 value=value,
-                attr_type=attr_type,
+                attr_type=PIIAttributeType.LOCATION_CLUE,
                 is_builtin_token=False,
                 rule_profile=rule_profile,
             )
@@ -1124,7 +1042,7 @@ def _collect_geo_fragment_hits(
                 collected=collected,
                 text=raw_text,
                 matched_text=value,
-                attr_type=attr_type,
+                attr_type=PIIAttributeType.LOCATION_CLUE,
                 source=source,
                 bbox=bbox,
                 block_id=block_id,

@@ -40,6 +40,194 @@ def _strip_ocr_break_edge_noise(self, value: str) -> str:
         if cleaned == previous:
             return cleaned
 
+
+def _active_ocr_context(self, raw_text: str) -> tuple[_OCRPageDocument | None, _OCRSceneIndex | None]:
+    document = getattr(self, "_active_ocr_page_document", None)
+    scene_index = getattr(self, "_active_ocr_scene_index", None)
+    if document is None or scene_index is None:
+        return None, None
+    if document.text != raw_text:
+        return None, None
+    return document, scene_index
+
+
+def _ocr_span_block_indices(
+    self,
+    raw_text: str,
+    span_start: int,
+    span_end: int,
+) -> tuple[int, ...]:
+    document, _ = self._active_ocr_context(raw_text)
+    if document is None:
+        return ()
+    covered = [
+        ref[0]
+        for ref in document.char_refs[max(0, span_start) : min(len(document.char_refs), span_end)]
+        if ref is not None
+    ]
+    return tuple(dict.fromkeys(covered))
+
+
+def _contains_field_keyword(self, text: str) -> bool:
+    cleaned = self._clean_extracted_value(text)
+    if not cleaned:
+        return False
+    lowered = cleaned.lower()
+    for keyword in self._all_field_keywords():
+        if any("\u4e00" <= char <= "\u9fff" for char in keyword):
+            if keyword in cleaned:
+                return True
+            continue
+        if re.search(rf"(?<![A-Za-z]){re.escape(keyword.lower())}(?![A-Za-z])", lowered):
+            return True
+    return False
+
+
+def _ocr_block_pii_context_signal(self, text: str) -> float:
+    cleaned = self._clean_extracted_value(text)
+    if not cleaned:
+        return 0.0
+    lowered = cleaned.lower()
+    score = 0.0
+    if self._contains_field_keyword(cleaned):
+        score += 0.14
+    if any(token in lowered for token in ("phone", "mobile", "email", "address", "contact", "account", "card", "id", "passport", "license")):
+        score += 0.08
+    if any(token in cleaned for token in ("电话", "手机", "邮箱", "地址", "住址", "联系人", "证件", "护照", "账号", "账户", "银行卡", "微信号")):
+        score += 0.08
+    if self._is_email_candidate(cleaned):
+        score += 0.12
+    if self._is_context_phone_candidate(cleaned) or self._is_id_candidate(cleaned):
+        score += 0.1
+    if self._looks_like_address_candidate(cleaned, min_confidence=0.45):
+        score += 0.06
+    if any(
+        token in lowered
+        for token in (
+            "following",
+            "followers",
+            "likes",
+            "edit profile",
+            "share profile",
+            "add bio",
+        )
+    ):
+        score += 0.08
+    if any(token in cleaned for token in ("粉丝", "关注", "获赞", "编辑资料", "个人资料", "简介")):
+        score += 0.08
+    return min(0.24, score)
+
+
+def _is_relevant_vertical_ocr_neighbor(
+    self,
+    source_block: OCRTextBlock,
+    neighbor_block: OCRTextBlock,
+) -> bool:
+    if source_block.bbox is None or neighbor_block.bbox is None:
+        return False
+    avg_height = (source_block.bbox.height + neighbor_block.bbox.height) / 2
+    align_threshold = self._clamped_ocr_tolerance(avg_height, ratio=2.4, min_px=18.0, max_px=96.0)
+    center_x_delta = abs(
+        (source_block.bbox.x + source_block.bbox.width / 2) - (neighbor_block.bbox.x + neighbor_block.bbox.width / 2)
+    )
+    horizontal_overlap = max(
+        0.0,
+        min(source_block.bbox.x + source_block.bbox.width, neighbor_block.bbox.x + neighbor_block.bbox.width)
+        - max(source_block.bbox.x, neighbor_block.bbox.x),
+    )
+    min_width = max(1.0, min(source_block.bbox.width, neighbor_block.bbox.width))
+    return center_x_delta <= align_threshold or horizontal_overlap / min_width >= 0.18
+
+
+def _ocr_neighbor_pii_context_score(
+    self,
+    raw_text: str,
+    span_start: int,
+    span_end: int,
+) -> float:
+    document, scene_index = self._active_ocr_context(raw_text)
+    if document is None or scene_index is None:
+        return 0.0
+    block_indices = self._ocr_span_block_indices(raw_text, span_start, span_end)
+    if not block_indices:
+        return 0.0
+    weighted_neighbors: dict[int, float] = {}
+    for block_index in block_indices:
+        position = scene_index.position_by_block_index.get(block_index)
+        if position is None:
+            continue
+        line_index, item_index = position
+        line = scene_index.lines[line_index]
+        for offset in (-2, -1, 1, 2):
+            neighbor_pos = item_index + offset
+            if not 0 <= neighbor_pos < len(line):
+                continue
+            neighbor_block_index = line[neighbor_pos]
+            if neighbor_block_index in block_indices:
+                continue
+            weight = 0.9 if abs(offset) == 1 else 0.65
+            weighted_neighbors[neighbor_block_index] = max(weighted_neighbors.get(neighbor_block_index, 0.0), weight)
+        for line_offset in (-4, -3, -2, -1, 1, 2, 3, 4):
+            neighbor_line_index = line_index + line_offset
+            if not 0 <= neighbor_line_index < len(scene_index.lines):
+                continue
+            for neighbor_block_index in scene_index.lines[neighbor_line_index]:
+                if neighbor_block_index in block_indices:
+                    continue
+                neighbor_block = document.blocks[neighbor_block_index]
+                if not self._is_relevant_vertical_ocr_neighbor(document.blocks[block_index], neighbor_block):
+                    continue
+                if abs(line_offset) == 1:
+                    weight = 0.75
+                elif abs(line_offset) == 2:
+                    weight = 0.5
+                elif abs(line_offset) == 3:
+                    weight = 0.35
+                else:
+                    weight = 0.25
+                weighted_neighbors[neighbor_block_index] = max(weighted_neighbors.get(neighbor_block_index, 0.0), weight)
+    score = 0.0
+    for neighbor_block_index, weight in weighted_neighbors.items():
+        score += min(0.24, self._ocr_block_pii_context_signal(document.blocks[neighbor_block_index].text)) * weight
+    return min(0.18, score)
+
+
+def _detected_candidate_context_score(
+    self,
+    raw_text: str,
+    span_start: int,
+    span_end: int,
+) -> float:
+    context_text = getattr(self, "_active_standalone_context_text", None)
+    candidates = getattr(self, "_active_standalone_context_candidates", ())
+    if context_text != raw_text or not candidates:
+        return 0.0
+    score = 0.0
+    window_left = max(0, span_start - 80)
+    window_right = min(len(raw_text), span_end + 80)
+    for candidate in candidates:
+        if candidate.attr_type == PIIAttributeType.NAME:
+            continue
+        if candidate.span_start is None or candidate.span_end is None:
+            continue
+        if candidate.span_end <= window_left or candidate.span_start >= window_right:
+            continue
+        distance = 0
+        if candidate.span_end <= span_start:
+            distance = span_start - candidate.span_end
+        elif candidate.span_start >= span_end:
+            distance = candidate.span_start - span_end
+        weight = 1.0 - min(1.0, distance / 80.0)
+        if weight <= 0.0:
+            continue
+        base = 0.12
+        if candidate.attr_type in {PIIAttributeType.PHONE, PIIAttributeType.EMAIL, PIIAttributeType.ID_NUMBER, PIIAttributeType.CARD_NUMBER, PIIAttributeType.BANK_ACCOUNT, PIIAttributeType.PASSPORT_NUMBER, PIIAttributeType.DRIVER_LICENSE, PIIAttributeType.ADDRESS}:
+            base = 0.18
+        elif candidate.attr_type in {PIIAttributeType.ORGANIZATION, PIIAttributeType.LOCATION_CLUE}:
+            base = 0.1
+        score += base * weight
+    return min(0.3, score)
+
 def _clean_address_candidate(self, value: str) -> str:
     """清理地址候选前后的连接词与标点。"""
     cleaned = self._clean_extracted_value(value)
@@ -105,10 +293,270 @@ def _starts_with_geo_or_activity(self, value: str) -> bool:
     return any(compact.startswith(token) or compact_lower.startswith(token.lower()) for token in _LOCATION_CLUE_TOKENS)
 
 def _is_ui_operation_name_token(self, value: str) -> bool:
-    compact = re.sub(r"\s+", "", self._clean_extracted_value(value))
+    cleaned = self._clean_extracted_value(value)
+    compact = re.sub(r"\s+", "", cleaned)
+    lowered = re.sub(r"\s+", " ", cleaned).strip().lower()
     if not compact:
         return False
-    return compact in _UI_OPERATION_NAME_WHITELIST or compact.lower() in _UI_OPERATION_NAME_WHITELIST
+    if compact in _UI_NEGATIVE_TERMS_ZH:
+        return True
+    if lowered in _UI_NEGATIVE_PHRASES_EN or cleaned in _UI_NEGATIVE_PHRASES_ZH:
+        return True
+    return any(token in lowered.split() for token in _UI_NEGATIVE_TERMS_EN)
+
+
+def _is_ui_or_commerce_location_token(self, value: str) -> bool:
+    cleaned = self._clean_extracted_value(value)
+    compact = re.sub(r"\s+", "", cleaned)
+    lowered = re.sub(r"\s+", " ", cleaned).strip().lower()
+    if not compact:
+        return False
+    if any(phrase in cleaned for phrase in _LOCATION_UI_NEGATIVE_PHRASES_ZH):
+        return True
+    if any(phrase in lowered for phrase in _LOCATION_UI_NEGATIVE_PHRASES_EN):
+        return True
+    if any(token in compact for token in _LOCATION_UI_NEGATIVE_TERMS_ZH):
+        return True
+    return any(token in lowered.split() for token in _LOCATION_UI_NEGATIVE_TERMS_EN)
+
+
+def _split_en_name_tokens(self, value: str) -> tuple[str, ...]:
+    cleaned = re.sub(r"\s+", " ", self._clean_extracted_value(value)).strip()
+    if not cleaned:
+        return ()
+    tokens = tuple(token for token in re.split(r"\s+", cleaned) if token)
+    if not tokens:
+        return ()
+    if not all(re.fullmatch(r"[A-Za-z][A-Za-z'\-]{0,24}", token) for token in tokens):
+        return ()
+    return tokens
+
+
+def _is_blacklisted_english_name_phrase(self, value: str) -> bool:
+    lowered = re.sub(r"\s+", " ", self._clean_extracted_value(value)).strip().lower()
+    if not lowered:
+        return False
+    if lowered in _NON_PERSON_PHRASES_EN:
+        return True
+    if lowered in _UI_NEGATIVE_PHRASES_EN:
+        return True
+    tokens = tuple(token for token in re.split(r"\s+", lowered) if token)
+    return bool(tokens) and any(token in _NON_PERSON_TOKENS_EN or token in _UI_NEGATIVE_TERMS_EN for token in tokens)
+
+
+def _english_given_name_weight(self, token: str) -> float:
+    lowered = token.strip().lower()
+    if lowered in _BUILTIN_EN_NAME_LEXICON.given_tier_a:
+        return 0.26
+    if lowered in _BUILTIN_EN_NAME_LEXICON.given_tier_b:
+        return 0.18
+    if lowered in _BUILTIN_EN_NAME_LEXICON.given_tier_c:
+        return 0.1
+    return 0.0
+
+
+def _english_surname_weight(self, token: str) -> float:
+    lowered = token.strip().lower()
+    if lowered in _BUILTIN_EN_NAME_LEXICON.surname_tier_a:
+        return 0.24
+    if lowered in _BUILTIN_EN_NAME_LEXICON.surname_tier_b:
+        return 0.16
+    if lowered in _BUILTIN_EN_NAME_LEXICON.surname_tier_c:
+        return 0.08
+    return 0.0
+
+
+def _english_geo_phrase_weight(self, value: str) -> float:
+    lowered = re.sub(r"\s+", " ", self._clean_extracted_value(value)).strip().lower()
+    if not lowered:
+        return 0.0
+    if lowered in _BUILTIN_EN_GEO_LEXICON.tier_a_state_names or lowered in _BUILTIN_EN_GEO_LEXICON.tier_a_state_codes:
+        return 0.32
+    if lowered in _BUILTIN_EN_GEO_LEXICON.tier_b_places:
+        return 0.24
+    if lowered in _BUILTIN_EN_GEO_LEXICON.tier_c_places:
+        return 0.12
+    return 0.0
+
+
+def _nearby_pii_context_score(self, raw_text: str, span_start: int, span_end: int) -> float:
+    window = self._match_context_window(raw_text, span_start, span_end, radius=56)
+    lowered = window.lower()
+    score = 0.0
+    if any(token in window for token in ("<PHONE>", "<EMAIL>", "<ADDR>", "<ID>", "<CARD>", "<ACCOUNT>", "<ORG>")):
+        score += 0.16
+    if any(
+        token in lowered
+        for token in (
+            "phone",
+            "mobile",
+            "email",
+            "address",
+            "passport",
+            "license",
+            "driver",
+            "account",
+            "card",
+            "contact",
+            "profile",
+            "id",
+        )
+    ):
+        score += 0.08
+    if any(token in window for token in ("电话", "手机", "邮箱", "地址", "住址", "证件", "护照", "银行卡", "联系人")):
+        score += 0.08
+    if re.search(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", window):
+        score += 0.12
+    if re.search(r"(?:\+?1[\s\-._()]*)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[\s\-._()]*\d{3}[\s\-._()]*\d{4}", window):
+        score += 0.12
+    if re.search(r"(?:1[3-9]\d{9}|[1-9]\d{5}[12]\d{3}[01]\d[0-3]\d[\dXx])", window):
+        score += 0.1
+    if _EN_ADDRESS_SUFFIX_PATTERN.search(window) or _EN_POSTAL_CODE_PATTERN.search(window):
+        score += 0.06
+    score += self._detected_candidate_context_score(raw_text, span_start, span_end)
+    score += self._ocr_neighbor_pii_context_score(raw_text, span_start, span_end)
+    return min(0.42, score)
+
+
+def _standalone_name_confidence(
+    self,
+    raw_text: str,
+    span_start: int,
+    span_end: int,
+    *,
+    value: str,
+    source: PIISourceType,
+    rule_profile: _RuleStrengthProfile,
+) -> float:
+    cleaned = self._clean_extracted_value(value)
+    compact = self._compact_name_value(cleaned, allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG)
+    if not compact:
+        return 0.0
+    if self._is_ui_operation_name_token(compact):
+        return 0.0
+    if any(char.isalpha() and char.isascii() for char in cleaned) and not any(self._is_cjk_char(char) for char in cleaned):
+        return self._english_standalone_name_confidence(
+            raw_text,
+            span_start,
+            span_end,
+            value=cleaned,
+            source=source,
+            rule_profile=rule_profile,
+        )
+    return self._zh_standalone_name_confidence(
+        raw_text,
+        span_start,
+        span_end,
+        value=compact,
+        source=source,
+        rule_profile=rule_profile,
+    )
+
+
+def _english_standalone_name_confidence(
+    self,
+    raw_text: str,
+    span_start: int,
+    span_end: int,
+    *,
+    value: str,
+    source: PIISourceType,
+    rule_profile: _RuleStrengthProfile,
+) -> float:
+    if rule_profile.level == ProtectionLevel.WEAK:
+        return 0.0
+    if self._is_blacklisted_english_name_phrase(value):
+        return 0.0
+    tokens = self._split_en_name_tokens(value)
+    if len(tokens) < 2 or len(tokens) > 3:
+        return 0.0
+    lowered_tokens = tuple(token.lower() for token in tokens)
+    if any(token in _NON_PERSON_TOKENS_EN for token in lowered_tokens):
+        return 0.0
+    if any(
+        token.rstrip(".") in {suffix.rstrip(".").lower() for suffix in (*_EN_ORGANIZATION_STRONG_SUFFIXES, *_EN_ORGANIZATION_WEAK_SUFFIXES)}
+        for token in lowered_tokens
+    ):
+        return 0.0
+    if any(token in _BUILTIN_EN_GEO_LEXICON.tier_a_state_codes for token in lowered_tokens):
+        return 0.0
+    full_geo_weight = self._english_geo_phrase_weight(value)
+    given_weight = self._english_given_name_weight(tokens[0])
+    surname_weight = self._english_surname_weight(tokens[-1])
+    lexicon_support = given_weight + surname_weight
+    pii_support = self._nearby_pii_context_score(raw_text, span_start, span_end)
+    full_text = self._clean_extracted_value(raw_text)
+    tight_window = self._clean_extracted_value(raw_text[max(0, span_start - 2):min(len(raw_text), span_end + 2)])
+    exact_block_like = full_text == value or (value in tight_window and len(tight_window) <= len(value) + 2)
+    ocr_profile_support = source == PIISourceType.OCR and exact_block_like and pii_support >= 0.12
+    if pii_support < 0.08:
+        return 0.0
+    if full_geo_weight >= 0.24 and lexicon_support < 0.24 and pii_support < 0.18:
+        return 0.0
+    if lexicon_support <= 0.0 and not ocr_profile_support and pii_support < 0.18:
+        return 0.0
+    if surname_weight <= 0.0 and not ocr_profile_support and pii_support < 0.24:
+        return 0.0
+    score = 0.34
+    score += lexicon_support
+    if ocr_profile_support and lexicon_support <= 0.0:
+        score += 0.14
+    if given_weight > 0.0 and surname_weight > 0.0:
+        score += 0.1
+    elif lexicon_support > 0.0:
+        score += 0.04
+    score += pii_support
+    if full_text == value:
+        score += 0.06 if source == PIISourceType.OCR else 0.02
+    if source == PIISourceType.OCR:
+        if value in tight_window and len(tight_window) <= len(value) + 2:
+            score += 0.04
+    threshold = 0.7 if source == PIISourceType.OCR else 0.74
+    return min(0.9, score) if score >= threshold else 0.0
+
+
+def _zh_standalone_name_confidence(
+    self,
+    raw_text: str,
+    span_start: int,
+    span_end: int,
+    *,
+    value: str,
+    source: PIISourceType,
+    rule_profile: _RuleStrengthProfile,
+) -> float:
+    if source != PIISourceType.OCR and rule_profile.level != ProtectionLevel.STRONG:
+        return 0.0
+    if source == PIISourceType.OCR and rule_profile.level == ProtectionLevel.WEAK:
+        return 0.0
+    if any(value.endswith(suffix) for suffix in _NAME_STANDALONE_NEGATIVE_SUFFIXES):
+        return 0.0
+    if any(token in value for token in _NON_PERSON_TOKENS):
+        return 0.0
+    is_compound = value[:2] in _COMMON_COMPOUND_SURNAMES
+    if is_compound:
+        if not 3 <= len(value) <= 4:
+            return 0.0
+    elif not 2 <= len(value) <= 3:
+        return 0.0
+    if not is_compound and value[0] not in _COMMON_SINGLE_CHAR_SURNAMES:
+        return 0.0
+    pii_support = self._nearby_pii_context_score(raw_text, span_start, span_end) if source == PIISourceType.OCR else 0.0
+    if source == PIISourceType.OCR and pii_support < 0.08:
+        return 0.0
+    full_text = self._clean_extracted_value(raw_text)
+    if full_text == value:
+        if source == PIISourceType.OCR:
+            base = 0.74 if rule_profile.level == ProtectionLevel.BALANCED else 0.82
+            return min(0.9, base + pii_support)
+        return 0.9
+    if source == PIISourceType.OCR:
+        window = self._clean_extracted_value(raw_text[max(0, span_start - 2):min(len(raw_text), span_end + 2)])
+        if value in window and len(window) <= len(value) + 2:
+            base = 0.68 if rule_profile.level == ProtectionLevel.BALANCED else 0.78
+            return min(0.88, base + pii_support)
+    return 0.0
+
 
 def _generic_name_confidence(
     self,
@@ -143,16 +591,7 @@ def _generic_name_confidence(
         right_char is None or not self._is_cjk_char(right_char)
     )
     if standalone:
-        if source == PIISourceType.OCR:
-            return self._ocr_standalone_name_confidence(
-                raw_text,
-                span_start,
-                span_end,
-                value=value,
-                source=source,
-                rule_profile=rule_profile,
-            )
-        return self._strong_standalone_name_confidence(
+        return self._standalone_name_confidence(
             raw_text,
             span_start,
             span_end,
@@ -170,6 +609,7 @@ def _generic_name_confidence(
         return 0.0
     return 0.0
 
+
 def _ocr_standalone_name_confidence(
     self,
     raw_text: str,
@@ -180,30 +620,15 @@ def _ocr_standalone_name_confidence(
     source: PIISourceType,
     rule_profile: _RuleStrengthProfile,
 ) -> float:
-    if source != PIISourceType.OCR or rule_profile.level == ProtectionLevel.WEAK:
-        return 0.0
-    compact = self._compact_name_value(value, allow_ocr_noise=rule_profile.level == ProtectionLevel.STRONG)
-    if not compact:
-        return 0.0
-    if self._is_ui_operation_name_token(compact):
-        return 0.0
-    if any(compact.endswith(suffix) for suffix in _NAME_STANDALONE_NEGATIVE_SUFFIXES):
-        return 0.0
-    if any(token in compact for token in _NON_PERSON_TOKENS):
-        return 0.0
-    is_compound = compact[:2] in _COMMON_COMPOUND_SURNAMES
-    if is_compound:
-        if not 3 <= len(compact) <= 4:
-            return 0.0
-    elif not 2 <= len(compact) <= 3:
-        return 0.0
-    full_text = self._clean_extracted_value(raw_text)
-    if full_text == value:
-        return 0.82 if rule_profile.level == ProtectionLevel.BALANCED else 0.9
-    window = self._clean_extracted_value(raw_text[max(0, span_start - 2):min(len(raw_text), span_end + 2)])
-    if value in window and len(window) <= len(value) + 2:
-        return 0.74 if rule_profile.level == ProtectionLevel.BALANCED else 0.86
-    return 0.0
+    return self._standalone_name_confidence(
+        raw_text,
+        span_start,
+        span_end,
+        value=value,
+        source=source,
+        rule_profile=rule_profile,
+    )
+
 
 def _strong_standalone_name_confidence(
     self,
@@ -215,29 +640,14 @@ def _strong_standalone_name_confidence(
     source: PIISourceType,
     rule_profile: _RuleStrengthProfile,
 ) -> float:
-    if rule_profile.level != ProtectionLevel.STRONG:
-        return 0.0
-    compact = self._compact_name_value(value, allow_ocr_noise=False)
-    if not compact:
-        return 0.0
-    if any(compact.endswith(suffix) for suffix in _NAME_STANDALONE_NEGATIVE_SUFFIXES):
-        return 0.0
-    if any(token in compact for token in _NON_PERSON_TOKENS):
-        return 0.0
-    is_compound = compact[:2] in _COMMON_COMPOUND_SURNAMES
-    if is_compound:
-        if not 3 <= len(compact) <= 4:
-            return 0.0
-    elif not 2 <= len(compact) <= 3:
-        return 0.0
-    full_text = self._clean_extracted_value(raw_text)
-    if full_text == value:
-        return 0.9
-    if source == PIISourceType.OCR:
-        window = self._clean_extracted_value(raw_text[max(0, span_start - 2):min(len(raw_text), span_end + 2)])
-        if value in window and len(window) <= len(value) + 2:
-            return 0.86
-    return 0.0
+    return self._standalone_name_confidence(
+        raw_text,
+        span_start,
+        span_end,
+        value=value,
+        source=source,
+        rule_profile=rule_profile,
+    )
 
 def _is_cjk_char(self, char: str) -> bool:
     return bool(char) and "\u4e00" <= char <= "\u9fff"
@@ -487,8 +897,10 @@ def _is_name_candidate(self, value: str) -> bool:
     if self._looks_like_address_candidate(compact):
         return False
     if re.fullmatch(r"[A-Za-z][A-Za-z .'\-]{1,40}", cleaned):
-        tokens = [token for token in re.split(r"\s+", cleaned.strip()) if token]
+        tokens = list(self._split_en_name_tokens(cleaned))
         if not tokens or len(tokens) > 3:
+            return False
+        if self._is_blacklisted_english_name_phrase(cleaned):
             return False
         if any(token.lower() in _NON_PERSON_TOKENS_EN for token in tokens):
             return False
@@ -497,9 +909,14 @@ def _is_name_candidate(self, value: str) -> bool:
             for token in tokens
         ):
             return False
+        if len(tokens) == 1:
+            token = tokens[0].lower()
+            if token in _EN_GEO_ALL_TOKENS and self._english_given_name_weight(tokens[0]) <= 0.0 and self._english_surname_weight(tokens[0]) <= 0.0:
+                return False
+            return len(tokens[0]) >= 3
         if len(tokens) >= 2 and all(re.fullmatch(r"[A-Za-z][A-Za-z'\-]{0,20}", token) for token in tokens):
             return True
-        return len(tokens) == 1 and len(tokens[0]) >= 3
+        return False
     if re.fullmatch(r"[一-龥][*＊xX某]{1,3}", compact):
         return True
     if "·" in compact and re.fullmatch(r"[一-龥]{1,4}·[一-龥]{1,6}", compact):
@@ -525,7 +942,14 @@ def _is_family_name_candidate(self, value: str) -> bool:
         return True
     if len(compact) == 1 and compact[0] in _COMMON_SINGLE_CHAR_SURNAMES:
         return True
-    return bool(re.fullmatch(r"[A-Za-z][A-Za-z'\-]{1,24}", cleaned))
+    if not re.fullmatch(r"[A-Za-z][A-Za-z'\-]{1,24}", cleaned):
+        return False
+    if self._is_blacklisted_english_name_phrase(cleaned):
+        return False
+    lowered = cleaned.lower()
+    if lowered in _EN_GEO_ALL_TOKENS and self._english_surname_weight(cleaned) <= 0.0:
+        return False
+    return True
 
 
 def _is_given_name_candidate(self, value: str) -> bool:
@@ -540,7 +964,14 @@ def _is_given_name_candidate(self, value: str) -> bool:
         return False
     if re.fullmatch(r"[一-龥·]{1,6}", compact):
         return True
-    return bool(re.fullmatch(r"[A-Za-z][A-Za-z'\-]{1,24}", cleaned))
+    if not re.fullmatch(r"[A-Za-z][A-Za-z'\-]{1,24}", cleaned):
+        return False
+    if self._is_blacklisted_english_name_phrase(cleaned):
+        return False
+    lowered = cleaned.lower()
+    if lowered in _EN_GEO_ALL_TOKENS and self._english_given_name_weight(cleaned) <= 0.0:
+        return False
+    return True
 
 
 def _is_middle_name_candidate(self, value: str) -> bool:
@@ -582,15 +1013,21 @@ def _is_organization_candidate(self, value: str, *, allow_weak_suffix: bool = Tr
     """判断是否像机构名。"""
     cleaned = self._clean_organization_candidate(value)
     compact = re.sub(r"\s+", "", cleaned)
+    lowered = re.sub(r"\s+", " ", cleaned).strip().lower()
     if not compact or compact in _ORGANIZATION_BLACKLIST:
         return False
     if compact in _ADDRESS_FIELD_KEYWORDS or compact in _NAME_FIELD_KEYWORDS:
+        return False
+    if lowered in _UI_NEGATIVE_PHRASES_EN or cleaned in _UI_NEGATIVE_PHRASES_ZH:
         return False
     if self._looks_like_address_candidate(compact):
         return False
     if self._is_name_candidate(cleaned):
         return False
     if self._supports_en() and re.fullmatch(r"[A-Za-z][A-Za-z0-9 .&'\-]{2,64}", cleaned):
+        tokens = tuple(token for token in re.split(r"\s+", lowered) if token)
+        if tokens and any(token in _UI_NEGATIVE_TERMS_EN for token in tokens):
+            return False
         strong_en, weak_en = self._has_en_organization_suffix(cleaned, allow_weak_suffix=allow_weak_suffix)
         if strong_en or weak_en:
             return len(cleaned.replace(" ", "")) >= 4
@@ -657,9 +1094,6 @@ def _looks_like_name_with_title(self, value: str) -> bool:
         return core in _COMMON_SINGLE_CHAR_SURNAMES
     return self._is_name_candidate(core)
 
-def _geo_candidate_attr_type(self, value: str) -> PIIAttributeType:
-    return PIIAttributeType.LOCATION_CLUE
-
 def _geo_fragment_confidence(
     self,
     raw_text: str,
@@ -672,6 +1106,8 @@ def _geo_fragment_confidence(
     rule_profile: _RuleStrengthProfile,
 ) -> float:
     """根据几何边界和上下文估计地名/地址碎片置信度。"""
+    if attr_type == PIIAttributeType.LOCATION_CLUE and self._is_ui_or_commerce_location_token(value):
+        return 0.0
     left_char = self._previous_significant_char(raw_text, span_start)
     right_char = self._next_significant_char(raw_text, span_end)
     left_open = left_char is None or not self._is_cjk_char(left_char)
@@ -709,6 +1145,10 @@ def _english_address_confidence(self, value: str) -> float:
         return 0.0
     score = 0.0
     lowered = cleaned.lower()
+    has_state_name = bool(_EN_GEO_TIER_A_STATE_PATTERN.search(cleaned))
+    has_state_code = bool(_EN_GEO_TIER_A_CODE_PATTERN.search(cleaned))
+    has_major_place = bool(_EN_GEO_TIER_B_PATTERN.search(cleaned))
+    has_city_clue = bool(_EN_GEO_TIER_C_PATTERN.search(cleaned))
     if _EN_PO_BOX_PATTERN.search(cleaned):
         score += 0.62
     if _EN_ADDRESS_NUMBER_PATTERN.search(cleaned):
@@ -717,10 +1157,14 @@ def _english_address_confidence(self, value: str) -> float:
         score += 0.32
     if _EN_ADDRESS_UNIT_PATTERN.search(cleaned):
         score += 0.12
-    if _EN_STATE_OR_REGION_PATTERN.search(cleaned):
+    if _EN_STATE_OR_REGION_PATTERN.search(cleaned) or has_state_name or has_state_code:
         score += 0.12
     if _EN_POSTAL_CODE_PATTERN.search(cleaned):
         score += 0.14
+    if has_major_place:
+        score += 0.12
+    if has_city_clue and (_EN_STATE_OR_REGION_PATTERN.search(cleaned) or has_state_name or has_state_code or _EN_POSTAL_CODE_PATTERN.search(cleaned) or _EN_ADDRESS_SUFFIX_PATTERN.search(cleaned)):
+        score += 0.08
     if any(keyword in lowered for keyword in ("address", "street", "road", "avenue", "boulevard", "drive", "lane", "suite", "unit")):
         score += 0.08
     return min(0.96, score)
@@ -771,25 +1215,6 @@ def _looks_like_masked_address_candidate(
     if _ADDRESS_SUFFIX_PATTERN.search(compact):
         confidence += 0.06
     return confidence >= min_confidence
-
-def _should_collect_full_text_address(
-    self,
-    raw_text: str,
-    cleaned: str,
-    *,
-    rule_profile: _RuleStrengthProfile,
-) -> bool:
-    """仅在整段文本本身已经像独立地址片段时才直接收整段。"""
-    if _OCR_SEMANTIC_BREAK_TOKEN in raw_text:
-        return False
-    if not self._looks_like_address_candidate(cleaned, min_confidence=rule_profile.address_min_confidence):
-        return False
-    base_text = self._clean_extracted_value(raw_text)
-    if sum(1 for _ in self.field_label_pattern.finditer(base_text)) > 1:
-        return False
-    if re.search(r"[，,。！？；;、]", base_text):
-        return False
-    return len(base_text) - len(cleaned) <= 6
 
 def _address_confidence(self, value: str) -> float:
     """根据地址信号强度计算置信度。"""

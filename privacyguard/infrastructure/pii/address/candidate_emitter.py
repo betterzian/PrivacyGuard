@@ -20,7 +20,7 @@ def emit_candidates(
     shadow_index_map: tuple[int | None, ...] | None = None,
 ) -> None:
     for result in parse_results:
-        if result.address_kind not in {"private_address", "unknown"}:
+        if result.address_kind == "organization_like":
             if config.emit_location_candidates:
                 _emit_location_components(
                     detector,
@@ -67,9 +67,28 @@ def emit_candidates(
 
 
 def _should_emit_whole_address(result: AddressParseResult) -> bool:
+    if result.address_kind == "unknown":
+        return False
+    if len(result.components) == 1:
+        single = result.components[0]
+        if (
+            result.span.matched_by != "context_address_field"
+            and single.component_type in {"province", "city", "district", "county", "state"}
+        ):
+            return False
+        if (
+            result.span.matched_by != "context_address_field"
+            and single.component_type == "compound"
+            and single.privacy_level != "fine"
+        ):
+            return False
     if result.address_kind == "private_address":
+        if result.span.matched_by != "context_address_field" and result.components and all(
+            component.privacy_level == "coarse" for component in result.components
+        ):
+            return False
         return True
-    if result.span.matched_by == "context_address_field" and len(result.components) >= 1:
+    if result.span.matched_by == "context_address_field" and (len(result.components) >= 1 or len(result.span.text.strip()) >= 2):
         return True
     if any(component.component_type in {"street", "road", "compound"} for component in result.components) and len(result.components) >= 2:
         return True
@@ -100,11 +119,15 @@ def _emit_whole_address_candidate(
     if extracted is None:
         return None
     value, span_start, span_end = extracted
+    component_types = _ordered_unique(component.component_type for component in result.components)
+    privacy_levels = _ordered_unique(component.privacy_level for component in result.components)
+    component_trace = [f"{component.component_type}:{component.text}" for component in result.components]
     metadata = {
         "address_kind": [result.address_kind],
         "address_terminated_by": [result.span.terminated_by],
-        "address_component_type": sorted({component.component_type for component in result.components}),
-        "address_privacy_level": sorted({component.privacy_level for component in result.components}),
+        "address_component_type": component_types,
+        "address_privacy_level": privacy_levels,
+        "address_component_trace": component_trace,
     }
     detector._upsert_candidate(
         collected=collected,
@@ -161,6 +184,7 @@ def _emit_component_candidate(
             "address_component_type": [component.component_type],
             "address_privacy_level": [component.privacy_level],
             "address_match_origin": [result.span.matched_by],
+            "address_component_trace": [f"{component.component_type}:{component.text}"],
         },
         skip_spans=skip_spans,
     )
@@ -208,6 +232,7 @@ def _emit_location_components(
                 "address_kind": [result.address_kind],
                 "address_component_type": [component.component_type],
                 "address_privacy_level": [component.privacy_level],
+                "address_component_trace": [f"{component.component_type}:{component.text}"],
             },
             skip_spans=skip_spans,
         )
@@ -224,3 +249,14 @@ def _component_start_offset(value: str, component: AddressComponent) -> int | No
     if index >= 0:
         return index
     return None
+
+
+def _ordered_unique(values) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered

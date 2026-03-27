@@ -1,0 +1,55 @@
+{
+  "standalone_name_ui": {
+    "exact": [
+      "add",
+      "back",
+      "cancel",
+      "close",
+      "copy",
+      "delete",
+      "download",
+      "edit",
+      "forward",
+      "help",
+      "home",
+      "message",
+      "messages",
+      "notification",
+      "notifications",
+      "open",
+      "reply",
+      "save",
+      "search",
+      "send",
+      "settings",
+      "share",
+      "support",
+      "threads",
+      "upload"
+    ],
+    "contains": [
+      "add bio",
+      "edit profile",
+      "new chat",
+      "search by name",
+      "show threadsbanner",
+      "switch accounts",
+      "sign out",
+      "your personal info",
+      "new community",
+      "share profile",
+      "edit banner",
+      "personal info",
+      "account center"
+    ]
+  },
+  "address_keyword_expansions": {
+    "road": ["roadshow"],
+    "street": ["streetwear", "streetball", "backstreet"],
+    "city": ["citywide"],
+    "state": ["statewide"],
+    "county": ["countywide"],
+    "town": ["townhouse", "downtown"],
+    "village": ["villager"]
+  }
+}

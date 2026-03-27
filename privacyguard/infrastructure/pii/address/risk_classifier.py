@@ -2,10 +2,54 @@ from __future__ import annotations
 
 from privacyguard.infrastructure.pii.address.component_parser_en import parse_en_components
 from privacyguard.infrastructure.pii.address.component_parser_zh import parse_zh_components
-from privacyguard.infrastructure.pii.address.lexicon import organization_suffix_tokens, public_place_suffixes
+from privacyguard.infrastructure.pii.address.lexicon import (
+    allow_explicit_label_address_value,
+    allow_single_component_address,
+    organization_suffix_tokens,
+    public_place_suffixes,
+)
 from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressParseConfig, AddressParseResult, AddressSpan
 
 _ZH_FINE_COMPOUND_SUFFIXES = ("小区", "公寓", "大厦", "社区", "宿舍", "花园", "家园")
+_ZH_COMPONENT_GROUP_ORDER = {
+    "country": 0,
+    "province": 1,
+    "state": 1,
+    "city": 2,
+    "district": 3,
+    "county": 3,
+    "street_admin": 4,
+    "town": 4,
+    "village": 5,
+    "street": 6,
+    "road": 6,
+    "compound": 7,
+    "poi": 7,
+    "building": 8,
+    "unit": 8,
+    "floor": 8,
+    "room": 8,
+    "postal_code": 9,
+    "po_box": 9,
+}
+_EN_COMPONENT_GROUP_ORDER = {
+    "country": 4,
+    "po_box": 1,
+    "street": 1,
+    "road": 1,
+    "compound": 1,
+    "poi": 1,
+    "building": 1,
+    "unit": 1,
+    "floor": 1,
+    "room": 1,
+    "city": 2,
+    "district": 2,
+    "county": 2,
+    "state": 3,
+    "province": 3,
+    "postal_code": 4,
+}
 
 
 def classify_spans(
@@ -44,31 +88,44 @@ def _classify_address_kind(span: AddressSpan, components: tuple[AddressComponent
     text = span.text.strip()
     lowered = text.lower()
     component_types = {component.component_type for component in components}
-    has_fine = any(component.privacy_level == "fine" for component in components)
-    has_street = "road" in component_types or "street" in component_types
-    has_locality = bool(component_types & {"province", "state", "city", "district", "postal_code"})
-    has_explicit_label = span.matched_by == "context_address_field"
-    has_po_box = "po_box" in component_types
-    residential_compound = any(
-        component.component_type == "compound" and component.text.endswith(_ZH_FINE_COMPOUND_SUFFIXES)
-        for component in components
-    )
-    public_place = any(lowered.endswith(token) for token in public_place_suffixes())
     organization_like = any(token in lowered for token in organization_suffix_tokens())
-
-    if has_po_box or has_fine:
+    has_explicit_label = span.matched_by == "context_address_field"
+    address_like_types = {
+        "country",
+        "province",
+        "city",
+        "district",
+        "county",
+        "street_admin",
+        "town",
+        "village",
+        "street",
+        "road",
+        "compound",
+        "building",
+        "unit",
+        "floor",
+        "room",
+        "postal_code",
+        "po_box",
+        "state",
+    }
+    if components:
+        if len(components) >= 2 and not _components_follow_expected_order(text, components):
+            return "unknown"
+        if len(components) == 1 and not allow_single_component_address(
+            components[0].component_type,
+            components[0].text,
+            matched_by=span.matched_by,
+            source_text=text,
+        ):
+            return "unknown"
+        if organization_like and not any(item in component_types for item in address_like_types - {"compound"}):
+            return "organization_like"
         return "private_address"
-    if has_explicit_label and (has_street or has_locality or residential_compound):
+    if has_explicit_label and allow_explicit_label_address_value(text):
         return "private_address"
-    if has_street and (has_locality or _has_numbered_street(text)):
-        return "private_address"
-    if residential_compound and (has_locality or has_street):
-        return "private_address"
-    if organization_like and not has_locality and not has_street:
-        return "organization_like"
-    if public_place or (span.terminated_by == "soft_stop" and not has_fine and not has_explicit_label):
-        return "public_place"
-    if has_locality and (has_street or residential_compound):
+    if text and any(lowered.endswith(token) for token in public_place_suffixes()):
         return "private_address"
     return "unknown"
 
@@ -80,18 +137,28 @@ def _result_confidence(span: AddressSpan, components: tuple[AddressComponent, ..
             confidence += 0.04
         elif len(components) >= 2:
             confidence += 0.02
-    elif kind == "public_place":
-        confidence -= 0.18
     elif kind == "organization_like":
         confidence -= 0.22
     else:
-        confidence -= 0.08
+        confidence -= 0.02
     return max(0.0, min(0.97, confidence))
 
 
-def _has_numbered_street(text: str) -> bool:
-    stripped = text.lstrip()
-    return bool(stripped) and stripped[0].isdigit()
+def _components_follow_expected_order(text: str, components: tuple[AddressComponent, ...]) -> bool:
+    group_order = _ZH_COMPONENT_GROUP_ORDER if any("\u4e00" <= char <= "\u9fff" for char in text) else _EN_COMPONENT_GROUP_ORDER
+    ordered_groups = [
+        group_order.get(component.component_type)
+        for component in components
+        if group_order.get(component.component_type) is not None
+    ]
+    if len(ordered_groups) < 2:
+        return True
+    previous = ordered_groups[0]
+    for current in ordered_groups[1:]:
+        if current < previous:
+            return False
+        previous = current
+    return True
 
 
 def _dedupe_results(results: list[AddressParseResult]) -> list[AddressParseResult]:
@@ -101,4 +168,19 @@ def _dedupe_results(results: list[AddressParseResult]) -> list[AddressParseResul
         previous = deduped.get(key)
         if previous is None or result.confidence > previous.confidence:
             deduped[key] = result
-    return sorted(deduped.values(), key=lambda item: (item.span.start, item.span.end))
+    ordered = sorted(
+        deduped.values(),
+        key=lambda item: (-(item.span.end - item.span.start), -item.confidence, item.span.start, item.span.end),
+    )
+    kept: list[AddressParseResult] = []
+    for result in ordered:
+        result_types = {component.component_type for component in result.components}
+        if any(
+            other.span.start <= result.span.start
+            and other.span.end >= result.span.end
+            and result_types.issubset({component.component_type for component in other.components})
+            for other in kept
+        ):
+            continue
+        kept.append(result)
+    return sorted(kept, key=lambda item: (item.span.start, item.span.end))

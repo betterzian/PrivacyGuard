@@ -88,6 +88,31 @@ class _BuiltinGeoLexicon:
     ordered_tokens: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _BuiltinEnglishGeoLexicon:
+    tier_a_state_names: frozenset[str]
+    tier_a_state_codes: frozenset[str]
+    tier_b_places: frozenset[str]
+    tier_c_places: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _BuiltinEnglishNameLexicon:
+    given_tier_a: frozenset[str]
+    given_tier_b: frozenset[str]
+    given_tier_c: frozenset[str]
+    surname_tier_a: frozenset[str]
+    surname_tier_b: frozenset[str]
+    surname_tier_c: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _UIKeywordBlacklist:
+    standalone_exact: frozenset[str]
+    standalone_contains: frozenset[str]
+    address_keyword_expansions: dict[str, frozenset[str]]
+
+
 def _normalize_geo_entries(values) -> tuple[str, ...]:
     if not isinstance(values, list):
         return ()
@@ -137,6 +162,112 @@ def _load_builtin_geo_lexicon() -> _BuiltinGeoLexicon:
         address_tokens=address_tokens,
         ordered_tokens=ordered_tokens,
     )
+
+
+def _normalize_en_entries(values) -> frozenset[str]:
+    if not isinstance(values, list):
+        return frozenset()
+    normalized: list[str] = []
+    for item in values:
+        text = str(item).strip().lower()
+        if text:
+            normalized.append(text)
+    return frozenset(dict.fromkeys(normalized))
+
+
+def _load_builtin_en_geo_lexicon() -> _BuiltinEnglishGeoLexicon:
+    lexicon_path = _DATA_ROOT / "en_geo_lexicon.json"
+    if not lexicon_path.exists():
+        LOGGER.warning("builtin english geo lexicon not found: %s", lexicon_path)
+        return _BuiltinEnglishGeoLexicon(
+            tier_a_state_names=frozenset(),
+            tier_a_state_codes=frozenset(),
+            tier_b_places=frozenset(),
+            tier_c_places=frozenset(),
+        )
+    content = json.loads(lexicon_path.read_text(encoding="utf-8"))
+    return _BuiltinEnglishGeoLexicon(
+        tier_a_state_names=_normalize_en_entries(content.get("tier_a_state_names")),
+        tier_a_state_codes=_normalize_en_entries(content.get("tier_a_state_codes")),
+        tier_b_places=_normalize_en_entries(content.get("tier_b_places")),
+        tier_c_places=_normalize_en_entries(content.get("tier_c_places")),
+    )
+
+
+def _load_builtin_en_name_lexicon() -> _BuiltinEnglishNameLexicon:
+    lexicon_path = _DATA_ROOT / "en_name_lexicon.json"
+    if not lexicon_path.exists():
+        LOGGER.warning("builtin english name lexicon not found: %s", lexicon_path)
+        return _BuiltinEnglishNameLexicon(
+            given_tier_a=frozenset(),
+            given_tier_b=frozenset(),
+            given_tier_c=frozenset(),
+            surname_tier_a=frozenset(),
+            surname_tier_b=frozenset(),
+            surname_tier_c=frozenset(),
+        )
+    content = json.loads(lexicon_path.read_text(encoding="utf-8"))
+    return _BuiltinEnglishNameLexicon(
+        given_tier_a=_normalize_en_entries(content.get("given_tier_a")),
+        given_tier_b=_normalize_en_entries(content.get("given_tier_b")),
+        given_tier_c=_normalize_en_entries(content.get("given_tier_c")),
+        surname_tier_a=_normalize_en_entries(content.get("surname_tier_a")),
+        surname_tier_b=_normalize_en_entries(content.get("surname_tier_b")),
+        surname_tier_c=_normalize_en_entries(content.get("surname_tier_c")),
+    )
+
+
+def _normalize_ui_entries(values, *, lower: bool) -> frozenset[str]:
+    if not isinstance(values, list):
+        return frozenset()
+    normalized: list[str] = []
+    for item in values:
+        text = str(item).strip()
+        if not text:
+            continue
+        normalized.append(text.lower() if lower else text)
+    return frozenset(dict.fromkeys(normalized))
+
+
+def _load_ui_keyword_blacklist(filename: str, *, lower: bool) -> _UIKeywordBlacklist:
+    lexicon_path = _DATA_ROOT / filename
+    if not lexicon_path.exists():
+        LOGGER.warning("ui keyword blacklist not found: %s", lexicon_path)
+        return _UIKeywordBlacklist(
+            standalone_exact=frozenset(),
+            standalone_contains=frozenset(),
+            address_keyword_expansions={},
+        )
+    content = json.loads(lexicon_path.read_text(encoding="utf-8"))
+    standalone_section = content.get("standalone_name_ui")
+    if isinstance(standalone_section, dict):
+        standalone_exact = standalone_section.get("exact")
+        standalone_contains = standalone_section.get("contains")
+    else:
+        standalone_exact = content.get("name_exact")
+        standalone_contains = content.get("name_contains")
+    keyword_expansions = content.get("address_keyword_expansions")
+    if not isinstance(keyword_expansions, dict):
+        keyword_expansions = content.get("address_suffix_negative")
+    normalized_keyword_expansions: dict[str, frozenset[str]] = {}
+    if isinstance(keyword_expansions, dict):
+        for suffix, values in keyword_expansions.items():
+            key = str(suffix).strip()
+            if not key:
+                continue
+            normalized_keyword_expansions[key.lower() if lower else key] = _normalize_ui_entries(values, lower=lower)
+    return _UIKeywordBlacklist(
+        standalone_exact=_normalize_ui_entries(standalone_exact, lower=lower),
+        standalone_contains=_normalize_ui_entries(standalone_contains, lower=lower),
+        address_keyword_expansions=normalized_keyword_expansions,
+    )
+
+
+def _compile_en_phrase_pattern(values: frozenset[str]) -> re.Pattern[str]:
+    if not values:
+        return re.compile(r"(?!x)x")
+    escaped = sorted((re.escape(item) for item in values), key=len, reverse=True)
+    return re.compile(rf"\b(?:{'|'.join(escaped)})\b", re.IGNORECASE)
 
 _MASK_CHAR_CLASS_COMMON = r"[*＊●○◦◯⚫⚪■□▪▫█▇▉◆◇★☆※×✕✖╳]"
 _MASK_CHAR_CLASS_WITH_X = r"[*＊xX●○◦◯⚫⚪■□▪▫█▇▉◆◇★☆※×✕✖╳]"
@@ -247,6 +378,8 @@ _NAME_BLACKLIST = {
     "经理",
 }
 _NON_PERSON_TOKENS = {
+    "管理",
+    "公司",
     "项目",
     "产品",
     "前端",
@@ -264,31 +397,67 @@ _NON_PERSON_TOKENS = {
 }
 _NON_PERSON_TOKENS_EN = {
     "account",
+    "accounts",
     "address",
     "admin",
     "agent",
     "alert",
+    "banner",
+    "bio",
     "contact",
     "customer",
     "dashboard",
+    "email",
     "editor",
     "help",
     "home",
+    "id",
     "message",
+    "number",
     "notification",
+    "or",
+    "phone",
     "profile",
     "project",
     "pronoun",
     "pronouns",
+    "community",
+    "search",
     "service",
     "settings",
+    "show",
+    "status",
     "system",
     "support",
     "team",
+    "threads",
+    "threadsbanner",
+    "username",
     "user",
 }
-_UI_OPERATION_NAME_WHITELIST = {
+_NON_PERSON_PHRASES_EN = {
+    "account number",
+    "buy again",
+    "email address",
+    "member id",
+    "new community",
+    "new chat",
+    "or number",
+    "phone number",
+    "screen name",
+    "search by name",
+    "show threadsbanner",
+    "sign out",
+    "switch accounts",
+    "user id",
+    "your personal info",
+    "weixin id",
+}
+_UI_NEGATIVE_TERMS_ZH = {
+    "全部",
     "公告",
+    "个人信息",
+    "个人资料",
     "通知",
     "通知群",
     "文件",
@@ -315,8 +484,17 @@ _UI_OPERATION_NAME_WHITELIST = {
     "保存",
     "上传",
     "下载",
+    "时效",
+    "国补",
+    "便宜",
+    "管理",
+    "标签",
+    "补贴",
+}
+_UI_NEGATIVE_TERMS_EN = {
     "add",
     "back",
+    "buy",
     "cancel",
     "close",
     "copy",
@@ -325,7 +503,13 @@ _UI_OPERATION_NAME_WHITELIST = {
     "edit",
     "file",
     "forward",
+    "info",
+    "lists",
+    "mobile",
+    "new",
     "open",
+    "out",
+    "personal",
     "refresh",
     "reply",
     "save",
@@ -333,7 +517,67 @@ _UI_OPERATION_NAME_WHITELIST = {
     "send",
     "settings",
     "share",
+    "sign",
+    "switch",
+    "newchat",
     "upload",
+}
+_UI_NEGATIVE_PHRASES_ZH = {
+    "个人信息",
+    "个人资料",
+}
+_UI_NEGATIVE_PHRASES_EN = {
+    "buy again",
+    "new group",
+    "new community",
+    "sign out",
+    "switch accounts",
+    "your personal info",
+}
+_LOCATION_UI_NEGATIVE_TERMS_ZH = {
+    "专区",
+    "专用",
+    "专业",
+    "学生",
+    "年度",
+    "店铺",
+    "旗舰",
+    "折叠",
+    "标签",
+    "管理",
+    "自营",
+    "补贴",
+    "部分",
+    "限时",
+}
+_LOCATION_UI_NEGATIVE_TERMS_EN = {
+    "again",
+    "banner",
+    "buy",
+    "community",
+    "holder",
+    "info",
+    "list",
+    "lists",
+    "menu",
+    "mobile",
+    "new",
+    "personal",
+    "profile",
+    "switch",
+}
+_LOCATION_UI_NEGATIVE_PHRASES_ZH = {
+    "学生专区",
+    "年度五星店铺",
+    "限部分地区",
+    "专业折叠旗",
+    "京东自营旗",
+}
+_LOCATION_UI_NEGATIVE_PHRASES_EN = {
+    "new community",
+    "personal info",
+    "switch accounts",
+    "your personal info",
 }
 _LOCATION_ACTIVITY_TOKENS = (
     "拼车",
@@ -369,11 +613,29 @@ _LOCATION_ACTIVITY_TOKENS = (
 _OCR_FRAGMENT_DELIMITERS = "-－—_/|｜"
 _OCR_SEMANTIC_BREAK_TOKEN = " <OCR_BREAK> "
 _BUILTIN_GEO_LEXICON = _load_builtin_geo_lexicon()
+_BUILTIN_EN_GEO_LEXICON = _load_builtin_en_geo_lexicon()
+_BUILTIN_EN_NAME_LEXICON = _load_builtin_en_name_lexicon()
+_BUILTIN_UI_BLACKLIST_ZH = _load_ui_keyword_blacklist("ui_keyword_blacklist_zh.json", lower=False)
+_BUILTIN_UI_BLACKLIST_EN = _load_ui_keyword_blacklist("ui_keyword_blacklist_en.json", lower=True)
+_UI_NEGATIVE_TERMS_ZH = frozenset(_UI_NEGATIVE_TERMS_ZH) | _BUILTIN_UI_BLACKLIST_ZH.standalone_exact
+_UI_NEGATIVE_TERMS_EN = frozenset(_UI_NEGATIVE_TERMS_EN) | _BUILTIN_UI_BLACKLIST_EN.standalone_exact
+_UI_NEGATIVE_PHRASES_ZH = frozenset(_UI_NEGATIVE_PHRASES_ZH) | _BUILTIN_UI_BLACKLIST_ZH.standalone_contains
+_UI_NEGATIVE_PHRASES_EN = frozenset(_UI_NEGATIVE_PHRASES_EN) | _BUILTIN_UI_BLACKLIST_EN.standalone_contains
 _COMMON_CITY_TOKENS = set(_BUILTIN_GEO_LEXICON.cities)
 _COMMON_DISTRICT_TOKENS = set(_BUILTIN_GEO_LEXICON.districts)
 _COMMON_BUSINESS_AREA_TOKENS = set(_BUILTIN_GEO_LEXICON.local_places)
 _LOCATION_CLUE_TOKENS = _BUILTIN_GEO_LEXICON.ordered_tokens
 _LOCATION_CLUE_MATCHER = AhoCorasickMatcher(_LOCATION_CLUE_TOKENS)
+_EN_GEO_TIER_A_STATE_PATTERN = _compile_en_phrase_pattern(_BUILTIN_EN_GEO_LEXICON.tier_a_state_names)
+_EN_GEO_TIER_A_CODE_PATTERN = _compile_en_phrase_pattern(_BUILTIN_EN_GEO_LEXICON.tier_a_state_codes)
+_EN_GEO_TIER_B_PATTERN = _compile_en_phrase_pattern(_BUILTIN_EN_GEO_LEXICON.tier_b_places)
+_EN_GEO_TIER_C_PATTERN = _compile_en_phrase_pattern(_BUILTIN_EN_GEO_LEXICON.tier_c_places)
+_EN_GEO_ALL_TOKENS = (
+    _BUILTIN_EN_GEO_LEXICON.tier_a_state_names
+    | _BUILTIN_EN_GEO_LEXICON.tier_a_state_codes
+    | _BUILTIN_EN_GEO_LEXICON.tier_b_places
+    | _BUILTIN_EN_GEO_LEXICON.tier_c_places
+)
 _TITLE_SEGMENT_PATTERN = re.compile(r"[-—_|｜/／]")
 _NAME_FIELD_KEYWORDS = (
     "name",
@@ -428,8 +690,36 @@ _ADDRESS_FIELD_KEYWORDS = (
     "addr",
     "mailing address",
     "shipping address",
+    "province",
+    "state",
+    "city",
+    "district",
+    "county",
+    "borough",
+    "town",
+    "township",
+    "village",
+    "street",
+    "road",
+    "avenue",
+    "postal code",
+    "zip",
+    "zip code",
+    "zipcode",
     "location",
     "所在地",
+    "省",
+    "省份",
+    "市",
+    "区",
+    "区县",
+    "县",
+    "镇",
+    "乡",
+    "街道",
+    "村",
+    "邮编",
+    "邮政编码",
     "地址",
     "住址",
     "详细地址",
@@ -542,9 +832,18 @@ _ID_FIELD_KEYWORDS = (
     "公民身份号码",
 )
 _OTHER_FIELD_KEYWORDS = (
+    "account",
+    "account id",
+    "account no",
     "code",
+    "member id",
+    "profile",
+    "screen name",
     "token",
     "otp",
+    "user id",
+    "username",
+    "user name",
     "验证码",
     "校验码",
     "订单号",
@@ -552,9 +851,17 @@ _OTHER_FIELD_KEYWORDS = (
     "编号",
     "工号",
     "学号",
+    "用户id",
+    "用户名",
+    "用户名称",
+    "账号",
+    "账户",
+    "会员id",
     "会员号",
     "客户号",
     "流水号",
+    "资料",
+    "个人资料",
 )
 _ORGANIZATION_FIELD_KEYWORDS = (
     "organization",
@@ -565,6 +872,8 @@ _ORGANIZATION_FIELD_KEYWORDS = (
     "school",
     "hospital",
     "bank",
+    "hotel",
+    "inn",
     "firm",
     "机构",
     "组织",
@@ -578,6 +887,10 @@ _ORGANIZATION_FIELD_KEYWORDS = (
     "学校",
     "医院",
     "银行",
+    "酒店",
+    "宾馆",
+    "旅馆",
+    "民宿",
     "毕业院校",
     "就读学校",
     "律所",
@@ -817,17 +1130,6 @@ _EN_POSTAL_CODE_PATTERN = re.compile(
     r"\b\d{5}(?:-\d{4})?\b",
     re.IGNORECASE,
 )
-_EN_ADDRESS_SPAN_PATTERNS = (
-    re.compile(
-        rf"\b\d{{1,6}}(?:-\d{{1,6}})?\s+[A-Za-z0-9][A-Za-z0-9.'\- ]{{1,48}}?\s+"
-        rf"(?:{'|'.join(map(re.escape, _EN_ADDRESS_STREET_SUFFIXES))})\.?"
-        rf"(?:\s*,?\s*(?:{'|'.join(map(re.escape, _EN_ADDRESS_UNIT_TOKENS))}|#)\.?\s*[A-Za-z0-9\-]+)?"
-        rf"(?:\s*,?\s*[A-Za-z .'\-]{{2,32}})?"
-        rf"(?:\s*,?\s*(?:[A-Z]{{2}}|\d{{5}}(?:-\d{{4}})?))?",
-        re.IGNORECASE,
-    ),
-    _EN_PO_BOX_PATTERN,
-)
 _ADDRESS_SUFFIX_PATTERN = re.compile(
     r"(?:特别行政区|自治区|自治州|盟|省|市|区|县|旗|乡|镇|街道|村|屯|组|路|街|巷|弄|胡同|大道|道|"
     r"社区|小区|公寓|大厦|广场|花园|家园|苑|庭|府|湾|城|里|园区|校区|宿舍|号院|号楼|栋|幢|座|单元|室|层|号)"
@@ -840,24 +1142,11 @@ _STANDALONE_ADDRESS_FRAGMENT_PATTERN = re.compile(
 _SHORT_ADDRESS_TOKEN_PATTERN = re.compile(
     r"^[一-龥]{2,12}(?:区|县|旗|乡|镇|街道|村|路|街|巷|弄|胡同|大道|道|社区|小区|公寓|大厦|广场|花园|家园|苑|庭|府|湾)$"
 )
-_ADDRESS_SPAN_PATTERNS = (
-    re.compile(
-        r"(?:北京|上海|天津|重庆|香港|澳门|内蒙古|广西|西藏|宁夏|新疆|"
-        r"[一-龥]{2,7}省|[一-龥]{2,7}市|[一-龥]{2,7}区|[一-龥]{2,7}县)"
-        rf"[A-Za-z0-9#\-－—一-龥{_ADDRESS_MASK_CHAR_CLASS[1:-1]}]{{0,24}}"
-    ),
-    re.compile(
-        rf"[A-Za-z0-9#\-－—一-龥{_ADDRESS_MASK_CHAR_CLASS[1:-1]}]{{2,24}}"
-        r"(?:路|街|巷|弄|胡同|大道|道|社区|小区|公寓|大厦|广场|花园|家园|苑|庭|府|湾|园区|校区|宿舍)"
-        rf"[A-Za-z0-9#\-－—一-龥{_ADDRESS_MASK_CHAR_CLASS[1:-1]}]{{0,16}}"
-    ),
-    re.compile(r"(?:\d{1,5}|[A-Za-z]\d{1,5})(?:号院|号楼|栋|幢|座|单元|室|层|号|户)(?:\d{0,4}(?:室|层|户))?"),
-)
 _GENERIC_GEO_FRAGMENT_PATTERNS = (
     re.compile(r"[一-龥]{2,12}(?:省|市|州|盟)"),
-    re.compile(r"[一-龥]{2,12}(?:区|县|旗|乡|镇|街道)"),
+    re.compile(r"[一-龥]{2,12}(?:区|县|乡|镇|街道)"),
     re.compile(r"[一-龥]{2,18}(?:路|街|巷|弄|胡同|大道|道)"),
-    re.compile(r"[一-龥]{2,18}(?:地铁站|火车站|高铁站|机场|码头|社区|小区|公寓|大厦|广场|花园|家园|苑|庭|府|湾|园区|校区|宿舍|公园|景区|商圈|站)"),
+    re.compile(r"[一-龥]{2,18}(?:地铁站|火车站|高铁站|机场|码头|广场|公园|景区|商圈|站)"),
 )
 _GENERIC_NUMBER_PATTERN = re.compile(r"(?<!\d)(?:\d(?:[\s\-－—_.,，。·•]?\d){3,})(?!\d)")
 _LEADING_ADDRESS_NOISE_PATTERN = re.compile(
@@ -874,6 +1163,10 @@ _ORGANIZATION_STRONG_SUFFIXES = (
     "集团",
     "银行",
     "医院",
+    "酒店",
+    "宾馆",
+    "旅馆",
+    "民宿",
     "大学",
     "学院",
     "中学",
@@ -907,6 +1200,10 @@ _EN_ORGANIZATION_STRONG_SUFFIXES = (
     "ltd.",
     "bank",
     "hospital",
+    "hotel",
+    "inn",
+    "motel",
+    "resort",
     "university",
     "college",
     "school",
@@ -916,13 +1213,13 @@ _EN_ORGANIZATION_STRONG_SUFFIXES = (
     "laboratory",
     "lab",
     "clinic",
-    "group",
 )
 _EN_ORGANIZATION_WEAK_SUFFIXES = (
     "analytics",
     "consulting",
     "design",
     "digital",
+    "group",
     "media",
     "network",
     "software",
@@ -1014,7 +1311,6 @@ class _RuleStrengthProfile:
     level: ProtectionLevel
     enable_self_name_patterns: bool
     enable_honorific_name_pattern: bool
-    enable_full_text_address: bool
     address_min_confidence: float
     allow_weak_org_suffix: bool
     enable_context_masked_text: bool
@@ -1033,9 +1329,30 @@ class _OCRPageDocument:
 
 
 @dataclass(frozen=True, slots=True)
+class _OCRPairGeometry:
+    source_block_index: int
+    target_block_index: int
+    direction: str
+    min_height_px: float
+    avg_height_px: float
+    max_height_px: float
+    gap_px: float
+    vertical_gap_px: float
+    center_delta_px: float
+    left_edge_delta_px: float
+    vertical_overlap_ratio: float
+    horizontal_overlap_ratio: float
+    height_ratio: float
+    gap_kind: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class _OCRSceneIndex:
+    blocks: tuple[OCRTextBlock, ...]
     lines: tuple[tuple[int, ...], ...]
     position_by_block_index: dict[int, tuple[int, int]]
+    pair_geometry_cache: dict[tuple[int, int, str], _OCRPairGeometry | None] = field(default_factory=dict)
+    vertical_line_score_cache: dict[tuple[int, int], float | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1055,7 +1372,6 @@ _RULE_PROFILES = {
         level=ProtectionLevel.STRONG,
         enable_self_name_patterns=True,
         enable_honorific_name_pattern=True,
-        enable_full_text_address=True,
         address_min_confidence=0.35,
         allow_weak_org_suffix=False,
         enable_context_masked_text=True,
@@ -1084,7 +1400,6 @@ _RULE_PROFILES = {
         level=ProtectionLevel.BALANCED,
         enable_self_name_patterns=True,
         enable_honorific_name_pattern=True,
-        enable_full_text_address=True,
         address_min_confidence=0.45,
         allow_weak_org_suffix=False,
         enable_context_masked_text=True,
@@ -1113,7 +1428,6 @@ _RULE_PROFILES = {
         level=ProtectionLevel.WEAK,
         enable_self_name_patterns=False,
         enable_honorific_name_pattern=False,
-        enable_full_text_address=False,
         address_min_confidence=0.6,
         allow_weak_org_suffix=False,
         enable_context_masked_text=False,

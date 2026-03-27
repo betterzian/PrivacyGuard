@@ -77,26 +77,34 @@ def _context_padding(item: Any) -> int:
     """根据目标大小动态决定外围采样带厚度。"""
     bbox = getattr(item, "bbox", None)
     if bbox is None:
-        return 4
-    return max(2, min(16, int(round(min(bbox.width, bbox.height) * 0.3))))
+        return 6
+    return max(3, min(20, int(round(min(bbox.width, bbox.height) * 0.38))))
 
 
 def _build_shape_mask(size: tuple[int, int], item: Any, offset: tuple[int, int]) -> Any:
     """构建 item 的局部形状蒙版，polygon 优先，bbox 兜底。"""
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFilter
 
     width, height = size
     offset_x, offset_y = offset
     mask = Image.new("L", (width, height), 0)
     draw = ImageDraw.Draw(mask)
+    bbox = getattr(item, "bbox", None)
+    expansion = 3
+    if bbox is not None:
+        expansion = max(2, min(6, int(round(min(bbox.width, bbox.height) * 0.1))))
     polygon = _shape_polygon(item)
     if polygon is not None:
         shifted = [(x - offset_x, y - offset_y) for x, y in polygon]
         draw.polygon(shifted, fill=255)
-        return mask
+        kernel = expansion * 2 + 1
+        return mask.filter(ImageFilter.MaxFilter(kernel)).filter(ImageFilter.GaussianBlur(radius=max(1, expansion // 2)))
     left, top, right, bottom = _shape_bounds(item)
     draw.rectangle(
-        [(left - offset_x, top - offset_y), (right - offset_x - 1, bottom - offset_y - 1)],
+        [
+            (left - offset_x - expansion, top - offset_y - expansion),
+            (right - offset_x - 1 + expansion, bottom - offset_y - 1 + expansion),
+        ],
         fill=255,
         outline=None,
     )
@@ -307,6 +315,8 @@ def _build_inpaint_mask(items: list[Any], size: tuple[int, int]) -> Any:
         bottom = min(height, top + int(bbox.height))
         if right > left and bottom > top:
             mask[top:bottom, left:right] = 255
+    kernel = np.ones((5, 5), dtype=np.uint8)
+    mask = cv2.dilate(mask, kernel, iterations=2)
     return mask
 
 

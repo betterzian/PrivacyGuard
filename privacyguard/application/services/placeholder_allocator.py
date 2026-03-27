@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.mapping import ReplacementRecord
-from privacyguard.domain.policies.generic_placeholder import generic_placeholder_label, render_generic_replacement_text
+from privacyguard.domain.policies.generic_placeholder import render_generic_replacement_text
 from privacyguard.utils.pii_value import canonicalize_pii_value
 
-_PLACEHOLDER_PATTERN = re.compile(r"^<(?P<label>.+?)(?P<index>\d+)>$")
+_PLACEHOLDER_PATTERN = re.compile(r"^<(?P<label>.+?)(?P<index>\d+)?>$")
 
 
 class SessionPlaceholderAllocator:
@@ -25,7 +24,7 @@ class SessionPlaceholderAllocator:
         """基于 session 历史为计划中的通用标签分配唯一占位符。"""
         session_records = self.mapping_store.get_replacements(plan.session_id)
         existing_by_source = self._build_existing_by_source(session_records)
-        next_indices = self._build_next_indices(session_records)
+        next_index = self._build_next_index(session_records)
 
         actions: list[DecisionAction] = []
         for action in plan.actions:
@@ -35,10 +34,13 @@ class SessionPlaceholderAllocator:
             source_key = self._source_key(action.attr_type, action.canonical_source_text or action.source_text)
             replacement_text = existing_by_source.get(source_key)
             if replacement_text is None:
-                next_index = next_indices[action.attr_type]
-                replacement_text = render_generic_replacement_text(action.attr_type, next_index)
+                replacement_text = render_generic_replacement_text(
+                    action.attr_type,
+                    source_text=action.canonical_source_text or action.source_text,
+                    index=next_index,
+                )
                 existing_by_source[source_key] = replacement_text
-                next_indices[action.attr_type] = next_index + 1
+                next_index += 1
             updated = action.model_copy(deep=True)
             updated.replacement_text = replacement_text
             actions.append(updated)
@@ -58,19 +60,19 @@ class SessionPlaceholderAllocator:
             existing.setdefault(key, record.replacement_text)
         return existing
 
-    def _build_next_indices(self, records: list[ReplacementRecord]) -> defaultdict[PIIAttributeType, int]:
-        max_indices: defaultdict[PIIAttributeType, int] = defaultdict(int)
+    def _build_next_index(self, records: list[ReplacementRecord]) -> int:
+        max_index = 0
         for record in records:
             if record.action_type != ActionType.GENERICIZE or not record.replacement_text:
                 continue
             matched = _PLACEHOLDER_PATTERN.match(record.replacement_text)
             if matched is None:
                 continue
-            expected_label = generic_placeholder_label(record.attr_type)
-            if matched.group("label") != expected_label:
+            index_text = matched.group("index")
+            if index_text is None:
                 continue
-            max_indices[record.attr_type] = max(max_indices[record.attr_type], int(matched.group("index")))
-        return defaultdict(lambda: 1, {attr_type: index + 1 for attr_type, index in max_indices.items()})
+            max_index = max(max_index, int(index_text))
+        return max_index + 1 if max_index > 0 else 1
 
     def _source_key(self, attr_type: PIIAttributeType, source_text: str) -> tuple[PIIAttributeType, str]:
         return (attr_type, canonicalize_pii_value(attr_type, source_text))

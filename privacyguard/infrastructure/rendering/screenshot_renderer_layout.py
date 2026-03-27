@@ -91,7 +91,16 @@ def _draw_text_box(
     bottom = bbox.y + bbox.height
     fill_rgb = self._get_bbox_fill_color(image, bbox)
     if not skip_fill:
-        draw.rectangle([(left, top), (right, bottom)], fill=fill_rgb, outline=None)
+        image_w, image_h = image.size
+        fill_padding = max(2, min(6, int(round(min(bbox.width, bbox.height) * 0.08))))
+        draw.rectangle(
+            [
+                (max(0, left - fill_padding), max(0, top - fill_padding)),
+                (min(image_w, right + fill_padding), min(image_h, bottom + fill_padding)),
+            ],
+            fill=fill_rgb,
+            outline=None,
+        )
     if not text:
         return
     pad = 2

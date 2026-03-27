@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType
 
-# 对外只读：属性类型 → 占位符中的中文标签名（不含尖括号与序号）
-GENERIC_PLACEHOLDER_LABELS: dict[PIIAttributeType, str] = {
+# 对外只读：属性类型 → 占位符中的中文标签名（不含尖括号）
+GENERIC_PLACEHOLDER_LABELS_ZH: dict[PIIAttributeType, str] = {
     PIIAttributeType.NAME: "姓名",
-    PIIAttributeType.LOCATION_CLUE: "位置",
+    PIIAttributeType.LOCATION_CLUE: "地址",
     PIIAttributeType.PHONE: "手机号",
     PIIAttributeType.CARD_NUMBER: "卡号",
     PIIAttributeType.BANK_ACCOUNT: "银行账号",
@@ -28,14 +28,46 @@ GENERIC_PLACEHOLDER_LABELS: dict[PIIAttributeType, str] = {
     PIIAttributeType.OTHER: "敏感信息",
 }
 
+GENERIC_PLACEHOLDER_LABELS_EN: dict[PIIAttributeType, str] = {
+    PIIAttributeType.NAME: "name",
+    PIIAttributeType.LOCATION_CLUE: "address",
+    PIIAttributeType.PHONE: "phone",
+    PIIAttributeType.CARD_NUMBER: "card",
+    PIIAttributeType.BANK_ACCOUNT: "account",
+    PIIAttributeType.PASSPORT_NUMBER: "passport",
+    PIIAttributeType.DRIVER_LICENSE: "license",
+    PIIAttributeType.EMAIL: "email",
+    PIIAttributeType.ADDRESS: "address",
+    PIIAttributeType.ID_NUMBER: "id",
+    PIIAttributeType.ORGANIZATION: "organization",
+    PIIAttributeType.TIME: "time",
+    PIIAttributeType.NUMERIC: "number",
+    PIIAttributeType.TEXTUAL: "text",
+    PIIAttributeType.OTHER: "sensitive",
+}
 
-def generic_placeholder_label(attr_type: PIIAttributeType) -> str:
-    """返回占位符内的中文标签片段（如 ``姓名``、``位置``），不含括号与序号。"""
-    return GENERIC_PLACEHOLDER_LABELS.get(attr_type, "敏感信息")
+# 兼容旧导入路径；默认暴露中文标签表。
+GENERIC_PLACEHOLDER_LABELS = GENERIC_PLACEHOLDER_LABELS_ZH
+
+def _contains_cjk(text: str | None) -> bool:
+    return bool(text) and any("\u4e00" <= char <= "\u9fff" for char in text)
 
 
-def render_generic_replacement_text(attr_type: PIIAttributeType, index: int = 1) -> str:
-    """渲染 GENERICIZE 使用的标准占位字符串，格式为 ``<姓名1>``、``<位置2>`` 等。"""
-    label = generic_placeholder_label(attr_type)
-    idx = max(1, index)
-    return f"<{label}{idx}>"
+def generic_placeholder_label(attr_type: PIIAttributeType, *, source_text: str | None = None) -> str:
+    """返回占位符内的标签片段（如 ``姓名``、``name``），不含括号。"""
+    if _contains_cjk(source_text):
+        return GENERIC_PLACEHOLDER_LABELS_ZH.get(attr_type, "敏感信息")
+    return GENERIC_PLACEHOLDER_LABELS_EN.get(attr_type, "sensitive")
+
+
+def render_generic_replacement_text(
+    attr_type: PIIAttributeType,
+    *,
+    source_text: str | None = None,
+    index: int | None = None,
+) -> str:
+    """渲染 GENERICIZE 使用的标准占位字符串，格式为 ``<姓名1>``、``<name2>`` 等。"""
+    label = generic_placeholder_label(attr_type, source_text=source_text)
+    if index is not None:
+        label = f"{label}{index}"
+    return f"<{label}>"

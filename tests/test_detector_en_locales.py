@@ -5,6 +5,8 @@ from pathlib import Path
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.mapping import ReplacementRecord
+from privacyguard.infrastructure.pii.address.component_parser_en import parse_en_components
+from privacyguard.infrastructure.pii.address.component_parser_zh import parse_zh_components
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 from privacyguard.infrastructure.pii.json_privacy_repository import InvalidPrivacyRepositoryError
 from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector
@@ -294,6 +296,30 @@ def test_rule_based_detector_keeps_store_name_out_of_address_candidates() -> Non
     assert _find_candidate(candidates, PIIAttributeType.ADDRESS) is None
 
 
+def test_rule_based_detector_rejects_ui_like_location_suffix_noise() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="学生专区 京东自营旗 专业折叠旗",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert _find_candidate(candidates, PIIAttributeType.LOCATION_CLUE) is None
+
+
+def test_rule_based_detector_rejects_new_group_as_organization() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="New group",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert _find_candidate(candidates, PIIAttributeType.ORGANIZATION) is None
+
+
 def test_rule_based_detector_handles_masked_truncated_address_tail() -> None:
     detector = RuleBasedPIIDetector(locale_profile="mixed")
 
@@ -328,3 +354,286 @@ def test_rule_based_detector_trims_narrative_tail_after_address() -> None:
     assert address_candidate.text.endswith("小区")
     assert "吃饭" not in address_candidate.text
     assert not address_candidate.text.endswith("里")
+
+
+def test_parse_zh_components_keeps_city_district_and_town_separate() -> None:
+    components = parse_zh_components("北京市北京市昌平区百善镇")
+    by_type = {}
+    for component in components:
+        by_type.setdefault(component.component_type, []).append(component.text)
+
+    assert by_type.get("city", []) == ["北京市"]
+    assert "昌平区" in by_type.get("district", [])
+    assert "百善镇" in by_type.get("town", [])
+
+
+def test_parse_en_components_keeps_right_tail_city_state_and_zip() -> None:
+    components = parse_en_components("123 Main St Apt 5B, Seattle, WA 98101")
+    by_type = {}
+    for component in components:
+        by_type.setdefault(component.component_type, []).append(component.text)
+
+    assert "123 Main St" in by_type.get("street", [])
+    assert "Apt 5B" in by_type.get("unit", [])
+    assert "Seattle" in by_type.get("city", [])
+    assert "WA" in by_type.get("state", [])
+    assert "98101" in by_type.get("postal_code", [])
+
+
+def test_rule_based_detector_stops_address_before_ocr_break_and_name_label() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="Address: 97 Lincoln Street <OCR_BREAK> > <OCR_BREAK> Name:",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    address_candidate = _find_candidate(candidates, PIIAttributeType.ADDRESS)
+    assert address_candidate is not None
+    assert address_candidate.text == "97 Lincoln Street"
+
+
+def test_rule_based_detector_emits_partial_chinese_road_address() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="麦当劳&麦咖啡（北京善缘街店）",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    address_candidate = next(
+        candidate
+        for candidate in candidates
+        if candidate.attr_type == PIIAttributeType.ADDRESS and candidate.text == "北京善缘街"
+    )
+
+    assert address_candidate.metadata["address_kind"] == ["private_address"]
+    assert "street" in address_candidate.metadata["address_component_type"] or "road" in address_candidate.metadata["address_component_type"]
+
+
+def test_rule_based_detector_emits_town_and_village_address_components() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="北京市昌平区百善镇下东廓村2号库",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    by_text = {
+        candidate.text: candidate
+        for candidate in candidates
+        if candidate.attr_type == PIIAttributeType.ADDRESS
+    }
+
+    assert "百善镇" in by_text
+    assert by_text["百善镇"].metadata["address_component_type"] == ["town"]
+    assert "下东廓村" in by_text
+    assert by_text["下东廓村"].metadata["address_component_type"] == ["village"]
+
+
+def test_rule_based_detector_rejects_reordered_room_and_city_as_address() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="1201室上海",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(
+        candidate.attr_type == PIIAttributeType.ADDRESS and candidate.text == "1201室上海"
+        for candidate in candidates
+    )
+
+
+def test_rule_based_detector_rejects_single_component_commerce_road_noise() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="国家补贴至仅剩1件799弄",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
+
+
+def test_rule_based_detector_rejects_keyword_expansion_block_for_single_address_clue() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="强大道具",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
+
+
+def test_rule_based_detector_rejects_single_component_compound_noise() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="华润国际社区",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
+
+
+def test_rule_based_detector_rejects_ui_like_explicit_address_value() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="收货地址 管理",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
+
+
+def test_rule_based_detector_rejects_city_word_inside_phone_label() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="Mobile number",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
+
+
+def test_rule_based_detector_detects_conservative_english_standalone_name_nearby_pii() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="alice@example.com Brian Foster",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    name_candidate = next(
+        candidate
+        for candidate in candidates
+        if candidate.attr_type == PIIAttributeType.NAME and candidate.text == "Brian Foster"
+    )
+
+    assert name_candidate.metadata["matched_by"] == ["heuristic_name_fragment_en"]
+    assert name_candidate.confidence >= 0.74
+
+
+def test_rule_based_detector_does_not_trigger_english_standalone_name_without_nearby_pii() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="Brian Foster joined the call.",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(
+        candidate.attr_type == PIIAttributeType.NAME and candidate.text == "Brian Foster"
+        for candidate in candidates
+    )
+
+
+def test_rule_based_detector_rejects_washington_post_as_english_name() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="Washington Post",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert _find_candidate(candidates, PIIAttributeType.NAME) is None
+
+
+def test_rule_based_detector_rejects_or_number_as_name_value() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="Type name or number",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert _find_candidate(candidates, PIIAttributeType.NAME) is None
+
+
+def test_rule_based_detector_supports_full_state_name_in_english_address() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        prompt_text="Address: 123 Main St Apt 4B, Springfield, Illinois 62704",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    address_candidate = _find_candidate(candidates, PIIAttributeType.ADDRESS)
+    assert address_candidate is not None
+    assert address_candidate.text == "123 Main St Apt 4B, Springfield, Illinois 62704"
+
+    by_text = {
+        candidate.text: candidate
+        for candidate in candidates
+        if candidate.attr_type == PIIAttributeType.ADDRESS
+    }
+    assert by_text["Illinois"].metadata["matched_by"] == ["address_component_state"]
+    assert by_text["Illinois"].metadata["address_component_type"] == ["state"]
+
+
+def test_rule_based_detector_emits_ordered_address_component_trace() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="上海浦东新区世纪大道1201室",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    address_candidate = next(
+        candidate
+        for candidate in candidates
+        if candidate.attr_type == PIIAttributeType.ADDRESS and candidate.text == "上海浦东新区世纪大道1201室"
+    )
+
+    assert address_candidate.metadata["address_component_type"] == ["city", "district", "poi", "room"]
+    assert address_candidate.metadata["address_component_trace"][:4] == [
+        "city:上海",
+        "district:浦东新区",
+        "poi:世纪大道",
+        "room:1201室",
+    ]
+
+
+def test_rule_based_detector_rejects_explicit_english_address_value_outside_local_geo_lexicon() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="City: Wonderland",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
+
+
+def test_rule_based_detector_detects_hotel_as_organization() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="轻奢连锁酒店",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    organization_candidate = _find_candidate(candidates, PIIAttributeType.ORGANIZATION)
+    assert organization_candidate is not None
+    assert organization_candidate.text == "轻奢连锁酒店"

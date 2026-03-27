@@ -123,6 +123,34 @@ def _scan_text(
         original_text=text,
         shadow_index_map=masked_shadow.index_map,
     )
+    should_run_standalone = not (
+        source == PIISourceType.OCR
+        and block_id is None
+        and bbox is None
+        and getattr(self, "_active_ocr_page_document", None) is not None
+    )
+    if should_run_standalone:
+        previous_context_text = getattr(self, "_active_standalone_context_text", None)
+        previous_context_candidates = getattr(self, "_active_standalone_context_candidates", ())
+        self._active_standalone_context_text = text
+        self._active_standalone_context_candidates = tuple(collected.values())
+        try:
+            protected_spans = self._protected_spans_from_candidates(collected, rule_profile=rule_profile)
+            standalone_shadow = self._build_shadow_text(text, collected)
+            self._collect_generic_name_fragment_hits(
+                collected,
+                standalone_shadow.text,
+                source,
+                bbox,
+                block_id,
+                skip_spans=protected_spans,
+                rule_profile=rule_profile,
+                original_text=text,
+                shadow_index_map=standalone_shadow.index_map,
+            )
+        finally:
+            self._active_standalone_context_text = previous_context_text
+            self._active_standalone_context_candidates = previous_context_candidates
     return [
         candidate
         for candidate in collected.values()
@@ -139,35 +167,62 @@ def _scan_ocr_page(
 ) -> list[PIICandidate]:
     """将整页 OCR 聚合成单文档扫描，再映射回原始 block。"""
     remapped_candidates: list[PIICandidate] = []
-    seen_signatures: set[tuple[str, str, tuple[str, ...]]] = set()
-    document = self._build_ocr_page_document(ocr_blocks)
+    signature_to_index: dict[tuple[str, str, tuple[str, ...]], int] = {}
+    scene_index = self._build_ocr_scene_index(tuple(ocr_blocks))
+    document = self._build_ocr_page_document(scene_index)
     if document is None:
         return remapped_candidates
-    scene_index = self._build_ocr_scene_index(document.blocks)
-    document_candidates = self._scan_text(
-        document.text,
-        PIISourceType.OCR,
-        bbox=None,
-        block_id=None,
-        session_index=session_index,
-        local_index=local_index,
-        rule_profile=rule_profile,
-    )
-    for candidate in document_candidates:
-        remapped = self._remap_ocr_page_candidate(candidate, document)
-        if remapped is not None:
-            refined = self._refine_ocr_name_candidate(remapped, document, scene_index, rule_profile)
-            if refined is not None:
-                seen_signatures.add(self._ocr_candidate_signature(refined))
-                remapped_candidates.append(refined)
-        derived_candidates = self._derive_address_block_candidates(candidate, document)
-        remapped_candidates.extend(derived_candidates)
-        for derived_candidate in derived_candidates:
-            seen_signatures.add(self._ocr_candidate_signature(derived_candidate))
-    for candidate in self._collect_ocr_label_adjacency_candidates(document, scene_index, rule_profile):
-        signature = self._ocr_candidate_signature(candidate)
-        if signature in seen_signatures:
-            continue
-        seen_signatures.add(signature)
-        remapped_candidates.append(candidate)
+    previous_document = self._active_ocr_page_document
+    previous_scene_index = self._active_ocr_scene_index
+    self._active_ocr_page_document = document
+    self._active_ocr_scene_index = scene_index
+    try:
+        document_candidates = self._scan_text(
+            document.text,
+            PIISourceType.OCR,
+            bbox=None,
+            block_id=None,
+            session_index=session_index,
+            local_index=local_index,
+            rule_profile=rule_profile,
+        )
+        for candidate in document_candidates:
+            remapped = self._remap_ocr_page_candidate(candidate, document)
+            if remapped is not None:
+                refined = self._refine_ocr_name_candidate(remapped, document, scene_index, rule_profile)
+                if refined is not None:
+                    signature_to_index[self._ocr_candidate_signature(refined)] = len(remapped_candidates)
+                    remapped_candidates.append(refined)
+            derived_candidates = self._derive_address_block_candidates(candidate, document)
+            for derived_candidate in derived_candidates:
+                signature_to_index[self._ocr_candidate_signature(derived_candidate)] = len(remapped_candidates)
+                remapped_candidates.append(derived_candidate)
+        for candidate in self._collect_ocr_label_adjacency_candidates(document, scene_index, rule_profile):
+            signature = self._ocr_candidate_signature(candidate)
+            existing_index = signature_to_index.get(signature)
+            if existing_index is not None:
+                existing = remapped_candidates[existing_index]
+                existing.metadata = self._merge_candidate_metadata(existing.metadata, candidate.metadata)
+                existing.confidence = max(existing.confidence, candidate.confidence)
+                continue
+            signature_to_index[signature] = len(remapped_candidates)
+            remapped_candidates.append(candidate)
+        for candidate in self._collect_ocr_standalone_name_candidates(
+            document,
+            scene_index,
+            tuple(remapped_candidates),
+            rule_profile,
+        ):
+            signature = self._ocr_candidate_signature(candidate)
+            existing_index = signature_to_index.get(signature)
+            if existing_index is not None:
+                existing = remapped_candidates[existing_index]
+                existing.metadata = self._merge_candidate_metadata(existing.metadata, candidate.metadata)
+                existing.confidence = max(existing.confidence, candidate.confidence)
+                continue
+            signature_to_index[signature] = len(remapped_candidates)
+            remapped_candidates.append(candidate)
+    finally:
+        self._active_ocr_page_document = previous_document
+        self._active_ocr_scene_index = previous_scene_index
     return remapped_candidates
