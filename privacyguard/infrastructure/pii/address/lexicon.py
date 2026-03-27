@@ -495,14 +495,29 @@ def _iter_en_components(text: str) -> Iterable[AddressComponentMatch]:
 def _iter_builtin_geo_tokens(text: str) -> Iterable[AddressComponentMatch]:
     from privacyguard.infrastructure.pii.rule_based_detector_shared import _LOCATION_CLUE_MATCHER
 
+    # 词典可去掉“关键词后缀”，运行时再与后缀绑定成完整地名/地址组件。
     _ZH_SUFFIX_TO_TYPE = {
+        "特别行政区": "province",
+        "自治区": "province",
+        "地区": "district",
+        "大道": "road",
+        "小区": "compound",
+        "公寓": "compound",
+        "大厦": "compound",
+        "园区": "compound",
+        "社区": "compound",
+        "宿舍": "compound",
         "省": "province",
         "市": "city",
         "区": "district",
         "县": "district",
         "旗": "district",
         "盟": "district",
-        "地区": "district",
+        "路": "road",
+        "街": "street",
+        "道": "road",
+        "巷": "street",
+        "弄": "street",
     }
 
     seen: set[tuple[int, int]] = set()
@@ -528,7 +543,7 @@ def _iter_builtin_geo_tokens(text: str) -> Iterable[AddressComponentMatch]:
         merged_type = component_type
         merged_end = end
         merged_text = token
-        for suffix, suffix_type in _ZH_SUFFIX_TO_TYPE.items():
+        for suffix, suffix_type in sorted(_ZH_SUFFIX_TO_TYPE.items(), key=lambda item: len(item[0]), reverse=True):
             if cursor + len(suffix) <= len(text) and text[cursor : cursor + len(suffix)] == suffix:
                 merged_type = suffix_type
                 merged_end = cursor + len(suffix)

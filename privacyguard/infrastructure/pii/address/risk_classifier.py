@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from privacyguard.infrastructure.pii.address.component_parser_en import parse_en_components
 from privacyguard.infrastructure.pii.address.component_parser_zh import parse_zh_components
 from privacyguard.infrastructure.pii.address.lexicon import (
@@ -50,6 +52,9 @@ _EN_COMPONENT_GROUP_ORDER = {
     "province": 3,
     "postal_code": 4,
 }
+_TRAILING_BUILDING_ROOM_DIGITS_PATTERN = re.compile(
+    r"(?P<building>[0-9A-Za-z一二三四五六七八九十百零两]+(?:号楼|栋|幢|座|单元))\s*(?P<room>\d{1,4})$"
+)
 
 
 def classify_spans(
@@ -103,7 +108,40 @@ def _parse_components_for_span(
                 confidence=0.9 if match.strength == "strong" else 0.82,
             )
         )
+    local = _append_trailing_numeric_room(span, local)
     return tuple(sorted(local, key=lambda item: (item.start_offset, item.end_offset, item.component_type)))
+
+
+def _append_trailing_numeric_room(span: AddressSpan, components: list[AddressComponent]) -> list[AddressComponent]:
+    if not components:
+        return components
+    if any(item.component_type == "room" for item in components):
+        return components
+    building_components = [item for item in components if item.component_type in {"building", "unit", "floor"}]
+    if not building_components:
+        return components
+    rightmost = max(components, key=lambda item: item.end_offset)
+    if rightmost.component_type not in {"building", "unit", "floor"}:
+        return components
+    match = _TRAILING_BUILDING_ROOM_DIGITS_PATTERN.search(span.text)
+    if match is None:
+        return components
+    room_text = match.group("room")
+    room_start = match.start("room")
+    room_end = match.end("room")
+    if room_start < rightmost.end_offset:
+        return components
+    components.append(
+        AddressComponent(
+            component_type="room",
+            text=room_text,
+            start_offset=room_start,
+            end_offset=room_end,
+            privacy_level="fine",
+            confidence=0.78,
+        )
+    )
+    return components
 
 
 def _parse_components(text: str, *, locale_profile: str) -> tuple[AddressComponent, ...]:

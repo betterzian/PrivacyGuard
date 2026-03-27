@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.infrastructure.pii.address.lexicon import (
@@ -32,6 +33,7 @@ _ORG_SUFFIX_TOKENS = tuple(
 )
 _ZH_PREPOSITIONS = ("的", "在", "于", "在于", "地")
 _EN_PREPOSITIONS = frozenset({"of", "in", "at", "on", "for", "to", "from", "by", "with"})
+_TRAILING_ROOM_DIGITS_PATTERN = re.compile(r"^\s*(\d{1,4})(?!\d)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +68,22 @@ def scan_address_and_organization(
     label_value_starts = [match.end() for match in build_label_pattern().finditer(text)]
 
     emitted_org_events: set[tuple[int, int]] = set()
+    # 与地址在同一扫描器中直接处理组织事件（不在末尾补扫）
+    for event in org_events:
+        _emit_org_from_event(
+            detector,
+            collected,
+            text=text,
+            event=event,
+            source=source,
+            bbox=bbox,
+            block_id=block_id,
+            skip_spans=skip_spans,
+            original_text=original_text,
+            shadow_index_map=shadow_index_map,
+            left_limit=0,
+        )
+        emitted_org_events.add((event.start, event.end))
 
     spans: list[AddressSpan] = []
     i = 0
@@ -86,17 +104,6 @@ def scan_address_and_organization(
             stack.append(nxt)
             j += 1
 
-        # 黑名单校准回退（总回退<=5）
-        rollback = 0
-        while stack and rollback < 5:
-            if stack and _tail_component_is_blacklisted(text, stack[-1]):
-                stack.pop()
-                rollback += 1
-                if not stack or rollback >= 5:
-                    break
-                continue
-            break
-
         if stack:
             # 遇到组织后缀时，触发组织探测并按规则处理地址回退/截止。
             _handle_org_event_for_stack(
@@ -114,15 +121,31 @@ def scan_address_and_organization(
                 shadow_index_map=shadow_index_map,
             )
 
-            # 单组件特判：按 ProtectionLevel 放行；字段语境由 matched_by 决定（本扫描器默认非字段语境）
-            if len(stack) == 1:
-                single = stack[0]
-                if not _allow_single_geo_as_address(single.component_type, config.protection_level):
-                    stack = []
+        # 黑名单校准回退（总回退<=5）——放在组织联动之后执行。
+        rollback = 0
+        while stack and rollback < 5:
+            if stack and _tail_component_is_blacklisted(text, stack[-1]):
+                stack.pop()
+                rollback += 1
+                if not stack or rollback >= 5:
+                    break
+                continue
+            break
+
+        # 单组件特判：按 ProtectionLevel 放行；字段语境由 matched_by 决定（本扫描器默认非字段语境）
+        if len(stack) == 1:
+            single = stack[0]
+            if not _allow_single_geo_as_address(single.component_type, config.protection_level):
+                stack = []
 
         if stack:
             start = stack[0].start
             end = stack[-1].end
+            tail_component = stack[-1]
+            if tail_component.component_type in {"building", "unit", "floor"}:
+                room_digits = _TRAILING_ROOM_DIGITS_PATTERN.match(text[end:])
+                if room_digits is not None:
+                    end += room_digits.end()
             terminated_by = "event_stream"
             tail = text[end:]
             masked = masked_tail_match(tail)
@@ -159,20 +182,6 @@ def scan_address_and_organization(
         # 继续从下一个位置开始（避免 O(n^2) 重复起点）
         i = max(i + 1, j + 1)
 
-    # 对未在地址扫描中触发的组织事件，补做一次独立组织探测。
-    _emit_unhandled_org_candidates(
-        detector,
-        collected,
-        text=text,
-        org_events=org_events,
-        emitted_org_events=emitted_org_events,
-        source=source,
-        bbox=bbox,
-        block_id=block_id,
-        skip_spans=skip_spans,
-        original_text=original_text,
-        shadow_index_map=shadow_index_map,
-    )
     return tuple(_dedupe_spans(spans))
 
 
@@ -224,10 +233,6 @@ def _can_bridge_gap(gap: str) -> bool:
     if is_connector_text(stripped):
         return True
     return stripped in {"的", "之", "·", "•"}
-
-
-def _tail_component_is_blacklisted(detector, text: str, component: AddressComponentMatch) -> bool:
-    raise NotImplementedError
 
 
 def _tail_component_is_blacklisted(text: str, component: AddressComponentMatch) -> bool:
@@ -340,16 +345,16 @@ def _handle_org_event_for_stack(
         if not _org_gap_allowed(gap, script=event.script):
             continue
         event_key = (event.start, event.end)
+        # 距离为 0 时，如果当前地理点是省/市，则回退让给组织；否则地址截止但不回退。
+        left_limit = tail.end
+        if gap == "" and tail.component_type in {"province", "city"}:
+            if len(stack) >= 2:
+                popped = stack.pop()
+                left_limit = popped.start
+            else:
+                popped = stack.pop()
+                left_limit = max(0, popped.start)
         if event_key not in emitted_org_events:
-            # 距离为 0 时，如果当前地理点是省/市，则回退让给组织；否则地址截止但不回退。
-            left_limit = tail.end
-            if gap == "" and tail.component_type in {"province", "city"}:
-                if len(stack) >= 2:
-                    popped = stack.pop()
-                    left_limit = popped.start
-                else:
-                    popped = stack.pop()
-                    left_limit = max(0, popped.start)
             _emit_org_from_event(
                 detector,
                 collected,
@@ -432,41 +437,6 @@ def _grow_org_left(
     if not any(lowered.endswith(suf.lower()) for suf in _ORG_SUFFIX_TOKENS):
         return None
     return candidate, start, end
-
-
-def _emit_unhandled_org_candidates(
-    detector,
-    collected: dict[tuple[str, str, int | None, int | None], object],
-    *,
-    text: str,
-    org_events: tuple[_OrgSuffixEvent, ...],
-    emitted_org_events: set[tuple[int, int]],
-    source: PIISourceType,
-    bbox: object,
-    block_id: str | None,
-    skip_spans: list[tuple[int, int]],
-    original_text: str | None,
-    shadow_index_map: tuple[int | None, ...] | None,
-) -> None:
-    # 对尚未在地址扫描中处理过的组织后缀，补做一次独立探测。
-    for event in org_events:
-        key = (event.start, event.end)
-        if key in emitted_org_events:
-            continue
-        _emit_org_from_event(
-            detector,
-            collected,
-            text=text,
-            event=event,
-            source=source,
-            bbox=bbox,
-            block_id=block_id,
-            skip_spans=skip_spans,
-            original_text=original_text,
-            shadow_index_map=shadow_index_map,
-            left_limit=0,
-        )
-        emitted_org_events.add(key)
 
 
 def _dedupe_spans(spans: list[AddressSpan]) -> list[AddressSpan]:

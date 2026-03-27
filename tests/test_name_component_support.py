@@ -70,6 +70,11 @@ def test_english_name_canonicalization_preserves_spaces() -> None:
     assert canonicalize_pii_value(PIIAttributeType.NAME, "Alice Johnson") == "alice johnson"
     assert canonicalize_pii_value(PIIAttributeType.NAME, "张 三") == "张三"
 
+
+def test_organization_canonicalization_strips_geo_and_company_suffix() -> None:
+    assert canonicalize_pii_value(PIIAttributeType.ORGANIZATION, "上海市浦东新区阳光科技有限公司") == "阳光科技"
+    assert canonicalize_pii_value(PIIAttributeType.ORGANIZATION, "88 Main Street Acme Labs Inc") == "acmelabs"
+
     match_text, index_map = build_match_text(PIIAttributeType.NAME, "Alice   Johnson")
     assert match_text == "alice johnson"
     assert len(index_map) == len(match_text)
@@ -657,6 +662,7 @@ def test_session_placeholder_allocator_uses_global_cross_script_indices() -> Non
                 action_type=ActionType.GENERICIZE,
                 attr_type=PIIAttributeType.ADDRESS,
                 source_text="上海浦东新区",
+                canonical_source_text="province=上海|city=上海|district=浦东",
             ),
         ],
     )
@@ -667,6 +673,120 @@ def test_session_placeholder_allocator_uses_global_cross_script_indices() -> Non
     assert by_candidate["c-zh"] == "<姓名1>"
     assert by_candidate["c-en"] == "<name2>"
     assert by_candidate["c-address"] == "<地址3>"
+
+
+def test_session_placeholder_allocator_reuses_address_placeholder_by_field_prefix_match() -> None:
+    mapping_store = InMemoryMappingStore()
+    mapping_store.save_replacements(
+        "session-address-equivalent",
+        1,
+        [
+            ReplacementRecord(
+                session_id="session-address-equivalent",
+                turn_id=1,
+                candidate_id="c-existing-address",
+                source_text="上海市浦东新区世纪大道阳光小区",
+                    canonical_source_text="province=上海|city=上海|district=浦东|street=世纪大|compound=阳光",
+                replacement_text="<地址1>",
+                attr_type=PIIAttributeType.ADDRESS,
+                action_type=ActionType.GENERICIZE,
+            )
+        ],
+    )
+    allocator = SessionPlaceholderAllocator(mapping_store)
+    plan = DecisionPlan(
+        session_id="session-address-equivalent",
+        turn_id=2,
+        actions=[
+            DecisionAction(
+                candidate_id="c-new-address",
+                action_type=ActionType.GENERICIZE,
+                attr_type=PIIAttributeType.ADDRESS,
+                source_text="上海市浦东新区世纪大道阳光社区一期",
+                    canonical_source_text="province=上海|city=上海|district=浦东|street=世纪大|compound=阳光一期",
+            )
+        ],
+    )
+
+    assigned = allocator.assign(plan)
+    by_candidate = {action.candidate_id: action.replacement_text for action in assigned.actions}
+    assert by_candidate["c-new-address"] == "<地址1>"
+
+
+def test_session_placeholder_allocator_reuses_address_placeholder_with_extended_keywords() -> None:
+    mapping_store = InMemoryMappingStore()
+    mapping_store.save_replacements(
+        "session-address-extended",
+        1,
+        [
+            ReplacementRecord(
+                session_id="session-address-extended",
+                turn_id=1,
+                candidate_id="c-existing-address",
+                source_text="上海市浦东新区世纪大道阳光花园",
+                canonical_source_text="province=上海市|city=上海市|district=浦东新区|street=世纪大道|compound=阳光花园",
+                replacement_text="<地址1>",
+                attr_type=PIIAttributeType.ADDRESS,
+                action_type=ActionType.GENERICIZE,
+            )
+        ],
+    )
+    allocator = SessionPlaceholderAllocator(mapping_store)
+    plan = DecisionPlan(
+        session_id="session-address-extended",
+        turn_id=2,
+        actions=[
+            DecisionAction(
+                candidate_id="c-new-address",
+                action_type=ActionType.GENERICIZE,
+                attr_type=PIIAttributeType.ADDRESS,
+                source_text="上海市浦东新区世纪大道阳光公寓一期",
+                canonical_source_text="province=上海市|city=上海市|district=浦东新区|street=世纪大道|compound=阳光公寓一期",
+            )
+        ],
+    )
+
+    assigned = allocator.assign(plan)
+    by_candidate = {action.candidate_id: action.replacement_text for action in assigned.actions}
+    # 纯新链路：不再做 mapping 层关键词兼容剥离，因此该组合不复用历史占位符。
+    assert by_candidate["c-new-address"] == "<地址2>"
+
+
+def test_session_placeholder_allocator_reuses_organization_placeholder_by_prefix() -> None:
+    mapping_store = InMemoryMappingStore()
+    mapping_store.save_replacements(
+        "session-org-prefix",
+        1,
+        [
+            ReplacementRecord(
+                session_id="session-org-prefix",
+                turn_id=1,
+                candidate_id="c-existing-org",
+                source_text="上海市浦东新区阳光科技有限公司",
+                canonical_source_text="阳光科技",
+                replacement_text="<机构1>",
+                attr_type=PIIAttributeType.ORGANIZATION,
+                action_type=ActionType.GENERICIZE,
+            )
+        ],
+    )
+    allocator = SessionPlaceholderAllocator(mapping_store)
+    plan = DecisionPlan(
+        session_id="session-org-prefix",
+        turn_id=2,
+        actions=[
+            DecisionAction(
+                candidate_id="c-new-org",
+                action_type=ActionType.GENERICIZE,
+                attr_type=PIIAttributeType.ORGANIZATION,
+                source_text="阳光科技集团",
+                canonical_source_text="阳光科技",
+            )
+        ],
+    )
+    assigned = allocator.assign(plan)
+    by_candidate = {action.candidate_id: action.replacement_text for action in assigned.actions}
+    assert by_candidate["c-new-org"] == "<机构1>"
 
 
 def test_ocr_page_document_uses_space_for_word_gap_between_english_tokens() -> None:

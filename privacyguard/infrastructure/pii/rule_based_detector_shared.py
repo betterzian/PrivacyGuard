@@ -133,6 +133,15 @@ def _expand_city_tokens(values: tuple[str, ...]) -> frozenset[str]:
     return frozenset(expanded)
 
 
+def _expand_province_tokens(values: tuple[str, ...]) -> frozenset[str]:
+    expanded: set[str] = set()
+    for value in values:
+        expanded.add(value)
+        if value.endswith(("省", "市")) and len(value) > 1:
+            expanded.add(value[:-1])
+    return frozenset(expanded)
+
+
 def _load_builtin_geo_lexicon() -> _BuiltinGeoLexicon:
     lexicon_path = _DATA_ROOT / "china_geo_lexicon.json"
     if not lexicon_path.exists():
@@ -146,7 +155,7 @@ def _load_builtin_geo_lexicon() -> _BuiltinGeoLexicon:
             ordered_tokens=(),
         )
     content = json.loads(lexicon_path.read_text(encoding="utf-8"))
-    provinces = frozenset(_normalize_geo_entries(content.get("provinces")))
+    provinces = _expand_province_tokens(_normalize_geo_entries(content.get("provinces")))
     cities = _expand_city_tokens(_normalize_geo_entries(content.get("cities")))
     districts = frozenset(_normalize_geo_entries(content.get("districts")))
     local_places = frozenset(_normalize_geo_entries(content.get("local_places")))
@@ -1381,6 +1390,7 @@ _RULE_PROFILES = {
         min_confidence_by_attr={
             PIIAttributeType.NAME: 0.72,
             PIIAttributeType.ADDRESS: 0.35,
+            PIIAttributeType.DETAILS: 0.35,
             PIIAttributeType.ORGANIZATION: 0.48,
             PIIAttributeType.TIME: 0.76,
             PIIAttributeType.NUMERIC: 0.76,
@@ -1408,6 +1418,7 @@ _RULE_PROFILES = {
         min_confidence_by_attr={
             PIIAttributeType.NAME: 0.72,
             PIIAttributeType.ADDRESS: 0.45,
+            PIIAttributeType.DETAILS: 0.45,
             PIIAttributeType.ORGANIZATION: 0.48,
             PIIAttributeType.TIME: 0.76,
             PIIAttributeType.NUMERIC: 0.76,
@@ -1435,6 +1446,7 @@ _RULE_PROFILES = {
         min_confidence_by_attr={
             PIIAttributeType.NAME: 0.9,
             PIIAttributeType.ADDRESS: 0.6,
+            PIIAttributeType.DETAILS: 0.6,
             PIIAttributeType.ORGANIZATION: 0.74,
             PIIAttributeType.TIME: 0.9,
             PIIAttributeType.NUMERIC: 0.9,
@@ -1454,6 +1466,7 @@ _RULE_PROFILES = {
 _TUNABLE_RULE_ATTR_TYPES = {
     PIIAttributeType.NAME,
     PIIAttributeType.ADDRESS,
+    PIIAttributeType.DETAILS,
     PIIAttributeType.ORGANIZATION,
     PIIAttributeType.OTHER,
 }

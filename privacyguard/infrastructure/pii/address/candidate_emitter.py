@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressParseConfig, AddressParseResult
@@ -137,6 +139,7 @@ def _emit_whole_address_candidate(
         "address_privacy_level": privacy_levels,
         "address_component_trace": component_trace,
     }
+    canonical_value = _canonicalize_address_components(result.components)
     detector._upsert_candidate(
         collected=collected,
         text=raw_text,
@@ -149,6 +152,8 @@ def _emit_whole_address_candidate(
         span_end=span_end,
         confidence=result.confidence,
         matched_by=result.span.matched_by,
+        canonical_source_text=canonical_value,
+        normalized_text=canonical_value,
         metadata=metadata,
         skip_spans=skip_spans,
     )
@@ -175,11 +180,12 @@ def _emit_component_candidate(
     component_end = component_start + len(component.text)
     if component_end > len(value):
         return
+    canonical_value = _canonicalize_address_components((component,))
     detector._upsert_candidate(
         collected=collected,
         text=raw_text,
         matched_text=component.text,
-        attr_type=PIIAttributeType.ADDRESS,
+        attr_type=_component_attr_type(component.component_type),
         source=source,
         bbox=bbox,
         block_id=block_id,
@@ -187,6 +193,8 @@ def _emit_component_candidate(
         span_end=span_start + component_end,
         confidence=max(0.0, min(result.confidence - 0.04, component.confidence)),
         matched_by=f"address_component_{component.component_type}",
+        canonical_source_text=canonical_value,
+        normalized_text=canonical_value,
         metadata={
             "address_kind": [result.address_kind],
             "address_component_type": [component.component_type],
@@ -224,6 +232,7 @@ def _emit_location_components(
         if extracted is None:
             continue
         value, span_start, span_end = extracted
+        canonical_value = _canonicalize_address_components((component,))
         detector._upsert_candidate(
             collected=collected,
             text=raw_text,
@@ -236,6 +245,8 @@ def _emit_location_components(
             span_end=span_end,
             confidence=max(0.0, min(result.confidence - 0.08, component.confidence)),
             matched_by=f"address_component_{component.component_type}",
+            canonical_source_text=canonical_value,
+            normalized_text=canonical_value,
             metadata={
                 "address_kind": [result.address_kind],
                 "address_component_type": [component.component_type],
@@ -268,3 +279,211 @@ def _ordered_unique(values) -> list[str]:
         seen.add(value)
         ordered.append(value)
     return ordered
+
+
+def _component_attr_type(component_type: str) -> PIIAttributeType:
+    if component_type in {"building", "unit", "floor", "room"}:
+        return PIIAttributeType.DETAILS
+    return PIIAttributeType.ADDRESS
+
+
+def _canonicalize_address_components(components: tuple[AddressComponent, ...]) -> str:
+    slots: dict[str, str] = {}
+
+    def _put(key: str, value: str) -> None:
+        compact = value.strip()
+        if compact and key not in slots:
+            slots[key] = compact
+
+    def _strip_suffix(text: str, suffixes: tuple[str, ...]) -> str:
+        cleaned = text.strip()
+        for suffix in sorted(suffixes, key=len, reverse=True):
+            if cleaned.endswith(suffix) and len(cleaned) > len(suffix):
+                return cleaned[: -len(suffix)]
+        return cleaned
+
+    def _normalize_component_text(text: str, ctype: str) -> str:
+        if ctype in {"province", "state"}:
+            return _strip_suffix(text, ("特别行政区", "自治区", "省", "市", "state", "province"))
+        if ctype == "city":
+            return _strip_suffix(text, ("自治州", "地区", "盟", "市", "city"))
+        if ctype in {"district", "county"}:
+            return _strip_suffix(text, ("自治县", "自治旗", "新区", "区", "县", "旗", "市", "county", "district"))
+        if ctype in {"road", "street", "po_box"}:
+            return _strip_suffix(text, ("大道", "胡同", "街", "路", "道", "巷", "弄", "street", "road", "avenue", "blvd"))
+        if ctype == "compound":
+            return _strip_suffix(
+                text,
+                (
+                    "小区",
+                    "社区",
+                    "花园",
+                    "公寓",
+                    "大厦",
+                    "园区",
+                    "家园",
+                    "苑",
+                    "庭",
+                    "府",
+                    "湾",
+                    "community",
+                    "garden",
+                    "apartment",
+                    "apartments",
+                    "residence",
+                    "residences",
+                    "building",
+                    "tower",
+                    "park",
+                ),
+            )
+        if ctype == "poi":
+            return _strip_suffix(text, ("广场", "中心", "公园", "学校", "医院", "车站", "plaza", "center", "park"))
+        return text.strip()
+
+    def _canonical_numeric(text: str) -> str:
+        digits = re.findall(r"\d+", text)
+        if digits:
+            return "".join(digits)
+        zh = _chinese_numeral_to_int(text)
+        if zh is not None:
+            return str(zh)
+        en = _english_numeral_to_int(text)
+        if en is not None:
+            return str(en)
+        return ""
+
+    for component in sorted(components, key=lambda item: item.start_offset):
+        ctype = component.component_type
+        text = component.text
+        if ctype in {"province", "state"}:
+            _put("province", _normalize_component_text(text, ctype))
+            continue
+        if ctype == "city":
+            _put("city", _normalize_component_text(text, ctype))
+            continue
+        if ctype in {"district", "county"}:
+            _put("district", _normalize_component_text(text, ctype))
+            continue
+        if ctype in {"road", "street", "po_box"}:
+            _put("street", _normalize_component_text(text, ctype))
+            continue
+        if ctype in {"compound"}:
+            _put("compound", _normalize_component_text(text, ctype))
+            continue
+        if ctype in {"poi"}:
+            _put("poi", _normalize_component_text(text, ctype))
+            continue
+        if ctype in {"building", "unit", "floor"}:
+            _put("building", _canonical_numeric(text))
+            continue
+        if ctype == "room":
+            _put("room", _canonical_numeric(text))
+            continue
+        if ctype == "postal_code":
+            _put("postal", text)
+            continue
+        _put("detail", text)
+
+    order = ("province", "city", "district", "street", "poi", "compound", "building", "room", "detail", "postal")
+    parts = [f"{key}={slots[key]}" for key in order if key in slots]
+    return "|".join(parts)
+
+
+_ZH_DIGIT = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_EN_DIGIT = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+}
+_EN_TEENS = {
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+}
+_EN_TENS = {
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
+}
+
+
+def _chinese_numeral_to_int(text: str) -> int | None:
+    chars = [ch for ch in text if ch in _ZH_DIGIT or ch in {"十", "百", "千"}]
+    if not chars:
+        return None
+    compact = "".join(chars)
+    if all(ch in _ZH_DIGIT for ch in compact):
+        return int("".join(str(_ZH_DIGIT[ch]) for ch in compact))
+    total = 0
+    section = 0
+    number = 0
+    unit_map = {"十": 10, "百": 100, "千": 1000}
+    for ch in compact:
+        if ch in _ZH_DIGIT:
+            number = _ZH_DIGIT[ch]
+            continue
+        unit = unit_map.get(ch)
+        if unit is None:
+            continue
+        if number == 0:
+            number = 1
+        section += number * unit
+        number = 0
+    total += section + number
+    return total if total > 0 else None
+
+
+def _english_numeral_to_int(text: str) -> int | None:
+    tokens = [tok for tok in re.split(r"[^A-Za-z]+", text.lower()) if tok]
+    if not tokens:
+        return None
+    if all(tok in _EN_DIGIT for tok in tokens):
+        return int("".join(str(_EN_DIGIT[tok]) for tok in tokens))
+    value = 0
+    current = 0
+    seen = False
+    for tok in tokens:
+        if tok in _EN_DIGIT:
+            current += _EN_DIGIT[tok]
+            seen = True
+            continue
+        if tok in _EN_TEENS:
+            current += _EN_TEENS[tok]
+            seen = True
+            continue
+        if tok in _EN_TENS:
+            current += _EN_TENS[tok]
+            seen = True
+            continue
+        if tok == "hundred":
+            current = max(1, current) * 100
+            seen = True
+            continue
+        if tok == "thousand":
+            value += max(1, current) * 1000
+            current = 0
+            seen = True
+            continue
+        return None
+    result = value + current
+    return result if seen and result >= 0 else None

@@ -189,8 +189,13 @@ def test_rule_based_detector_detects_english_phone_organization_and_address() ->
     assert address_candidate.confidence == 0.97
     assert address_candidate.metadata["matched_by"] == ["context_address_field"]
     assert address_candidate.metadata["address_kind"] == ["private_address"]
-    by_text = {candidate.text: candidate for candidate in address_candidates if candidate.attr_type == PIIAttributeType.ADDRESS}
+    by_text = {
+        candidate.text: candidate
+        for candidate in address_candidates
+        if candidate.attr_type in {PIIAttributeType.ADDRESS, PIIAttributeType.DETAILS}
+    }
     assert by_text["123 Main St"].metadata["matched_by"] == ["address_component_street"]
+    assert by_text["Apt 4B"].attr_type == PIIAttributeType.DETAILS
     assert by_text["Apt 4B"].metadata["matched_by"] == ["address_component_unit"]
 
 
@@ -335,8 +340,14 @@ def test_rule_based_detector_handles_masked_truncated_address_tail() -> None:
     assert address_candidate is not None
     assert address_candidate.text == "上海市浦东新区世纪大道XX小区3号楼1201室"
     assert address_candidate.metadata["address_terminated_by"] == ["masked_end"]
-    by_text = {candidate.text: candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS}
+    by_text = {
+        candidate.text: candidate
+        for candidate in candidates
+        if candidate.attr_type in {PIIAttributeType.ADDRESS, PIIAttributeType.DETAILS}
+    }
+    assert by_text["3号楼"].attr_type == PIIAttributeType.DETAILS
     assert by_text["3号楼"].metadata["matched_by"] == ["address_component_building"]
+    assert by_text["1201室"].attr_type == PIIAttributeType.DETAILS
     assert by_text["1201室"].metadata["matched_by"] == ["address_component_room"]
 
 
@@ -607,13 +618,32 @@ def test_rule_based_detector_emits_ordered_address_component_trace() -> None:
         if candidate.attr_type == PIIAttributeType.ADDRESS and candidate.text == "上海浦东新区世纪大道1201室"
     )
 
-    assert address_candidate.metadata["address_component_type"] == ["city", "district", "poi", "room"]
+    assert address_candidate.metadata["address_component_type"] == ["city", "district", "road", "room"]
     assert address_candidate.metadata["address_component_trace"][:4] == [
         "city:上海",
         "district:浦东新区",
-        "poi:世纪大道",
+        "road:世纪大道",
         "room:1201室",
     ]
+
+
+def test_rule_based_detector_extends_building_with_trailing_room_digits() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="鼓楼路阳光小区13号楼102",
+        ocr_blocks=[],
+        protection_level=ProtectionLevel.BALANCED,
+    )
+
+    address_candidate = next(
+        candidate
+        for candidate in candidates
+        if candidate.attr_type == PIIAttributeType.ADDRESS and candidate.text == "鼓楼路阳光小区13号楼102"
+    )
+
+    assert "room" in address_candidate.metadata["address_component_type"]
+    assert "room:102" in address_candidate.metadata["address_component_trace"]
 
 
 def test_rule_based_detector_rejects_explicit_english_address_value_outside_local_geo_lexicon() -> None:

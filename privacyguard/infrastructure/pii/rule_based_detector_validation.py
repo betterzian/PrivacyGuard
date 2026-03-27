@@ -1286,6 +1286,7 @@ def _upsert_candidate(
     confidence: float,
     matched_by: str,
     canonical_source_text: str | None = None,
+    normalized_text: str | None = None,
     metadata: dict[str, list[str]] | None = None,
     skip_spans: list[tuple[int, int]] | None = None,
 ) -> None:
@@ -1300,7 +1301,7 @@ def _upsert_candidate(
         if self._overlaps_any_span(span_start, span_end, skip_spans):
             return
     attr_type = self._normalize_fallback_attr_type(attr_type, cleaned_text)
-    normalized = canonicalize_pii_value(attr_type, cleaned_text)
+    normalized = normalized_text or canonicalize_pii_value(attr_type, cleaned_text)
     key = (normalized, attr_type.value, span_start, span_end)
     entity_id = self.resolver.build_candidate_id(
         self.detector_mode,
@@ -1421,6 +1422,7 @@ def _to_attr_type(self, raw_key: str | PIIAttributeType) -> PIIAttributeType | N
         "driver_license_number": PIIAttributeType.DRIVER_LICENSE,
         "email": PIIAttributeType.EMAIL,
         "address": PIIAttributeType.ADDRESS,
+        "details": PIIAttributeType.DETAILS,
         "id_number": PIIAttributeType.ID_NUMBER,
         "id": PIIAttributeType.ID_NUMBER,
         "organization": PIIAttributeType.ORGANIZATION,

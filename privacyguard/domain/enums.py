@@ -47,6 +47,7 @@ class PIIAttributeType(str, Enum):
     DRIVER_LICENSE = "driver_license"
     EMAIL = "email"
     ADDRESS = "address"
+    DETAILS = "details"
     ID_NUMBER = "id_number"
     ORGANIZATION = "organization"
     TIME = "time"

@@ -430,7 +430,7 @@ def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
     if not cleaned:
         return ""
     if attr_type == PIIAttributeType.ORGANIZATION:
-        return re.sub(r"\s+", "", cleaned)
+        return canonicalize_organization_text(value)
     if attr_type == PIIAttributeType.PHONE:
         return compact_phone_value(cleaned)
     if attr_type == PIIAttributeType.CARD_NUMBER:
@@ -446,7 +446,9 @@ def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
     if attr_type == PIIAttributeType.EMAIL:
         return compact_email_value(cleaned)
     if attr_type == PIIAttributeType.ADDRESS:
-        return canonicalize_address_text(cleaned)
+        return _compact_text(cleaned)
+    if attr_type == PIIAttributeType.DETAILS:
+        return _compact_text(cleaned)
     if attr_type == PIIAttributeType.TIME:
         return compact_time_value(cleaned) or cleaned
     if attr_type == PIIAttributeType.NUMERIC:
@@ -456,6 +458,80 @@ def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
     if attr_type == PIIAttributeType.OTHER:
         return compact_other_code_value(cleaned)
     return normalize_text(value)
+
+
+_ORG_SUFFIX_ZH = (
+    "股份有限公司",
+    "集团有限公司",
+    "有限责任公司",
+    "有限公司",
+    "责任公司",
+    "研究院",
+    "分公司",
+    "公司",
+    "集团",
+)
+_ORG_SUFFIX_EN = (
+    "incorporated",
+    "corporation",
+    "company",
+    "limited",
+    "inc",
+    "corp",
+    "co",
+    "ltd",
+    "llc",
+    "plc",
+    "gmbh",
+    "pte",
+)
+_ORG_LEADING_GEO_PATTERN = re.compile(
+    r"^(?:[\u4e00-\u9fff]{1,16}(?:特别行政区|自治区|省|市|区|县|镇|乡|街道|大道|路|街|道|巷|弄)){1,6}"
+)
+_ORG_LEADING_EN_ADDRESS_PATTERN = re.compile(
+    r"^(?:\d{1,6}[a-zA-Z\-]*\s+)?(?:[a-zA-Z0-9]+\s+){0,4}(?:street|st|road|rd|avenue|ave|boulevard|blvd|lane|ln)\b[\s,]*",
+    re.IGNORECASE,
+)
+
+
+def canonicalize_organization_text(value: str) -> str:
+    text = unicodedata.normalize("NFKC", str(value)).strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+
+    # 去掉前缀地址片段（中英文常见写法）
+    zh_prefix = _ORG_LEADING_GEO_PATTERN.match(text)
+    if zh_prefix is not None:
+        text = text[zh_prefix.end() :]
+        lowered = text.lower()
+    en_prefix = _ORG_LEADING_EN_ADDRESS_PATTERN.match(lowered)
+    if en_prefix is not None:
+        text = text[en_prefix.end() :]
+        lowered = text.lower()
+
+    # 去掉公司后缀（可重复剥离）
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _ORG_SUFFIX_ZH:
+            if text.endswith(suffix) and len(text) > len(suffix):
+                text = text[: -len(suffix)]
+                lowered = text.lower()
+                changed = True
+                break
+        if changed:
+            continue
+        for suffix in _ORG_SUFFIX_EN:
+            if lowered.endswith(suffix) and len(lowered) > len(suffix):
+                text = text[: -len(suffix)]
+                lowered = text.lower()
+                changed = True
+                break
+
+    text = re.sub(r"^[,./\\-]+|[,./\\-]+$", "", text)
+    text = re.sub(r"\s+", "", text)
+    return text.lower() if re.search(r"[A-Za-z]", text) else text
 
 
 def compact_phone_value(value: str) -> str:

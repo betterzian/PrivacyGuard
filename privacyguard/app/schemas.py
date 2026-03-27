@@ -14,6 +14,7 @@ class DetectorOverridesModel(BaseModel):
 
     name: float | None = Field(default=None, ge=0.0, le=1.0)
     address: float | None = Field(default=None, ge=0.0, le=1.0)
+    details: float | None = Field(default=None, ge=0.0, le=1.0)
     organization: float | None = Field(default=None, ge=0.0, le=1.0)
     other: float | None = Field(default=None, ge=0.0, le=1.0)
 
@@ -21,6 +22,7 @@ class DetectorOverridesModel(BaseModel):
         mapping = {
             "name": PIIAttributeType.NAME,
             "address": PIIAttributeType.ADDRESS,
+            "details": PIIAttributeType.DETAILS,
             "organization": PIIAttributeType.ORGANIZATION,
             "other": PIIAttributeType.OTHER,
         }

@@ -48,6 +48,7 @@ def _shadow_token(self, attr_type: PIIAttributeType) -> str:
         PIIAttributeType.EMAIL: " <EMAIL> ",
         PIIAttributeType.ID_NUMBER: " <ID> ",
         PIIAttributeType.ADDRESS: " <ADDR> ",
+        PIIAttributeType.DETAILS: " <ADDR> ",
         PIIAttributeType.ORGANIZATION: " <ORG> ",
         PIIAttributeType.TIME: " <TIME> ",
         PIIAttributeType.NUMERIC: " <NUM> ",
