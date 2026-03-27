@@ -76,6 +76,39 @@ _GEO_ADDRESS_SUFFIXES = (
     "里",
     "站",
 )
+# 与组织名后缀精确去重：凡与行政区划/道路与住宅小区等地址形态完全相同的词不再当作组织后缀触发词。
+_ADDRESS_KEYWORD_TOKENS_EXACT_ORG_EXCLUSION = frozenset(dict.fromkeys((*_GEO_ADMIN_SUFFIXES, *_GEO_ADDRESS_SUFFIXES, "地区")))
+# 英文路街类缩写/全称，与地址关键词一致者从组织后缀表剔除（精确匹配，小写去尾点）。
+_EN_ADDRESS_STREET_TOKEN_KEYS = frozenset(
+    {
+        "boulevard",
+        "blvd",
+        "avenue",
+        "ave",
+        "street",
+        "st",
+        "road",
+        "rd",
+        "lane",
+        "ln",
+        "drive",
+        "dr",
+        "court",
+        "ct",
+        "place",
+        "pl",
+    }
+)
+
+
+def _org_suffix_token_allowed_after_address_dedupe(token: str) -> bool:
+    if any("\u4e00" <= ch <= "\u9fff" for ch in token):
+        return token not in _ADDRESS_KEYWORD_TOKENS_EXACT_ORG_EXCLUSION
+    return token.lower().rstrip(".") not in _EN_ADDRESS_STREET_TOKEN_KEYS
+
+
+def _tuple_org_suffixes_minus_address_keywords(suffixes: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(s for s in suffixes if _org_suffix_token_allowed_after_address_dedupe(s))
 
 
 @dataclass(frozen=True, slots=True)
@@ -633,8 +666,8 @@ _UI_NEGATIVE_PHRASES_EN = frozenset(_UI_NEGATIVE_PHRASES_EN) | _BUILTIN_UI_BLACK
 _COMMON_CITY_TOKENS = set(_BUILTIN_GEO_LEXICON.cities)
 _COMMON_DISTRICT_TOKENS = set(_BUILTIN_GEO_LEXICON.districts)
 _COMMON_BUSINESS_AREA_TOKENS = set(_BUILTIN_GEO_LEXICON.local_places)
-_LOCATION_CLUE_TOKENS = _BUILTIN_GEO_LEXICON.ordered_tokens
-_LOCATION_CLUE_MATCHER = AhoCorasickMatcher(_LOCATION_CLUE_TOKENS)
+_GEO_LEXICON_ORDERED_TOKENS = _BUILTIN_GEO_LEXICON.ordered_tokens
+_GEO_LEXICON_MATCHER = AhoCorasickMatcher(_GEO_LEXICON_ORDERED_TOKENS)
 _EN_GEO_TIER_A_STATE_PATTERN = _compile_en_phrase_pattern(_BUILTIN_EN_GEO_LEXICON.tier_a_state_names)
 _EN_GEO_TIER_A_CODE_PATTERN = _compile_en_phrase_pattern(_BUILTIN_EN_GEO_LEXICON.tier_a_state_codes)
 _EN_GEO_TIER_B_PATTERN = _compile_en_phrase_pattern(_BUILTIN_EN_GEO_LEXICON.tier_b_places)
@@ -1165,88 +1198,96 @@ _LEADING_ADDRESS_NOISE_PATTERN_EN = re.compile(
     r"^(?:address|addr|location|located at|live at|lives at|resides at|ship to|send to|deliver to|from)\s*(?:[:=,-]|is|at)?\s*",
     re.IGNORECASE,
 )
-_ORGANIZATION_STRONG_SUFFIXES = (
-    "有限责任公司",
-    "股份有限公司",
-    "有限公司",
-    "集团",
-    "银行",
-    "医院",
-    "酒店",
-    "宾馆",
-    "旅馆",
-    "民宿",
-    "大学",
-    "学院",
-    "中学",
-    "小学",
-    "幼儿园",
-    "法院",
-    "检察院",
-    "事务所",
-    "研究院",
-    "研究所",
-    "实验室",
-    "基金会",
-    "协会",
-    "委员会",
-    "派出所",
-    "公安局",
-    "分局",
-    "工作室",
-    "公司",
+_ORGANIZATION_STRONG_SUFFIXES = _tuple_org_suffixes_minus_address_keywords(
+    (
+        "有限责任公司",
+        "股份有限公司",
+        "有限公司",
+        "集团",
+        "银行",
+        "医院",
+        "酒店",
+        "宾馆",
+        "旅馆",
+        "民宿",
+        "大学",
+        "学院",
+        "中学",
+        "小学",
+        "幼儿园",
+        "法院",
+        "检察院",
+        "事务所",
+        "研究院",
+        "研究所",
+        "实验室",
+        "基金会",
+        "协会",
+        "委员会",
+        "派出所",
+        "公安局",
+        "分局",
+        "工作室",
+        "公司",
+    )
 )
-_EN_ORGANIZATION_STRONG_SUFFIXES = (
-    "inc",
-    "inc.",
-    "corp",
-    "corp.",
-    "corporation",
-    "company",
-    "co.",
-    "llc",
-    "ltd",
-    "ltd.",
-    "bank",
-    "hospital",
-    "hotel",
-    "inn",
-    "motel",
-    "resort",
-    "university",
-    "college",
-    "school",
-    "institute",
-    "foundation",
-    "association",
-    "laboratory",
-    "lab",
-    "clinic",
+_EN_ORGANIZATION_STRONG_SUFFIXES = _tuple_org_suffixes_minus_address_keywords(
+    (
+        "inc",
+        "inc.",
+        "corp",
+        "corp.",
+        "corporation",
+        "company",
+        "co.",
+        "llc",
+        "ltd",
+        "ltd.",
+        "bank",
+        "hospital",
+        "hotel",
+        "inn",
+        "motel",
+        "resort",
+        "university",
+        "college",
+        "school",
+        "institute",
+        "foundation",
+        "association",
+        "laboratory",
+        "lab",
+        "clinic",
+    )
 )
-_EN_ORGANIZATION_WEAK_SUFFIXES = (
-    "analytics",
-    "consulting",
-    "design",
-    "digital",
-    "group",
-    "media",
-    "network",
-    "software",
-    "studio",
-    "systems",
-    "technology",
-    "tech",
+_EN_ORGANIZATION_WEAK_SUFFIXES = _tuple_org_suffixes_minus_address_keywords(
+    (
+        "analytics",
+        "consulting",
+        "design",
+        "digital",
+        "group",
+        "media",
+        "network",
+        "software",
+        "studio",
+        "systems",
+        "technology",
+        "tech",
+    )
 )
-_ORGANIZATION_WEAK_SUFFIXES = (
-    "科技",
-    "信息",
-    "网络",
-    "软件",
-    "电子",
-    "传媒",
-    "咨询",
-    "设计",
-    "贸易",
+_ORGANIZATION_WEAK_SUFFIXES = _tuple_org_suffixes_minus_address_keywords(
+    (
+        "科技",
+        "信息",
+        "网络",
+        "软件",
+        "电子",
+        "传媒",
+        "咨询",
+        "设计",
+        "贸易",
+    )
 )
 _ORGANIZATION_SUFFIX_PATTERN = re.compile(
     rf"(?:{'|'.join(map(re.escape, _ORGANIZATION_STRONG_SUFFIXES + _ORGANIZATION_WEAK_SUFFIXES))})$"

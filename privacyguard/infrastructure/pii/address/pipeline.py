@@ -4,7 +4,7 @@ from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.pii.address.candidate_emitter import emit_candidates
 from privacyguard.infrastructure.pii.address.event_stream_scanner import scan_address_and_organization
 from privacyguard.infrastructure.pii.address.input_adapter import build_text_input
-from privacyguard.infrastructure.pii.address.risk_classifier import classify_spans
+from privacyguard.infrastructure.pii.address.span_parse import parse_results_from_spans
 from privacyguard.infrastructure.pii.address.seed_extractor import collect_component_matches, extract_seeds
 from privacyguard.infrastructure.pii.address.types import AddressParseConfig
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _RuleStrengthProfile
@@ -31,7 +31,6 @@ def collect_address_candidates(
         min_confidence=rule_profile.address_min_confidence,
         field_label_pattern=self.field_label_pattern,
         emit_component_candidates=True,
-        emit_location_candidates=False,
     )
     spans = scan_address_and_organization(
         self,
@@ -48,7 +47,7 @@ def collect_address_candidates(
     )
     if not spans:
         return
-    results = classify_spans(
+    results = parse_results_from_spans(
         spans,
         locale_profile=self.locale_profile,
         config=config,

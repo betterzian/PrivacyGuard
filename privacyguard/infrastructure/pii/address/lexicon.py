@@ -17,6 +17,7 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import (
     _ID_FIELD_KEYWORDS,
     _OCR_SEMANTIC_BREAK_TOKEN,
     _PHONE_FIELD_KEYWORDS,
+    _org_suffix_token_allowed_after_address_dedupe,
 )
 
 _ZH_CONNECTORS = {"", " ", ",", "，", "、", ":", "：", "-", "－", "—", "/", "#", "的"}
@@ -103,24 +104,28 @@ _PUBLIC_PLACE_SUFFIXES = (
     "车站",
     "门店",
 )
-_ORG_SUFFIX_TOKENS = (
-    "bank",
-    "college",
-    "company",
-    "group",
-    "hospital",
-    "institute",
-    "school",
-    "university",
-    "事务所",
-    "公司",
-    "医院",
-    "大学",
-    "学院",
-    "学校",
-    "工作室",
-    "银行",
-    "集团",
+_ORG_SUFFIX_TOKENS = tuple(
+    token
+    for token in (
+        "bank",
+        "college",
+        "company",
+        "group",
+        "hospital",
+        "institute",
+        "school",
+        "university",
+        "事务所",
+        "公司",
+        "医院",
+        "大学",
+        "学院",
+        "学校",
+        "工作室",
+        "银行",
+        "集团",
+    )
+    if _org_suffix_token_allowed_after_address_dedupe(token)
 )
 _LEADING_NOISE_RE = re.compile(
     r"^(?:\s*(?:请)?(?:在|住在|我住在|我住|位于|地址在|住址在|家住|现住|居住于|收货到|寄往|寄到|送到|派送至|发往|前往|来自|发自|located at|live at|lives at|resides at|ship to|send to|deliver to|from)\s*)",
@@ -148,71 +153,6 @@ _FIELD_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 _ZH_DIRECT_CONTROLLED_MUNICIPALITIES = frozenset({"北京", "北京市", "上海", "上海市", "天津", "天津市", "重庆", "重庆市"})
-_ZH_SINGLE_COMPONENT_NEGATIVE_TERMS: dict[str, frozenset[str]] = {
-    "road": frozenset({
-        "专用",
-        "便宜",
-        "充值",
-        "减免",
-        "国家",
-        "好物",
-        "学生",
-        "店铺",
-        "旗舰",
-        "政府",
-        "标签",
-        "管理",
-        "秒杀",
-        "自营",
-        "补贴",
-        "虚拟",
-        "道具",
-        "专区",
-        "仅剩",
-        "限时",
-    }),
-    "street": frozenset({
-        "专用",
-        "便宜",
-        "充值",
-        "减免",
-        "国家",
-        "好物",
-        "学生",
-        "店铺",
-        "旗舰",
-        "政府",
-        "标签",
-        "管理",
-        "秒杀",
-        "自营",
-        "补贴",
-        "虚拟",
-        "街区",
-        "专区",
-        "仅剩",
-        "限时",
-    }),
-    "compound": frozenset({
-        "专区",
-        "便宜",
-        "公司",
-        "学校",
-        "店铺",
-        "政府",
-        "标签",
-        "管理",
-        "自营",
-        "补贴",
-        "超市",
-        "酒店",
-        "银行",
-        "医院",
-    }),
-    "town": frozenset({"专区", "标签", "管理", "补贴", "便宜"}),
-    "street_admin": frozenset({"专区", "标签", "管理", "补贴", "便宜"}),
-    "village": frozenset({"专区", "标签", "管理", "补贴", "便宜"}),
-}
 _ZH_SINGLE_COMPONENT_NEGATIVE_EXACT = frozenset({
     "政府",
     "管理",
@@ -238,12 +178,6 @@ _ZH_SUFFIX_NEGATIVE_TERMS: dict[str, frozenset[str]] = {
     "湾": frozenset({"港湾币", "专区", "标签"}),
     "庭": frozenset({"家庭装", "庭审", "庭院灯"}),
     "苑": frozenset({"苑校", "专区", "标签"}),
-}
-_EN_SINGLE_COMPONENT_NEGATIVE_TERMS: dict[str, frozenset[str]] = {
-    "road": frozenset({"account", "banner", "buy", "community", "group", "info", "number", "personal", "profile", "switch"}),
-    "street": frozenset({"account", "banner", "buy", "community", "group", "info", "number", "personal", "profile", "switch"}),
-    "city": frozenset({"account", "banner", "mobile", "number", "phone", "profile"}),
-    "state": frozenset({"account", "banner", "number", "phone", "profile"}),
 }
 
 
@@ -371,51 +305,6 @@ def _has_en_keyword_expansion_match(source_text: str, match_start: int, match_en
     return False
 
 
-def allow_single_component_address(
-    component_type: str,
-    text: str,
-    *,
-    matched_by: str,
-    source_text: str | None = None,
-) -> bool:
-    cleaned = text.strip()
-    compact = re.sub(r"\s+", "", cleaned)
-    lowered = re.sub(r"\s+", " ", cleaned).strip().lower()
-    if not compact:
-        return False
-    if compact in _ZH_SINGLE_COMPONENT_NEGATIVE_EXACT:
-        return False
-    if any("\u4e00" <= char <= "\u9fff" for char in compact):
-        if _has_zh_single_component_suffix_noise(compact, source_text=source_text):
-            return False
-        negatives = _ZH_SINGLE_COMPONENT_NEGATIVE_TERMS.get(component_type, frozenset())
-        if any(token in compact for token in negatives):
-            return False
-        if component_type == "province":
-            return matched_by == "context_address_field" and compact in _BUILTIN_GEO_LEXICON.provinces
-        if component_type == "city":
-            return matched_by == "context_address_field" and compact in (_BUILTIN_GEO_LEXICON.cities | _ZH_DIRECT_CONTROLLED_MUNICIPALITIES)
-        if component_type == "district":
-            return matched_by == "context_address_field" and compact in _BUILTIN_GEO_LEXICON.districts
-        if component_type == "compound":
-            return compact in _BUILTIN_GEO_LEXICON.local_places or matched_by == "context_address_field"
-        return True
-
-    negatives_en = _EN_SINGLE_COMPONENT_NEGATIVE_TERMS.get(component_type, frozenset())
-    if any(token in lowered for token in negatives_en):
-        return False
-    if _has_en_single_component_suffix_noise(component_type, lowered, source_text=source_text):
-        return False
-    if component_type == "city":
-        return matched_by == "context_address_field" and lowered in (_BUILTIN_EN_GEO_LEXICON.tier_b_places | _BUILTIN_EN_GEO_LEXICON.tier_c_places)
-    if component_type == "state":
-        return matched_by == "context_address_field" and (
-            lowered in _BUILTIN_EN_GEO_LEXICON.tier_a_state_names
-            or lowered in _BUILTIN_EN_GEO_LEXICON.tier_a_state_codes
-        )
-    return True
-
-
 def allow_explicit_label_address_value(text: str) -> bool:
     cleaned = text.strip()
     compact = re.sub(r"\s+", "", cleaned)
@@ -493,7 +382,7 @@ def _iter_en_components(text: str) -> Iterable[AddressComponentMatch]:
 
 
 def _iter_builtin_geo_tokens(text: str) -> Iterable[AddressComponentMatch]:
-    from privacyguard.infrastructure.pii.rule_based_detector_shared import _LOCATION_CLUE_MATCHER
+    from privacyguard.infrastructure.pii.rule_based_detector_shared import _GEO_LEXICON_MATCHER
 
     # 词典可去掉“关键词后缀”，运行时再与后缀绑定成完整地名/地址组件。
     _ZH_SUFFIX_TO_TYPE = {
@@ -521,7 +410,7 @@ def _iter_builtin_geo_tokens(text: str) -> Iterable[AddressComponentMatch]:
     }
 
     seen: set[tuple[int, int]] = set()
-    for start, end, token in _LOCATION_CLUE_MATCHER.finditer(text):
+    for start, end, token in _GEO_LEXICON_MATCHER.finditer(text):
         if (start, end) in seen:
             continue
         seen.add((start, end))

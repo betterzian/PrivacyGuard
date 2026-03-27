@@ -290,7 +290,7 @@ def _starts_with_geo_or_activity(self, value: str) -> bool:
     compact_lower = compact.lower()
     if any(compact.startswith(token) or compact_lower.startswith(token.lower()) for token in _LOCATION_ACTIVITY_TOKENS):
         return True
-    return any(compact.startswith(token) or compact_lower.startswith(token.lower()) for token in _LOCATION_CLUE_TOKENS)
+    return any(compact.startswith(token) or compact_lower.startswith(token.lower()) for token in _GEO_LEXICON_ORDERED_TOKENS)
 
 def _is_ui_operation_name_token(self, value: str) -> bool:
     cleaned = self._clean_extracted_value(value)

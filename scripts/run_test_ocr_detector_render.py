@@ -194,7 +194,6 @@ def run_for_image(
                 "name_findings": _collect_findings(candidates, attr_type_value="name"),
                 "address_findings": _collect_findings(candidates, attr_type_value="address"),
                 "organization_findings": _collect_findings(candidates, attr_type_value="organization"),
-                "location_clue_findings": _collect_findings(candidates, attr_type_value="location_clue"),
                 "other_findings": _collect_findings(candidates, attr_type_value="other"),
                 "timings": {
                     "detector_seconds": round(detector_seconds, 6),
@@ -272,7 +271,6 @@ def run_for_image(
         name_findings = _collect_findings(candidates, attr_type_value="name")
         address_findings = _collect_findings(candidates, attr_type_value="address")
         organization_findings = _collect_findings(candidates, attr_type_value="organization")
-        location_clue_findings = _collect_findings(candidates, attr_type_value="location_clue")
         other_findings = _collect_findings(candidates, attr_type_value="other")
         level_timings[level_name] = timing_payload
         level_summaries[level_name] = {
@@ -283,8 +281,6 @@ def run_for_image(
             "address_findings": address_findings,
             "organization_candidate_count": len(organization_findings),
             "organization_findings": organization_findings,
-            "location_clue_candidate_count": len(location_clue_findings),
-            "location_clue_findings": location_clue_findings,
             "other_candidate_count": len(other_findings),
             "other_findings": other_findings,
             "render_path": str((image_output_root / level_name / "render.png").resolve()),

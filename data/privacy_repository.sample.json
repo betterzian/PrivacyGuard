@@ -24,20 +24,6 @@
             }
           }
         ],
-        "location_clue": [
-          {
-            "value": "样本校区",
-            "aliases": [
-              "样本园"
-            ]
-          },
-          {
-            "value": "演示街区",
-            "aliases": [
-              "演示广场"
-            ]
-          }
-        ],
         "phone": [
           {
             "value": "13800000001",
@@ -222,20 +208,6 @@
               "value": "Jordan",
               "aliases": []
             }
-          }
-        ],
-        "location_clue": [
-          {
-            "value": "Demo Campus",
-            "aliases": [
-              "Campus West"
-            ]
-          },
-          {
-            "value": "Sample Market",
-            "aliases": [
-              "Market Block"
-            ]
           }
         ],
         "phone": [

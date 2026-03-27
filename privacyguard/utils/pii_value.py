@@ -446,7 +446,12 @@ def canonicalize_pii_value(attr_type: PIIAttributeType, value: str) -> str:
     if attr_type == PIIAttributeType.EMAIL:
         return compact_email_value(cleaned)
     if attr_type == PIIAttributeType.ADDRESS:
-        return _compact_text(cleaned)
+        from privacyguard.infrastructure.pii.address.key_value_canonical import address_key_value_canonical_from_zh
+
+        stripped = str(value or "").strip()
+        if not stripped:
+            return ""
+        return address_key_value_canonical_from_zh(stripped)
     if attr_type == PIIAttributeType.DETAILS:
         return _compact_text(cleaned)
     if attr_type == PIIAttributeType.TIME:
@@ -670,30 +675,6 @@ def canonicalize_address_text(value: str) -> str:
         ]
         return "|".join(part for part in parts if part)
     return _compact_text(value)
-
-
-def canonicalize_location_clue_text(value: str) -> str:
-    """将位置线索文本归一为稳定 key。"""
-    compact = _compact_text(value)
-    if not compact:
-        return ""
-    if compact in _PROVINCE_ALIASES:
-        return _PROVINCE_ALIASES[compact]
-    components = parse_address_components(compact)
-    if components.district_key:
-        return components.district_key
-    if components.city_key:
-        city = components.city_key
-        if city.endswith("市") and len(city) > 2:
-            return city[:-1]
-        return city
-    if components.province_key:
-        return components.province_key
-    if components.country_key:
-        return components.country_key
-    if compact.endswith("市") and len(compact) > 2:
-        return compact[:-1]
-    return compact
 
 
 def persona_slot_replacement(attr_type: PIIAttributeType, source_text: str, slot_value: str) -> str:

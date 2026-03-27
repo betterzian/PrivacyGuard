@@ -1,16 +1,21 @@
+"""从地址事件流产出的 span 构建解析结果（组件切片 + 置信度门限 + 去重）。
+
+地址与组织已在事件流层划分，此处不再做 organization_like / address_kind 风险分类。
+"""
+
 from __future__ import annotations
 
 import re
 
 from privacyguard.infrastructure.pii.address.component_parser_en import parse_en_components
 from privacyguard.infrastructure.pii.address.component_parser_zh import parse_zh_components
-from privacyguard.infrastructure.pii.address.lexicon import (
-    allow_explicit_label_address_value,
-    allow_single_component_address,
-    organization_suffix_tokens,
-    public_place_suffixes,
+from privacyguard.infrastructure.pii.address.types import (
+    AddressComponent,
+    AddressComponentMatch,
+    AddressParseConfig,
+    AddressParseResult,
+    AddressSpan,
 )
-from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressComponentMatch, AddressParseConfig, AddressParseResult, AddressSpan
 
 _ZH_FINE_COMPOUND_SUFFIXES = ("小区", "公寓", "大厦", "社区", "宿舍", "花园", "家园")
 _ZH_COMPONENT_GROUP_ORDER = {
@@ -57,7 +62,7 @@ _TRAILING_BUILDING_ROOM_DIGITS_PATTERN = re.compile(
 )
 
 
-def classify_spans(
+def parse_results_from_spans(
     spans: tuple[AddressSpan, ...],
     *,
     locale_profile: str,
@@ -66,27 +71,28 @@ def classify_spans(
 ) -> tuple[AddressParseResult, ...]:
     results: list[AddressParseResult] = []
     for span in spans:
-        components = _parse_components_for_span(
+        components = build_components_for_span(
             span,
             locale_profile=locale_profile,
             component_matches=component_matches,
         )
-        kind = _classify_address_kind(span, components)
-        confidence = _result_confidence(span, components, kind)
+        if len(components) >= 2 and not _components_follow_expected_order(span.text, components):
+            continue
+        confidence = max(0.0, min(0.97, span.confidence))
         if confidence < config.min_confidence:
             continue
         results.append(
             AddressParseResult(
                 span=span,
                 components=components,
-                address_kind=kind,
+                address_kind="private_address",
                 confidence=confidence,
             )
         )
     return tuple(_dedupe_results(results))
 
 
-def _parse_components_for_span(
+def build_components_for_span(
     span: AddressSpan,
     *,
     locale_profile: str,
@@ -157,79 +163,20 @@ def _privacy_level(component_type: str, text: str) -> str:
         return "fine"
     if component_type == "compound" and text.endswith(_ZH_FINE_COMPOUND_SUFFIXES):
         return "fine"
-    if component_type in {"street", "road", "postal_code", "city", "district", "county", "town", "street_admin", "village", "poi"}:
-        return "medium"
-    return "coarse"
-
-
-def _classify_address_kind(span: AddressSpan, components: tuple[AddressComponent, ...]) -> str:
-    text = span.text.strip()
-    lowered = text.lower()
-    component_types = {component.component_type for component in components}
-    organization_like = any(token in lowered for token in organization_suffix_tokens())
-    has_explicit_label = span.matched_by == "context_address_field"
-    address_like_types = {
-        "country",
-        "province",
+    if component_type in {
+        "street",
+        "road",
+        "postal_code",
         "city",
         "district",
         "county",
-        "street_admin",
         "town",
+        "street_admin",
         "village",
-        "street",
-        "road",
-        "compound",
-        "building",
-        "unit",
-        "floor",
-        "room",
-        "postal_code",
-        "po_box",
-        "state",
-    }
-    if components:
-        if len(components) >= 2 and not _components_follow_expected_order(text, components):
-            return "unknown"
-        if len(components) == 1:
-            only = components[0]
-            # grow 左扩行政前缀后 span 可能长于唯一 compound，仍应视为有效地址。
-            if (
-                only.component_type == "compound"
-                and span.matched_by == "event_stream_address"
-                and only.start_offset > 0
-                and text[: only.start_offset].strip()
-            ):
-                pass
-            elif not allow_single_component_address(
-                only.component_type,
-                only.text,
-                matched_by=span.matched_by,
-                source_text=text,
-            ):
-                return "unknown"
-        if organization_like and not any(item in component_types for item in address_like_types - {"compound"}):
-            return "organization_like"
-        return "private_address"
-    if has_explicit_label and allow_explicit_label_address_value(text):
-        return "private_address"
-    if text and any(lowered.endswith(token) for token in public_place_suffixes()):
-        return "private_address"
-    return "unknown"
-
-
-def _result_confidence(span: AddressSpan, components: tuple[AddressComponent, ...], kind: str) -> float:
-    confidence = span.confidence
-    if kind == "private_address":
-        if any(component.privacy_level == "fine" for component in components):
-            confidence += 0.04
-        elif len(components) >= 2:
-            confidence += 0.02
-    elif kind == "organization_like":
-        confidence -= 0.22
-    else:
-        confidence -= 0.02
-    return max(0.0, min(0.97, confidence))
+        "poi",
+    }:
+        return "medium"
+    return "coarse"
 
 
 def _components_follow_expected_order(text: str, components: tuple[AddressComponent, ...]) -> bool:

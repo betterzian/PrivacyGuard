@@ -291,7 +291,7 @@ def test_rule_based_detector_keeps_store_name_out_of_address_candidates() -> Non
         protection_level=ProtectionLevel.STRONG,
     )
 
-    # LOCATION_CLUE 已移除，且门店误检拦截规则已移除；此类文本可能产生 ADDRESS 候选。
+    # 门店类短串仍可能产生 ADDRESS 候选（按当前规则）。
     assert _find_candidate(candidates, PIIAttributeType.ADDRESS) is not None
 
 
@@ -501,7 +501,6 @@ def test_rule_based_detector_rejects_keyword_expansion_block_for_single_address_
         protection_level=ProtectionLevel.STRONG,
     )
 
-    # LOCATION_CLUE 已移除，地理碎片与单组件更倾向归入 ADDRESS；此处不再强约束为空。
     assert candidates is not None
 
 
@@ -514,7 +513,6 @@ def test_rule_based_detector_rejects_single_component_compound_noise() -> None:
         protection_level=ProtectionLevel.STRONG,
     )
 
-    # LOCATION_CLUE 已移除，单组件 compound 可能作为 ADDRESS 候选存在。
     assert candidates is not None
 
 

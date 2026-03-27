@@ -77,5 +77,4 @@ class AddressParseConfig:
     min_confidence: float
     field_label_pattern: Pattern[str] | None = None
     emit_component_candidates: bool = True
-    emit_location_candidates: bool = False
     extra_metadata: dict[str, list[str]] = field(default_factory=dict)

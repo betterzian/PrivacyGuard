@@ -1,5 +1,10 @@
 """RuleBasedPIIDetector internal helper functions."""
 
+from privacyguard.infrastructure.pii.address.key_value_canonical import (
+    address_key_value_canonical_from_zh,
+    has_cjk_characters,
+    zh_label_address_has_parse_components,
+)
 from privacyguard.infrastructure.pii.rule_based_detector_labels import (
     _FieldLabelSpec,
     _match_inline_field_labels,
@@ -1419,6 +1424,7 @@ def _validate_ocr_label_value_text(
     allow_ocr_noise = True
     canonical_source_text: str | None = None
     confidence = spec.ocr_confidence
+    resolved_attr_type = spec.attr_type
     if spec.attr_type == PIIAttributeType.NAME:
         component = spec.name_component or "full"
         if component == "full":
@@ -1442,7 +1448,12 @@ def _validate_ocr_label_value_text(
     elif spec.attr_type == PIIAttributeType.ADDRESS:
         if not self._looks_like_address_candidate(cleaned_text, min_confidence=rule_profile.address_min_confidence):
             return None
-        canonical_source_text = self._clean_address_candidate(cleaned_text)
+        addr_value = self._clean_address_candidate(cleaned_text)
+        if not zh_label_address_has_parse_components(addr_value) and has_cjk_characters(addr_value):
+            resolved_attr_type = PIIAttributeType.DETAILS
+            canonical_source_text = canonicalize_pii_value(PIIAttributeType.DETAILS, addr_value)
+        else:
+            canonical_source_text = address_key_value_canonical_from_zh(addr_value)
         confidence = max(confidence, min(0.96, self._address_confidence(cleaned_text) + 0.08))
     elif spec.attr_type == PIIAttributeType.ID_NUMBER:
         if not self._is_id_candidate(cleaned_text):
@@ -1490,7 +1501,7 @@ def _validate_ocr_label_value_text(
             document,
             block_index=unique_block_indices[0],
             text=cleaned_text,
-            attr_type=spec.attr_type,
+            attr_type=resolved_attr_type,
             confidence=confidence,
             canonical_source_text=canonical_source_text,
             span_start=inline_span[0],
@@ -1501,7 +1512,7 @@ def _validate_ocr_label_value_text(
         document,
         block_indices=unique_block_indices,
         text=cleaned_text,
-        attr_type=spec.attr_type,
+        attr_type=resolved_attr_type,
         confidence=confidence,
         canonical_source_text=canonical_source_text,
         metadata=metadata,
@@ -1991,6 +2002,7 @@ def _derive_address_block_candidates(
         if not self._looks_like_address_candidate(local_text):
             continue
         normalized = canonicalize_pii_value(PIIAttributeType.ADDRESS, local_text)
+        canonical_source_text = address_key_value_canonical_from_zh(local_text)
         entity_id = self.resolver.build_candidate_id(
             self.detector_mode,
             PIISourceType.OCR.value,
@@ -2012,6 +2024,7 @@ def _derive_address_block_candidates(
                 span_start=local_start,
                 span_end=local_end,
                 confidence=max(0.4, candidate.confidence - 0.08),
+                canonical_source_text=canonical_source_text,
                 metadata=self._merge_candidate_metadata(
                     candidate.metadata,
                     {

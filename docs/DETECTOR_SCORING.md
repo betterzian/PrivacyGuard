@@ -514,7 +514,7 @@ score = min(0.96, max(chinese_address_score, english_address_score_if_enabled))
 - 左右边界是否“开”
 - 右侧是否跟地理 / 活动词
 - 右侧是否紧跟数字
-- 当前推断类型是 `ADDRESS` 还是 `LOCATION_CLUE`
+- 当前推断类型是否为 `ADDRESS`
 - 当前 `ProtectionLevel`
 
 典型返回值：
@@ -528,7 +528,6 @@ score = min(0.96, max(chinese_address_score, english_address_score_if_enabled))
 | 地址型片段，单边界较开 | `0.90` | `0.82` |
 | 地址型片段，边界更挤，`STRONG` | `0.76` | `0.72` |
 | 地址型片段，边界更挤，`BALANCED` | `0.72` | `0.66` |
-| 较弱 `LOCATION_CLUE`，单边界较开 | `0.86` | `0.78` |
 | 更弱但 `STRONG` 保守收下 | `0.72` | `0.72` |
 | 不成立 | `0.0` | `0.0` |
 
@@ -697,7 +696,6 @@ max(0.4, parent_confidence - 0.08)
 | 类型 | `STRONG` | `BALANCED` | `WEAK` |
 | --- | ---: | ---: | ---: |
 | `NAME` | `0.72` | `0.72` | `0.90` |
-| `LOCATION_CLUE` | `0.48` | `0.52` | `0.90` |
 | `ADDRESS` | `0.35` | `0.45` | `0.60` |
 | `ORGANIZATION` | `0.48` | `0.48` | `0.74` |
 | `TIME` | `0.76` | `0.76` | `0.90` |
@@ -747,7 +745,6 @@ OCR blocks
 当前可调属性集合是：
 
 - `NAME`
-- `LOCATION_CLUE`
 - `ADDRESS`
 - `ORGANIZATION`
 - `OTHER`

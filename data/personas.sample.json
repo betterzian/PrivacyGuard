@@ -24,20 +24,6 @@
             }
           }
         ],
-        "location_clue": [
-          {
-            "value": "样例园区",
-            "aliases": [
-              "样例科技园"
-            ]
-          },
-          {
-            "value": "测试商圈",
-            "aliases": [
-              "测试广场"
-            ]
-          }
-        ],
         "phone": [
           {
             "value": "13900000001",
@@ -228,20 +214,6 @@
               "value": "Avery",
               "aliases": []
             }
-          }
-        ],
-        "location_clue": [
-          {
-            "value": "Sample Harbor",
-            "aliases": [
-              "Harbor District"
-            ]
-          },
-          {
-            "value": "Demo Square",
-            "aliases": [
-              "Square Block"
-            ]
           }
         ],
         "phone": [

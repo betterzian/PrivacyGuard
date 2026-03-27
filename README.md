@@ -287,7 +287,7 @@ guard = PrivacyGuard(
 - `protection_level: "weak" | "balanced" | "strong" = "balanced"`
 - `detector_overrides: dict | None`
 
-`detector_overrides` 当前在载荷中可写：`name`、`location_clue`、`address`、`organization`、`other`。其中 **`rule_based` 检测器实际只合并** `name`、`address`、`organization`、`other` 四类阈值（见 `DETECTOR_SCORING.md` 第 10 节）；`location_clue` 字段目前不会影响 detector。
+`detector_overrides` 当前在载荷中可写：`name`、`address`、`organization`、`other`。**`rule_based` 检测器合并**上述四类阈值（见 `DETECTOR_SCORING.md` 第 10 节）。
 
 返回字段：
 
