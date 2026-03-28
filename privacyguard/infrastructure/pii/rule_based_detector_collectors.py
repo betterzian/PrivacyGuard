@@ -955,57 +955,6 @@ def _collect_masked_text_hits(
             skip_spans=skip_spans,
         )
 
-def _collect_organization_hits(
-    self,
-    collected: dict[tuple[str, str, int | None, int | None], PIICandidate],
-    raw_text: str,
-    source: PIISourceType,
-    bbox: object,
-    block_id: str | None,
-    *,
-    skip_spans: list[tuple[int, int]],
-    rule_profile: _RuleStrengthProfile,
-    original_text: str | None = None,
-    shadow_index_map: tuple[int | None, ...] | None = None,
-) -> None:
-    """收集机构名后缀与就业/就读语境下的机构命中。"""
-    organization_patterns = list(_ORGANIZATION_SPAN_PATTERNS)
-    if self._supports_en():
-        organization_patterns.extend(_EN_ORGANIZATION_SPAN_PATTERNS)
-    for pattern in organization_patterns:
-        for match in pattern.finditer(raw_text):
-            extracted = self._extract_match(
-                raw_text,
-                *match.span(0),
-                cleaner=self._clean_organization_candidate,
-                original_text=original_text,
-                shadow_index_map=shadow_index_map,
-            )
-            if extracted is None:
-                continue
-            value, span_start, span_end = extracted
-            allow_weak_suffix = rule_profile.allow_weak_org_suffix or self._organization_has_explicit_context(
-                original_text or raw_text,
-                span_start,
-                span_end,
-            )
-            if not self._is_organization_candidate(value, allow_weak_suffix=allow_weak_suffix):
-                continue
-            self._upsert_candidate(
-                collected=collected,
-                text=raw_text,
-                matched_text=value,
-                attr_type=PIIAttributeType.ORGANIZATION,
-                source=source,
-                bbox=bbox,
-                block_id=block_id,
-                span_start=span_start,
-                span_end=span_end,
-                confidence=self._organization_confidence(value, allow_weak_suffix=allow_weak_suffix),
-                matched_by="regex_organization_suffix",
-                skip_spans=skip_spans,
-            )
-
 def _extract_match(
     self,
     raw_text: str,

@@ -7,7 +7,6 @@ from privacyguard.infrastructure.pii.address.key_value_canonical import (
     has_cjk_characters,
     zh_label_address_has_parse_components,
 )
-from privacyguard.infrastructure.pii.address.single_component_policy import single_component_address_allowed
 from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressParseConfig, AddressParseResult
 from privacyguard.utils.pii_value import canonicalize_pii_value
 
@@ -27,7 +26,7 @@ def emit_candidates(
     shadow_index_map: tuple[int | None, ...] | None = None,
 ) -> None:
     for result in parse_results:
-        if not _emit_single_private_component_allowed(result, config=config):
+        if not _emit_single_private_component_allowed(detector, result):
             continue
         whole_candidate = _emit_whole_address_candidate(
             detector,
@@ -38,6 +37,7 @@ def emit_candidates(
             bbox,
             block_id,
             skip_spans=skip_spans,
+            config=config,
             original_text=original_text,
             shadow_index_map=shadow_index_map,
         )
@@ -61,28 +61,16 @@ def emit_candidates(
             )
 
 
-def _emit_single_private_component_allowed(result: AddressParseResult, *, config: AddressParseConfig) -> bool:
-    if len(result.components) != 1:
-        return True
-    if result.address_kind != "private_address":
-        return True
-    if config.protection_level is not ProtectionLevel.STRONG:
-        return True
-    only = result.components[0]
-    text = result.span.text.strip()
-    if (
-        only.component_type == "compound"
-        and result.span.matched_by == "event_stream_address"
-        and only.start_offset > 0
-        and text[: only.start_offset].strip()
-    ):
-        return True
-    return single_component_address_allowed(
-        only.component_type,
-        only.text,
-        matched_by=result.span.matched_by,
-        source_text=text,
-    )
+def _emit_single_private_component_allowed(detector, result: AddressParseResult) -> bool:
+    """发射前 UI 黑名单：整段命中「操作/界面类」负例则不放行。
+
+    不使用 ``_is_ui_or_commerce_location_token`` 扫整段 span：营销话术里常含「专区」等词，
+    会与流划分的真实地理片段粘连；该类噪声由流侧 keyword expansion 等处理。
+    """
+    cleaned = detector._clean_address_candidate(result.span.text)
+    if not cleaned:
+        return False
+    return not detector._is_ui_operation_name_token(cleaned)
 
 
 def _emit_whole_address_candidate(
@@ -95,6 +83,7 @@ def _emit_whole_address_candidate(
     block_id: str | None,
     *,
     skip_spans: list[tuple[int, int]],
+    config: AddressParseConfig,
     original_text: str | None,
     shadow_index_map: tuple[int | None, ...] | None,
 ) -> tuple[str, int, int, bool] | None:
@@ -109,6 +98,12 @@ def _emit_whole_address_candidate(
     if extracted is None:
         return None
     value, span_start, span_end = extracted
+    if (
+        result.span.matched_by == "context_address_field"
+        and config.protection_level is ProtectionLevel.STRONG
+        and not detector._explicit_label_address_value_allowed(value)
+    ):
+        return None
     component_types = _ordered_unique(item.component_type for item in result.components)
     privacy_levels = _ordered_unique(item.privacy_level for item in result.components)
     component_trace = [f"{item.component_type}:{item.text}" for item in result.components]

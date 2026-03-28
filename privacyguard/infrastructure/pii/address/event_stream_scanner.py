@@ -326,12 +326,6 @@ def scan_address_and_organization(
                 continue
             break
 
-        # 单组件特判：字段语境由 matched_by 决定（本扫描器默认非字段语境）
-        if len(stack) == 1:
-            single = stack[0]
-            if not _allow_single_geo_as_address(single.component_type):
-                stack = []
-
         if stack:
             start = stack[0].start
             start = _expand_span_start_left_for_keyword_prefix(text, start, stack[0])
@@ -445,22 +439,6 @@ def _tail_component_is_blacklisted(text: str, component: AddressComponentMatch) 
 def _looks_like_terminal_mask(text: str) -> bool:
     stripped = text.strip()
     return bool(stripped) and all(char in ".…*＊xX某 " for char in stripped)
-
-
-def _allow_single_geo_as_address(component_type: str) -> bool:
-    return component_type in {
-        "province",
-        "city",
-        "district",
-        "county",
-        "state",
-        "compound",
-        "poi",
-        "road",
-        "street",
-        "po_box",
-        "postal_code",
-    }
 
 
 def _span_confidence_from_stack(stack: list[AddressComponentMatch]) -> float:

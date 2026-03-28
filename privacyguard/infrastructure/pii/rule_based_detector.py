@@ -226,7 +226,6 @@ class RuleBasedPIIDetector:
     _collect_generic_name_fragment_hits = _collectors._collect_generic_name_fragment_hits
     _collect_masked_text_hits = _collectors._collect_masked_text_hits
     _collect_address_candidates = _address_pipeline.collect_address_candidates
-    _collect_organization_hits = _collectors._collect_organization_hits
     _extract_match = _collectors._extract_match
     _remap_shadow_span = _collectors._remap_shadow_span
     _find_literal_matches = _collectors._find_literal_matches
@@ -290,13 +289,11 @@ class RuleBasedPIIDetector:
     _is_middle_name_candidate = _validation._is_middle_name_candidate
     _is_context_organization_candidate = _validation._is_context_organization_candidate
     _is_organization_candidate = _validation._is_organization_candidate
-    _organization_has_explicit_context = _validation._organization_has_explicit_context
     _looks_like_name_with_title = _validation._looks_like_name_with_title
-    _geo_fragment_confidence = _validation._geo_fragment_confidence
-    _english_address_confidence = _validation._english_address_confidence
-    _looks_like_address_candidate = _validation._looks_like_address_candidate
+    _explicit_label_address_value_allowed = _validation._explicit_label_address_value_allowed
+    _compact_resembles_address_token_shape = _validation._compact_resembles_address_token_shape
+    _label_address_value_shape_ok = _validation._label_address_value_shape_ok
     _looks_like_masked_address_candidate = _validation._looks_like_masked_address_candidate
-    _address_confidence = _validation._address_confidence
     _has_en_organization_suffix = _validation._has_en_organization_suffix
     _organization_confidence = _validation._organization_confidence
     _upsert_candidate = _validation._upsert_candidate

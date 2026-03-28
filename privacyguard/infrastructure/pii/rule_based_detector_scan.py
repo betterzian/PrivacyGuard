@@ -16,7 +16,7 @@ def _scan_text(
     """对单段文本执行分层识别。
 
     顺序按精度从高到低推进，并在组间刷新 protected spans：
-    session -> local -> (context + regex) -> organization -> name -> address
+    session -> local -> (context + regex) -> name -> address（地址管线内事件流同时产出组织）
     """
     collected: dict[tuple[str, str, int | None, int | None], PIICandidate] = {}
     self._collect_dictionary_hits(

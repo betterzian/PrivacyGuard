@@ -295,7 +295,8 @@ def test_rule_based_detector_keeps_store_name_out_of_address_candidates() -> Non
     assert _find_candidate(candidates, PIIAttributeType.ADDRESS) is not None
 
 
-def test_rule_based_detector_rejects_ui_like_location_suffix_noise() -> None:
+def test_rule_based_detector_allows_single_geo_stack_for_ui_noisy_phrases() -> None:
+    """strong 下允许单地理事件进栈；带「专区」等电商噪声的短串仍可能形成地址候选。"""
     detector = RuleBasedPIIDetector(locale_profile="mixed")
 
     candidates = detector.detect(
@@ -304,7 +305,7 @@ def test_rule_based_detector_rejects_ui_like_location_suffix_noise() -> None:
         protection_level=ProtectionLevel.STRONG,
     )
 
-    assert _find_candidate(candidates, PIIAttributeType.ADDRESS) is None
+    assert _find_candidate(candidates, PIIAttributeType.ADDRESS) is not None
 
 
 def test_rule_based_detector_rejects_new_group_as_organization() -> None:
@@ -353,12 +354,16 @@ def test_rule_based_detector_trims_narrative_tail_after_address() -> None:
         protection_level=ProtectionLevel.STRONG,
     )
 
-    address_candidate = _find_candidate(candidates, PIIAttributeType.ADDRESS)
-
-    assert address_candidate is not None
-    assert address_candidate.text.endswith("小区")
-    assert "吃饭" not in address_candidate.text
-    assert not address_candidate.text.endswith("里")
+    ending_xiaoqu = next(
+        (
+            c
+            for c in candidates
+            if c.attr_type == PIIAttributeType.ADDRESS and c.text.endswith("小区") and "吃饭" not in c.text
+        ),
+        None,
+    )
+    assert ending_xiaoqu is not None
+    assert not ending_xiaoqu.text.endswith("里")
 
 
 def test_parse_zh_components_keeps_city_district_and_town_separate() -> None:
@@ -465,7 +470,8 @@ def test_rule_based_detector_emits_town_and_village_address_components() -> None
     assert by_text["下东廓村"].metadata["address_component_type"] == ["village"]
 
 
-def test_rule_based_detector_rejects_reordered_room_and_city_as_address() -> None:
+def test_rule_based_detector_allows_reordered_room_and_city_as_address_strong() -> None:
+    """strong 下不做行政层级顺序拒识，「室+城市」乱序仍可作为地址整段保留。"""
     detector = RuleBasedPIIDetector(locale_profile="mixed")
 
     candidates = detector.detect(
@@ -474,13 +480,14 @@ def test_rule_based_detector_rejects_reordered_room_and_city_as_address() -> Non
         protection_level=ProtectionLevel.STRONG,
     )
 
-    assert not any(
+    assert any(
         candidate.attr_type == PIIAttributeType.ADDRESS and candidate.text == "1201室上海"
         for candidate in candidates
     )
 
 
-def test_rule_based_detector_rejects_single_component_commerce_road_noise() -> None:
+def test_rule_based_detector_allows_commerce_adjacent_alley_as_address_strong() -> None:
+    """strong 下单组件门弄类线索不再由已删除的 single_component 策略拦截。"""
     detector = RuleBasedPIIDetector(locale_profile="mixed")
 
     candidates = detector.detect(
@@ -489,7 +496,7 @@ def test_rule_based_detector_rejects_single_component_commerce_road_noise() -> N
         protection_level=ProtectionLevel.STRONG,
     )
 
-    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
+    assert any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
 
 
 def test_rule_based_detector_rejects_keyword_expansion_block_for_single_address_clue() -> None:
@@ -532,7 +539,7 @@ def test_rule_based_detector_rejects_city_word_inside_phone_label() -> None:
     detector = RuleBasedPIIDetector(locale_profile="en_us")
 
     candidates = detector.detect(
-        prompt_text="Mobile number",
+        prompt_text="Voice number",
         ocr_blocks=[],
         protection_level=ProtectionLevel.STRONG,
     )

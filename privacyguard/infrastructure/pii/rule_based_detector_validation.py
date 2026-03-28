@@ -99,7 +99,8 @@ def _ocr_block_pii_context_signal(self, text: str) -> float:
         score += 0.12
     if self._is_context_phone_candidate(cleaned) or self._is_id_candidate(cleaned):
         score += 0.1
-    if self._looks_like_address_candidate(cleaned, min_confidence=0.45):
+    compact_ctx = re.sub(r"\s+", "", cleaned)
+    if self._compact_resembles_address_token_shape(compact_ctx):
         score += 0.06
     if any(
         token in lowered
@@ -884,9 +885,7 @@ def _is_name_candidate(self, value: str) -> bool:
         return False
     if compact in _COMMON_CITY_TOKENS or compact in _COMMON_DISTRICT_TOKENS or compact in _COMMON_BUSINESS_AREA_TOKENS:
         return False
-    if _ADDRESS_SUFFIX_PATTERN.search(compact):
-        return False
-    if self._looks_like_address_candidate(compact):
+    if self._compact_resembles_address_token_shape(compact):
         return False
     if re.fullmatch(r"[A-Za-z][A-Za-z .'\-]{1,40}", cleaned):
         tokens = list(self._split_en_name_tokens(cleaned))
@@ -992,7 +991,7 @@ def _is_context_organization_candidate(self, value: str) -> bool:
     compact = re.sub(r"\s+", "", cleaned)
     if not compact or compact in _ORGANIZATION_BLACKLIST:
         return False
-    if self._looks_like_address_candidate(compact):
+    if self._compact_resembles_address_token_shape(compact):
         return False
     if self._is_name_candidate(cleaned):
         return False
@@ -1012,7 +1011,7 @@ def _is_organization_candidate(self, value: str, *, allow_weak_suffix: bool = Tr
         return False
     if lowered in _UI_NEGATIVE_PHRASES_EN or cleaned in _UI_NEGATIVE_PHRASES_ZH:
         return False
-    if self._looks_like_address_candidate(compact):
+    if self._compact_resembles_address_token_shape(compact):
         return False
     if self._is_name_candidate(cleaned):
         return False
@@ -1032,37 +1031,6 @@ def _is_organization_candidate(self, value: str, *, allow_weak_suffix: bool = Tr
             return False
         return len(compact) >= 4
     return False
-
-def _organization_has_explicit_context(self, raw_text: str, span_start: int, span_end: int) -> bool:
-    window = self._match_context_window(raw_text, span_start, span_end, radius=16)
-    if self._window_has_keywords(window, _ORGANIZATION_FIELD_KEYWORDS):
-        return True
-    lowered = window.lower()
-    return any(
-        token in lowered
-        for token in (
-            "就职于",
-            "任职于",
-            "供职于",
-            "毕业于",
-            "就读于",
-            "工作单位",
-            "所在单位",
-            "我在",
-            "当前在",
-            "目前在",
-            "曾在",
-            "work at",
-            "works at",
-            "worked at",
-            "study at",
-            "studies at",
-            "studied at",
-            "employed by",
-            "currently at",
-            "previously at",
-        )
-    )
 
 def _looks_like_name_with_title(self, value: str) -> bool:
     """判断是否为带敬称的姓名片段。"""
@@ -1086,88 +1054,59 @@ def _looks_like_name_with_title(self, value: str) -> bool:
         return core in _COMMON_SINGLE_CHAR_SURNAMES
     return self._is_name_candidate(core)
 
-def _geo_fragment_confidence(
-    self,
-    raw_text: str,
-    span_start: int,
-    span_end: int,
-    *,
-    value: str,
-    attr_type: PIIAttributeType,
-    is_builtin_token: bool,
-    rule_profile: _RuleStrengthProfile,
-) -> float:
-    """根据几何边界和上下文估计地名/地址碎片置信度。"""
-    if attr_type == PIIAttributeType.ADDRESS and self._is_ui_or_commerce_location_token(value):
-        return 0.0
-    left_char = self._previous_significant_char(raw_text, span_start)
-    right_char = self._next_significant_char(raw_text, span_end)
-    left_open = left_char is None or not self._is_cjk_char(left_char)
-    right_open = right_char is None or not self._is_cjk_char(right_char)
-    right_context = self._right_context(raw_text, span_end)
-    cleaned_text = self._clean_extracted_value(raw_text)
-    if cleaned_text == value:
-        return 0.96 if is_builtin_token else 0.9
-    if any(right_context.startswith(token) for token in _GEO_NEGATIVE_RIGHT_CONTEXT_TOKENS):
-        if attr_type == PIIAttributeType.ADDRESS and not right_open:
-            return 0.0
-    if left_open and right_open:
-        return 0.96 if is_builtin_token else 0.9
-    if self._starts_with_geo_or_activity(right_context):
-        return 0.94 if is_builtin_token else 0.88
-    if right_char is not None and right_char.isdigit():
-        return 0.92 if is_builtin_token else 0.86
-    if attr_type == PIIAttributeType.ADDRESS:
-        if left_open or right_open:
-            return 0.9 if is_builtin_token else 0.82
-        return 0.76 if is_builtin_token else 0.72
-    if left_open or right_open:
-        return 0.86 if is_builtin_token else 0.78
-    if is_builtin_token or len(value) >= 3:
-        return 0.72
-    return 0.0
-
-def _english_address_confidence(self, value: str) -> float:
-    cleaned = self._clean_address_candidate(value)
-    if not cleaned or not self._supports_en():
-        return 0.0
-    score = 0.0
-    lowered = cleaned.lower()
-    has_state_name = bool(_EN_GEO_TIER_A_STATE_PATTERN.search(cleaned))
-    has_state_code = bool(_EN_GEO_TIER_A_CODE_PATTERN.search(cleaned))
-    has_major_place = bool(_EN_GEO_TIER_B_PATTERN.search(cleaned))
-    has_city_clue = bool(_EN_GEO_TIER_C_PATTERN.search(cleaned))
-    if _EN_PO_BOX_PATTERN.search(cleaned):
-        score += 0.62
-    if _EN_ADDRESS_NUMBER_PATTERN.search(cleaned):
-        score += 0.24
-    if _EN_ADDRESS_SUFFIX_PATTERN.search(cleaned):
-        score += 0.32
-    if _EN_ADDRESS_UNIT_PATTERN.search(cleaned):
-        score += 0.12
-    if _EN_STATE_OR_REGION_PATTERN.search(cleaned) or has_state_name or has_state_code:
-        score += 0.12
-    if _EN_POSTAL_CODE_PATTERN.search(cleaned):
-        score += 0.14
-    if has_major_place:
-        score += 0.12
-    if has_city_clue and (_EN_STATE_OR_REGION_PATTERN.search(cleaned) or has_state_name or has_state_code or _EN_POSTAL_CODE_PATTERN.search(cleaned) or _EN_ADDRESS_SUFFIX_PATTERN.search(cleaned)):
-        score += 0.08
-    if any(keyword in lowered for keyword in ("address", "street", "road", "avenue", "boulevard", "drive", "lane", "suite", "unit")):
-        score += 0.08
-    return min(0.96, score)
-
-def _looks_like_address_candidate(self, value: str, *, min_confidence: float = 0.45) -> bool:
-    """判断是否像地址或地址碎片。"""
+def _explicit_label_address_value_allowed(self, value: str) -> bool:
+    """显式「地址」类字段值在 strong 下的放行条件：勿与高精度格式或纯 UI/电商占位串冲突。"""
     cleaned = self._clean_address_candidate(value)
     if not cleaned or len(cleaned) > 80:
         return False
     if cleaned in _ADDRESS_FIELD_KEYWORDS:
         return False
-    confidence = self._address_confidence(cleaned)
-    if confidence >= min_confidence:
+    if self._is_email_candidate(cleaned):
+        return False
+    if self._is_context_phone_candidate(cleaned):
+        return False
+    if self._is_context_card_number_candidate(cleaned):
+        return False
+    if self._is_bank_account_candidate(cleaned):
+        return False
+    if self._is_ui_or_commerce_location_token(cleaned):
+        return False
+    if self._is_ui_operation_name_token(cleaned):
+        return False
+    return True
+
+
+def _compact_resembles_address_token_shape(self, compact: str) -> bool:
+    """用语形/词典判断无空白 compact 是否像地址 token，不做整条地址置信度打分。"""
+    if not compact:
+        return False
+    if _ADDRESS_SUFFIX_PATTERN.search(compact) or _ADDRESS_NUMBER_PATTERN.search(compact):
         return True
-    return self._looks_like_masked_address_candidate(cleaned, min_confidence=min_confidence)
+    if _STANDALONE_ADDRESS_FRAGMENT_PATTERN.fullmatch(compact):
+        return True
+    if _SHORT_ADDRESS_TOKEN_PATTERN.fullmatch(compact):
+        return True
+    if any(token in compact for token in _REGION_TOKENS):
+        return True
+    if any(token in compact for token in _BUILTIN_GEO_LEXICON.address_tokens):
+        return True
+    return False
+
+
+def _label_address_value_shape_ok(self, value: str) -> bool:
+    """字段标签 ADDRESS 值的轻量护栏（与上下文规则 validator 签名一致）。"""
+    cleaned = self._clean_address_candidate(value)
+    if not cleaned or len(cleaned) > 80 or cleaned in _ADDRESS_FIELD_KEYWORDS:
+        return False
+    if self._is_email_candidate(cleaned) or self._is_context_phone_candidate(cleaned):
+        return False
+    if self._is_context_card_number_candidate(cleaned) or self._is_bank_account_candidate(cleaned):
+        return False
+    compact = re.sub(r"\s+", "", cleaned)
+    if self._looks_like_masked_address_candidate(cleaned, min_confidence=0.45, allow_alpha_masks=True):
+        return True
+    return self._compact_resembles_address_token_shape(compact)
+
 
 def _looks_like_masked_address_candidate(
     self,
@@ -1195,42 +1134,28 @@ def _looks_like_masked_address_candidate(
         or any(token in visible for token in _BUILTIN_GEO_LEXICON.address_tokens)
     ):
         return False
-    confidence = self._address_confidence(cleaned)
+    confidence = 0.0
+    if any(token in visible for token in _REGION_TOKENS):
+        confidence += 0.34
+    if any(token in visible for token in _BUILTIN_GEO_LEXICON.address_tokens):
+        confidence += 0.24
+    suffix_hits = _ADDRESS_SUFFIX_PATTERN.findall(compact)
+    if suffix_hits:
+        confidence += min(0.36, 0.18 * len(suffix_hits))
+    if _ADDRESS_NUMBER_PATTERN.search(compact):
+        confidence += 0.28
+    if _STANDALONE_ADDRESS_FRAGMENT_PATTERN.fullmatch(visible):
+        confidence += 0.24
+    elif _SHORT_ADDRESS_TOKEN_PATTERN.fullmatch(visible):
+        confidence += 0.10
     if mask_count >= 2:
         confidence += 0.12
     if _ADDRESS_NUMBER_PATTERN.search(compact):
         confidence += 0.08
     if _ADDRESS_SUFFIX_PATTERN.search(compact):
         confidence += 0.06
-    return confidence >= min_confidence
+    return min(0.96, confidence) >= min_confidence
 
-def _address_confidence(self, value: str) -> float:
-    """根据地址信号强度计算置信度。"""
-    cleaned = self._clean_address_candidate(value)
-    if not cleaned:
-        return 0.0
-    score = 0.0
-    suffix_hits = _ADDRESS_SUFFIX_PATTERN.findall(cleaned)
-    if any(token in cleaned for token in _REGION_TOKENS):
-        score += 0.34
-    if any(token in cleaned for token in _BUILTIN_GEO_LEXICON.address_tokens):
-        score += 0.24
-    if suffix_hits:
-        score += min(0.36, 0.18 * len(suffix_hits))
-    if _ADDRESS_NUMBER_PATTERN.search(cleaned):
-        score += 0.28
-    if _STANDALONE_ADDRESS_FRAGMENT_PATTERN.fullmatch(cleaned):
-        score += 0.24
-    if _SHORT_ADDRESS_TOKEN_PATTERN.fullmatch(cleaned):
-        score += 0.10
-    if any(keyword in cleaned for keyword in _ADDRESS_FIELD_KEYWORDS):
-        score += 0.18
-    if len(cleaned) >= 6 and re.fullmatch(rf"[A-Za-z0-9#\-－—()（）·\s一-龥{_ADDRESS_MASK_CHAR_CLASS[1:-1]}]+", cleaned):
-        score += 0.08
-    if re.fullmatch(r"(?:\d{1,5}|[A-Za-z]\d{1,5})(?:号院|号楼|栋|幢|座|单元|室|层|号|户)(?:\d{0,4}(?:室|层|户))?", cleaned):
-        score += 0.20
-    score = max(score, self._english_address_confidence(cleaned))
-    return min(0.96, score)
 
 def _organization_confidence(self, value: str, *, allow_weak_suffix: bool = True) -> float:
     """根据机构后缀与格式特征估算置信度。"""

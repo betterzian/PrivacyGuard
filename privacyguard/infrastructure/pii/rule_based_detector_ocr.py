@@ -1305,8 +1305,12 @@ def _score_ocr_label_value_block(self, block: OCRTextBlock, spec: _FieldLabelSpe
     if spec.attr_type == PIIAttributeType.EMAIL:
         return 1.0 if "@" in cleaned else 0.52
     if spec.attr_type == PIIAttributeType.ADDRESS:
-        score = self._address_confidence(cleaned)
-        return score if score > 0 else 0.48
+        if not cleaned.strip():
+            return None
+        alpha_or_cjk = sum(1 for char in cleaned if char.isalpha() or self._is_cjk_char(char))
+        if alpha_or_cjk == 0 and not any(char.isdigit() for char in cleaned):
+            return None
+        return min(1.0, 0.52 + 0.02 * min(24, len(cleaned)))
     if spec.attr_type == PIIAttributeType.ORGANIZATION:
         score = self._organization_confidence(cleaned, allow_weak_suffix=True)
         return score if score > 0 else 0.5
@@ -1446,15 +1450,25 @@ def _validate_ocr_label_value_text(
             return None
         canonical_source_text = cleaned_text
     elif spec.attr_type == PIIAttributeType.ADDRESS:
-        if not self._looks_like_address_candidate(cleaned_text, min_confidence=rule_profile.address_min_confidence):
+        cleaned_addr = self._clean_address_candidate(cleaned_text)
+        compact_addr = re.sub(r"\s+", "", cleaned_addr)
+        addr_ok = (
+            self._explicit_label_address_value_allowed(cleaned_text)
+            or self._looks_like_masked_address_candidate(
+                cleaned_addr,
+                min_confidence=rule_profile.address_min_confidence,
+                allow_alpha_masks=rule_profile.allow_alpha_mask_text,
+            )
+            or self._compact_resembles_address_token_shape(compact_addr)
+        )
+        if not addr_ok:
             return None
-        addr_value = self._clean_address_candidate(cleaned_text)
+        addr_value = cleaned_addr
         if not zh_label_address_has_parse_components(addr_value) and has_cjk_characters(addr_value):
             resolved_attr_type = PIIAttributeType.DETAILS
             canonical_source_text = canonicalize_pii_value(PIIAttributeType.DETAILS, addr_value)
         else:
             canonical_source_text = address_key_value_canonical_from_zh(addr_value)
-        confidence = max(confidence, min(0.96, self._address_confidence(cleaned_text) + 0.08))
     elif spec.attr_type == PIIAttributeType.ID_NUMBER:
         if not self._is_id_candidate(cleaned_text):
             return None
@@ -1999,7 +2013,7 @@ def _derive_address_block_candidates(
         local_start = min(positions)
         local_end = max(positions) + 1
         local_text = block.text[local_start:local_end]
-        if not self._looks_like_address_candidate(local_text):
+        if not self._compact_resembles_address_token_shape(re.sub(r"\s+", "", local_text)):
             continue
         normalized = canonicalize_pii_value(PIIAttributeType.ADDRESS, local_text)
         canonical_source_text = address_key_value_canonical_from_zh(local_text)

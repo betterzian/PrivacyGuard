@@ -399,258 +399,43 @@ _COMMON_COMPOUND_SURNAMES = {
     "第五",
 }
 _NAME_BLACKLIST = {
-    "姓名",
-    "名字",
-    "昵称",
-    "称呼",
-    "联系人",
-    "收件人",
-    "寄件人",
-    "住址",
-    "地址",
-    "电话",
-    "手机",
-    "邮箱",
-    "客户",
-    "用户",
-    "先生",
-    "女士",
-    "老师",
-    "医生",
-    "经理",
+
 }
 _NON_PERSON_TOKENS = {
-    "管理",
-    "公司",
-    "项目",
-    "产品",
-    "前端",
-    "后端",
-    "测试",
-    "运营",
-    "销售",
-    "客服",
-    "部门",
-    "团队",
-    "用户",
-    "客户",
-    "老板",
-    "助理",
+
 }
 _NON_PERSON_TOKENS_EN = {
-    "account",
-    "accounts",
-    "address",
-    "admin",
-    "agent",
-    "alert",
-    "banner",
-    "bio",
-    "contact",
-    "customer",
-    "dashboard",
-    "email",
-    "editor",
-    "help",
-    "home",
-    "id",
-    "message",
-    "number",
-    "notification",
-    "or",
-    "phone",
-    "profile",
-    "project",
-    "pronoun",
-    "pronouns",
-    "community",
-    "search",
-    "service",
-    "settings",
-    "show",
-    "status",
-    "system",
-    "support",
-    "team",
-    "threads",
-    "threadsbanner",
-    "username",
-    "user",
+
 }
 _NON_PERSON_PHRASES_EN = {
-    "account number",
-    "buy again",
-    "email address",
-    "member id",
-    "new community",
-    "new chat",
-    "or number",
-    "phone number",
-    "screen name",
-    "search by name",
-    "show threadsbanner",
-    "sign out",
-    "switch accounts",
-    "user id",
-    "your personal info",
-    "weixin id",
+
 }
 _UI_NEGATIVE_TERMS_ZH = {
-    "全部",
-    "公告",
-    "个人信息",
-    "个人资料",
-    "通知",
-    "通知群",
-    "文件",
-    "搜索",
-    "设置",
-    "编辑",
-    "删除",
-    "转发",
-    "收藏",
-    "添加",
-    "发送",
-    "分享",
-    "回复",
-    "撤回",
-    "复制",
-    "粘贴",
-    "拍照",
-    "相册",
-    "扫一扫",
-    "返回",
-    "关闭",
-    "打开",
-    "刷新",
-    "保存",
-    "上传",
-    "下载",
-    "时效",
-    "国补",
-    "便宜",
-    "管理",
-    "标签",
-    "补贴",
+
 }
 _UI_NEGATIVE_TERMS_EN = {
-    "add",
-    "back",
-    "buy",
-    "cancel",
-    "close",
-    "copy",
-    "delete",
-    "download",
-    "edit",
-    "file",
-    "forward",
-    "info",
-    "lists",
-    "mobile",
-    "new",
-    "open",
-    "out",
-    "personal",
-    "refresh",
-    "reply",
-    "save",
-    "search",
-    "send",
-    "settings",
-    "share",
-    "sign",
-    "switch",
-    "newchat",
-    "upload",
+
 }
 _UI_NEGATIVE_PHRASES_ZH = {
-    "个人信息",
-    "个人资料",
+
 }
 _UI_NEGATIVE_PHRASES_EN = {
-    "buy again",
-    "new group",
-    "new community",
-    "sign out",
-    "switch accounts",
-    "your personal info",
+
 }
 _LOCATION_UI_NEGATIVE_TERMS_ZH = {
-    "专区",
-    "专用",
-    "专业",
-    "学生",
-    "年度",
-    "店铺",
-    "旗舰",
-    "折叠",
-    "标签",
-    "管理",
-    "自营",
-    "补贴",
-    "部分",
-    "限时",
+
 }
 _LOCATION_UI_NEGATIVE_TERMS_EN = {
-    "again",
-    "banner",
-    "buy",
-    "community",
-    "holder",
-    "info",
-    "list",
-    "lists",
-    "menu",
-    "mobile",
-    "new",
-    "personal",
-    "profile",
-    "switch",
+
 }
 _LOCATION_UI_NEGATIVE_PHRASES_ZH = {
-    "学生专区",
-    "年度五星店铺",
-    "限部分地区",
-    "专业折叠旗",
-    "京东自营旗",
+
 }
 _LOCATION_UI_NEGATIVE_PHRASES_EN = {
-    "new community",
-    "personal info",
-    "switch accounts",
-    "your personal info",
+
 }
 _LOCATION_ACTIVITY_TOKENS = (
-    "拼车",
-    "滑雪",
-    "住宿",
-    "酒店",
-    "旅馆",
-    "民宿",
-    "旅行",
-    "旅游",
-    "出发",
-    "返程",
-    "集合",
-    "探店",
-    "租房",
-    "求职",
-    "兼职",
-    "上班",
-    "夜跑",
-    "搭子",
-    "airport",
-    "checkin",
-    "commute",
-    "hotel",
-    "office",
-    "pickup",
-    "ride",
-    "school",
-    "travel",
-    "trip",
-    "work",
+
 )
 _OCR_FRAGMENT_DELIMITERS = "-－—_/|｜"
 _OCR_SEMANTIC_BREAK_TOKEN = " <OCR_BREAK> "
@@ -855,9 +640,11 @@ _EMAIL_FIELD_KEYWORDS = (
     "email",
     "e-mail",
     "mail",
+    "email address",
     "邮箱",
     "电子邮箱",
     "联系邮箱",
+    "邮箱地址",
 )
 _ID_FIELD_KEYWORDS = (
     "id",
@@ -1289,27 +1076,11 @@ _ORGANIZATION_WEAK_SUFFIXES = _tuple_org_suffixes_minus_address_keywords(
         "贸易",
     )
 )
-_ORGANIZATION_SUFFIX_PATTERN = re.compile(
-    rf"(?:{'|'.join(map(re.escape, _ORGANIZATION_STRONG_SUFFIXES + _ORGANIZATION_WEAK_SUFFIXES))})$"
-)
 _ORGANIZATION_STRONG_SUFFIX_PATTERN = re.compile(
     rf"(?:{'|'.join(map(re.escape, _ORGANIZATION_STRONG_SUFFIXES))})$"
 )
 _ORGANIZATION_WEAK_SUFFIX_PATTERN = re.compile(
     rf"(?:{'|'.join(map(re.escape, _ORGANIZATION_WEAK_SUFFIXES))})$"
-)
-_ORGANIZATION_SPAN_PATTERNS = (
-    re.compile(
-        rf"[A-Za-z0-9&()（）·\s一-龥]{{2,48}}"
-        rf"(?:{'|'.join(map(re.escape, _ORGANIZATION_STRONG_SUFFIXES + _ORGANIZATION_WEAK_SUFFIXES))})"
-    ),
-)
-_EN_ORGANIZATION_SPAN_PATTERNS = (
-    re.compile(
-        rf"\b[A-Za-z][A-Za-z0-9&().,'\- ]{{1,64}}?\s+"
-        rf"(?:{'|'.join(map(re.escape, _EN_ORGANIZATION_STRONG_SUFFIXES + _EN_ORGANIZATION_WEAK_SUFFIXES))})\b",
-        re.IGNORECASE,
-    ),
 )
 _LEADING_ORGANIZATION_NOISE_PATTERN = re.compile(
     r"^(?:(?:我|你|他|她|其|本人|我们|他们|她们)\s*)?"

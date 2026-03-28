@@ -9,6 +9,7 @@ import re
 
 from privacyguard.infrastructure.pii.address.component_parser_en import parse_en_components
 from privacyguard.infrastructure.pii.address.component_parser_zh import parse_zh_components
+from privacyguard.domain.enums import ProtectionLevel
 from privacyguard.infrastructure.pii.address.types import (
     AddressComponent,
     AddressComponentMatch,
@@ -76,7 +77,11 @@ def parse_results_from_spans(
             locale_profile=locale_profile,
             component_matches=component_matches,
         )
-        if len(components) >= 2 and not _components_follow_expected_order(span.text, components):
+        if (
+            len(components) >= 2
+            and config.protection_level is not ProtectionLevel.STRONG
+            and not _components_follow_expected_order(span.text, components)
+        ):
             continue
         confidence = max(0.0, min(0.97, span.confidence))
         if confidence < config.min_confidence:

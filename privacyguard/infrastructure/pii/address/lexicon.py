@@ -87,34 +87,6 @@ _FIELD_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 _ZH_DIRECT_CONTROLLED_MUNICIPALITIES = frozenset({"北京", "北京市", "上海", "上海市", "天津", "天津市", "重庆", "重庆市"})
-_ZH_SINGLE_COMPONENT_NEGATIVE_EXACT = frozenset({
-    "政府",
-    "管理",
-    "标签",
-    "便宜",
-    "补贴",
-    "国补",
-})
-_ZH_SUFFIX_NEGATIVE_TERMS: dict[str, frozenset[str]] = {
-    "路": frozenset({"专用", "专区", "标签", "管理", "补贴", "自营", "旗舰", "店铺", "限时", "仅剩"}),
-    "街": frozenset({"专用", "专区", "标签", "管理", "补贴", "自营", "旗舰", "店铺", "限时", "仅剩"}),
-    "道": frozenset({"虚拟", "道具", "专用", "专区", "标签", "管理", "补贴", "自营"}),
-    "区": frozenset({"专区", "学生", "部分", "限时", "活动", "店铺", "旗舰", "管理"}),
-    "县": frozenset({"专区", "标签", "管理", "补贴"}),
-    "镇": frozenset({"专区", "标签", "管理", "补贴"}),
-    "乡": frozenset({"专区", "标签", "管理", "补贴"}),
-    "村": frozenset({"专区", "标签", "管理", "补贴"}),
-    "号": frozenset({"订单", "编号", "货号", "型号"}),
-    "栋": frozenset({"套餐", "标签", "管理"}),
-    "单元": frozenset({"套餐", "标签", "管理"}),
-    "室": frozenset({"直播", "教室", "办公室"}),
-    "府": frozenset({"政府", "区长", "市长", "专员", "店铺"}),
-    "湾": frozenset({"港湾币", "专区", "标签"}),
-    "庭": frozenset({"家庭装", "庭审", "庭院灯"}),
-    "苑": frozenset({"苑校", "专区", "标签"}),
-}
-
-
 def build_label_pattern() -> re.Pattern[str]:
     return _LABEL_RE
 
@@ -163,36 +135,6 @@ def hard_stop_matches(text: str) -> list[tuple[int, str]]:
 
 def find_field_keyword(text: str) -> re.Match[str] | None:
     return _FIELD_KEYWORD_RE.search(text)
-
-
-def _has_zh_single_component_suffix_noise(text: str, *, source_text: str | None = None) -> bool:
-    haystacks = tuple(
-        dict.fromkeys(
-            item for item in (re.sub(r"\s+", "", text), re.sub(r"\s+", "", source_text or "")) if item
-        )
-    )
-    for suffix, negatives in _ZH_SUFFIX_NEGATIVE_TERMS.items():
-        if not text.endswith(suffix):
-            continue
-        stem = text[: -len(suffix)] if len(text) > len(suffix) else text
-        if any(token in stem for token in negatives):
-            return True
-        expansions = _BUILTIN_UI_BLACKLIST_ZH.address_keyword_expansions.get(suffix, frozenset())
-        if any(expansion in haystack for haystack in haystacks for expansion in expansions):
-            return True
-    return False
-
-
-def _has_en_single_component_suffix_noise(component_type: str, text: str, *, source_text: str | None = None) -> bool:
-    haystacks = tuple(
-        dict.fromkeys(
-            item
-            for item in (re.sub(r"\s+", " ", text).strip().lower(), re.sub(r"\s+", " ", source_text or "").strip().lower())
-            if item
-        )
-    )
-    expansions = _BUILTIN_UI_BLACKLIST_EN.address_keyword_expansions.get(component_type, frozenset())
-    return any(expansion in haystack for haystack in haystacks for expansion in expansions)
 
 
 def _has_zh_keyword_expansion_match(source_text: str, match_start: int, match_end: int, matched_text: str) -> bool:
