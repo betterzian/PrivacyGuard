@@ -1,8 +1,54 @@
-# Agent Instructions
+# Agent Instructions（PrivacyGuard）
 
-- Run all repository tests with the conda `paddle` environment.
-- Prefer the direct interpreter path instead of `conda run`:
+面向在本仓库内改代码、跑测试的自动化助手说明。与 [README.md](README.md) 重复的部分以 README 为准；此处只写**对 Agent 的行为约束**与**本机环境约定**。
+
+---
+
+## 项目速览
+
+- **PrivacyGuard**：端侧隐私保护框架，核心流程为 `sanitize` → `restore`；PII 检测、OCR、决策等模块边界已拆开。
+- **Python**：`>=3.12,<3.13`（见 `pyproject.toml`）。
+- **包与可选依赖**：`pip install -e '.[dev]'`；截图 OCR 需 `'.[ocr]'`；训练相关需 `'.[train]'`。
+
+---
+
+## 测试环境与命令
+
+- **统一使用 conda 环境 `paddle` 跑全仓测试**（与 PaddleOCR 等依赖一致）。
+- **优先用解释器绝对路径**，不要用 `conda run` 包一层，例如：
+
   `C:\Users\vis\.conda\envs\paddle\python.exe -m pytest ...`
-- If a test dependency is missing, install it into the same `paddle` environment:
+
+- 若缺测试依赖，**只装到上述同一环境**：
+
   `C:\Users\vis\.conda\envs\paddle\python.exe -m pip install <package>`
-- Do not switch test execution to `base`, `pytorch`, `.venv-pytorch`, or other environments unless the user explicitly asks.
+
+- **不要**在未征得用户同意时把测试改到 `base`、`pytorch`、`.venv-pytorch` 等其他环境。
+
+- **路径可移植**：若换机器或用户名不同，将 `C:\Users\vis\.conda\envs\paddle\python.exe` 替换为当前机器的 `paddle` 环境 `python.exe`，原则不变。
+
+- 测试发现与配置见 `pyproject.toml` 中 `[tool.pytest.ini_options]`（如 `testpaths = ["tests"]`）。
+
+---
+
+## 迭代原则（当前为开发版）
+
+- 视为**开发版本**：迭代时**不必**为旧实现做兼容；以新版本为准。
+- 与新版功能**重复**的旧函数/旧路径应**删除**，避免双轨实现，保持代码库干净。
+
+---
+
+## 实现方式与缺陷沟通
+
+- 用户请求「实现某功能」时：**专注把功能按清晰设计实现到位**，不要在代码里堆大量「猜 BUG」的 fallback、静默吞错或过度防御分支。
+- **实现结束后**，在回复中**集中列出**：已知问题、未覆盖场景、建议后续测试点或潜在 BUG，便于用户统一处理。
+
+---
+
+## 中文注释规则
+
+- **语言**：新增与修改的注释、模块/函数说明性 docstring 中，面向读者的解释性文字**使用简体中文**；标识符、类型名、协议字段名等仍保持代码原有语言（通常为英文）。
+- **写什么**：优先注释**意图、约束、非显而易见的算法或边界**（例如为何这样截断、与 OCR/坐标系/编码相关的假设、与上游下游契约）；**不要**为「变量名已说清楚」的语句逐行复述。
+- **粒度**：公共 API、复杂分支、魔法数字或阈值、与隐私/安全相关的行为必须能说清楚；简单 getter、一眼可读的连续赋值可不加注释。
+- **docstring**：对模块、对外函数/类补充简短中文说明（职责、关键参数、返回值语义）；若类型注解已充分表达契约，docstring 避免与注解逐字重复。
+- **风格**：句子简短、用「。」结尾；避免大段散文；必要时用编号列表写清步骤或条件。**不要**用注释堆砌已废弃的旧实现说明（除非用户明确要求保留迁移说明）。

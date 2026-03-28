@@ -29,7 +29,6 @@ def collect_address_candidates(
         locale_profile=self.locale_profile,
         protection_level=rule_profile.level,
         min_confidence=rule_profile.address_min_confidence,
-        field_label_pattern=self.field_label_pattern,
         emit_component_candidates=True,
     )
     spans = scan_address_and_organization(

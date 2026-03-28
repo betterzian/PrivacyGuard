@@ -3,10 +3,10 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from privacyguard.infrastructure.pii.rule_based_detector_labels import _field_label_specs
+from privacyguard.domain.enums import PIIAttributeType
+from privacyguard.infrastructure.pii.detector.labels import _LABEL_SPECS
 from privacyguard.infrastructure.pii.address.types import AddressComponentMatch
 from privacyguard.infrastructure.pii.rule_based_detector_shared import (
-    PIIAttributeType,
     _ADDRESS_FIELD_KEYWORDS,
     _BUILTIN_EN_GEO_LEXICON,
     _BUILTIN_GEO_LEXICON,
@@ -65,10 +65,12 @@ _EN_CITY_RE = re.compile(
     re.IGNORECASE,
 ) if (_BUILTIN_EN_GEO_LEXICON.tier_b_places or _BUILTIN_EN_GEO_LEXICON.tier_c_places) else re.compile(r"(?!x)x")
 
-_ADDRESS_LABEL_KEYWORDS = next(
-    spec.keywords
-    for spec in _field_label_specs()
-    if spec.attr_type == PIIAttributeType.ADDRESS
+_ADDRESS_LABEL_KEYWORDS = tuple(
+    dict.fromkeys(
+        spec.keyword
+        for spec in _LABEL_SPECS
+        if spec.attr_type == PIIAttributeType.ADDRESS and str(spec.keyword or "").strip()
+    )
 )
 _LABEL_RE = re.compile(
     rf"(?:^|[\s{{\[\(（【<「『\"',，;；])(?:{'|'.join(sorted((re.escape(item) for item in _ADDRESS_LABEL_KEYWORDS), key=len, reverse=True))})\s*(?:[:：=]|是|为|is|was|at)?\s*",
@@ -76,10 +78,9 @@ _LABEL_RE = re.compile(
 )
 _ALL_FIELD_KEYWORDS = tuple(
     dict.fromkeys(
-        keyword
-        for spec in _field_label_specs()
-        for keyword in spec.keywords
-        if str(keyword or "").strip()
+        spec.keyword
+        for spec in _LABEL_SPECS
+        if str(spec.keyword or "").strip()
     )
 )
 _FIELD_KEYWORD_RE = re.compile(

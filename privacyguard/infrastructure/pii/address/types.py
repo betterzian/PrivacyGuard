@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from re import Pattern
 
 from privacyguard.domain.enums import ProtectionLevel
 
@@ -55,6 +54,5 @@ class AddressParseConfig:
     locale_profile: str
     protection_level: ProtectionLevel
     min_confidence: float
-    field_label_pattern: Pattern[str] | None = None
     emit_component_candidates: bool = True
     extra_metadata: dict[str, list[str]] = field(default_factory=dict)
