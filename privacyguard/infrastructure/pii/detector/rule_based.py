@@ -102,12 +102,6 @@ class RuleBasedPIIDetector:
             raise ValueError(f"unsupported locale_profile: {locale_profile}")
         return normalized
 
-    def _supports_zh(self) -> bool:
-        return self.locale_profile in {"zh_cn", "mixed"}
-
-    def _supports_en(self) -> bool:
-        return self.locale_profile in {"en_us", "mixed"}
-
     def _resolve_privacy_repository_path(self, path: str | Path | None) -> Path:
         if path is None:
             return Path(DEFAULT_PRIVACY_REPOSITORY_PATH)

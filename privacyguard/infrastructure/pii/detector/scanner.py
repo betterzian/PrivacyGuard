@@ -181,9 +181,6 @@ def build_clue_bundle(
     soft_clues = [clue for clue in soft_clues if clue in label_clues or not _overlaps_any(clue.start, clue.end, label_spans)]
     all_clues = tuple(sorted([*hard_clues, *soft_clues], key=lambda item: (item.start, -item.priority, item.end)))
     return ClueBundle(
-        shadow_text=shadow_text,
-        shadow_to_raw=shadow_to_raw,
-        hard_clues=hard_clues,
         label_clues=label_clues,
         all_clues=all_clues,
     )
@@ -208,11 +205,10 @@ def _scan_hard_patterns(text: str) -> list[Clue]:
                     hard=True,
                     attr_type=attr_type,
                     matched_by=matched_by,
-                    payload={
-                        "matched_by": matched_by,
-                        "hard_source": "regex",
-                        "placeholder": _PLACEHOLDER_BY_ATTR[attr_type],
-                    },
+                        payload={
+                            "hard_source": "regex",
+                            "placeholder": _PLACEHOLDER_BY_ATTR[attr_type],
+                        },
                 )
             )
     return clues
@@ -237,9 +233,7 @@ def _scan_dictionary_hard_clues(text: str, entries: tuple[DictionaryEntry, ...],
                         attr_type=entry.attr_type,
                         matched_by=entry.matched_by,
                         payload={
-                            "matched_by": entry.matched_by,
                             "hard_source": source_kind,
-                            "dictionary_text": entry.text,
                             "metadata": {key: list(values) for key, values in entry.metadata.items()},
                             "placeholder": _PLACEHOLDER_BY_ATTR.get(entry.attr_type, f"<{entry.attr_type.value}>"),
                         },
@@ -286,13 +280,11 @@ def _scan_label_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -
                     attr_type=spec.attr_type,
                     matched_by=spec.matched_by,
                     payload={
-                    "matched_by": spec.matched_by,
-                    "component_hint": spec.component_hint,
-                    "ocr_matched_by": spec.ocr_matched_by,
-                    "keyword": spec.keyword,
-                },
+                        "component_hint": spec.component_hint,
+                        "ocr_matched_by": spec.ocr_matched_by,
+                    },
+                )
             )
-        )
     return tuple(clues)
 
 
@@ -361,7 +353,6 @@ def _scan_name_start_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                     hard=False,
                     attr_type=PIIAttributeType.NAME,
                     matched_by="name_start",
-                    payload={"matched_by": "name_start"},
                 )
             )
     return _dedupe_clues(clues)
@@ -389,7 +380,6 @@ def _scan_family_name_clues(shadow_text: str, shadow_to_raw: tuple[int | None, .
                     hard=False,
                     attr_type=PIIAttributeType.NAME,
                     matched_by="family_name",
-                    payload={"matched_by": "family_name"},
                 )
             )
     return _dedupe_clues(clues)
@@ -414,7 +404,6 @@ def _scan_company_suffix_clues(shadow_text: str, shadow_to_raw: tuple[int | None
                     hard=False,
                     attr_type=PIIAttributeType.ORGANIZATION,
                     matched_by="company_suffix",
-                    payload={"matched_by": "company_suffix"},
                 )
             )
     return _dedupe_clues(clues)
@@ -456,7 +445,6 @@ def _scan_zh_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                         hard=False,
                         attr_type=PIIAttributeType.ADDRESS,
                         matched_by="geo_db",
-                        payload={"component_type": component_type, "token_role": "name", "matched_by": "geo_db"},
                     )
                 )
     for component_type, keywords in _ZH_ADDRESS_ATTRS:
@@ -477,7 +465,6 @@ def _scan_zh_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                         hard=False,
                         attr_type=PIIAttributeType.ADDRESS,
                         matched_by="address_keyword",
-                        payload={"component_type": component_type, "token_role": "attr", "matched_by": "address_keyword"},
                     )
                 )
     return clues
@@ -508,7 +495,6 @@ def _scan_en_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                         hard=False,
                         attr_type=PIIAttributeType.ADDRESS,
                         matched_by="geo_db",
-                        payload={"component_type": component_type, "token_role": "name", "matched_by": "geo_db"},
                     )
                 )
     for component_type, keywords in _EN_ADDRESS_ATTRS:
@@ -529,7 +515,6 @@ def _scan_en_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                         hard=False,
                         attr_type=PIIAttributeType.ADDRESS,
                         matched_by="address_keyword",
-                        payload={"component_type": component_type, "token_role": "attr", "matched_by": "address_keyword"},
                     )
                 )
     for token_match in re.finditer(r"(?<!\d)\d{5}(?:-\d{4})?(?!\d)", shadow_text):
@@ -548,7 +533,6 @@ def _scan_en_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                 hard=False,
                 attr_type=PIIAttributeType.ADDRESS,
                 matched_by="postal_value",
-                payload={"component_type": "postal_code", "token_role": "name", "matched_by": "postal_value"},
             )
         )
     return clues

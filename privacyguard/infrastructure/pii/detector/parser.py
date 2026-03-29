@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from privacyguard.domain.enums import PIIAttributeType
+from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, Clue, ClueBundle, ClueFamily, ParseResult, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks import (
     AddressStack,
@@ -28,15 +29,13 @@ _STACK_REGISTRY = {
 @dataclass(slots=True)
 class StackContext:
     stream: StreamInput
-    bundle: ClueBundle | object
     locale_profile: str
     min_confidence_by_attr: dict[PIIAttributeType, float]
     clues: tuple[Clue, ...] = ()
-    events: tuple[object, ...] = ()
     committed_until: int = 0
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
-    handled_label_ids: set[str] = field(default_factory=set)
+    handled_label_clue_ids: set[str] = field(default_factory=set)
 
 
 class StreamParser:
@@ -48,7 +47,6 @@ class StreamParser:
     def parse(self, stream: StreamInput, bundle: ClueBundle) -> ParseResult:
         context = StackContext(
             stream=stream,
-            bundle=bundle,
             locale_profile=self.locale_profile,
             min_confidence_by_attr=dict(self.min_confidence_by_attr),
             clues=bundle.all_clues,
@@ -82,7 +80,7 @@ class StreamParser:
         return ParseResult(
             candidates=context.candidates,
             claims=context.claims,
-            handled_label_ids=context.handled_label_ids,
+            handled_label_clue_ids=context.handled_label_clue_ids,
         )
 
     def _run_stack(self, context: StackContext, index: int) -> StackRun | None:
@@ -108,20 +106,20 @@ class StreamParser:
                 self._commit_candidate(context, current.candidate)
         if outcome.incoming is not None:
             self._commit_candidate(context, outcome.incoming)
-        context.handled_label_ids |= current.handled_label_ids
-        context.handled_label_ids |= challenger.handled_label_ids
+        context.handled_label_clue_ids |= current.handled_label_clue_ids
+        context.handled_label_clue_ids |= challenger.handled_label_clue_ids
 
     def _commit_run(self, context: StackContext, run: StackRun) -> None:
         self._commit_candidate(context, run.candidate)
-        context.handled_label_ids |= run.handled_label_ids
+        context.handled_label_clue_ids |= run.handled_label_clue_ids
 
     def _commit_candidate(self, context: StackContext, candidate: CandidateDraft) -> None:
         existing = self._find_identical(context.candidates, candidate)
         if existing is not None:
             existing.confidence = max(existing.confidence, candidate.confidence)
-            existing.metadata = self._merge_metadata(existing.metadata, candidate.metadata)
-            existing.label_event_ids |= candidate.label_event_ids
-            context.handled_label_ids |= candidate.label_event_ids
+            existing.metadata = merge_metadata(existing.metadata, candidate.metadata)
+            existing.label_clue_ids |= candidate.label_clue_ids
+            context.handled_label_clue_ids |= candidate.label_clue_ids
             return
         context.candidates.append(candidate)
         context.claims.append(
@@ -133,7 +131,7 @@ class StreamParser:
                 owner_stack_id=f"{candidate.attr_type.value}:{candidate.start}:{candidate.end}",
             )
         )
-        context.handled_label_ids |= candidate.label_event_ids
+        context.handled_label_clue_ids |= candidate.label_clue_ids
         context.committed_until = max(context.committed_until, candidate.end)
 
     def _find_identical(self, candidates: list[CandidateDraft], candidate: CandidateDraft) -> CandidateDraft | None:
@@ -146,12 +144,6 @@ class StreamParser:
             ):
                 return existing
         return None
-
-    def _merge_metadata(self, left: dict[str, list[str]], right: dict[str, list[str]]) -> dict[str, list[str]]:
-        merged = {key: [str(item) for item in values] for key, values in left.items()}
-        for key, values in right.items():
-            merged[key] = list(dict.fromkeys([*merged.get(key, []), *[str(item) for item in values]]))
-        return merged
 
     def _next_unconsumed_index(self, clues: tuple[Clue, ...], start_index: int, consumed_ids: set[str]) -> int | None:
         for index in range(start_index, len(clues)):

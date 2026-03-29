@@ -16,10 +16,10 @@ _HARD_STOP_TEXT_PATTERNS: tuple[re.Pattern[str], ...] = (
 _ZH_COMPONENT_PATTERNS: tuple[tuple[str, re.Pattern[str], bool], ...] = (
     ("province", re.compile(r"[一-龥]{2,8}(?:特别行政区|自治区|省)"), False),
     ("city", re.compile(r"(?:北京|上海|天津|重庆)市|[一-龥]{2,8}(?:自治州|地区|盟|市)"), False),
-    ("district", re.compile(r"[一-龥A-Za-z0-9]{1,12}(?:区|县|旗)"), False),
+    ("district", re.compile(r"[一-龥A-Za-z0-9]{1,12}(?:开发区|高新区|新区|区|县|旗)"), False),
     ("street_admin", re.compile(r"[一-龥A-Za-z0-9]{1,12}街道"), False),
     ("town", re.compile(r"[一-龥A-Za-z0-9]{1,12}(?:镇|乡)"), False),
-    ("village", re.compile(r"[一-龥A-Za-z0-9]{1,16}(?:村|社区)"), False),
+    ("village", re.compile(r"[一-龥A-Za-z0-9]{1,16}(?:村)"), False),
     ("road", re.compile(r"[一-龥A-Za-z0-9]{1,24}(?:大道|胡同|路|街|道|巷|弄)"), False),
     ("compound", re.compile(r"[一-龥A-Za-z0-9]{1,24}(?:小区|公寓|大厦|园区|社区|花园|家园|苑|庭|府|湾|宿舍)"), False),
     ("building", re.compile(r"[0-9A-Za-z一二三四五六七八九十百零两]+(?:号楼|栋|幢|座|楼)"), True),

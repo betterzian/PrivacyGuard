@@ -5,19 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from privacyguard.domain.enums import PIISourceType, PIIAttributeType
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, OCRScene, OCRSceneBlock, ParseResult, StreamEvent, StreamInput
+from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Clue, OCRScene, OCRSceneBlock, ParseResult, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks import (
-    build_address_candidate_from_text,
+    build_address_candidate_from_value,
     build_name_candidate_from_value,
     build_organization_candidate_from_value,
     has_address_signal,
     has_organization_suffix,
+    looks_like_name_value,
+    looks_like_organization_value,
 )
 
 
 @dataclass(frozen=True, slots=True)
 class OCROwnershipProposal:
-    event: StreamEvent
+    event: Clue
     label_block: OCRSceneBlock
     candidate_blocks: tuple[OCRSceneBlock, ...]
 
@@ -38,7 +41,7 @@ def apply_ocr_geometry(
     }
     proposals: list[OCROwnershipProposal] = []
     for event in bundle.label_clues:
-        if event.event_id in parsed.handled_label_ids:
+        if event.clue_id in parsed.handled_label_clue_ids:
             continue
         label_block = _event_scene_block(stream, scene, event)
         if label_block is None:
@@ -66,7 +69,7 @@ def apply_ocr_geometry(
     return _merge_ocr_candidates([*remapped, *extras])
 
 
-def _build_candidate_from_blocks(event: StreamEvent, blocks: tuple[OCRSceneBlock, ...]) -> CandidateDraft | None:
+def _build_candidate_from_blocks(event: Clue, blocks: tuple[OCRSceneBlock, ...]) -> CandidateDraft | None:
     text = " ".join(block.block.text.strip() for block in blocks if block.block.text.strip())
     if not text:
         return None
@@ -82,17 +85,17 @@ def _build_candidate_from_blocks(event: StreamEvent, blocks: tuple[OCRSceneBlock
             value_end=end,
             matched_by=matched_by,
             component_hint=component_hint,
-            label_event_id=event.event_id,
+            label_clue_id=event.clue_id,
             confidence=0.91,
         )
     if event.attr_type == PIIAttributeType.ADDRESS:
-        candidate = build_address_candidate_from_text(
+        candidate = build_address_candidate_from_value(
             source=PIISourceType.OCR,
             value_text=text,
             value_start=start,
             value_end=end,
             matched_by=matched_by,
-            label_event_id=event.event_id,
+            label_clue_id=event.clue_id,
         )
         return candidate
     if event.attr_type == PIIAttributeType.ORGANIZATION:
@@ -102,7 +105,7 @@ def _build_candidate_from_blocks(event: StreamEvent, blocks: tuple[OCRSceneBlock
             value_start=start,
             value_end=end,
             matched_by=matched_by,
-            label_event_id=event.event_id,
+            label_clue_id=event.clue_id,
             label_driven=True,
         )
     return None
@@ -135,22 +138,14 @@ def _proposal_score(proposal: OCROwnershipProposal) -> tuple[float, float, float
     return (attr_score, geometry_score, distance_score)
 
 
-def _attribute_segment_score(event: StreamEvent, text: str) -> float:
+def _attribute_segment_score(event: Clue, text: str) -> float:
     sample = text.strip()
     if not sample:
         return -999.0
     if event.attr_type == PIIAttributeType.NAME:
         score = 0.0
         component_hint = str(event.payload.get("component_hint") or "full")
-        if build_name_candidate_from_value(
-            source=PIISourceType.OCR,
-            value_text=sample,
-            value_start=0,
-            value_end=len(sample),
-            matched_by=event.matched_by,
-            component_hint=component_hint,
-            confidence=0.9,
-        ) is not None:
+        if looks_like_name_value(sample, component_hint=component_hint):
             score += 1.4
         if has_organization_suffix(sample):
             score -= 2.2
@@ -159,14 +154,7 @@ def _attribute_segment_score(event: StreamEvent, text: str) -> float:
         return score
     if event.attr_type == PIIAttributeType.ORGANIZATION:
         score = 0.0
-        if build_organization_candidate_from_value(
-            source=PIISourceType.OCR,
-            value_text=sample,
-            value_start=0,
-            value_end=len(sample),
-            matched_by=event.matched_by,
-            label_driven=True,
-        ) is not None:
+        if looks_like_organization_value(sample, label_driven=True):
             score += 1.2
         if has_organization_suffix(sample):
             score += 2.4
@@ -175,16 +163,10 @@ def _attribute_segment_score(event: StreamEvent, text: str) -> float:
         return score
     if event.attr_type == PIIAttributeType.ADDRESS:
         score = 0.0
-        if build_address_candidate_from_text(
-            source=PIISourceType.OCR,
-            value_text=sample,
-            value_start=0,
-            value_end=len(sample),
-            matched_by=event.matched_by,
-        ) is not None:
-            score += 1.2
         if has_address_signal(sample):
             score += 2.2
+        elif len(sample) >= 4:
+            score += 0.6
         if has_organization_suffix(sample):
             score -= 0.6
         return score
@@ -204,7 +186,7 @@ def _distance_fallback_score(label_block: OCRSceneBlock, blocks: tuple[OCRSceneB
 
 
 def _find_existing_bound_candidate(
-    event: StreamEvent,
+    event: Clue,
     label_block: OCRSceneBlock,
     candidates: list[CandidateDraft],
     scene: OCRScene,
@@ -226,10 +208,12 @@ def _find_existing_bound_candidate(
     return ranked[0][1]
 
 
-def _bind_label_to_candidate(candidate: CandidateDraft, event: StreamEvent) -> None:
-    candidate.label_event_ids.add(event.event_id)
+def _bind_label_to_candidate(candidate: CandidateDraft, event: Clue) -> None:
+    candidate.label_clue_ids.add(event.clue_id)
     metadata = dict(candidate.metadata)
-    metadata["bound_label_ids"] = list(dict.fromkeys([*metadata.get("bound_label_ids", []), event.event_id]))
+    metadata["bound_label_clue_ids"] = list(
+        dict.fromkeys([*metadata.get("bound_label_clue_ids", []), event.clue_id])
+    )
     metadata["matched_by"] = list(dict.fromkeys([*metadata.get("matched_by", []), str(event.payload.get("ocr_matched_by") or event.matched_by)]))
     candidate.metadata = metadata
 
@@ -338,26 +322,18 @@ def _merge_ocr_candidates(candidates: list[CandidateDraft]) -> list[CandidateDra
             merged.append(candidate)
             continue
         duplicate.confidence = max(duplicate.confidence, candidate.confidence)
-        duplicate.metadata = _merge_metadata(duplicate.metadata, candidate.metadata)
+        duplicate.metadata = merge_metadata(duplicate.metadata, candidate.metadata)
     return merged
 
 
-def _merge_metadata(left: dict[str, list[str]], right: dict[str, list[str]]) -> dict[str, list[str]]:
-    merged: dict[str, list[str]] = {}
-    for source in (left, right):
-        for key, values in source.items():
-            merged[key] = list(dict.fromkeys([*merged.get(key, []), *values]))
-    return merged
-
-
-def _event_block_id(stream: StreamInput, event: StreamEvent) -> str | None:
+def _event_block_id(stream: StreamInput, event: Clue) -> str | None:
     for ref in stream.char_refs[event.start : event.end]:
         if ref is not None and ref.block_id is not None:
             return ref.block_id
     return None
 
 
-def _event_scene_block(stream: StreamInput, scene: OCRScene, event: StreamEvent) -> OCRSceneBlock | None:
+def _event_scene_block(stream: StreamInput, scene: OCRScene, event: Clue) -> OCRSceneBlock | None:
     block_id = _event_block_id(stream, event)
     if block_id is None:
         return None

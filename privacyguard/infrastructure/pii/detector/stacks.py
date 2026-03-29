@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, Clue, ClueBundle, ClueFamily, StreamInput
+from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, Clue, ClueFamily, StreamInput
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
 
 _ORG_SUFFIX_RE = re.compile(
@@ -50,7 +51,6 @@ _PREFIX_EN_KEYWORDS = {"apt", "apartment", "suite", "ste", "unit", "#", "floor",
 
 class StackContextLike(Protocol):
     stream: StreamInput
-    bundle: ClueBundle | object
     locale_profile: str
     clues: tuple[Clue, ...]
 
@@ -60,7 +60,7 @@ class StackRun:
     family: ClueFamily
     candidate: CandidateDraft
     consumed_ids: set[str]
-    handled_label_ids: set[str] = field(default_factory=set)
+    handled_label_clue_ids: set[str] = field(default_factory=set)
     next_index: int = 0
 
 
@@ -88,13 +88,13 @@ class StructuredValueStack(BaseStack):
         if _blocked_between(self.context.stream.raw_text, self.context.clues, self.clue.end, hard_clue.start, allow_family=ClueFamily.STRUCTURED):
             return None
         candidate = _build_hard_candidate(hard_clue, self.context.stream.source)
-        candidate.label_event_ids.add(self.clue.clue_id)
-        candidate.metadata = _merge_metadata(candidate.metadata, {"bound_label_ids": [self.clue.clue_id]})
+        candidate.label_clue_ids.add(self.clue.clue_id)
+        candidate.metadata = merge_metadata(candidate.metadata, {"bound_label_clue_ids": [self.clue.clue_id]})
         return StackRun(
             family=ClueFamily.STRUCTURED,
             candidate=candidate,
             consumed_ids={self.clue.clue_id, hard_clue.clue_id},
-            handled_label_ids={self.clue.clue_id},
+            handled_label_clue_ids={self.clue.clue_id},
             next_index=hard_index + 1,
         )
 
@@ -129,7 +129,7 @@ class NameStack(BaseStack):
             matched_by=self.clue.matched_by,
             claim_strength=ClaimStrength.SOFT,
             metadata={"matched_by": [self.clue.matched_by], "name_component": [self._component_hint()]},
-            label_event_ids={self.clue.clue_id} if self.clue.kind.endswith("_label") else set(),
+            label_clue_ids={self.clue.clue_id} if self.clue.kind.endswith("_label") else set(),
         )
         return StackRun(ClueFamily.NAME, candidate, consumed_ids, {self.clue.clue_id} if self.clue.kind.endswith("_label") else set(), next_index)
 
@@ -184,7 +184,7 @@ class OrganizationStack(BaseStack):
             matched_by=self.clue.matched_by,
             claim_strength=ClaimStrength.SOFT,
             metadata={"matched_by": [self.clue.matched_by]},
-            label_event_ids={self.clue.clue_id} if self.clue.kind == "organization_label" else set(),
+            label_clue_ids={self.clue.clue_id} if self.clue.kind == "organization_label" else set(),
         )
         return StackRun(ClueFamily.ORGANIZATION, candidate, consumed_ids, handled, next_index)
 
@@ -287,7 +287,7 @@ class AddressStack(BaseStack):
             matched_by=self.clue.matched_by,
             claim_strength=ClaimStrength.SOFT,
             metadata=_address_metadata(self.clue, components),
-            label_event_ids=handled_labels,
+            label_clue_ids=handled_labels,
         )
         return StackRun(ClueFamily.ADDRESS, candidate, consumed_ids, handled_labels, i)
 
@@ -305,7 +305,7 @@ def _build_hard_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
     metadata = {}
     if isinstance(clue.payload.get("metadata"), dict):
         metadata = {key: [str(item) for item in values] for key, values in clue.payload["metadata"].items()}
-    metadata = _merge_metadata(metadata, {"matched_by": [clue.matched_by], "hard_source": [str(clue.payload.get("hard_source") or "regex")]})
+    metadata = merge_metadata(metadata, {"matched_by": [clue.matched_by], "hard_source": [str(clue.payload.get("hard_source") or "regex")]})
     return CandidateDraft(
         attr_type=clue.attr_type,
         start=clue.start,
@@ -327,7 +327,7 @@ def build_name_candidate_from_value(
     value_end: int,
     matched_by: str,
     component_hint: str,
-    label_event_id: str | None = None,
+    label_clue_id: str | None = None,
     confidence: float = 0.92,
 ) -> CandidateDraft | None:
     del value_end
@@ -345,7 +345,7 @@ def build_name_candidate_from_value(
         matched_by=matched_by,
         claim_strength=ClaimStrength.SOFT,
         metadata={"matched_by": [matched_by], "name_component": [component_hint or "full"]},
-        label_event_ids={label_event_id} if label_event_id else set(),
+        label_clue_ids={label_clue_id} if label_clue_id else set(),
     )
 
 
@@ -356,7 +356,7 @@ def build_organization_candidate_from_value(
     value_start: int,
     value_end: int,
     matched_by: str,
-    label_event_id: str | None = None,
+    label_clue_id: str | None = None,
     label_driven: bool = False,
 ) -> CandidateDraft | None:
     del value_end
@@ -374,47 +374,68 @@ def build_organization_candidate_from_value(
         matched_by=matched_by,
         claim_strength=ClaimStrength.SOFT,
         metadata={"matched_by": [matched_by]},
-        label_event_ids={label_event_id} if label_event_id else set(),
+        label_clue_ids={label_clue_id} if label_clue_id else set(),
     )
 
 
-def build_address_candidate_from_text(
+def has_organization_suffix(text: str) -> bool:
+    return _ORG_SUFFIX_RE.search(str(text or "")) is not None
+
+
+def has_address_signal(text: str) -> bool:
+    return _ADDRESS_SIGNAL_RE.search(str(text or "")) is not None
+
+
+def looks_like_name_value(text: str, *, component_hint: str = "full") -> bool:
+    return _is_plausible_name(_clean_value(text), component_hint=component_hint)
+
+
+def looks_like_organization_value(text: str, *, label_driven: bool = False) -> bool:
+    return _is_plausible_organization(_strip_leading_address_label(_clean_value(text)), label_driven=label_driven)
+
+
+def name_component_hint(candidate: CandidateDraft) -> str:
+    values = candidate.metadata.get("name_component")
+    return str(values[0]) if values else "full"
+
+
+def build_address_candidate_from_value(
     *,
     source,
     value_text: str,
     value_start: int,
     value_end: int,
     matched_by: str,
-    label_event_id: str | None = None,
-    locale_profile: str = "mixed",
+    label_clue_id: str | None = None,
+    confidence: float = 0.82,
+    metadata: dict[str, list[str]] | None = None,
 ) -> CandidateDraft | None:
-    del value_end
-    from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-    from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
-
-    stream = build_prompt_stream(value_text)
-    bundle = build_clue_bundle(stream, session_entries=(), local_entries=(), locale_profile=locale_profile)
-    context = _EphemeralStackContext(stream=stream, bundle=bundle, locale_profile=locale_profile, clues=bundle.all_clues)
-    first_index = _next_address_index(bundle.all_clues, 0)
-    if first_index is None:
+    cleaned = _clean_value(value_text)
+    if not cleaned:
         return None
-    run = AddressStack(clue=bundle.all_clues[first_index], clue_index=first_index, context=context).run()
-    if run is None:
-        return None
-    candidate = run.candidate
-    candidate.start += value_start
-    candidate.end += value_start
-    if label_event_id:
-        candidate.label_event_ids.add(label_event_id)
-    candidate.matched_by = matched_by
-    candidate.metadata = _merge_metadata(candidate.metadata, {"matched_by": [matched_by]})
-    return candidate
+    offset = value_text.find(cleaned)
+    candidate_metadata = {"matched_by": [matched_by], "address_kind": ["private_address"]}
+    if metadata:
+        candidate_metadata = merge_metadata(candidate_metadata, metadata)
+    return CandidateDraft(
+        attr_type=PIIAttributeType.ADDRESS,
+        start=value_start + max(0, offset),
+        end=value_start + max(0, offset) + len(cleaned),
+        text=cleaned,
+        source=source,
+        confidence=confidence,
+        matched_by=matched_by,
+        claim_strength=ClaimStrength.SOFT,
+        metadata=candidate_metadata,
+        label_clue_ids={label_clue_id} if label_clue_id else set(),
+    )
 
 
-def rebuild_candidate_from_span(candidate: CandidateDraft, raw_text: str, *, start: int, end: int) -> CandidateDraft | None:
+def _slice_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, end: int) -> CandidateDraft | None:
     if start >= end:
         return None
     segment = raw_text[start:end]
+    metadata_base = candidate.metadata
     if candidate.attr_type == PIIAttributeType.NAME:
         rebuilt = build_name_candidate_from_value(
             source=candidate.source,
@@ -432,37 +453,31 @@ def rebuild_candidate_from_span(candidate: CandidateDraft, raw_text: str, *, sta
             value_start=start,
             value_end=end,
             matched_by=candidate.matched_by,
-            label_driven=_is_label_driven(candidate),
+            label_driven=_candidate_is_label_driven(candidate),
         )
     elif candidate.attr_type == PIIAttributeType.ADDRESS:
-        rebuilt = build_address_candidate_from_text(
+        metadata_base = {
+            key: values
+            for key, values in candidate.metadata.items()
+            if not key.startswith("address_component") and not key.startswith("address_details")
+        }
+        rebuilt = build_address_candidate_from_value(
             source=candidate.source,
             value_text=segment,
             value_start=start,
             value_end=end,
             matched_by=candidate.matched_by,
+            confidence=candidate.confidence,
+            metadata=merge_metadata(metadata_base, {"address_match_origin": ["trimmed"]}),
         )
     else:
         rebuilt = None
     if rebuilt is None:
         return None
     rebuilt.claim_strength = candidate.claim_strength
-    rebuilt.metadata = _merge_metadata(candidate.metadata, rebuilt.metadata)
-    rebuilt.label_event_ids = set(candidate.label_event_ids)
+    rebuilt.metadata = merge_metadata(metadata_base, rebuilt.metadata)
+    rebuilt.label_clue_ids = set(candidate.label_clue_ids)
     return rebuilt
-
-
-def has_organization_suffix(text: str) -> bool:
-    return _ORG_SUFFIX_RE.search(str(text or "")) is not None
-
-
-def has_address_signal(text: str) -> bool:
-    return _ADDRESS_SIGNAL_RE.search(str(text or "")) is not None
-
-
-def name_component_hint(candidate: CandidateDraft) -> str:
-    values = candidate.metadata.get("name_component")
-    return str(values[0]) if values else "full"
 
 
 @dataclass(slots=True)
@@ -529,9 +544,9 @@ class StackManager:
         if suffix_start <= 0:
             return ConflictOutcome(incoming=organization if incoming is organization else None, drop_existing=name is existing)
         if organization is incoming:
-            trimmed = rebuild_candidate_from_span(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
+            trimmed = _slice_candidate(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
             return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
-        trimmed = rebuild_candidate_from_span(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
+        trimmed = _slice_candidate(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
         return ConflictOutcome(incoming=trimmed)
 
     def _resolve_name_address(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
@@ -550,16 +565,8 @@ class StackManager:
         if blocker.start <= candidate.start and blocker.end >= candidate.end:
             return None
         if blocker.start <= candidate.start:
-            return rebuild_candidate_from_span(candidate, raw_text, start=blocker.end, end=candidate.end)
-        return rebuild_candidate_from_span(candidate, raw_text, start=candidate.start, end=blocker.start)
-
-
-@dataclass(slots=True)
-class _EphemeralStackContext:
-    stream: StreamInput
-    bundle: ClueBundle
-    locale_profile: str
-    clues: tuple[Clue, ...]
+            return _slice_candidate(candidate, raw_text, start=blocker.end, end=candidate.end)
+        return _slice_candidate(candidate, raw_text, start=candidate.start, end=blocker.start)
 
 
 def _resolve_family_boundary(raw_text: str, clues: tuple[Clue, ...], start_index: int, *, family: ClueFamily, initial_end: int) -> tuple[int, int, set[str]]:
@@ -883,12 +890,5 @@ def _strip_leading_address_label(text: str) -> str:
         stripped = updated.strip()
 
 
-def _is_label_driven(candidate: CandidateDraft) -> bool:
+def _candidate_is_label_driven(candidate: CandidateDraft) -> bool:
     return candidate.matched_by.startswith("context_") or candidate.matched_by.startswith("ocr_label_") or candidate.matched_by.endswith("_label")
-
-
-def _merge_metadata(left: dict[str, list[str]], right: dict[str, list[str]]) -> dict[str, list[str]]:
-    merged = {key: [str(item) for item in values] for key, values in left.items()}
-    for key, values in right.items():
-        merged[key] = list(dict.fromkeys([*merged.get(key, []), *[str(item) for item in values]]))
-    return merged

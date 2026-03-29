@@ -18,12 +18,3 @@ class AddressComponent:
     key_start: int
     key_end: int
     is_detail: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class AddressToken:
-    component_type: str
-    token_role: str
-    text: str
-    start: int
-    end: int

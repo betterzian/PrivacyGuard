@@ -7,11 +7,10 @@ from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemory
 from privacyguard.infrastructure.pii.detector.models import (
     CandidateDraft,
     ClaimStrength,
-    EventBundle,
-    EventKind,
+    Clue,
+    ClueFamily,
     OCRScene,
     OCRSceneBlock,
-    StreamEvent,
     StreamInput,
 )
 from privacyguard.infrastructure.pii.detector.ocr import OCROwnershipProposal, _resolve_ownership_proposals
@@ -25,19 +24,6 @@ def _find_candidate(candidates, attr_type: PIIAttributeType):
             return candidate
     return None
 
-
-def _empty_bundle() -> EventBundle:
-    return EventBundle(
-        modified_text="",
-        modified_to_raw=(),
-        structured_events=(),
-        dictionary_events=(),
-        label_events=(),
-        anchor_events=(),
-        all_events=(),
-    )
-
-
 def _build_context(raw_text: str) -> StackContext:
     stream = StreamInput(
         source=PIISourceType.PROMPT,
@@ -47,10 +33,8 @@ def _build_context(raw_text: str) -> StackContext:
     )
     return StackContext(
         stream=stream,
-        bundle=_empty_bundle(),
         locale_profile="mixed",
         min_confidence_by_attr={},
-        events=(),
     )
 
 
@@ -159,7 +143,7 @@ def test_hard_hard_allows_longer_prompt_value_to_override_shorter_session_value(
     assert phone is not None
     assert phone.text == "13800138000"
     assert phone.metadata["hard_source"] == ["regex"]
-    assert phone.metadata["bound_label_ids"]
+    assert phone.metadata["bound_label_clue_ids"]
 
 
 def test_hard_soft_boundary_stops_address_before_phone() -> None:
@@ -327,15 +311,16 @@ def test_ocr_geometry_ownership_prefers_attribute_segment_owner() -> None:
     )
     proposals = [
         OCROwnershipProposal(
-            event=StreamEvent(
-                event_id="evt-name",
-                kind=EventKind.LABEL,
+            event=Clue(
+                clue_id="evt-name",
+                family=ClueFamily.NAME,
+                kind="name_label",
                 attr_type=PIIAttributeType.NAME,
                 start=0,
                 end=4,
-                strength=ClaimStrength.SOFT,
+                text="Name",
                 priority=200,
-                stack_kind="name",
+                hard=False,
                 matched_by="ocr_label_name_field",
                 payload={"component_hint": "full"},
             ),
@@ -343,15 +328,16 @@ def test_ocr_geometry_ownership_prefers_attribute_segment_owner() -> None:
             candidate_blocks=(shared_value,),
         ),
         OCROwnershipProposal(
-            event=StreamEvent(
-                event_id="evt-org",
-                kind=EventKind.LABEL,
+            event=Clue(
+                clue_id="evt-org",
+                family=ClueFamily.ORGANIZATION,
+                kind="organization_label",
                 attr_type=PIIAttributeType.ORGANIZATION,
                 start=0,
                 end=12,
-                strength=ClaimStrength.SOFT,
+                text="Company Name",
                 priority=200,
-                stack_kind="organization",
+                hard=False,
                 matched_by="ocr_label_organization_field",
                 payload={},
             ),
