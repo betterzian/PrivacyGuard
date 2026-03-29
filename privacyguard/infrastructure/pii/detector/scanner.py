@@ -1,4 +1,4 @@
-"""Clean clue scanner for the detector stream."""
+"""Detector 流式 clue 扫描器。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,16 @@ from itertools import count
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.address.geo_db import load_china_geo_lexicon, load_en_geo_lexicon
 from privacyguard.infrastructure.pii.detector.labels import _LABEL_SPECS
-from privacyguard.infrastructure.pii.detector.models import Clue, ClueBundle, ClueFamily, DictionaryEntry, StreamInput
+from privacyguard.infrastructure.pii.detector.models import (
+    AddressComponentType,
+    BreakType,
+    Clue,
+    ClueBundle,
+    ClueFamily,
+    ClueRole,
+    DictionaryEntry,
+    StreamInput,
+)
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
 
 _CLUE_IDS = count(1)
@@ -28,6 +37,19 @@ _PLACEHOLDER_BY_ATTR = {
     PIIAttributeType.BANK_ACCOUNT: "<bank>",
     PIIAttributeType.PASSPORT_NUMBER: "<passport>",
     PIIAttributeType.DRIVER_LICENSE: "<driver_license>",
+}
+
+_LABEL_FAMILY_BY_ATTR: dict[PIIAttributeType, ClueFamily] = {
+    PIIAttributeType.EMAIL: ClueFamily.STRUCTURED,
+    PIIAttributeType.PHONE: ClueFamily.STRUCTURED,
+    PIIAttributeType.ID_NUMBER: ClueFamily.STRUCTURED,
+    PIIAttributeType.CARD_NUMBER: ClueFamily.STRUCTURED,
+    PIIAttributeType.BANK_ACCOUNT: ClueFamily.STRUCTURED,
+    PIIAttributeType.PASSPORT_NUMBER: ClueFamily.STRUCTURED,
+    PIIAttributeType.DRIVER_LICENSE: ClueFamily.STRUCTURED,
+    PIIAttributeType.NAME: ClueFamily.NAME,
+    PIIAttributeType.ORGANIZATION: ClueFamily.ORGANIZATION,
+    PIIAttributeType.ADDRESS: ClueFamily.ADDRESS,
 }
 
 _HARD_PATTERNS: tuple[tuple[PIIAttributeType, str, re.Pattern[str], int], ...] = (
@@ -125,31 +147,31 @@ _COMMON_FAMILY_NAMES = tuple(
     )
 )
 
-_ZH_ADDRESS_ATTRS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("province", ("特别行政区", "自治区", "省")),
-    ("city", ("自治州", "地区", "盟", "市")),
-    ("district", ("新区", "区", "县", "旗")),
-    ("street_admin", ("街道",)),
-    ("town", ("镇", "乡")),
-    ("village", ("社区", "村")),
-    ("road", ("大道", "胡同", "路", "街", "道", "巷", "弄")),
-    ("compound", ("小区", "公寓", "大厦", "园区", "花园", "家园", "苑", "庭", "府", "湾", "宿舍")),
-    ("building", ("号楼", "栋", "幢", "座", "楼")),
-    ("unit", ("单元",)),
-    ("floor", ("层",)),
-    ("room", ("室", "房", "户")),
+_ZH_ADDRESS_ATTRS: tuple[tuple[AddressComponentType, tuple[str, ...]], ...] = (
+    (AddressComponentType.PROVINCE, ("特别行政区", "自治区", "省")),
+    (AddressComponentType.CITY, ("自治州", "地区", "盟", "市")),
+    (AddressComponentType.DISTRICT, ("新区", "区", "县", "旗")),
+    (AddressComponentType.STREET_ADMIN, ("街道",)),
+    (AddressComponentType.TOWN, ("镇", "乡")),
+    (AddressComponentType.VILLAGE, ("社区", "村")),
+    (AddressComponentType.ROAD, ("大道", "胡同", "路", "街", "道", "巷", "弄")),
+    (AddressComponentType.COMPOUND, ("小区", "公寓", "大厦", "园区", "花园", "家园", "苑", "庭", "府", "湾", "宿舍")),
+    (AddressComponentType.BUILDING, ("号楼", "栋", "幢", "座", "楼")),
+    (AddressComponentType.UNIT, ("单元",)),
+    (AddressComponentType.FLOOR, ("层",)),
+    (AddressComponentType.ROOM, ("室", "房", "户")),
 )
 
-_EN_ADDRESS_ATTRS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("street", ("street", "st", "road", "rd", "avenue", "ave", "boulevard", "blvd", "drive", "dr", "lane", "ln", "court", "ct", "place", "pl", "parkway", "pkwy", "terrace", "ter", "circle", "cir", "way", "highway", "hwy")),
-    ("unit", ("apt", "apartment", "suite", "ste", "unit", "#")),
-    ("floor", ("floor", "fl")),
-    ("room", ("room", "rm")),
+_EN_ADDRESS_ATTRS: tuple[tuple[AddressComponentType, tuple[str, ...]], ...] = (
+    (AddressComponentType.STREET, ("street", "st", "road", "rd", "avenue", "ave", "boulevard", "blvd", "drive", "dr", "lane", "ln", "court", "ct", "place", "pl", "parkway", "pkwy", "terrace", "ter", "circle", "cir", "way", "highway", "hwy")),
+    (AddressComponentType.UNIT, ("apt", "apartment", "suite", "ste", "unit", "#")),
+    (AddressComponentType.FLOOR, ("floor", "fl")),
+    (AddressComponentType.ROOM, ("room", "rm")),
 )
 
-_BREAK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("break_punct", re.compile(r"[;；。！？!?]")),
-    ("break_newline", re.compile(r"(?:\r?\n){2,}")),
+_BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
+    (BreakType.PUNCT, "break_punct", re.compile(r"[;；。！？!?]")),
+    (BreakType.NEWLINE, "break_newline", re.compile(r"(?:\r?\n){2,}")),
 )
 
 
@@ -180,10 +202,7 @@ def build_clue_bundle(
     ]
     soft_clues = [clue for clue in soft_clues if clue in label_clues or not _overlaps_any(clue.start, clue.end, label_spans)]
     all_clues = tuple(sorted([*hard_clues, *soft_clues], key=lambda item: (item.start, -item.priority, item.end)))
-    return ClueBundle(
-        label_clues=label_clues,
-        all_clues=all_clues,
-    )
+    return ClueBundle(all_clues=all_clues)
 
 
 def _scan_hard_patterns(text: str) -> list[Clue]:
@@ -197,18 +216,15 @@ def _scan_hard_patterns(text: str) -> list[Clue]:
                 Clue(
                     clue_id=_next_clue_id(),
                     family=ClueFamily.STRUCTURED,
-                    kind=f"hard_{attr_type.value}",
+                    role=ClueRole.HARD,
+                    attr_type=attr_type,
                     start=match.start(),
                     end=match.end(),
                     text=value,
                     priority=priority,
-                    hard=True,
-                    attr_type=attr_type,
-                    matched_by=matched_by,
-                        payload={
-                            "hard_source": "regex",
-                            "placeholder": _PLACEHOLDER_BY_ATTR[attr_type],
-                        },
+                    source_kind=matched_by,
+                    hard_source="regex",
+                    placeholder=_PLACEHOLDER_BY_ATTR[attr_type],
                 )
             )
     return clues
@@ -224,19 +240,16 @@ def _scan_dictionary_hard_clues(text: str, entries: tuple[DictionaryEntry, ...],
                     Clue(
                         clue_id=_next_clue_id(),
                         family=ClueFamily.STRUCTURED,
-                        kind=f"hard_{entry.attr_type.value}",
+                        role=ClueRole.HARD,
+                        attr_type=entry.attr_type,
                         start=match.start(),
                         end=match.end(),
                         text=match.group(0),
                         priority=priority,
-                        hard=True,
-                        attr_type=entry.attr_type,
-                        matched_by=entry.matched_by,
-                        payload={
-                            "hard_source": source_kind,
-                            "metadata": {key: list(values) for key, values in entry.metadata.items()},
-                            "placeholder": _PLACEHOLDER_BY_ATTR.get(entry.attr_type, f"<{entry.attr_type.value}>"),
-                        },
+                        source_kind=entry.matched_by,
+                        hard_source=source_kind,
+                        placeholder=_PLACEHOLDER_BY_ATTR.get(entry.attr_type, f"<{entry.attr_type.value}>"),
+                        source_metadata={key: list(values) for key, values in entry.metadata.items()},
                     )
                 )
     return clues
@@ -260,31 +273,22 @@ def _scan_label_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -
         raw_span = _shadow_span_to_raw(shadow_to_raw, start, end)
         if raw_span is None:
             continue
-        family = {
-            "structured": ClueFamily.STRUCTURED,
-            "address": ClueFamily.ADDRESS,
-            "organization": ClueFamily.ORGANIZATION,
-            "name": ClueFamily.NAME,
-        }[spec.stack_kind]
         raw_start, raw_end = raw_span
         clues.append(
-                Clue(
-                    clue_id=_next_clue_id(),
-                    family=family,
-                    kind=f"{spec.attr_type.value}_label" if spec.attr_type != PIIAttributeType.ORGANIZATION else "organization_label",
+            Clue(
+                clue_id=_next_clue_id(),
+                family=_LABEL_FAMILY_BY_ATTR[spec.attr_type],
+                role=ClueRole.LABEL,
+                attr_type=spec.attr_type,
                 start=raw_start,
                 end=raw_end,
                 text=spec.keyword,
-                    priority=spec.priority,
-                    hard=False,
-                    attr_type=spec.attr_type,
-                    matched_by=spec.matched_by,
-                    payload={
-                        "component_hint": spec.component_hint,
-                        "ocr_matched_by": spec.ocr_matched_by,
-                    },
-                )
+                priority=spec.priority,
+                source_kind=spec.source_kind,
+                component_hint=spec.component_hint,
+                ocr_source_kind=spec.ocr_source_kind,
             )
+        )
     return tuple(clues)
 
 
@@ -302,17 +306,17 @@ def _scan_break_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -
                 Clue(
                     clue_id=_next_clue_id(),
                     family=ClueFamily.BREAK,
-                    kind="break_ocr",
+                    role=ClueRole.BREAK,
+                    attr_type=None,
                     start=raw_start,
                     end=max(raw_start, raw_end),
                     text=_OCR_SEMANTIC_BREAK_TOKEN,
                     priority=500,
-                    hard=False,
-                    attr_type=None,
-                    matched_by="break_ocr",
+                    source_kind="break_ocr",
+                    break_type=BreakType.OCR,
                 )
             )
-    for kind, pattern in _BREAK_PATTERNS:
+    for break_type, source_kind, pattern in _BREAK_PATTERNS:
         for match in pattern.finditer(shadow_text):
             raw_span = _shadow_span_to_raw(shadow_to_raw, match.start(), match.end())
             if raw_span is None:
@@ -321,14 +325,14 @@ def _scan_break_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -
                 Clue(
                     clue_id=_next_clue_id(),
                     family=ClueFamily.BREAK,
-                    kind=kind,
+                    role=ClueRole.BREAK,
+                    attr_type=None,
                     start=raw_span[0],
                     end=raw_span[1],
                     text=match.group(0),
                     priority=480,
-                    hard=False,
-                    attr_type=None,
-                    matched_by=kind,
+                    source_kind=source_kind,
+                    break_type=break_type,
                 )
             )
     return _dedupe_clues(clues)
@@ -345,14 +349,13 @@ def _scan_name_start_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                 Clue(
                     clue_id=_next_clue_id(),
                     family=ClueFamily.NAME,
-                    kind="name_start",
+                    role=ClueRole.START,
+                    attr_type=PIIAttributeType.NAME,
                     start=raw_span[0],
                     end=raw_span[1],
                     text=keyword,
                     priority=230,
-                    hard=False,
-                    attr_type=PIIAttributeType.NAME,
-                    matched_by="name_start",
+                    source_kind="name_start",
                 )
             )
     return _dedupe_clues(clues)
@@ -372,14 +375,13 @@ def _scan_family_name_clues(shadow_text: str, shadow_to_raw: tuple[int | None, .
                 Clue(
                     clue_id=_next_clue_id(),
                     family=ClueFamily.NAME,
-                    kind="family_name",
+                    role=ClueRole.SURNAME,
+                    attr_type=PIIAttributeType.NAME,
                     start=raw_span[0],
                     end=raw_span[1],
                     text=surname,
                     priority=220,
-                    hard=False,
-                    attr_type=PIIAttributeType.NAME,
-                    matched_by="family_name",
+                    source_kind="family_name",
                 )
             )
     return _dedupe_clues(clues)
@@ -396,14 +398,13 @@ def _scan_company_suffix_clues(shadow_text: str, shadow_to_raw: tuple[int | None
                 Clue(
                     clue_id=_next_clue_id(),
                     family=ClueFamily.ORGANIZATION,
-                    kind="company_suffix",
+                    role=ClueRole.SUFFIX,
+                    attr_type=PIIAttributeType.ORGANIZATION,
                     start=raw_span[0],
                     end=raw_span[1],
                     text=suffix,
                     priority=240,
-                    hard=False,
-                    attr_type=PIIAttributeType.ORGANIZATION,
-                    matched_by="company_suffix",
+                    source_kind="company_suffix",
                 )
             )
     return _dedupe_clues(clues)
@@ -423,9 +424,9 @@ def _scan_zh_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
     lexicon = load_china_geo_lexicon()
     direct_city_names = {"北京", "上海", "天津", "重庆", "香港", "澳门"}
     geo_specs = (
-        ("province", tuple(item for item in lexicon.provinces if item not in direct_city_names)),
-        ("city", tuple([*lexicon.cities, *sorted(direct_city_names)])),
-        ("district", lexicon.districts),
+        (AddressComponentType.PROVINCE, tuple(item for item in lexicon.provinces if item not in direct_city_names)),
+        (AddressComponentType.CITY, tuple([*lexicon.cities, *sorted(direct_city_names)])),
+        (AddressComponentType.DISTRICT, lexicon.districts),
     )
     for component_type, names in geo_specs:
         for name in sorted(set(names), key=len, reverse=True):
@@ -437,14 +438,14 @@ def _scan_zh_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                     Clue(
                         clue_id=_next_clue_id(),
                         family=ClueFamily.ADDRESS,
-                        kind=f"address_value_{component_type}",
+                        role=ClueRole.VALUE,
+                        attr_type=PIIAttributeType.ADDRESS,
                         start=raw_span[0],
                         end=raw_span[1],
                         text=name,
                         priority=205,
-                        hard=False,
-                        attr_type=PIIAttributeType.ADDRESS,
-                        matched_by="geo_db",
+                        source_kind="geo_db",
+                        component_type=component_type,
                     )
                 )
     for component_type, keywords in _ZH_ADDRESS_ATTRS:
@@ -457,14 +458,14 @@ def _scan_zh_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                     Clue(
                         clue_id=_next_clue_id(),
                         family=ClueFamily.ADDRESS,
-                        kind=f"address_key_{component_type}",
+                        role=ClueRole.KEY,
+                        attr_type=PIIAttributeType.ADDRESS,
                         start=raw_span[0],
                         end=raw_span[1],
                         text=keyword,
                         priority=204,
-                        hard=False,
-                        attr_type=PIIAttributeType.ADDRESS,
-                        matched_by="address_keyword",
+                        source_kind="address_keyword",
+                        component_type=component_type,
                     )
                 )
     return clues
@@ -474,8 +475,8 @@ def _scan_en_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
     clues: list[Clue] = []
     lexicon = load_en_geo_lexicon()
     geo_specs = (
-        ("state", tuple([*lexicon.tier_a_state_names, *lexicon.tier_a_state_codes])),
-        ("city", lexicon.tier_b_places),
+        (AddressComponentType.STATE, tuple([*lexicon.tier_a_state_names, *lexicon.tier_a_state_codes])),
+        (AddressComponentType.CITY, lexicon.tier_b_places),
     )
     for component_type, names in geo_specs:
         for name in sorted(set(names), key=len, reverse=True):
@@ -487,14 +488,14 @@ def _scan_en_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                     Clue(
                         clue_id=_next_clue_id(),
                         family=ClueFamily.ADDRESS,
-                        kind=f"address_value_{component_type}",
+                        role=ClueRole.VALUE,
+                        attr_type=PIIAttributeType.ADDRESS,
                         start=raw_span[0],
                         end=raw_span[1],
                         text=name,
                         priority=205,
-                        hard=False,
-                        attr_type=PIIAttributeType.ADDRESS,
-                        matched_by="geo_db",
+                        source_kind="geo_db",
+                        component_type=component_type,
                     )
                 )
     for component_type, keywords in _EN_ADDRESS_ATTRS:
@@ -507,14 +508,14 @@ def _scan_en_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
                     Clue(
                         clue_id=_next_clue_id(),
                         family=ClueFamily.ADDRESS,
-                        kind=f"address_key_{component_type}",
+                        role=ClueRole.KEY,
+                        attr_type=PIIAttributeType.ADDRESS,
                         start=raw_span[0],
                         end=raw_span[1],
                         text=match.group(0),
                         priority=204,
-                        hard=False,
-                        attr_type=PIIAttributeType.ADDRESS,
-                        matched_by="address_keyword",
+                        source_kind="address_keyword",
+                        component_type=component_type,
                     )
                 )
     for token_match in re.finditer(r"(?<!\d)\d{5}(?:-\d{4})?(?!\d)", shadow_text):
@@ -525,14 +526,14 @@ def _scan_en_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ..
             Clue(
                 clue_id=_next_clue_id(),
                 family=ClueFamily.ADDRESS,
-                kind="address_value_postal_code",
+                role=ClueRole.VALUE,
+                attr_type=PIIAttributeType.ADDRESS,
                 start=raw_span[0],
                 end=raw_span[1],
                 text=token_match.group(0),
                 priority=203,
-                hard=False,
-                attr_type=PIIAttributeType.ADDRESS,
-                matched_by="postal_value",
+                source_kind="postal_value",
+                component_type=AddressComponentType.POSTAL_CODE,
             )
         )
     return clues
@@ -560,7 +561,7 @@ def _hard_clue_wins(incoming: Clue, existing: Clue) -> bool:
     existing_length = existing.end - existing.start
     if incoming_length != existing_length:
         return incoming_length > existing_length
-    return _HARD_SOURCE_PRIORITY.get(str(incoming.payload.get("hard_source") or ""), 0) > _HARD_SOURCE_PRIORITY.get(str(existing.payload.get("hard_source") or ""), 0)
+    return _HARD_SOURCE_PRIORITY.get(str(incoming.hard_source or ""), 0) > _HARD_SOURCE_PRIORITY.get(str(existing.hard_source or ""), 0)
 
 
 def _build_shadow_text(text: str, hard_clues: tuple[Clue, ...]) -> tuple[str, tuple[int | None, ...]]:
@@ -574,7 +575,7 @@ def _build_shadow_text(text: str, hard_clues: tuple[Clue, ...]) -> tuple[str, tu
             unchanged = text[cursor:clue.start]
             pieces.append(unchanged)
             mapping.extend(range(cursor, clue.start))
-        placeholder = str(clue.payload.get("placeholder") or "")
+        placeholder = str(clue.placeholder or "")
         if placeholder:
             pieces.append(placeholder)
             mapping.extend([clue.start] * len(placeholder))
@@ -637,10 +638,27 @@ def _nearest_raw(mapping: tuple[int | None, ...], index: int, *, direction: str)
 
 
 def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
-    seen: set[tuple[str, int, int, str]] = set()
+    seen: set[tuple[object, ...]] = set()
     ordered: list[Clue] = []
-    for clue in sorted(clues, key=lambda item: (item.start, -(item.end - item.start), -item.priority, item.kind)):
-        key = (clue.kind, clue.start, clue.end, clue.text.lower())
+    for clue in sorted(
+        clues,
+        key=lambda item: (
+            item.start,
+            -(item.end - item.start),
+            -item.priority,
+            item.family.value,
+            item.role.value,
+            item.component_type or "",
+        ),
+    ):
+        key = (
+            clue.family,
+            clue.role,
+            clue.component_type,
+            clue.start,
+            clue.end,
+            clue.text.lower(),
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -652,10 +670,10 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
             filtered.append(clue)
             continue
         if any(not (clue.end <= left or clue.start >= right) for left, right in occupied):
-            if clue.kind.endswith("_label") or clue.kind.startswith("address_key_"):
+            if clue.role in {ClueRole.LABEL, ClueRole.KEY}:
                 continue
         filtered.append(clue)
-        if clue.kind.endswith("_label") or clue.kind.startswith("address_key_") or clue.kind.startswith("address_value_"):
+        if clue.role in {ClueRole.LABEL, ClueRole.KEY, ClueRole.VALUE}:
             occupied.append((clue.start, clue.end))
     return sorted(filtered, key=lambda item: (item.start, item.end, -item.priority))
 

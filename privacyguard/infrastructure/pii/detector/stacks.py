@@ -1,4 +1,4 @@
-"""Clean boundary-first stack implementations."""
+"""Detector 的边界优先 stack 实现。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,16 @@ from typing import Protocol
 
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, Clue, ClueFamily, StreamInput
+from privacyguard.infrastructure.pii.detector.models import (
+    AddressComponentType,
+    CandidateDraft,
+    ClaimStrength,
+    Clue,
+    ClueFamily,
+    ClueRole,
+    NameComponentHint,
+    StreamInput,
+)
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
 
 _ORG_SUFFIX_RE = re.compile(
@@ -29,23 +38,28 @@ _ZH_NAME_RE = re.compile(r"^[\u4e00-\u9fff·]{2,8}$")
 _HARD_BREAK_RE = re.compile(r"[;；。！？!?]")
 
 _ADDRESS_COMPONENT_ORDER = {
-    "province": 1,
-    "city": 2,
-    "district": 3,
-    "street_admin": 4,
-    "town": 5,
-    "village": 6,
-    "road": 7,
-    "street": 7,
-    "compound": 8,
-    "building": 9,
-    "unit": 10,
-    "floor": 11,
-    "room": 12,
-    "state": 13,
-    "postal_code": 14,
+    AddressComponentType.PROVINCE: 1,
+    AddressComponentType.CITY: 2,
+    AddressComponentType.DISTRICT: 3,
+    AddressComponentType.STREET_ADMIN: 4,
+    AddressComponentType.TOWN: 5,
+    AddressComponentType.VILLAGE: 6,
+    AddressComponentType.ROAD: 7,
+    AddressComponentType.STREET: 7,
+    AddressComponentType.COMPOUND: 8,
+    AddressComponentType.BUILDING: 9,
+    AddressComponentType.UNIT: 10,
+    AddressComponentType.FLOOR: 11,
+    AddressComponentType.ROOM: 12,
+    AddressComponentType.STATE: 13,
+    AddressComponentType.POSTAL_CODE: 14,
 }
-_DETAIL_COMPONENTS = {"building", "unit", "floor", "room"}
+_DETAIL_COMPONENTS = {
+    AddressComponentType.BUILDING,
+    AddressComponentType.UNIT,
+    AddressComponentType.FLOOR,
+    AddressComponentType.ROOM,
+}
 _PREFIX_EN_KEYWORDS = {"apt", "apartment", "suite", "ste", "unit", "#", "floor", "fl", "room", "rm"}
 
 
@@ -77,10 +91,10 @@ class BaseStack:
 @dataclass(slots=True)
 class StructuredValueStack(BaseStack):
     def run(self) -> StackRun | None:
-        if self.clue.hard:
+        if self.clue.role == ClueRole.HARD:
             candidate = _build_hard_candidate(self.clue, self.context.stream.source)
             return StackRun(ClueFamily.STRUCTURED, candidate, {self.clue.clue_id}, next_index=self.clue_index + 1)
-        if not self.clue.kind.endswith("_label"):
+        if self.clue.role != ClueRole.LABEL:
             return None
         hard_clue, hard_index = _find_next_same_attr_hard(self.context.clues, self.clue_index + 1, self.clue.attr_type)
         if hard_clue is None:
@@ -102,6 +116,7 @@ class StructuredValueStack(BaseStack):
 @dataclass(slots=True)
 class NameStack(BaseStack):
     def run(self) -> StackRun | None:
+        is_label_seed = self.clue.role == ClueRole.LABEL
         start = self._resolve_left_boundary()
         if start is None:
             return None
@@ -125,31 +140,33 @@ class NameStack(BaseStack):
             end=absolute_start + len(text),
             text=text,
             source=self.context.stream.source,
-            confidence=0.92 if self.clue.kind.endswith("_label") else 0.76,
-            matched_by=self.clue.matched_by,
+            confidence=0.92 if is_label_seed else 0.76,
+            source_kind=self.clue.source_kind,
             claim_strength=ClaimStrength.SOFT,
-            metadata={"matched_by": [self.clue.matched_by], "name_component": [self._component_hint()]},
-            label_clue_ids={self.clue.clue_id} if self.clue.kind.endswith("_label") else set(),
+            metadata={"matched_by": [self.clue.source_kind], "name_component": [self._component_hint().value]},
+            label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
+            label_driven=is_label_seed,
         )
-        return StackRun(ClueFamily.NAME, candidate, consumed_ids, {self.clue.clue_id} if self.clue.kind.endswith("_label") else set(), next_index)
+        return StackRun(ClueFamily.NAME, candidate, consumed_ids, {self.clue.clue_id} if is_label_seed else set(), next_index)
 
     def _resolve_left_boundary(self) -> int | None:
-        if self.clue.kind in {"name_label", "name_start"}:
+        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
             return _skip_separators(self.context.stream.raw_text, self.clue.end)
-        if self.clue.kind == "family_name":
+        if self.clue.role == ClueRole.SURNAME:
             return self.clue.start
         return None
 
-    def _component_hint(self) -> str:
-        if self.clue.kind == "family_name":
-            return "family"
-        return str(self.clue.payload.get("component_hint") or "full")
+    def _component_hint(self) -> NameComponentHint:
+        if self.clue.role == ClueRole.SURNAME:
+            return NameComponentHint.FAMILY
+        return self.clue.component_hint or NameComponentHint.FULL
 
 
 @dataclass(slots=True)
 class OrganizationStack(BaseStack):
     def run(self) -> StackRun | None:
-        if self.clue.kind == "organization_label":
+        is_label_seed = self.clue.role == ClueRole.LABEL
+        if is_label_seed:
             start = _skip_separators(self.context.stream.raw_text, self.clue.end)
             end, next_index, consumed_ids = _resolve_family_boundary(
                 self.context.stream.raw_text,
@@ -159,7 +176,7 @@ class OrganizationStack(BaseStack):
                 initial_end=self.clue.end,
             )
             handled = {self.clue.clue_id}
-        elif self.clue.kind == "company_suffix":
+        elif self.clue.role == ClueRole.SUFFIX:
             start = _left_expand_text_boundary(self.context.stream.raw_text, self.context.clues, self.clue.start)
             end = self.clue.end
             next_index = self.clue_index + 1
@@ -170,7 +187,7 @@ class OrganizationStack(BaseStack):
         if end <= start:
             return None
         text = _strip_leading_address_label(_clean_value(self.context.stream.raw_text[start:end]))
-        if not _is_plausible_organization(text, label_driven=self.clue.kind == "organization_label"):
+        if not _is_plausible_organization(text, label_driven=is_label_seed):
             return None
         offset = self.context.stream.raw_text[start:end].find(text)
         absolute_start = start + max(0, offset)
@@ -180,11 +197,12 @@ class OrganizationStack(BaseStack):
             end=absolute_start + len(text),
             text=text,
             source=self.context.stream.source,
-            confidence=0.9 if self.clue.kind == "organization_label" else 0.82,
-            matched_by=self.clue.matched_by,
+            confidence=0.9 if is_label_seed else 0.82,
+            source_kind=self.clue.source_kind,
             claim_strength=ClaimStrength.SOFT,
-            metadata={"matched_by": [self.clue.matched_by]},
-            label_clue_ids={self.clue.clue_id} if self.clue.kind == "organization_label" else set(),
+            metadata={"matched_by": [self.clue.source_kind]},
+            label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
+            label_driven=is_label_seed,
         )
         return StackRun(ClueFamily.ORGANIZATION, candidate, consumed_ids, handled, next_index)
 
@@ -193,7 +211,8 @@ class OrganizationStack(BaseStack):
 class AddressStack(BaseStack):
     def run(self) -> StackRun | None:
         raw_text = self.context.stream.raw_text
-        if self.clue.kind == "address_label":
+        is_label_seed = self.clue.role == ClueRole.LABEL
+        if is_label_seed:
             address_start = _skip_separators(raw_text, self.clue.end)
             first_index = _next_address_index(self.context.clues, self.clue_index + 1)
             if first_index is None:
@@ -209,7 +228,7 @@ class AddressStack(BaseStack):
         if address_start is None:
             return None
         components: list[dict[str, object]] = []
-        pending_names: dict[str, Clue] = {}
+        pending_names: dict[AddressComponentType, Clue] = {}
         segment_cursor = address_start
         last_end = address_start
         last_component_order = 0
@@ -218,14 +237,14 @@ class AddressStack(BaseStack):
             clue = self.context.clues[i]
             if clue.family == ClueFamily.BREAK:
                 break
-            if clue.family != ClueFamily.ADDRESS or clue.kind == "address_label":
+            if clue.family != ClueFamily.ADDRESS or clue.role == ClueRole.LABEL:
                 break
             if clue.start < address_start:
                 i += 1
                 continue
             if clue.start > last_end and _address_gap_blocked(raw_text[last_end:clue.start]):
                 break
-            component_type = _address_component_type(clue.kind)
+            component_type = clue.component_type
             if component_type is None:
                 i += 1
                 continue
@@ -233,9 +252,9 @@ class AddressStack(BaseStack):
             if last_component_order and component_order < last_component_order:
                 break
             consumed_ids.add(clue.clue_id)
-            if clue.kind.startswith("address_value_"):
-                if component_type == "postal_code":
-                    component = _build_standalone_address_component(raw_text, clue, component_type)
+            if clue.role == ClueRole.VALUE:
+                if component_type == AddressComponentType.POSTAL_CODE:
+                    component = _build_standalone_address_component(clue, component_type)
                     if component is not None:
                         components.append(component)
                         segment_cursor = clue.end
@@ -284,28 +303,27 @@ class AddressStack(BaseStack):
             text=text,
             source=self.context.stream.source,
             confidence=_address_confidence(components),
-            matched_by=self.clue.matched_by,
+            source_kind=self.clue.source_kind,
             claim_strength=ClaimStrength.SOFT,
             metadata=_address_metadata(self.clue, components),
             label_clue_ids=handled_labels,
+            label_driven=is_label_seed,
         )
         return StackRun(ClueFamily.ADDRESS, candidate, consumed_ids, handled_labels, i)
 
     def _seed_left_boundary(self) -> int | None:
         raw_text = self.context.stream.raw_text
-        if self.clue.kind.startswith("address_value_"):
+        if self.clue.role == ClueRole.VALUE:
             return self.clue.start
-        if self.clue.kind.startswith("address_key_"):
+        if self.clue.role == ClueRole.KEY:
             floor = _left_family_floor(self.context.clues, self.clue_index)
             return _left_expand_value(raw_text, self.clue.start, floor=floor)
         return None
 
 
 def _build_hard_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
-    metadata = {}
-    if isinstance(clue.payload.get("metadata"), dict):
-        metadata = {key: [str(item) for item in values] for key, values in clue.payload["metadata"].items()}
-    metadata = merge_metadata(metadata, {"matched_by": [clue.matched_by], "hard_source": [str(clue.payload.get("hard_source") or "regex")]})
+    metadata = {key: list(values) for key, values in clue.source_metadata.items()}
+    metadata = merge_metadata(metadata, {"matched_by": [clue.source_kind], "hard_source": [str(clue.hard_source or "regex")]})
     return CandidateDraft(
         attr_type=clue.attr_type,
         start=clue.start,
@@ -313,7 +331,7 @@ def _build_hard_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
         text=clue.text,
         source=source,
         confidence=_structured_confidence(clue),
-        matched_by=clue.matched_by,
+        source_kind=clue.source_kind,
         claim_strength=ClaimStrength.HARD,
         metadata=metadata,
     )
@@ -325,10 +343,11 @@ def build_name_candidate_from_value(
     value_text: str,
     value_start: int,
     value_end: int,
-    matched_by: str,
-    component_hint: str,
+    source_kind: str,
+    component_hint: NameComponentHint,
     label_clue_id: str | None = None,
     confidence: float = 0.92,
+    label_driven: bool = False,
 ) -> CandidateDraft | None:
     del value_end
     cleaned = _clean_value(value_text)
@@ -342,10 +361,11 @@ def build_name_candidate_from_value(
         text=cleaned,
         source=source,
         confidence=confidence,
-        matched_by=matched_by,
+        source_kind=source_kind,
         claim_strength=ClaimStrength.SOFT,
-        metadata={"matched_by": [matched_by], "name_component": [component_hint or "full"]},
+        metadata={"matched_by": [source_kind], "name_component": [component_hint.value]},
         label_clue_ids={label_clue_id} if label_clue_id else set(),
+        label_driven=label_driven,
     )
 
 
@@ -355,7 +375,7 @@ def build_organization_candidate_from_value(
     value_text: str,
     value_start: int,
     value_end: int,
-    matched_by: str,
+    source_kind: str,
     label_clue_id: str | None = None,
     label_driven: bool = False,
 ) -> CandidateDraft | None:
@@ -371,10 +391,11 @@ def build_organization_candidate_from_value(
         text=cleaned,
         source=source,
         confidence=0.9 if label_driven else 0.82,
-        matched_by=matched_by,
+        source_kind=source_kind,
         claim_strength=ClaimStrength.SOFT,
-        metadata={"matched_by": [matched_by]},
+        metadata={"matched_by": [source_kind]},
         label_clue_ids={label_clue_id} if label_clue_id else set(),
+        label_driven=label_driven,
     )
 
 
@@ -386,7 +407,7 @@ def has_address_signal(text: str) -> bool:
     return _ADDRESS_SIGNAL_RE.search(str(text or "")) is not None
 
 
-def looks_like_name_value(text: str, *, component_hint: str = "full") -> bool:
+def looks_like_name_value(text: str, *, component_hint: NameComponentHint = NameComponentHint.FULL) -> bool:
     return _is_plausible_name(_clean_value(text), component_hint=component_hint)
 
 
@@ -394,9 +415,9 @@ def looks_like_organization_value(text: str, *, label_driven: bool = False) -> b
     return _is_plausible_organization(_strip_leading_address_label(_clean_value(text)), label_driven=label_driven)
 
 
-def name_component_hint(candidate: CandidateDraft) -> str:
+def name_component_hint(candidate: CandidateDraft) -> NameComponentHint:
     values = candidate.metadata.get("name_component")
-    return str(values[0]) if values else "full"
+    return NameComponentHint(str(values[0])) if values else NameComponentHint.FULL
 
 
 def build_address_candidate_from_value(
@@ -405,16 +426,17 @@ def build_address_candidate_from_value(
     value_text: str,
     value_start: int,
     value_end: int,
-    matched_by: str,
+    source_kind: str,
     label_clue_id: str | None = None,
     confidence: float = 0.82,
     metadata: dict[str, list[str]] | None = None,
+    label_driven: bool = False,
 ) -> CandidateDraft | None:
     cleaned = _clean_value(value_text)
     if not cleaned:
         return None
     offset = value_text.find(cleaned)
-    candidate_metadata = {"matched_by": [matched_by], "address_kind": ["private_address"]}
+    candidate_metadata = {"matched_by": [source_kind], "address_kind": ["private_address"]}
     if metadata:
         candidate_metadata = merge_metadata(candidate_metadata, metadata)
     return CandidateDraft(
@@ -424,10 +446,11 @@ def build_address_candidate_from_value(
         text=cleaned,
         source=source,
         confidence=confidence,
-        matched_by=matched_by,
+        source_kind=source_kind,
         claim_strength=ClaimStrength.SOFT,
         metadata=candidate_metadata,
         label_clue_ids={label_clue_id} if label_clue_id else set(),
+        label_driven=label_driven,
     )
 
 
@@ -442,9 +465,10 @@ def _slice_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, en
             value_text=segment,
             value_start=start,
             value_end=end,
-            matched_by=candidate.matched_by,
+            source_kind=candidate.source_kind,
             component_hint=name_component_hint(candidate),
             confidence=candidate.confidence,
+            label_driven=candidate.label_driven,
         )
     elif candidate.attr_type == PIIAttributeType.ORGANIZATION:
         rebuilt = build_organization_candidate_from_value(
@@ -452,8 +476,8 @@ def _slice_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, en
             value_text=segment,
             value_start=start,
             value_end=end,
-            matched_by=candidate.matched_by,
-            label_driven=_candidate_is_label_driven(candidate),
+            source_kind=candidate.source_kind,
+            label_driven=candidate.label_driven,
         )
     elif candidate.attr_type == PIIAttributeType.ADDRESS:
         metadata_base = {
@@ -466,9 +490,10 @@ def _slice_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, en
             value_text=segment,
             value_start=start,
             value_end=end,
-            matched_by=candidate.matched_by,
+            source_kind=candidate.source_kind,
             confidence=candidate.confidence,
             metadata=merge_metadata(metadata_base, {"address_match_origin": ["trimmed"]}),
+            label_driven=candidate.label_driven,
         )
     else:
         rebuilt = None
@@ -477,6 +502,7 @@ def _slice_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, en
     rebuilt.claim_strength = candidate.claim_strength
     rebuilt.metadata = merge_metadata(metadata_base, rebuilt.metadata)
     rebuilt.label_clue_ids = set(candidate.label_clue_ids)
+    rebuilt.label_driven = candidate.label_driven
     return rebuilt
 
 
@@ -493,9 +519,9 @@ class StackManager:
         if candidate.claim_strength == ClaimStrength.HARD:
             score += 0.4
             score += 0.02 * _candidate_hard_source_rank(candidate)
-        if candidate.matched_by.startswith("dictionary_"):
+        if candidate.source_kind.startswith("dictionary_"):
             score += 0.25
-        elif candidate.matched_by.endswith("_label"):
+        elif candidate.label_driven:
             score += 0.08
         return score
 
@@ -604,9 +630,9 @@ def _find_next_same_attr_hard(clues: tuple[Clue, ...], start_index: int, attr_ty
         clue = clues[index]
         if clue.family == ClueFamily.BREAK:
             break
-        if clue.hard and clue.attr_type == attr_type:
+        if clue.role == ClueRole.HARD and clue.attr_type == attr_type:
             return (clue, index)
-        if clue.kind.endswith("_label") and clue.attr_type != attr_type:
+        if clue.role == ClueRole.LABEL and clue.attr_type != attr_type:
             break
     return (None, -1)
 
@@ -616,7 +642,7 @@ def _next_address_index(clues: tuple[Clue, ...], start_index: int) -> int | None
         clue = clues[index]
         if clue.family == ClueFamily.BREAK:
             return None
-        if clue.family == ClueFamily.ADDRESS and clue.kind != "address_label":
+        if clue.family == ClueFamily.ADDRESS and clue.role != ClueRole.LABEL:
             return index
         if clue.family not in {ClueFamily.ADDRESS, ClueFamily.BREAK}:
             return None
@@ -629,15 +655,7 @@ def _address_gap_blocked(gap: str) -> bool:
     return bool(_HARD_BREAK_RE.search(gap) or _OCR_SEMANTIC_BREAK_TOKEN in gap)
 
 
-def _address_component_type(kind: str) -> str | None:
-    if kind.startswith("address_value_"):
-        return kind.removeprefix("address_value_")
-    if kind.startswith("address_key_"):
-        return kind.removeprefix("address_key_")
-    return None
-
-
-def _build_standalone_address_component(raw_text: str, clue: Clue, component_type: str) -> dict[str, object] | None:
+def _build_standalone_address_component(clue: Clue, component_type: AddressComponentType) -> dict[str, object] | None:
     value = _normalize_address_value(component_type, clue.text)
     if not value:
         return None
@@ -648,7 +666,7 @@ def _build_address_component_from_attr(
     raw_text: str,
     *,
     clue: Clue,
-    component_type: str,
+    component_type: AddressComponentType,
     segment_cursor: int,
     pending_name: Clue | None,
     clues: tuple[Clue, ...],
@@ -679,7 +697,7 @@ def _build_address_component_from_attr(
     if not value:
         return None
     component_end = clue.end
-    if component_type in {"road", "street"}:
+    if component_type in {AddressComponentType.ROAD, AddressComponentType.STREET}:
         component_end = _extend_street_tail(raw_text, component_end)
     return {"component_type": component_type, "start": component_start, "end": component_end, "value": value, "key": key_text, "is_detail": component_type in _DETAIL_COMPONENTS}
 
@@ -742,7 +760,7 @@ def _address_metadata(origin_clue: Clue, components: list[dict[str, object]]) ->
     detail_types: list[str] = []
     detail_values: list[str] = []
     for component in components:
-        component_type = str(component["component_type"])
+        component_type = component["component_type"].value
         value = str(component["value"])
         key = str(component["key"])
         component_types.append(component_type)
@@ -753,9 +771,9 @@ def _address_metadata(origin_clue: Clue, components: list[dict[str, object]]) ->
             detail_types.append(component_type)
             detail_values.append(value)
     return {
-        "matched_by": [origin_clue.matched_by],
+        "matched_by": [origin_clue.source_kind],
         "address_kind": ["private_address"],
-        "address_match_origin": [origin_clue.text if origin_clue.kind == "address_label" else origin_clue.matched_by],
+        "address_match_origin": [origin_clue.text if origin_clue.role == ClueRole.LABEL else origin_clue.source_kind],
         "address_component_type": component_types,
         "address_component_trace": component_trace,
         "address_component_key_trace": component_key_trace,
@@ -765,7 +783,7 @@ def _address_metadata(origin_clue: Clue, components: list[dict[str, object]]) ->
 
 
 def _structured_confidence(clue: Clue) -> float:
-    source = str(clue.payload.get("hard_source") or "")
+    source = str(clue.hard_source or "")
     if source == "session":
         return 0.99
     if source == "local":
@@ -781,10 +799,10 @@ def _structured_confidence(clue: Clue) -> float:
 
 def _address_confidence(components: list[dict[str, object]]) -> float:
     score = 0.78
-    component_types = {str(component["component_type"]) for component in components}
-    if {"province", "city", "district", "state"} & component_types:
+    component_types = {component["component_type"] for component in components}
+    if {AddressComponentType.PROVINCE, AddressComponentType.CITY, AddressComponentType.DISTRICT, AddressComponentType.STATE} & component_types:
         score += 0.05
-    if {"road", "street", "compound"} & component_types:
+    if {AddressComponentType.ROAD, AddressComponentType.STREET, AddressComponentType.COMPOUND} & component_types:
         score += 0.05
     if any(bool(component["is_detail"]) for component in components):
         score += 0.05
@@ -793,7 +811,7 @@ def _address_confidence(components: list[dict[str, object]]) -> float:
     return min(0.95, score)
 
 
-def _normalize_address_value(component_type: str, raw_value: str) -> str:
+def _normalize_address_value(component_type: AddressComponentType, raw_value: str) -> str:
     cleaned = _clean_value(raw_value)
     if component_type in _DETAIL_COMPONENTS:
         alnum = "".join(re.findall(r"[A-Za-z0-9]+", cleaned))
@@ -832,7 +850,7 @@ def _left_expand_text_boundary(raw_text: str, clues: tuple[Clue, ...], start: in
             if clue.family == ClueFamily.BREAK:
                 floor = clue.end
                 break
-            if clue.kind.endswith("_label"):
+            if clue.role == ClueRole.LABEL:
                 floor = clue.end
                 break
     index = start
@@ -854,7 +872,7 @@ def _clean_value(text: str) -> str:
     return cleaned
 
 
-def _is_plausible_name(text: str, *, component_hint: str) -> bool:
+def _is_plausible_name(text: str, *, component_hint: NameComponentHint) -> bool:
     if not text or len(text) > 80 or "@" in text:
         return False
     if any(char.isdigit() for char in text):
@@ -866,7 +884,7 @@ def _is_plausible_name(text: str, *, component_hint: str) -> bool:
     if _ZH_NAME_RE.fullmatch(compact_no_space):
         return True
     tokens = [token for token in re.split(r"\s+", text) if token]
-    if component_hint in {"family", "given", "middle"}:
+    if component_hint in {NameComponentHint.FAMILY, NameComponentHint.GIVEN, NameComponentHint.MIDDLE}:
         return len(tokens) == 1 and _EN_NAME_TOKEN_RE.fullmatch(tokens[0]) is not None
     return 1 <= len(tokens) <= 4 and all(_EN_NAME_TOKEN_RE.fullmatch(token) is not None for token in tokens)
 
@@ -888,7 +906,3 @@ def _strip_leading_address_label(text: str) -> str:
         if updated == stripped:
             return stripped
         stripped = updated.strip()
-
-
-def _candidate_is_label_driven(candidate: CandidateDraft) -> bool:
-    return candidate.matched_by.startswith("context_") or candidate.matched_by.startswith("ocr_label_") or candidate.matched_by.endswith("_label")

@@ -1,4 +1,4 @@
-"""Core models for the rewritten detector."""
+"""重写版 detector 的核心数据模型。"""
 
 from __future__ import annotations
 
@@ -21,6 +21,48 @@ class ClueFamily(str, Enum):
     NAME = "name"
     ORGANIZATION = "organization"
     BREAK = "break"
+
+
+class ClueRole(str, Enum):
+    HARD = "hard"
+    LABEL = "label"
+    KEY = "key"
+    VALUE = "value"
+    START = "start"
+    SURNAME = "surname"
+    SUFFIX = "suffix"
+    BREAK = "break"
+
+
+class AddressComponentType(str, Enum):
+    PROVINCE = "province"
+    CITY = "city"
+    DISTRICT = "district"
+    STREET_ADMIN = "street_admin"
+    TOWN = "town"
+    VILLAGE = "village"
+    ROAD = "road"
+    STREET = "street"
+    COMPOUND = "compound"
+    BUILDING = "building"
+    UNIT = "unit"
+    FLOOR = "floor"
+    ROOM = "room"
+    STATE = "state"
+    POSTAL_CODE = "postal_code"
+
+
+class BreakType(str, Enum):
+    OCR = "ocr"
+    PUNCT = "punct"
+    NEWLINE = "newline"
+
+
+class NameComponentHint(str, Enum):
+    FULL = "full"
+    FAMILY = "family"
+    GIVEN = "given"
+    MIDDLE = "middle"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,10 +100,9 @@ class LabelSpec:
     keyword: str
     attr_type: PIIAttributeType
     priority: int
-    matched_by: str
-    ocr_matched_by: str
-    stack_kind: str
-    component_hint: str | None = None
+    source_kind: str
+    ocr_source_kind: str
+    component_hint: NameComponentHint | None = None
     ascii_boundary: bool = False
 
 
@@ -82,10 +123,11 @@ class CandidateDraft:
     text: str
     source: PIISourceType
     confidence: float
-    matched_by: str
+    source_kind: str
     claim_strength: ClaimStrength = ClaimStrength.SOFT
     metadata: dict[str, list[str]] = field(default_factory=dict)
     label_clue_ids: set[str] = field(default_factory=set)
+    label_driven: bool = False
     block_ids: tuple[str, ...] = ()
     block_id: str | None = None
     bbox: BoundingBox | None = None
@@ -97,20 +139,28 @@ class CandidateDraft:
 class Clue:
     clue_id: str
     family: ClueFamily
-    kind: str
+    role: ClueRole
+    attr_type: PIIAttributeType | None
     start: int
     end: int
     text: str
     priority: int
-    hard: bool
-    attr_type: PIIAttributeType | None
-    matched_by: str
-    payload: dict[str, object] = field(default_factory=dict)
+    source_kind: str
+    component_type: AddressComponentType | None = None
+    component_hint: NameComponentHint | None = None
+    break_type: BreakType | None = None
+    hard_source: str | None = None
+    placeholder: str | None = None
+    ocr_source_kind: str | None = None
+    source_metadata: dict[str, list[str]] = field(default_factory=dict)
 
 @dataclass(slots=True)
 class ClueBundle:
-    label_clues: tuple[Clue, ...]
     all_clues: tuple[Clue, ...]
+
+    @property
+    def label_clues(self) -> tuple[Clue, ...]:
+        return tuple(clue for clue in self.all_clues if clue.role == ClueRole.LABEL)
 
 
 @dataclass(frozen=True, slots=True)

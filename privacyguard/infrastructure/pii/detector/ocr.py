@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 from privacyguard.domain.enums import PIISourceType, PIIAttributeType
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Clue, OCRScene, OCRSceneBlock, ParseResult, StreamInput
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Clue, NameComponentHint, OCRScene, OCRSceneBlock, ParseResult, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks import (
     build_address_candidate_from_value,
     build_name_candidate_from_value,
@@ -75,18 +75,19 @@ def _build_candidate_from_blocks(event: Clue, blocks: tuple[OCRSceneBlock, ...])
         return None
     start = blocks[0].raw_start
     end = blocks[-1].raw_end
-    matched_by = str(event.payload.get("ocr_matched_by") or event.matched_by)
-    component_hint = str(event.payload.get("component_hint") or "full")
+    source_kind = str(event.ocr_source_kind or event.source_kind)
+    component_hint = event.component_hint or NameComponentHint.FULL
     if event.attr_type == PIIAttributeType.NAME:
         return build_name_candidate_from_value(
             source=PIISourceType.OCR,
             value_text=text,
             value_start=start,
             value_end=end,
-            matched_by=matched_by,
+            source_kind=source_kind,
             component_hint=component_hint,
             label_clue_id=event.clue_id,
             confidence=0.91,
+            label_driven=True,
         )
     if event.attr_type == PIIAttributeType.ADDRESS:
         candidate = build_address_candidate_from_value(
@@ -94,8 +95,9 @@ def _build_candidate_from_blocks(event: Clue, blocks: tuple[OCRSceneBlock, ...])
             value_text=text,
             value_start=start,
             value_end=end,
-            matched_by=matched_by,
+            source_kind=source_kind,
             label_clue_id=event.clue_id,
+            label_driven=True,
         )
         return candidate
     if event.attr_type == PIIAttributeType.ORGANIZATION:
@@ -104,7 +106,7 @@ def _build_candidate_from_blocks(event: Clue, blocks: tuple[OCRSceneBlock, ...])
             value_text=text,
             value_start=start,
             value_end=end,
-            matched_by=matched_by,
+            source_kind=source_kind,
             label_clue_id=event.clue_id,
             label_driven=True,
         )
@@ -144,7 +146,7 @@ def _attribute_segment_score(event: Clue, text: str) -> float:
         return -999.0
     if event.attr_type == PIIAttributeType.NAME:
         score = 0.0
-        component_hint = str(event.payload.get("component_hint") or "full")
+        component_hint = event.component_hint or NameComponentHint.FULL
         if looks_like_name_value(sample, component_hint=component_hint):
             score += 1.4
         if has_organization_suffix(sample):
@@ -214,7 +216,7 @@ def _bind_label_to_candidate(candidate: CandidateDraft, event: Clue) -> None:
     metadata["bound_label_clue_ids"] = list(
         dict.fromkeys([*metadata.get("bound_label_clue_ids", []), event.clue_id])
     )
-    metadata["matched_by"] = list(dict.fromkeys([*metadata.get("matched_by", []), str(event.payload.get("ocr_matched_by") or event.matched_by)]))
+    metadata["matched_by"] = list(dict.fromkeys([*metadata.get("matched_by", []), str(event.ocr_source_kind or event.source_kind)]))
     candidate.metadata = metadata
 
 
