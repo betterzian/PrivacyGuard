@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from functools import lru_cache
 from itertools import count
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.address.geo_db import load_china_geo_lexicon, load_en_geo_lexicon
 from privacyguard.infrastructure.pii.detector.labels import _LABEL_SPECS
+from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
     BreakType,
@@ -174,6 +177,23 @@ _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
     (BreakType.NEWLINE, "break_newline", re.compile(r"(?:\r?\n){2,}")),
 )
 
+_ASCII_KEYWORD_CHARS_RE = re.compile(r"[A-Za-z0-9 #.'-]+")
+_ASCII_LITERAL_CHARS_RE = re.compile(r"[A-Za-z0-9 .,'@_+\-#/&()]+")
+_POSTAL_CODE_PATTERN = re.compile(r"(?<!\d)\d{5}(?:-\d{4})?(?!\d)")
+
+
+@dataclass(frozen=True, slots=True)
+class _ScanSegment:
+    text: str
+    raw_start: int
+    folded_text: str
+
+
+@dataclass(frozen=True, slots=True)
+class _AddressPatternPayload:
+    component_type: AddressComponentType
+    canonical_text: str
+
 
 def build_clue_bundle(
     stream: StreamInput,
@@ -182,35 +202,57 @@ def build_clue_bundle(
     local_entries: tuple[DictionaryEntry, ...],
     locale_profile: str,
 ) -> ClueBundle:
+    literal_pattern_cache: dict[tuple[str, bool], re.Pattern[str]] = {}
+    ocr_break_spans = _find_ocr_break_spans(stream.raw_text)
     hard_clues = _resolve_hard_conflicts(
         [
-            *_scan_hard_patterns(stream.raw_text),
-            *_scan_dictionary_hard_clues(stream.raw_text, session_entries, source_kind="session"),
-            *_scan_dictionary_hard_clues(stream.raw_text, local_entries, source_kind="local"),
+            *_scan_hard_patterns(stream.raw_text, ignored_spans=ocr_break_spans),
+            *_scan_dictionary_hard_clues(
+                stream.raw_text,
+                session_entries,
+                source_kind="session",
+                pattern_cache=literal_pattern_cache,
+                ignored_spans=ocr_break_spans,
+            ),
+            *_scan_dictionary_hard_clues(
+                stream.raw_text,
+                local_entries,
+                source_kind="local",
+                pattern_cache=literal_pattern_cache,
+                ignored_spans=ocr_break_spans,
+            ),
         ]
     )
-    shadow_text, shadow_to_raw = _build_shadow_text(stream.raw_text, hard_clues)
-    label_clues = _scan_label_clues(shadow_text, shadow_to_raw)
+    scan_segments = _build_soft_scan_segments(stream.raw_text, hard_clues, extra_blocked_spans=ocr_break_spans)
+
+    label_clues = tuple(
+        clue
+        for segment in scan_segments
+        for clue in _scan_label_clues(segment)
+    )
     label_spans = tuple((clue.start, clue.end) for clue in label_clues)
     soft_clues = [
         *label_clues,
-        *_scan_break_clues(shadow_text, shadow_to_raw),
-        *_scan_name_start_clues(shadow_text, shadow_to_raw),
-        *_scan_family_name_clues(shadow_text, shadow_to_raw),
-        *_scan_company_suffix_clues(shadow_text, shadow_to_raw),
-        *_scan_address_clues(shadow_text, shadow_to_raw, locale_profile=locale_profile),
+        *_scan_ocr_break_clues(ocr_break_spans),
+        *(clue for segment in scan_segments for clue in _scan_break_clues(segment)),
+        *(clue for segment in scan_segments for clue in _scan_name_start_clues(segment)),
+        *(clue for segment in scan_segments for clue in _scan_family_name_clues(segment)),
+        *(clue for segment in scan_segments for clue in _scan_company_suffix_clues(segment)),
+        *(clue for segment in scan_segments for clue in _scan_address_clues(segment, locale_profile=locale_profile)),
     ]
     soft_clues = [clue for clue in soft_clues if clue in label_clues or not _overlaps_any(clue.start, clue.end, label_spans)]
     all_clues = tuple(sorted([*hard_clues, *soft_clues], key=lambda item: (item.start, -item.priority, item.end)))
     return ClueBundle(all_clues=all_clues)
 
 
-def _scan_hard_patterns(text: str) -> list[Clue]:
+def _scan_hard_patterns(text: str, *, ignored_spans: tuple[tuple[int, int], ...] = ()) -> list[Clue]:
     clues: list[Clue] = []
     for attr_type, matched_by, pattern, priority in _HARD_PATTERNS:
         for match in pattern.finditer(text):
             value = match.group(0).strip()
             if not value:
+                continue
+            if _overlaps_any(match.start(), match.end(), ignored_spans):
                 continue
             clues.append(
                 Clue(
@@ -230,12 +272,21 @@ def _scan_hard_patterns(text: str) -> list[Clue]:
     return clues
 
 
-def _scan_dictionary_hard_clues(text: str, entries: tuple[DictionaryEntry, ...], *, source_kind: str) -> list[Clue]:
+def _scan_dictionary_hard_clues(
+    text: str,
+    entries: tuple[DictionaryEntry, ...],
+    *,
+    source_kind: str,
+    pattern_cache: dict[tuple[str, bool], re.Pattern[str]],
+    ignored_spans: tuple[tuple[int, int], ...] = (),
+) -> list[Clue]:
     clues: list[Clue] = []
     priority = 300 if source_kind == "session" else 290
     for entry in entries:
         for variant in sorted({item for item in entry.variants if str(item).strip()}, key=len, reverse=True):
-            for match in _iter_literal_matches(text, variant):
+            for match in _iter_literal_matches(text, variant, pattern_cache=pattern_cache):
+                if _overlaps_any(match.start(), match.end(), ignored_spans):
+                    continue
                 clues.append(
                     Clue(
                         clue_id=_next_clue_id(),
@@ -255,10 +306,10 @@ def _scan_dictionary_hard_clues(text: str, entries: tuple[DictionaryEntry, ...],
     return clues
 
 
-def _scan_label_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -> tuple[Clue, ...]:
+def _scan_label_clues(segment: _ScanSegment) -> tuple[Clue, ...]:
     matches: list[tuple[int, int, object]] = []
-    for spec in _LABEL_SPECS:
-        matches.extend(_iter_label_matches(shadow_text, spec))
+    for match in _label_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        matches.append((match.start, match.end, match.payload))
     accepted: list[tuple[int, int, object]] = []
     occupied: list[tuple[int, int]] = []
     for start, end, spec in sorted(matches, key=lambda item: (-(item[1] - item[0]), -len(item[2].keyword), -item[2].priority, item[0])):
@@ -268,12 +319,7 @@ def _scan_label_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -
         accepted.append((start, end, spec))
     clues: list[Clue] = []
     for start, end, spec in sorted(accepted, key=lambda item: (item[0], item[1])):
-        if _looks_like_placeholder_slice(shadow_text, start, end):
-            continue
-        raw_span = _shadow_span_to_raw(shadow_to_raw, start, end)
-        if raw_span is None:
-            continue
-        raw_start, raw_end = raw_span
+        raw_start, raw_end = _segment_span_to_raw(segment, start, end)
         clues.append(
             Clue(
                 clue_id=_next_clue_id(),
@@ -292,16 +338,11 @@ def _scan_label_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -
     return tuple(clues)
 
 
-def _scan_break_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -> list[Clue]:
+def _scan_break_clues(segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
-    if _OCR_SEMANTIC_BREAK_TOKEN in shadow_text:
-        for match in re.finditer(re.escape(_OCR_SEMANTIC_BREAK_TOKEN), shadow_text):
-            raw_start = _nearest_raw(shadow_to_raw, match.start(), direction="left")
-            raw_end = _nearest_raw(shadow_to_raw, match.end() - 1, direction="right")
-            if raw_start is None:
-                raw_start = 0
-            if raw_end is None:
-                raw_end = raw_start
+    for break_type, source_kind, pattern in _BREAK_PATTERNS:
+        for match in pattern.finditer(segment.text):
+            raw_start, raw_end = _segment_span_to_raw(segment, match.start(), match.end())
             clues.append(
                 Clue(
                     clue_id=_next_clue_id(),
@@ -309,26 +350,7 @@ def _scan_break_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -
                     role=ClueRole.BREAK,
                     attr_type=None,
                     start=raw_start,
-                    end=max(raw_start, raw_end),
-                    text=_OCR_SEMANTIC_BREAK_TOKEN,
-                    priority=500,
-                    source_kind="break_ocr",
-                    break_type=BreakType.OCR,
-                )
-            )
-    for break_type, source_kind, pattern in _BREAK_PATTERNS:
-        for match in pattern.finditer(shadow_text):
-            raw_span = _shadow_span_to_raw(shadow_to_raw, match.start(), match.end())
-            if raw_span is None:
-                continue
-            clues.append(
-                Clue(
-                    clue_id=_next_clue_id(),
-                    family=ClueFamily.BREAK,
-                    role=ClueRole.BREAK,
-                    attr_type=None,
-                    start=raw_span[0],
-                    end=raw_span[1],
+                    end=raw_end,
                     text=match.group(0),
                     priority=480,
                     source_kind=source_kind,
@@ -338,198 +360,183 @@ def _scan_break_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -
     return _dedupe_clues(clues)
 
 
-def _scan_name_start_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -> list[Clue]:
+def _scan_ocr_break_clues(ocr_break_spans: tuple[tuple[int, int], ...]) -> list[Clue]:
     clues: list[Clue] = []
-    for keyword in sorted(_NAME_START_KEYWORDS, key=len, reverse=True):
-        for match in _iter_keyword_matches(shadow_text, keyword):
-            raw_span = _shadow_span_to_raw(shadow_to_raw, match.start(), match.end())
-            if raw_span is None:
-                continue
-            clues.append(
-                Clue(
-                    clue_id=_next_clue_id(),
-                    family=ClueFamily.NAME,
-                    role=ClueRole.START,
-                    attr_type=PIIAttributeType.NAME,
-                    start=raw_span[0],
-                    end=raw_span[1],
-                    text=keyword,
-                    priority=230,
-                    source_kind="name_start",
-                )
+    for start, end in ocr_break_spans:
+        clues.append(
+            Clue(
+                clue_id=_next_clue_id(),
+                family=ClueFamily.BREAK,
+                role=ClueRole.BREAK,
+                attr_type=None,
+                start=start,
+                end=end,
+                text=_OCR_SEMANTIC_BREAK_TOKEN,
+                priority=500,
+                source_kind="break_ocr",
+                break_type=BreakType.OCR,
             )
-    return _dedupe_clues(clues)
-
-
-def _scan_family_name_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -> list[Clue]:
-    clues: list[Clue] = []
-    for surname in _COMMON_FAMILY_NAMES:
-        for match in re.finditer(re.escape(surname), shadow_text):
-            tail = shadow_text[match.end() : match.end() + 4]
-            if any(keyword in tail for keyword in ("省", "市", "区", "县", "旗", "路", "街", "道", "大道", "小区", "单元", "栋", "室", "住址", "地址")):
-                continue
-            raw_span = _shadow_span_to_raw(shadow_to_raw, match.start(), match.end())
-            if raw_span is None:
-                continue
-            clues.append(
-                Clue(
-                    clue_id=_next_clue_id(),
-                    family=ClueFamily.NAME,
-                    role=ClueRole.SURNAME,
-                    attr_type=PIIAttributeType.NAME,
-                    start=raw_span[0],
-                    end=raw_span[1],
-                    text=surname,
-                    priority=220,
-                    source_kind="family_name",
-                )
-            )
-    return _dedupe_clues(clues)
-
-
-def _scan_company_suffix_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -> list[Clue]:
-    clues: list[Clue] = []
-    for suffix in sorted(_COMPANY_SUFFIXES, key=len, reverse=True):
-        for match in _iter_keyword_matches(shadow_text, suffix):
-            raw_span = _shadow_span_to_raw(shadow_to_raw, match.start(), match.end())
-            if raw_span is None:
-                continue
-            clues.append(
-                Clue(
-                    clue_id=_next_clue_id(),
-                    family=ClueFamily.ORGANIZATION,
-                    role=ClueRole.SUFFIX,
-                    attr_type=PIIAttributeType.ORGANIZATION,
-                    start=raw_span[0],
-                    end=raw_span[1],
-                    text=suffix,
-                    priority=240,
-                    source_kind="company_suffix",
-                )
-            )
-    return _dedupe_clues(clues)
-
-
-def _scan_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...], *, locale_profile: str) -> list[Clue]:
-    clues: list[Clue] = []
-    if locale_profile in {"zh_cn", "mixed"}:
-        clues.extend(_scan_zh_address_clues(shadow_text, shadow_to_raw))
-    if locale_profile in {"en_us", "mixed"}:
-        clues.extend(_scan_en_address_clues(shadow_text, shadow_to_raw))
-    return _dedupe_clues(clues)
-
-
-def _scan_zh_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -> list[Clue]:
-    clues: list[Clue] = []
-    lexicon = load_china_geo_lexicon()
-    direct_city_names = {"北京", "上海", "天津", "重庆", "香港", "澳门"}
-    geo_specs = (
-        (AddressComponentType.PROVINCE, tuple(item for item in lexicon.provinces if item not in direct_city_names)),
-        (AddressComponentType.CITY, tuple([*lexicon.cities, *sorted(direct_city_names)])),
-        (AddressComponentType.DISTRICT, lexicon.districts),
-    )
-    for component_type, names in geo_specs:
-        for name in sorted(set(names), key=len, reverse=True):
-            for match in re.finditer(re.escape(name), shadow_text):
-                raw_span = _shadow_span_to_raw(shadow_to_raw, match.start(), match.end())
-                if raw_span is None:
-                    continue
-                clues.append(
-                    Clue(
-                        clue_id=_next_clue_id(),
-                        family=ClueFamily.ADDRESS,
-                        role=ClueRole.VALUE,
-                        attr_type=PIIAttributeType.ADDRESS,
-                        start=raw_span[0],
-                        end=raw_span[1],
-                        text=name,
-                        priority=205,
-                        source_kind="geo_db",
-                        component_type=component_type,
-                    )
-                )
-    for component_type, keywords in _ZH_ADDRESS_ATTRS:
-        for keyword in sorted(set(keywords), key=len, reverse=True):
-            for match in re.finditer(re.escape(keyword), shadow_text):
-                raw_span = _shadow_span_to_raw(shadow_to_raw, match.start(), match.end())
-                if raw_span is None:
-                    continue
-                clues.append(
-                    Clue(
-                        clue_id=_next_clue_id(),
-                        family=ClueFamily.ADDRESS,
-                        role=ClueRole.KEY,
-                        attr_type=PIIAttributeType.ADDRESS,
-                        start=raw_span[0],
-                        end=raw_span[1],
-                        text=keyword,
-                        priority=204,
-                        source_kind="address_keyword",
-                        component_type=component_type,
-                    )
-                )
+        )
     return clues
 
 
-def _scan_en_address_clues(shadow_text: str, shadow_to_raw: tuple[int | None, ...]) -> list[Clue]:
+def _scan_name_start_clues(segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
-    lexicon = load_en_geo_lexicon()
-    geo_specs = (
-        (AddressComponentType.STATE, tuple([*lexicon.tier_a_state_names, *lexicon.tier_a_state_codes])),
-        (AddressComponentType.CITY, lexicon.tier_b_places),
-    )
-    for component_type, names in geo_specs:
-        for name in sorted(set(names), key=len, reverse=True):
-            for match in _iter_keyword_matches(shadow_text, name):
-                raw_span = _shadow_span_to_raw(shadow_to_raw, match.start(), match.end())
-                if raw_span is None:
-                    continue
-                clues.append(
-                    Clue(
-                        clue_id=_next_clue_id(),
-                        family=ClueFamily.ADDRESS,
-                        role=ClueRole.VALUE,
-                        attr_type=PIIAttributeType.ADDRESS,
-                        start=raw_span[0],
-                        end=raw_span[1],
-                        text=name,
-                        priority=205,
-                        source_kind="geo_db",
-                        component_type=component_type,
-                    )
-                )
-    for component_type, keywords in _EN_ADDRESS_ATTRS:
-        for keyword in sorted(set(keywords), key=len, reverse=True):
-            for match in _iter_keyword_matches(shadow_text, keyword):
-                raw_span = _shadow_span_to_raw(shadow_to_raw, match.start(), match.end())
-                if raw_span is None:
-                    continue
-                clues.append(
-                    Clue(
-                        clue_id=_next_clue_id(),
-                        family=ClueFamily.ADDRESS,
-                        role=ClueRole.KEY,
-                        attr_type=PIIAttributeType.ADDRESS,
-                        start=raw_span[0],
-                        end=raw_span[1],
-                        text=match.group(0),
-                        priority=204,
-                        source_kind="address_keyword",
-                        component_type=component_type,
-                    )
-                )
-    for token_match in re.finditer(r"(?<!\d)\d{5}(?:-\d{4})?(?!\d)", shadow_text):
-        raw_span = _shadow_span_to_raw(shadow_to_raw, token_match.start(), token_match.end())
-        if raw_span is None:
+    for match in _name_start_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=_next_clue_id(),
+                family=ClueFamily.NAME,
+                role=ClueRole.START,
+                attr_type=PIIAttributeType.NAME,
+                start=raw_start,
+                end=raw_end,
+                text=str(match.payload),
+                priority=230,
+                source_kind="name_start",
+            )
+        )
+    return _dedupe_clues(clues)
+
+
+def _scan_family_name_clues(segment: _ScanSegment) -> list[Clue]:
+    clues: list[Clue] = []
+    for match in _family_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        tail = segment.text[match.end : match.end + 4]
+        if any(keyword in tail for keyword in ("省", "市", "区", "县", "旗", "路", "街", "道", "大道", "小区", "单元", "栋", "室", "住址", "地址")):
             continue
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=_next_clue_id(),
+                family=ClueFamily.NAME,
+                role=ClueRole.SURNAME,
+                attr_type=PIIAttributeType.NAME,
+                start=raw_start,
+                end=raw_end,
+                text=str(match.payload),
+                priority=220,
+                source_kind="family_name",
+            )
+        )
+    return _dedupe_clues(clues)
+
+
+def _scan_company_suffix_clues(segment: _ScanSegment) -> list[Clue]:
+    clues: list[Clue] = []
+    for match in _company_suffix_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=_next_clue_id(),
+                family=ClueFamily.ORGANIZATION,
+                role=ClueRole.SUFFIX,
+                attr_type=PIIAttributeType.ORGANIZATION,
+                start=raw_start,
+                end=raw_end,
+                text=str(match.payload),
+                priority=240,
+                source_kind="company_suffix",
+            )
+        )
+    return _dedupe_clues(clues)
+
+
+def _scan_address_clues(segment: _ScanSegment, *, locale_profile: str) -> list[Clue]:
+    clues: list[Clue] = []
+    if locale_profile in {"zh_cn", "mixed"}:
+        clues.extend(_scan_zh_address_clues(segment))
+    if locale_profile in {"en_us", "mixed"}:
+        clues.extend(_scan_en_address_clues(segment))
+    return _dedupe_clues(clues)
+
+
+def _scan_zh_address_clues(segment: _ScanSegment) -> list[Clue]:
+    clues: list[Clue] = []
+    for match in _zh_address_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        payload = match.payload
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
         clues.append(
             Clue(
                 clue_id=_next_clue_id(),
                 family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
-                start=raw_span[0],
-                end=raw_span[1],
+                start=raw_start,
+                end=raw_end,
+                text=payload.canonical_text,
+                priority=205,
+                source_kind="geo_db",
+                component_type=payload.component_type,
+            )
+        )
+    for match in _zh_address_key_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        payload = match.payload
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=_next_clue_id(),
+                family=ClueFamily.ADDRESS,
+                role=ClueRole.KEY,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=raw_start,
+                end=raw_end,
+                text=payload.canonical_text,
+                priority=204,
+                source_kind="address_keyword",
+                component_type=payload.component_type,
+            )
+        )
+    return clues
+
+
+def _scan_en_address_clues(segment: _ScanSegment) -> list[Clue]:
+    clues: list[Clue] = []
+    for match in _en_address_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        payload = match.payload
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=_next_clue_id(),
+                family=ClueFamily.ADDRESS,
+                role=ClueRole.VALUE,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=raw_start,
+                end=raw_end,
+                text=payload.canonical_text,
+                priority=205,
+                source_kind="geo_db",
+                component_type=payload.component_type,
+            )
+        )
+    for match in _en_address_key_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        payload = match.payload
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=_next_clue_id(),
+                family=ClueFamily.ADDRESS,
+                role=ClueRole.KEY,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=raw_start,
+                end=raw_end,
+                text=match.matched_text,
+                priority=204,
+                source_kind="address_keyword",
+                component_type=payload.component_type,
+            )
+        )
+    for token_match in _POSTAL_CODE_PATTERN.finditer(segment.text):
+        raw_start, raw_end = _segment_span_to_raw(segment, token_match.start(), token_match.end())
+        clues.append(
+            Clue(
+                clue_id=_next_clue_id(),
+                family=ClueFamily.ADDRESS,
+                role=ClueRole.VALUE,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=raw_start,
+                end=raw_end,
                 text=token_match.group(0),
                 priority=203,
                 source_kind="postal_value",
@@ -564,77 +571,188 @@ def _hard_clue_wins(incoming: Clue, existing: Clue) -> bool:
     return _HARD_SOURCE_PRIORITY.get(str(incoming.hard_source or ""), 0) > _HARD_SOURCE_PRIORITY.get(str(existing.hard_source or ""), 0)
 
 
-def _build_shadow_text(text: str, hard_clues: tuple[Clue, ...]) -> tuple[str, tuple[int | None, ...]]:
-    pieces: list[str] = []
-    mapping: list[int | None] = []
+def _build_soft_scan_segments(
+    text: str,
+    hard_clues: tuple[Clue, ...],
+    *,
+    extra_blocked_spans: tuple[tuple[int, int], ...] = (),
+) -> tuple[_ScanSegment, ...]:
+    segments: list[_ScanSegment] = []
+    blocked_spans = sorted(
+        [(clue.start, clue.end) for clue in hard_clues] + list(extra_blocked_spans),
+        key=lambda item: (item[0], item[1]),
+    )
     cursor = 0
-    for clue in sorted(hard_clues, key=lambda item: (item.start, item.end)):
-        if clue.start < cursor:
+    for start, end in blocked_spans:
+        if start < cursor:
             continue
-        if cursor < clue.start:
-            unchanged = text[cursor:clue.start]
-            pieces.append(unchanged)
-            mapping.extend(range(cursor, clue.start))
-        placeholder = str(clue.placeholder or "")
-        if placeholder:
-            pieces.append(placeholder)
-            mapping.extend([clue.start] * len(placeholder))
-        else:
-            original = text[clue.start:clue.end]
-            pieces.append(original)
-            mapping.extend(range(clue.start, clue.end))
-        cursor = clue.end
+        if cursor < start:
+            segment_text = text[cursor:start]
+            segments.append(_ScanSegment(text=segment_text, raw_start=cursor, folded_text=segment_text.lower()))
+        cursor = end
     if cursor < len(text):
-        tail = text[cursor:]
-        pieces.append(tail)
-        mapping.extend(range(cursor, len(text)))
-    return ("".join(pieces), tuple(mapping))
+        segment_text = text[cursor:]
+        segments.append(_ScanSegment(text=segment_text, raw_start=cursor, folded_text=segment_text.lower()))
+    return tuple(segments)
 
 
-def _iter_label_matches(text: str, spec) -> list[tuple[int, int, object]]:
-    escaped = re.escape(spec.keyword)
-    if spec.ascii_boundary:
-        pattern = rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])"
-        flags = re.IGNORECASE
-    else:
-        pattern = escaped
-        flags = 0
-    return [(match.start(), match.end(), spec) for match in re.finditer(pattern, text, flags=flags)]
+def _segment_span_to_raw(segment: _ScanSegment, start: int, end: int) -> tuple[int, int]:
+    return (segment.raw_start + start, segment.raw_start + end)
 
 
-def _iter_literal_matches(text: str, literal: str):
+def _find_ocr_break_spans(text: str) -> tuple[tuple[int, int], ...]:
+    if _OCR_SEMANTIC_BREAK_TOKEN not in text:
+        return ()
+    return tuple((match.start(), match.end()) for match in re.finditer(re.escape(_OCR_SEMANTIC_BREAK_TOKEN), text))
+
+
+def _needs_ascii_keyword_boundary(keyword: str) -> bool:
+    return bool(_ASCII_KEYWORD_CHARS_RE.fullmatch(keyword))
+
+
+def _compile_literal_pattern(literal: str, *, ascii_boundary: bool) -> re.Pattern[str]:
     escaped = re.escape(literal)
-    if re.fullmatch(r"[A-Za-z0-9 .,'@_+\-#/&()]+", literal):
-        pattern = rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])"
-        return re.finditer(pattern, text, flags=re.IGNORECASE)
-    return re.finditer(escaped, text)
+    if ascii_boundary:
+        return re.compile(rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])", flags=re.IGNORECASE)
+    return re.compile(escaped)
 
 
-def _iter_keyword_matches(text: str, keyword: str):
-    escaped = re.escape(keyword)
-    if re.fullmatch(r"[A-Za-z0-9 #.'-]+", keyword):
-        return re.finditer(rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])", text, flags=re.IGNORECASE)
-    return re.finditer(escaped, text)
+def _iter_literal_matches(text: str, literal: str, *, pattern_cache: dict[tuple[str, bool], re.Pattern[str]]):
+    ascii_boundary = bool(_ASCII_LITERAL_CHARS_RE.fullmatch(literal))
+    cache_key = (literal, ascii_boundary)
+    pattern = pattern_cache.get(cache_key)
+    if pattern is None:
+        pattern = _compile_literal_pattern(literal, ascii_boundary=ascii_boundary)
+        pattern_cache[cache_key] = pattern
+    return pattern.finditer(text)
 
 
-def _shadow_span_to_raw(mapping: tuple[int | None, ...], start: int, end: int) -> tuple[int, int] | None:
-    raw_positions = [position for position in mapping[start:end] if position is not None]
-    if not raw_positions:
-        return None
-    return (min(raw_positions), max(raw_positions) + 1)
+@lru_cache(maxsize=1)
+def _label_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=spec.keyword,
+                payload=spec,
+                ascii_boundary=spec.ascii_boundary,
+            )
+            for spec in _LABEL_SPECS
+        )
+    )
 
 
-def _nearest_raw(mapping: tuple[int | None, ...], index: int, *, direction: str) -> int | None:
-    if not mapping:
-        return None
-    index = max(0, min(index, len(mapping) - 1))
-    step = -1 if direction == "left" else 1
-    probe = index
-    while 0 <= probe < len(mapping):
-        if mapping[probe] is not None:
-            return mapping[probe]
-        probe += step
-    return None
+@lru_cache(maxsize=1)
+def _name_start_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=keyword,
+                payload=keyword,
+                ascii_boundary=_needs_ascii_keyword_boundary(keyword),
+            )
+            for keyword in sorted(set(_NAME_START_KEYWORDS), key=len, reverse=True)
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _family_name_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=surname,
+                payload=surname,
+                ascii_boundary=_needs_ascii_keyword_boundary(surname),
+            )
+            for surname in _COMMON_FAMILY_NAMES
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _company_suffix_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=suffix,
+                payload=suffix,
+                ascii_boundary=_needs_ascii_keyword_boundary(suffix),
+            )
+            for suffix in sorted(set(_COMPANY_SUFFIXES), key=len, reverse=True)
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _zh_address_value_matcher() -> AhoMatcher:
+    lexicon = load_china_geo_lexicon()
+    direct_city_names = {"北京", "上海", "天津", "重庆", "香港", "澳门"}
+    geo_specs = (
+        (AddressComponentType.PROVINCE, tuple(item for item in lexicon.provinces if item not in direct_city_names)),
+        (AddressComponentType.CITY, tuple([*lexicon.cities, *sorted(direct_city_names)])),
+        (AddressComponentType.DISTRICT, lexicon.districts),
+    )
+    patterns: list[AhoPattern] = []
+    for component_type, names in geo_specs:
+        for name in sorted(set(names), key=len, reverse=True):
+            patterns.append(
+                AhoPattern(
+                    text=name,
+                    payload=_AddressPatternPayload(component_type=component_type, canonical_text=name),
+                    ascii_boundary=_needs_ascii_keyword_boundary(name),
+                )
+            )
+    return AhoMatcher.from_patterns(tuple(patterns))
+
+
+@lru_cache(maxsize=1)
+def _zh_address_key_matcher() -> AhoMatcher:
+    patterns: list[AhoPattern] = []
+    for component_type, keywords in _ZH_ADDRESS_ATTRS:
+        for keyword in sorted(set(keywords), key=len, reverse=True):
+            patterns.append(
+                AhoPattern(
+                    text=keyword,
+                    payload=_AddressPatternPayload(component_type=component_type, canonical_text=keyword),
+                    ascii_boundary=_needs_ascii_keyword_boundary(keyword),
+                )
+            )
+    return AhoMatcher.from_patterns(tuple(patterns))
+
+
+@lru_cache(maxsize=1)
+def _en_address_value_matcher() -> AhoMatcher:
+    lexicon = load_en_geo_lexicon()
+    geo_specs = (
+        (AddressComponentType.STATE, tuple([*lexicon.tier_a_state_names, *lexicon.tier_a_state_codes])),
+        (AddressComponentType.CITY, lexicon.tier_b_places),
+    )
+    patterns: list[AhoPattern] = []
+    for component_type, names in geo_specs:
+        for name in sorted(set(names), key=len, reverse=True):
+            patterns.append(
+                AhoPattern(
+                    text=name,
+                    payload=_AddressPatternPayload(component_type=component_type, canonical_text=name),
+                    ascii_boundary=_needs_ascii_keyword_boundary(name),
+                )
+            )
+    return AhoMatcher.from_patterns(tuple(patterns))
+
+
+@lru_cache(maxsize=1)
+def _en_address_key_matcher() -> AhoMatcher:
+    patterns: list[AhoPattern] = []
+    for component_type, keywords in _EN_ADDRESS_ATTRS:
+        for keyword in sorted(set(keywords), key=len, reverse=True):
+            patterns.append(
+                AhoPattern(
+                    text=keyword,
+                    payload=_AddressPatternPayload(component_type=component_type, canonical_text=keyword),
+                    ascii_boundary=_needs_ascii_keyword_boundary(keyword),
+                )
+            )
+    return AhoMatcher.from_patterns(tuple(patterns))
 
 
 def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
@@ -680,17 +798,6 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
 
 def _overlaps_any(start: int, end: int, spans: tuple[tuple[int, int], ...]) -> bool:
     return any(not (end <= left or start >= right) for left, right in spans)
-
-
-def _looks_like_placeholder_slice(text: str, start: int, end: int) -> bool:
-    if not (0 <= start < end <= len(text)):
-        return False
-    slice_text = text[start:end]
-    if slice_text.startswith("<") and slice_text.endswith(">"):
-        return True
-    left = text.rfind("<", 0, start + 1)
-    right = text.find(">", end - 1)
-    return left >= 0 and right >= end
 
 
 def _next_clue_id() -> str:
