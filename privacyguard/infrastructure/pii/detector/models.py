@@ -20,6 +20,14 @@ class ClaimStrength(str, Enum):
     SOFT = "soft"
 
 
+class ClueFamily(str, Enum):
+    STRUCTURED = "structured"
+    ADDRESS = "address"
+    NAME = "name"
+    ORGANIZATION = "organization"
+    BREAK = "break"
+
+
 class StackState(str, Enum):
     ACTIVE = "active"
     FINALIZED = "finalized"
@@ -108,6 +116,34 @@ class CandidateDraft:
     bbox: BoundingBox | None = None
     span_start: int | None = None
     span_end: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Clue:
+    clue_id: str
+    family: ClueFamily
+    kind: str
+    start: int
+    end: int
+    text: str
+    priority: int
+    hard: bool
+    attr_type: PIIAttributeType | None
+    matched_by: str
+    payload: dict[str, object] = field(default_factory=dict)
+
+    @property
+    def event_id(self) -> str:
+        return self.clue_id
+
+
+@dataclass(slots=True)
+class ClueBundle:
+    shadow_text: str
+    shadow_to_raw: tuple[int | None, ...]
+    hard_clues: tuple[Clue, ...]
+    label_clues: tuple[Clue, ...]
+    all_clues: tuple[Clue, ...]
 
 
 @dataclass(frozen=True, slots=True)

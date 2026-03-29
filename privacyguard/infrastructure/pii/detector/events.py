@@ -6,8 +6,9 @@ import re
 from itertools import count
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.infrastructure.pii.address.input_adapter import build_text_input
-from privacyguard.infrastructure.pii.address.seed_extractor import collect_component_matches
+from privacyguard.infrastructure.pii.address.geo_db import load_china_geo_lexicon
+from privacyguard.infrastructure.pii.address.lexicon import collect_components
+from privacyguard.infrastructure.pii.address.types import AddressComponent, AddressToken
 from privacyguard.infrastructure.pii.detector.labels import _LABEL_SPECS
 from privacyguard.infrastructure.pii.detector.models import (
     ClaimStrength,
@@ -84,27 +85,20 @@ _NAME_SELF_INTRO_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("context_name_self_intro_zh", re.compile(r"(?:我是|我叫|姓名是|名字叫)\s*")),
     ("context_name_self_intro_en", re.compile(r"(?i)\b(?:this is|i am|i'm|my name is|name is)\b\s*")),
 )
-_ADDRESS_COMPONENT_PRIORITIES = {
-    "province": 198,
-    "city": 197,
-    "district": 196,
-    "street_admin": 195,
-    "town": 194,
-    "village": 193,
-    "street": 192,
-    "road": 191,
-    "compound": 190,
-    "poi": 189,
-    "building": 188,
-    "unit": 187,
-    "floor": 186,
-    "room": 185,
-    "postal_code": 184,
-    "po_box": 183,
-    "state": 182,
-    "county": 181,
-}
-_ADDRESS_ATTR_SUFFIXES = ("省", "市", "区", "县", "镇", "乡", "村", "路", "街", "道", "巷", "弄", "号", "室", "单元", "层")
+_ZH_ADDRESS_ATTR_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("province", ("特别行政区", "自治区", "省")),
+    ("city", ("自治州", "地区", "盟", "市")),
+    ("district", ("区", "县", "旗")),
+    ("street_admin", ("街道",)),
+    ("town", ("镇", "乡")),
+    ("village", ("社区", "村")),
+    ("road", ("大道", "胡同", "路", "街", "道", "巷", "弄")),
+    ("compound", ("小区", "公寓", "大厦", "园区", "社区", "花园", "家园", "苑", "庭", "府", "湾", "宿舍")),
+    ("building", ("号楼", "栋", "幢", "座", "楼")),
+    ("unit", ("单元",)),
+    ("floor", ("层",)),
+    ("room", ("室", "房", "户")),
+)
 
 
 def build_event_bundle(
@@ -118,7 +112,7 @@ def build_event_bundle(
     modified_text, modified_to_raw = _build_modified_text(stream.raw_text, structured_events)
     label_events = tuple(_collect_label_events(modified_text, modified_to_raw, locale_profile))
     anchor_events = tuple(_collect_anchor_events(modified_text, modified_to_raw, locale_profile))
-    address_events = tuple(_collect_address_component_events(stream, locale_profile=locale_profile))
+    address_events = tuple(_collect_address_atomic_events(stream, label_events=label_events, locale_profile=locale_profile))
     dictionary_events = tuple(_collect_dictionary_events(stream, [*session_entries, *local_entries]))
     hard_events = tuple(_resolve_hard_event_conflicts([*structured_events, *dictionary_events]))
     structured_event_ids = {event.event_id for event in structured_events}
@@ -260,51 +254,196 @@ def _collect_anchor_events(modified_text: str, modified_to_raw: tuple[int | None
     return events
 
 
-def _collect_address_component_events(stream: StreamInput, *, locale_profile: str) -> list[StreamEvent]:
+def _collect_address_atomic_events(
+    stream: StreamInput,
+    *,
+    label_events: tuple[StreamEvent, ...],
+    locale_profile: str,
+) -> list[StreamEvent]:
     events: list[StreamEvent] = []
-    seen: set[tuple[int, int, str]] = set()
-    matches = collect_component_matches(build_text_input(stream.raw_text), locale_profile=locale_profile)
-    for match in matches:
-        key = (match.start, match.end, match.component_type)
-        if key in seen:
-            continue
-        seen.add(key)
-        trigger_kind = _address_component_trigger_kind(match.text, match.component_type, match.strength)
-        matched_by = f"address_component_{match.component_type}"
+    label_spans = tuple(
+        (event.start, event.end)
+        for event in label_events
+        if event.attr_type == PIIAttributeType.ADDRESS
+    )
+    if locale_profile in {"zh_cn", "mixed"}:
+        tokens = _collect_zh_address_tokens(stream.raw_text, label_spans=label_spans)
+        for token in tokens:
+            events.append(_address_token_event(token, label_spans=label_spans))
+    if locale_profile in {"en_us", "mixed"} and any("A" <= ch <= "z" for ch in stream.raw_text):
+        components = collect_components(
+            stream.raw_text,
+            locale_profile="en_us",
+            forbidden_spans=label_spans,
+        )
+        for component in components:
+            events.extend(_address_component_events(component, label_spans=label_spans))
+    return events
+
+
+def _collect_zh_address_tokens(
+    text: str,
+    *,
+    label_spans: tuple[tuple[int, int], ...],
+) -> list[AddressToken]:
+    tokens: list[AddressToken] = []
+    china_geo = load_china_geo_lexicon()
+    direct_city_names = {"北京", "上海", "天津", "重庆", "香港", "澳门"}
+    geo_specs = (
+        ("province", tuple(token for token in china_geo.provinces if token not in direct_city_names)),
+        ("city", tuple([*china_geo.cities, *sorted(direct_city_names)])),
+        ("district", china_geo.districts),
+    )
+    for component_type, lexicon in geo_specs:
+        for token_text in sorted(set(lexicon), key=len, reverse=True):
+            for match in re.finditer(re.escape(token_text), text):
+                start, end = match.start(), match.end()
+                if any(not (end <= left or start >= right) for left, right in label_spans):
+                    continue
+                tokens.append(
+                    AddressToken(
+                        component_type=component_type,
+                        token_role="name",
+                        text=token_text,
+                        start=start,
+                        end=end,
+                    )
+                )
+    for component_type, keywords in _ZH_ADDRESS_ATTR_KEYWORDS:
+        for keyword in keywords:
+            for match in re.finditer(re.escape(keyword), text):
+                start, end = match.start(), match.end()
+                if any(not (end <= left or start >= right) for left, right in label_spans):
+                    continue
+                tokens.append(
+                    AddressToken(
+                        component_type=component_type,
+                        token_role="attr",
+                        text=keyword,
+                        start=start,
+                        end=end,
+                    )
+                )
+    return _dedupe_address_tokens(tokens)
+
+
+def _address_component_events(
+    component: AddressComponent,
+    *,
+    label_spans: tuple[tuple[int, int], ...],
+) -> list[StreamEvent]:
+    events: list[StreamEvent] = []
+    matched_by = "context_address_field" if any(0 <= component.start - right <= 2 for _, right in label_spans) else "event_stream_address"
+    common_payload = {
+        "anchor_kind": "address_component",
+        "component": component,
+        "component_type": component.component_type,
+        "component_start": component.start,
+        "component_end": component.end,
+        "matched_by": matched_by,
+    }
+    if _should_emit_address_name_event(component) and component.value_start < component.value_end and component.value_text:
         events.append(
             StreamEvent(
                 event_id=_next_event_id(),
                 kind=EventKind.ANCHOR,
                 attr_type=PIIAttributeType.ADDRESS,
-                start=match.start,
-                end=match.end,
+                start=component.value_start,
+                end=component.value_end,
                 strength=ClaimStrength.SOFT,
-                priority=_ADDRESS_COMPONENT_PRIORITIES.get(match.component_type, 180),
+                priority=196,
                 stack_kind="address",
-                matched_by=matched_by,
+                matched_by=f"address_{component.component_type}_name",
                 payload={
-                    "anchor_kind": "address_component",
-                    "component_type": match.component_type,
-                    "component_strength": match.strength,
-                    "component_text": match.text,
-                    "trigger_kind": trigger_kind,
+                    **common_payload,
+                    "token_role": "name",
+                },
+            )
+        )
+    if component.key_start < component.key_end and component.key_text:
+        events.append(
+            StreamEvent(
+                event_id=_next_event_id(),
+                kind=EventKind.ANCHOR,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=component.key_start,
+                end=component.key_end,
+                strength=ClaimStrength.SOFT,
+                priority=195,
+                stack_kind="address",
+                matched_by=f"address_{component.component_type}_attr",
+                payload={
+                    **common_payload,
+                    "token_role": "attr",
                 },
             )
         )
     return events
 
 
-def _address_component_trigger_kind(text: str, component_type: str, strength: str) -> str:
-    compact = re.sub(r"\s+", "", str(text or ""))
-    if not compact:
-        return "component_name"
-    if strength != "strong":
-        return "component_attr"
-    if len(compact) <= 2 and compact.endswith(_ADDRESS_ATTR_SUFFIXES):
-        return "component_attr"
-    if component_type in {"district", "city", "province"} and len(compact) <= 3:
-        return "component_attr"
-    return "component_name"
+def _address_token_event(
+    token: AddressToken,
+    *,
+    label_spans: tuple[tuple[int, int], ...],
+) -> StreamEvent:
+    matched_by = "context_address_field" if any(0 <= token.start - right <= 2 for _, right in label_spans) else "event_stream_address"
+    matched_suffix = "name" if token.token_role == "name" else "attr"
+    return StreamEvent(
+        event_id=_next_event_id(),
+        kind=EventKind.ANCHOR,
+        attr_type=PIIAttributeType.ADDRESS,
+        start=token.start,
+        end=token.end,
+        strength=ClaimStrength.SOFT,
+        priority=196 if token.token_role == "name" else 195,
+        stack_kind="address",
+        matched_by=f"address_{token.component_type}_{matched_suffix}",
+        payload={
+            "anchor_kind": "address_token",
+            "token": token,
+            "component_type": token.component_type,
+            "matched_by": matched_by,
+            "token_role": token.token_role,
+        },
+    )
+
+
+def _should_emit_address_name_event(component: AddressComponent) -> bool:
+    return component.component_type in {
+        "province",
+        "city",
+        "district",
+        "street_admin",
+        "town",
+        "village",
+        "road",
+        "street",
+        "state",
+        "postal_code",
+    }
+
+
+def _dedupe_address_tokens(tokens: list[AddressToken]) -> list[AddressToken]:
+    ordered = sorted(tokens, key=lambda item: (item.start, -(item.end - item.start), item.component_type, item.token_role))
+    kept: list[AddressToken] = []
+    seen: set[tuple[str, str, int, int, str]] = set()
+    occupied_names: list[tuple[int, int]] = []
+    occupied_attrs: list[tuple[int, int]] = []
+    for token in ordered:
+        key = (token.component_type, token.token_role, token.start, token.end, token.text)
+        if key in seen:
+            continue
+        if token.token_role == "name" and any(not (token.end <= left or token.start >= right) for left, right in occupied_names):
+            continue
+        if token.token_role == "attr" and any(not (token.end <= left or token.start >= right) for left, right in occupied_attrs):
+            continue
+        seen.add(key)
+        kept.append(token)
+        if token.token_role == "name":
+            occupied_names.append((token.start, token.end))
+        if token.token_role == "attr":
+            occupied_attrs.append((token.start, token.end))
+    return sorted(kept, key=lambda item: (item.start, item.end, item.component_type, item.token_role))
 
 
 def _collect_dictionary_events(stream: StreamInput, entries: list[DictionaryEntry]) -> list[StreamEvent]:

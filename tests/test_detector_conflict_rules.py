@@ -158,7 +158,8 @@ def test_hard_hard_allows_longer_prompt_value_to_override_shorter_session_value(
 
     assert phone is not None
     assert phone.text == "13800138000"
-    assert phone.metadata["hard_source"] == ["prompt"]
+    assert phone.metadata["hard_source"] == ["regex"]
+    assert phone.metadata["bound_label_ids"]
 
 
 def test_hard_soft_boundary_stops_address_before_phone() -> None:
@@ -178,7 +179,22 @@ def test_hard_soft_boundary_stops_address_before_phone() -> None:
     assert "13800138000" not in address.text
 
 
-def test_same_attr_keeps_main_address_and_components() -> None:
+def test_address_detail_only_tail_chain_can_be_emitted_as_main_address() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="14栋103室",
+        ocr_blocks=[],
+    )
+
+    address = _find_candidate(candidates, PIIAttributeType.ADDRESS)
+
+    assert address is not None
+    assert address.text == "14栋103室"
+    assert address.metadata["address_component_type"] == ["building", "room"]
+
+
+def test_same_attr_keeps_main_address_and_puts_components_in_metadata() -> None:
     detector = RuleBasedPIIDetector(locale_profile="en_us")
 
     candidates = detector.detect(
@@ -186,15 +202,15 @@ def test_same_attr_keeps_main_address_and_components() -> None:
         ocr_blocks=[],
     )
 
-    observed = {
-        (candidate.attr_type, candidate.text)
-        for candidate in candidates
-        if candidate.attr_type in {PIIAttributeType.ADDRESS, PIIAttributeType.DETAILS}
-    }
+    address = _find_candidate(candidates, PIIAttributeType.ADDRESS)
 
-    assert (PIIAttributeType.ADDRESS, "123 Main St Apt 4B, Springfield, IL 62704") in observed
-    assert (PIIAttributeType.ADDRESS, "123 Main St") in observed
-    assert (PIIAttributeType.DETAILS, "Apt 4B") in observed
+    assert address is not None
+    assert address.text == "123 Main St Apt 4B, Springfield, IL 62704"
+    assert address.metadata["address_component_type"] == ["street", "unit", "postal_code"]
+    assert "unit:4B" in address.metadata["address_component_trace"]
+    assert address.metadata["address_details_type"] == ["unit"]
+    assert address.metadata["address_details_text"] == ["4B"]
+    assert not any(candidate.attr_type == PIIAttributeType.DETAILS for candidate in candidates)
 
 
 def test_address_organization_conflict_prefers_organization_suffix_path() -> None:
@@ -209,6 +225,21 @@ def test_address_organization_conflict_prefers_organization_suffix_path() -> Non
 
     assert organization is not None
     assert organization.text.endswith("有限公司")
+    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
+
+
+def test_organization_suffix_does_not_keep_leading_address_label() -> None:
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        prompt_text="地址：浦东新区阳光科技有限公司",
+        ocr_blocks=[],
+    )
+
+    organization = _find_candidate(candidates, PIIAttributeType.ORGANIZATION)
+
+    assert organization is not None
+    assert organization.text == "浦东新区阳光科技有限公司"
     assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
 
 

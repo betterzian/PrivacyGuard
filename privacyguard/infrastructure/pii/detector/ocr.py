@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from privacyguard.domain.enums import PIISourceType, PIIAttributeType
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, OCRScene, OCRSceneBlock, ParseResult, StreamEvent, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks import (
-    build_address_candidates_from_value,
+    build_address_candidate_from_text,
     build_name_candidate_from_value,
     build_organization_candidate_from_value,
     has_address_signal,
@@ -32,12 +32,12 @@ def apply_ocr_geometry(
     remapped = [_remap_candidate(candidate, stream, scene) for candidate in parsed.candidates]
     label_block_ids = {
         block_id
-        for event in bundle.label_events
+        for event in bundle.label_clues
         for block_id in [_event_block_id(stream, event)]
         if block_id
     }
     proposals: list[OCROwnershipProposal] = []
-    for event in bundle.label_events:
+    for event in bundle.label_clues:
         if event.event_id in parsed.handled_label_ids:
             continue
         label_block = _event_scene_block(stream, scene, event)
@@ -86,7 +86,7 @@ def _build_candidate_from_blocks(event: StreamEvent, blocks: tuple[OCRSceneBlock
             confidence=0.91,
         )
     if event.attr_type == PIIAttributeType.ADDRESS:
-        candidates = build_address_candidates_from_value(
+        candidate = build_address_candidate_from_text(
             source=PIISourceType.OCR,
             value_text=text,
             value_start=start,
@@ -94,7 +94,7 @@ def _build_candidate_from_blocks(event: StreamEvent, blocks: tuple[OCRSceneBlock
             matched_by=matched_by,
             label_event_id=event.event_id,
         )
-        return candidates[0] if candidates else None
+        return candidate
     if event.attr_type == PIIAttributeType.ORGANIZATION:
         return build_organization_candidate_from_value(
             source=PIISourceType.OCR,
@@ -175,13 +175,13 @@ def _attribute_segment_score(event: StreamEvent, text: str) -> float:
         return score
     if event.attr_type == PIIAttributeType.ADDRESS:
         score = 0.0
-        if build_address_candidates_from_value(
+        if build_address_candidate_from_text(
             source=PIISourceType.OCR,
             value_text=sample,
             value_start=0,
             value_end=len(sample),
             matched_by=event.matched_by,
-        ):
+        ) is not None:
             score += 1.2
         if has_address_signal(sample):
             score += 2.2
