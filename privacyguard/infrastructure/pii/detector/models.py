@@ -122,8 +122,8 @@ class CandidateDraft:
     end: int
     text: str
     source: PIISourceType
-    confidence: float
     source_kind: str
+    confidence: float = 1.0
     claim_strength: ClaimStrength = ClaimStrength.SOFT
     metadata: dict[str, list[str]] = field(default_factory=dict)
     label_clue_ids: set[str] = field(default_factory=set)
@@ -168,9 +168,9 @@ class DictionaryEntry:
     attr_type: PIIAttributeType
     text: str
     variants: tuple[str, ...]
-    confidence: float
     matched_by: str
-    metadata: dict[str, list[str]]
+    metadata: dict[str, list[str]] = field(default_factory=dict)
+    confidence: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)

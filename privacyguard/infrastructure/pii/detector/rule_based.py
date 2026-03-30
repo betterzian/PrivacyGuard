@@ -14,7 +14,7 @@ from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Dict
 from privacyguard.infrastructure.pii.detector.ocr import apply_ocr_geometry
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
-from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
+from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle, reset_clue_id_sequence
 from privacyguard.infrastructure.pii.json_privacy_repository import DEFAULT_PRIVACY_REPOSITORY_PATH, JsonPrivacyRepository, parse_privacy_repository_document
 from privacyguard.utils.pii_value import (
     address_components_from_levels,
@@ -39,14 +39,12 @@ class RuleBasedPIIDetector:
         detector_mode: str = "rule_based",
         locale_profile: str = "mixed",
         mapping_store: MappingStore | None = None,
-        min_confidence_by_attr: dict[PIIAttributeType | str, float] | None = None,
     ) -> None:
         self.detector_mode = detector_mode
         self.locale_profile = self._normalize_locale_profile(locale_profile)
         self.mapping_store = mapping_store
         self.resolver = CandidateResolverService()
         self.privacy_repository_path = self._resolve_privacy_repository_path(privacy_repository_path)
-        self.min_confidence_by_attr = self._normalize_confidence_overrides(min_confidence_by_attr)
         self.local_entries = self._load_local_dictionary()
 
     def detect(
@@ -59,11 +57,10 @@ class RuleBasedPIIDetector:
         protection_level: ProtectionLevel | str = ProtectionLevel.STRONG,
         detector_overrides: dict[PIIAttributeType | str, float] | None = None,
     ) -> list[PIICandidate]:
-        del protection_level
-        thresholds = dict(self.min_confidence_by_attr)
-        thresholds.update(self._normalize_confidence_overrides(detector_overrides))
+        del protection_level, detector_overrides
+        reset_clue_id_sequence()
         session_entries = self._load_session_dictionary(session_id=session_id, turn_id=turn_id)
-        parser = StreamParser(locale_profile=self.locale_profile, min_confidence_by_attr=thresholds)
+        parser = StreamParser(locale_profile=self.locale_profile)
         candidates: list[PIICandidate] = []
 
         prompt_stream = build_prompt_stream(prompt_text)
@@ -107,16 +104,6 @@ class RuleBasedPIIDetector:
             return Path(DEFAULT_PRIVACY_REPOSITORY_PATH)
         return Path(path)
 
-    def _normalize_confidence_overrides(
-        self,
-        overrides: dict[PIIAttributeType | str, float] | None,
-    ) -> dict[PIIAttributeType, float]:
-        normalized: dict[PIIAttributeType, float] = {}
-        for key, value in (overrides or {}).items():
-            attr_type = key if isinstance(key, PIIAttributeType) else PIIAttributeType(str(key).lower())
-            normalized[attr_type] = float(value)
-        return normalized
-
     def _load_local_dictionary(self) -> tuple[DictionaryEntry, ...]:
         repository = JsonPrivacyRepository(path=str(self.privacy_repository_path))
         document = parse_privacy_repository_document(repository.load_raw())
@@ -131,7 +118,6 @@ class RuleBasedPIIDetector:
                         text=slot.full.value,
                         aliases=list(slot.full.aliases),
                         matched_by="dictionary_local",
-                        confidence=0.99,
                         metadata={**persona_metadata, "name_component": ["full"]},
                     )
                 )
@@ -142,7 +128,6 @@ class RuleBasedPIIDetector:
                             text=slot.family.value,
                             aliases=list(slot.family.aliases),
                             matched_by="dictionary_local",
-                            confidence=0.99,
                             metadata={**persona_metadata, "name_component": ["family"]},
                         )
                     )
@@ -153,7 +138,6 @@ class RuleBasedPIIDetector:
                             text=slot.given.value,
                             aliases=list(slot.given.aliases),
                             matched_by="dictionary_local",
-                            confidence=0.99,
                             metadata={**persona_metadata, "name_component": ["given"]},
                         )
                     )
@@ -164,7 +148,6 @@ class RuleBasedPIIDetector:
                             text=slot.middle.value,
                             aliases=list(slot.middle.aliases),
                             matched_by="dictionary_local",
-                            confidence=0.99,
                             metadata={**persona_metadata, "name_component": ["middle"]},
                         )
                     )
@@ -194,7 +177,6 @@ class RuleBasedPIIDetector:
                         text=full_text,
                         aliases=[],
                         matched_by="dictionary_local",
-                        confidence=0.99,
                         metadata={"local_entity_ids": [persona.persona_id]},
                     )
                 )
@@ -223,7 +205,6 @@ class RuleBasedPIIDetector:
                     text=source_text,
                     aliases=aliases,
                     matched_by="dictionary_session",
-                    confidence=0.97,
                     metadata=metadata,
                 )
             )
@@ -236,7 +217,6 @@ class RuleBasedPIIDetector:
         text: str,
         aliases: list[str],
         matched_by: str,
-        confidence: float,
         metadata: dict[str, list[str]],
     ) -> DictionaryEntry:
         variants = tuple(dict.fromkeys([text, *aliases]))
@@ -244,7 +224,6 @@ class RuleBasedPIIDetector:
             attr_type=attr_type,
             text=text,
             variants=variants,
-            confidence=confidence,
             matched_by=matched_by,
             metadata={key: list(values) for key, values in metadata.items()},
         )
@@ -258,7 +237,6 @@ class RuleBasedPIIDetector:
                     text=slot.value,
                     aliases=list(slot.aliases),
                     matched_by="dictionary_local",
-                    confidence=0.99,
                     metadata={"local_entity_ids": [persona_id]},
                 )
             )

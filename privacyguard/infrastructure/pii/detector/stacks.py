@@ -140,7 +140,6 @@ class NameStack(BaseStack):
             end=absolute_start + len(text),
             text=text,
             source=self.context.stream.source,
-            confidence=0.92 if is_label_seed else 0.76,
             source_kind=self.clue.source_kind,
             claim_strength=ClaimStrength.SOFT,
             metadata={"matched_by": [self.clue.source_kind], "name_component": [self._component_hint().value]},
@@ -197,7 +196,6 @@ class OrganizationStack(BaseStack):
             end=absolute_start + len(text),
             text=text,
             source=self.context.stream.source,
-            confidence=0.9 if is_label_seed else 0.82,
             source_kind=self.clue.source_kind,
             claim_strength=ClaimStrength.SOFT,
             metadata={"matched_by": [self.clue.source_kind]},
@@ -302,7 +300,6 @@ class AddressStack(BaseStack):
             end=absolute_start + len(text),
             text=text,
             source=self.context.stream.source,
-            confidence=_address_confidence(components),
             source_kind=self.clue.source_kind,
             claim_strength=ClaimStrength.SOFT,
             metadata=_address_metadata(self.clue, components),
@@ -330,7 +327,6 @@ def _build_hard_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
         end=clue.end,
         text=clue.text,
         source=source,
-        confidence=_structured_confidence(clue),
         source_kind=clue.source_kind,
         claim_strength=ClaimStrength.HARD,
         metadata=metadata,
@@ -346,7 +342,6 @@ def build_name_candidate_from_value(
     source_kind: str,
     component_hint: NameComponentHint,
     label_clue_id: str | None = None,
-    confidence: float = 0.92,
     label_driven: bool = False,
 ) -> CandidateDraft | None:
     del value_end
@@ -360,7 +355,6 @@ def build_name_candidate_from_value(
         end=value_start + max(0, offset) + len(cleaned),
         text=cleaned,
         source=source,
-        confidence=confidence,
         source_kind=source_kind,
         claim_strength=ClaimStrength.SOFT,
         metadata={"matched_by": [source_kind], "name_component": [component_hint.value]},
@@ -390,7 +384,6 @@ def build_organization_candidate_from_value(
         end=value_start + max(0, offset) + len(cleaned),
         text=cleaned,
         source=source,
-        confidence=0.9 if label_driven else 0.82,
         source_kind=source_kind,
         claim_strength=ClaimStrength.SOFT,
         metadata={"matched_by": [source_kind]},
@@ -428,7 +421,6 @@ def build_address_candidate_from_value(
     value_end: int,
     source_kind: str,
     label_clue_id: str | None = None,
-    confidence: float = 0.82,
     metadata: dict[str, list[str]] | None = None,
     label_driven: bool = False,
 ) -> CandidateDraft | None:
@@ -445,7 +437,6 @@ def build_address_candidate_from_value(
         end=value_start + max(0, offset) + len(cleaned),
         text=cleaned,
         source=source,
-        confidence=confidence,
         source_kind=source_kind,
         claim_strength=ClaimStrength.SOFT,
         metadata=candidate_metadata,
@@ -467,7 +458,6 @@ def _slice_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, en
             value_end=end,
             source_kind=candidate.source_kind,
             component_hint=name_component_hint(candidate),
-            confidence=candidate.confidence,
             label_driven=candidate.label_driven,
         )
     elif candidate.attr_type == PIIAttributeType.ORGANIZATION:
@@ -491,7 +481,6 @@ def _slice_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, en
             value_start=start,
             value_end=end,
             source_kind=candidate.source_kind,
-            confidence=candidate.confidence,
             metadata=merge_metadata(metadata_base, {"address_match_origin": ["trimmed"]}),
             label_driven=candidate.label_driven,
         )
@@ -515,7 +504,7 @@ class ConflictOutcome:
 
 class StackManager:
     def score(self, candidate: CandidateDraft) -> float:
-        score = candidate.confidence
+        score = 0.0
         if candidate.claim_strength == ClaimStrength.HARD:
             score += 0.4
             score += 0.02 * _candidate_hard_source_rank(candidate)
@@ -544,7 +533,7 @@ class StackManager:
         return self._resolve_by_score(existing, incoming)
 
     def _resolve_same_attr(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
-        if self.score(incoming) > self.score(existing) + 0.02:
+        if self.score(incoming) > self.score(existing):
             return ConflictOutcome(incoming=incoming, drop_existing=True)
         if (incoming.end - incoming.start) > (existing.end - existing.start):
             return ConflictOutcome(incoming=incoming, drop_existing=True)
@@ -780,35 +769,6 @@ def _address_metadata(origin_clue: Clue, components: list[dict[str, object]]) ->
         "address_details_type": detail_types,
         "address_details_text": detail_values,
     }
-
-
-def _structured_confidence(clue: Clue) -> float:
-    source = str(clue.hard_source or "")
-    if source == "session":
-        return 0.99
-    if source == "local":
-        return 0.98
-    if source == "prompt":
-        return 0.97
-    if clue.attr_type == PIIAttributeType.EMAIL:
-        return 0.98
-    if clue.attr_type == PIIAttributeType.PHONE:
-        return 0.97
-    return 0.95
-
-
-def _address_confidence(components: list[dict[str, object]]) -> float:
-    score = 0.78
-    component_types = {component["component_type"] for component in components}
-    if {AddressComponentType.PROVINCE, AddressComponentType.CITY, AddressComponentType.DISTRICT, AddressComponentType.STATE} & component_types:
-        score += 0.05
-    if {AddressComponentType.ROAD, AddressComponentType.STREET, AddressComponentType.COMPOUND} & component_types:
-        score += 0.05
-    if any(bool(component["is_detail"]) for component in components):
-        score += 0.05
-    if len(components) >= 3:
-        score += 0.03
-    return min(0.95, score)
 
 
 def _normalize_address_value(component_type: AddressComponentType, raw_value: str) -> str:

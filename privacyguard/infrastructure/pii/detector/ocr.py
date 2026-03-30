@@ -86,7 +86,6 @@ def _build_candidate_from_blocks(event: Clue, blocks: tuple[OCRSceneBlock, ...])
             source_kind=source_kind,
             component_hint=component_hint,
             label_clue_id=event.clue_id,
-            confidence=0.91,
             label_driven=True,
         )
     if event.attr_type == PIIAttributeType.ADDRESS:
@@ -323,7 +322,6 @@ def _merge_ocr_candidates(candidates: list[CandidateDraft]) -> list[CandidateDra
         if duplicate is None:
             merged.append(candidate)
             continue
-        duplicate.confidence = max(duplicate.confidence, candidate.confidence)
         duplicate.metadata = merge_metadata(duplicate.metadata, candidate.metadata)
     return merged
 

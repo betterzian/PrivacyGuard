@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, Clue, ClueBundle, ClueFamily, ParseResult, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks import (
@@ -30,7 +29,6 @@ _STACK_REGISTRY = {
 class StackContext:
     stream: StreamInput
     locale_profile: str
-    min_confidence_by_attr: dict[PIIAttributeType, float]
     clues: tuple[Clue, ...] = ()
     committed_until: int = 0
     candidates: list[CandidateDraft] = field(default_factory=list)
@@ -39,16 +37,14 @@ class StackContext:
 
 
 class StreamParser:
-    def __init__(self, *, locale_profile: str, min_confidence_by_attr: dict[PIIAttributeType, float] | None = None) -> None:
+    def __init__(self, *, locale_profile: str) -> None:
         self.locale_profile = locale_profile
-        self.min_confidence_by_attr = dict(min_confidence_by_attr or {})
         self.stack_manager = StackManager()
 
     def parse(self, stream: StreamInput, bundle: ClueBundle) -> ParseResult:
         context = StackContext(
             stream=stream,
             locale_profile=self.locale_profile,
-            min_confidence_by_attr=dict(self.min_confidence_by_attr),
             clues=bundle.all_clues,
         )
         consumed_ids: set[str] = set()
@@ -90,10 +86,7 @@ class StreamParser:
             return None
         stack: BaseStack = stack_cls(clue=clue, clue_index=index, context=context)
         run = stack.run()
-        if run is None:
-            return None
-        threshold = context.min_confidence_by_attr.get(run.candidate.attr_type, 0.0)
-        if run.candidate.confidence < threshold or not run.candidate.text.strip():
+        if run is None or not run.candidate.text.strip():
             return None
         return run
 
@@ -116,7 +109,6 @@ class StreamParser:
     def _commit_candidate(self, context: StackContext, candidate: CandidateDraft) -> None:
         existing = self._find_identical(context.candidates, candidate)
         if existing is not None:
-            existing.confidence = max(existing.confidence, candidate.confidence)
             existing.metadata = merge_metadata(existing.metadata, candidate.metadata)
             existing.label_clue_ids |= candidate.label_clue_ids
             context.handled_label_clue_ids |= candidate.label_clue_ids

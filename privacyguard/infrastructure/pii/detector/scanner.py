@@ -23,7 +23,13 @@ from privacyguard.infrastructure.pii.detector.models import (
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
 
-_CLUE_IDS = count(1)
+_clue_id_seq = count(1)
+
+
+def reset_clue_id_sequence() -> None:
+    """在每个 turn（一次完整 `detect`）开始时将 clue 编号重置为从 1 递增。"""
+    global _clue_id_seq
+    _clue_id_seq = count(1)
 
 _HARD_SOURCE_PRIORITY = {
     "session": 4,
@@ -181,6 +187,25 @@ _ASCII_KEYWORD_CHARS_RE = re.compile(r"[A-Za-z0-9 #.'-]+")
 _ASCII_LITERAL_CHARS_RE = re.compile(r"[A-Za-z0-9 .,'@_+\-#/&()]+")
 _POSTAL_CODE_PATTERN = re.compile(r"(?<!\d)\d{5}(?:-\d{4})?(?!\d)")
 
+# 银行卡 PAN：13–19 位数字，中间可含空格/制表/连字符；须通过 Luhn 校验。
+# 优先级高于 regex_bank_account，硬冲突时同长度下先收录的卡号线索优先保留。
+_CARD_PAN_PATTERN = re.compile(r"(?<!\d)\d(?:[ \t\-]?\d){12,18}(?!\d)")
+
+
+def _luhn_valid(digits: str) -> bool:
+    """标准 Luhn，用于银行卡号校验（digits 须为纯数字）。"""
+    if not digits.isdigit() or not (13 <= len(digits) <= 19):
+        return False
+    total = 0
+    for index, ch in enumerate(reversed(digits)):
+        n = ord(ch) - 48
+        if index % 2 == 1:
+            n *= 2
+            if n > 9:
+                n -= 9
+        total += n
+    return total % 10 == 0
+
 
 @dataclass(frozen=True, slots=True)
 class _ScanSegment:
@@ -269,6 +294,28 @@ def _scan_hard_patterns(text: str, *, ignored_spans: tuple[tuple[int, int], ...]
                     placeholder=_PLACEHOLDER_BY_ATTR[attr_type],
                 )
             )
+    for match in _CARD_PAN_PATTERN.finditer(text):
+        if _overlaps_any(match.start(), match.end(), ignored_spans):
+            continue
+        value = match.group(0).strip()
+        digits = re.sub(r"\D", "", value)
+        if not _luhn_valid(digits):
+            continue
+        clues.append(
+            Clue(
+                clue_id=_next_clue_id(),
+                family=ClueFamily.STRUCTURED,
+                role=ClueRole.HARD,
+                attr_type=PIIAttributeType.CARD_NUMBER,
+                start=match.start(),
+                end=match.end(),
+                text=value,
+                priority=114,
+                source_kind="regex_card_pan",
+                hard_source="regex",
+                placeholder=_PLACEHOLDER_BY_ATTR[PIIAttributeType.CARD_NUMBER],
+            )
+        )
     return clues
 
 
@@ -801,4 +848,4 @@ def _overlaps_any(start: int, end: int, spans: tuple[tuple[int, int], ...]) -> b
 
 
 def _next_clue_id() -> str:
-    return f"clue-{next(_CLUE_IDS)}"
+    return f"clue-{next(_clue_id_seq)}"
