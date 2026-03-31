@@ -7,6 +7,16 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
+from privacyguard.infrastructure.pii.detector.candidate_utils import (
+    build_address_candidate_from_value,
+    build_name_candidate_from_value,
+    build_organization_candidate_from_value,
+    clean_value,
+    has_organization_suffix,
+    name_component_hint,
+    organization_suffix_start,
+    trim_candidate,
+)
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
@@ -16,25 +26,12 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueFamily,
     ClueRole,
     NameComponentHint,
+    NegativeDecision,
     StreamInput,
 )
+from privacyguard.infrastructure.pii.detector.negative_utils import evaluate_negative_effect, overlapping_negative_clues
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
 
-_ORG_SUFFIX_RE = re.compile(
-    r"(?i)(股份有限公司|有限责任公司|有限公司|研究院|实验室|工作室|事务所|集团|公司|大学|学院|银行|酒店|医院|中心"
-    r"|incorporated|corporation|company|limited|inc\.?|corp\.?|co\.?|ltd\.?|llc|plc|gmbh|pte|university|college|bank|hotel|hospital|clinic|labs?)"
-)
-_ADDRESS_SIGNAL_RE = re.compile(
-    r"(?i)(省|市|区|县|旗|镇|乡|村|路|街|道|巷|弄|小区|公寓|大厦|园区|花园|家园|苑|庭|府|湾|宿舍|栋|幢|座|楼|单元|层|室|房|户"
-    r"|street|st|road|rd|avenue|ave|boulevard|blvd|drive|dr|lane|ln|court|ct|suite|ste|apt|unit|zip)"
-)
-_LEADING_ADDRESS_LABEL_RE = re.compile(r"^(?:收货地址|家庭住址|联系地址|住址|地址)\s*[:：]?\s*")
-_NAME_PRONOUNS = {
-    "he", "him", "she", "her", "they", "them", "we", "us", "you", "me", "i", "myself", "pronouns",
-}
-_NAME_BLOCKLIST_ZH = {"本人", "未知", "匿名", "姓名", "名字"}
-_EN_NAME_TOKEN_RE = re.compile(r"^[A-Za-z][A-Za-z.'\-]{0,30}$")
-_ZH_NAME_RE = re.compile(r"^[\u4e00-\u9fff·]{2,8}$")
 _HARD_BREAK_RE = re.compile(r"[;；。！？!?]")
 
 _ADDRESS_COMPONENT_ORDER = {
@@ -67,6 +64,7 @@ class StackContextLike(Protocol):
     stream: StreamInput
     locale_profile: str
     clues: tuple[Clue, ...]
+    negative_clues: tuple[Clue, ...]
 
     def has_negative_at(self, start: int, end: int) -> bool: ...
 
@@ -98,10 +96,8 @@ class StructuredValueStack(BaseStack):
             return StackRun(ClueFamily.STRUCTURED, candidate, {self.clue.clue_id}, next_index=self.clue_index + 1)
         if self.clue.role != ClueRole.LABEL:
             return None
-        hard_clue, hard_index = _find_next_same_attr_hard(self.context.clues, self.clue_index + 1, self.clue.attr_type)
+        hard_clue, hard_index = self._find_bound_hard_clue()
         if hard_clue is None:
-            return None
-        if _blocked_between(self.context.stream.raw_text, self.context.clues, self.clue.end, hard_clue.start, allow_family=ClueFamily.STRUCTURED):
             return None
         candidate = _build_hard_candidate(hard_clue, self.context.stream.source)
         candidate.label_clue_ids.add(self.clue.clue_id)
@@ -114,6 +110,27 @@ class StructuredValueStack(BaseStack):
             next_index=hard_index + 1,
         )
 
+    def _find_bound_hard_clue(self) -> tuple[Clue | None, int]:
+        raw_text = self.context.stream.raw_text
+        cursor = self.clue.end
+        for index in range(self.clue_index + 1, len(self.context.clues)):
+            clue = self.context.clues[index]
+            if clue.family == ClueFamily.BREAK:
+                return (None, -1)
+            gap_text = raw_text[cursor:clue.start]
+            if gap_text and (_HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text):
+                return (None, -1)
+            if gap_text.strip():
+                return (None, -1)
+            if clue.role == ClueRole.HARD and clue.attr_type == self.clue.attr_type:
+                return (clue, index)
+            if clue.role == ClueRole.LABEL and clue.attr_type != self.clue.attr_type:
+                return (None, -1)
+            if clue.family != ClueFamily.STRUCTURED:
+                return (None, -1)
+            cursor = max(cursor, clue.end)
+        return (None, -1)
+
 
 @dataclass(slots=True)
 class NameStack(BaseStack):
@@ -122,37 +139,33 @@ class NameStack(BaseStack):
         start = self._resolve_left_boundary()
         if start is None:
             return None
-        end, next_index, consumed_ids = _resolve_family_boundary(
-            self.context.stream.raw_text,
-            self.context.clues,
-            self.clue_index,
-            family=ClueFamily.NAME,
-            initial_end=self.clue.end,
-        )
+        end, next_index, consumed_ids = self._resolve_right_boundary()
         # 名字 clue 只覆盖姓氏，需向右扩展以捕获完整姓名（如"张"→"张三"）。
         end = _extend_name_boundary(self.context.stream.raw_text, start, end, self.context.clues, next_index)
         if end <= start:
             return None
-        text = _clean_value(self.context.stream.raw_text[start:end])
-        if not _is_plausible_name(text, component_hint=self._component_hint()):
-            return None
-        offset = self.context.stream.raw_text[start:end].find(text)
-        absolute_start = start + max(0, offset)
-        # 非 label-driven 时，若候选区间被负向 clue 覆盖则拒绝。
-        if not is_label_seed and self.context.has_negative_at(absolute_start, absolute_start + len(text)):
-            return None
-        candidate = CandidateDraft(
-            attr_type=PIIAttributeType.NAME,
-            start=absolute_start,
-            end=absolute_start + len(text),
-            text=text,
+        candidate = build_name_candidate_from_value(
             source=self.context.stream.source,
+            value_text=self.context.stream.raw_text[start:end],
+            value_start=start,
+            value_end=end,
             source_kind=self.clue.source_kind,
-            claim_strength=ClaimStrength.SOFT,
-            metadata={"matched_by": [self.clue.source_kind], "name_component": [self._component_hint().value]},
-            label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
+            component_hint=self._component_hint(),
+            label_clue_id=self.clue.clue_id if is_label_seed else None,
             label_driven=is_label_seed,
         )
+        if candidate is None:
+            return None
+        # 非 label-driven 时，若候选区间被负向 clue 覆盖则拒绝。
+        if not is_label_seed:
+            effect = evaluate_negative_effect(
+                ClueFamily.NAME,
+                overlapping_negative_clues(self.context.negative_clues, candidate.start, candidate.end),
+            )
+            if effect.decision == NegativeDecision.VETO:
+                return None
+            if effect.decision == NegativeDecision.PENALTY:
+                candidate.metadata = merge_metadata(candidate.metadata, {"negative_signals": list(effect.reasons)})
         return StackRun(ClueFamily.NAME, candidate, consumed_ids, {self.clue.clue_id} if is_label_seed else set(), next_index)
 
     def _resolve_left_boundary(self) -> int | None:
@@ -167,6 +180,27 @@ class NameStack(BaseStack):
             return NameComponentHint.FAMILY
         return self.clue.component_hint or NameComponentHint.FULL
 
+    def _resolve_right_boundary(self) -> tuple[int, int, set[str]]:
+        raw_text = self.context.stream.raw_text
+        end = self.clue.end
+        consumed = {self.clue.clue_id}
+        index = self.clue_index + 1
+        while index < len(self.context.clues):
+            clue = self.context.clues[index]
+            if clue.family == ClueFamily.BREAK:
+                break
+            gap_text = raw_text[end:clue.start]
+            if gap_text and (_HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text):
+                break
+            if gap_text.strip():
+                break
+            if clue.family != ClueFamily.NAME:
+                break
+            end = max(end, clue.end)
+            consumed.add(clue.clue_id)
+            index += 1
+        return (end, index, consumed)
+
 
 @dataclass(slots=True)
 class OrganizationStack(BaseStack):
@@ -174,13 +208,7 @@ class OrganizationStack(BaseStack):
         is_label_seed = self.clue.role == ClueRole.LABEL
         if is_label_seed:
             start = _skip_separators(self.context.stream.raw_text, self.clue.end)
-            end, next_index, consumed_ids = _resolve_family_boundary(
-                self.context.stream.raw_text,
-                self.context.clues,
-                self.clue_index,
-                family=ClueFamily.ORGANIZATION,
-                initial_end=self.clue.end,
-            )
+            end, next_index, consumed_ids = self._resolve_right_boundary()
             handled = {self.clue.clue_id}
         elif self.clue.role == ClueRole.SUFFIX:
             start = _left_expand_text_boundary(self.context.stream.raw_text, self.context.clues, self.clue.start)
@@ -192,27 +220,49 @@ class OrganizationStack(BaseStack):
             return None
         if end <= start:
             return None
-        text = _strip_leading_address_label(_clean_value(self.context.stream.raw_text[start:end]))
-        if not _is_plausible_organization(text, label_driven=is_label_seed):
-            return None
-        offset = self.context.stream.raw_text[start:end].find(text)
-        absolute_start = start + max(0, offset)
-        # 非 label-driven 的 suffix 触发，若被负向 clue 覆盖则拒绝。
-        if not is_label_seed and self.context.has_negative_at(absolute_start, absolute_start + len(text)):
-            return None
-        candidate = CandidateDraft(
-            attr_type=PIIAttributeType.ORGANIZATION,
-            start=absolute_start,
-            end=absolute_start + len(text),
-            text=text,
+        candidate = build_organization_candidate_from_value(
             source=self.context.stream.source,
+            value_text=self.context.stream.raw_text[start:end],
+            value_start=start,
+            value_end=end,
             source_kind=self.clue.source_kind,
-            claim_strength=ClaimStrength.SOFT,
-            metadata={"matched_by": [self.clue.source_kind]},
-            label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
+            label_clue_id=self.clue.clue_id if is_label_seed else None,
             label_driven=is_label_seed,
         )
+        if candidate is None:
+            return None
+        # 非 label-driven 的 suffix 触发，若被负向 clue 覆盖则拒绝。
+        if not is_label_seed:
+            effect = evaluate_negative_effect(
+                ClueFamily.ORGANIZATION,
+                overlapping_negative_clues(self.context.negative_clues, candidate.start, candidate.end),
+            )
+            if effect.decision == NegativeDecision.VETO:
+                return None
+            if effect.decision == NegativeDecision.PENALTY:
+                candidate.metadata = merge_metadata(candidate.metadata, {"negative_signals": list(effect.reasons)})
         return StackRun(ClueFamily.ORGANIZATION, candidate, consumed_ids, handled, next_index)
+
+    def _resolve_right_boundary(self) -> tuple[int, int, set[str]]:
+        raw_text = self.context.stream.raw_text
+        end = self.clue.end
+        consumed = {self.clue.clue_id}
+        index = self.clue_index + 1
+        while index < len(self.context.clues):
+            clue = self.context.clues[index]
+            if clue.family == ClueFamily.BREAK:
+                break
+            gap_text = raw_text[end:clue.start]
+            if gap_text and (_HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text):
+                break
+            if gap_text.strip():
+                break
+            if clue.family != ClueFamily.ORGANIZATION:
+                break
+            end = max(end, clue.end)
+            consumed.add(clue.clue_id)
+            index += 1
+        return (end, index, consumed)
 
 
 @dataclass(slots=True)
@@ -301,7 +351,7 @@ class AddressStack(BaseStack):
             return None
         final_start = int(components[0]["start"])
         final_end = int(components[-1]["end"])
-        text = _clean_value(raw_text[final_start:final_end])
+        text = clean_value(raw_text[final_start:final_end])
         if not text:
             return None
         relative = raw_text[final_start:final_end].find(text)
@@ -318,6 +368,14 @@ class AddressStack(BaseStack):
             label_clue_ids=handled_labels,
             label_driven=is_label_seed,
         )
+        effect = evaluate_negative_effect(
+            ClueFamily.ADDRESS,
+            overlapping_negative_clues(self.context.negative_clues, candidate.start, candidate.end),
+        )
+        if effect.decision == NegativeDecision.VETO:
+            return None
+        if effect.decision == NegativeDecision.PENALTY:
+            candidate.metadata = merge_metadata(candidate.metadata, {"negative_signals": list(effect.reasons)})
         return StackRun(ClueFamily.ADDRESS, candidate, consumed_ids, handled_labels, i)
 
     def _seed_left_boundary(self) -> int | None:
@@ -343,168 +401,6 @@ def _build_hard_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
         claim_strength=ClaimStrength.HARD,
         metadata=metadata,
     )
-
-
-def build_name_candidate_from_value(
-    *,
-    source,
-    value_text: str,
-    value_start: int,
-    value_end: int,
-    source_kind: str,
-    component_hint: NameComponentHint,
-    label_clue_id: str | None = None,
-    label_driven: bool = False,
-) -> CandidateDraft | None:
-    del value_end
-    cleaned = _clean_value(value_text)
-    if not _is_plausible_name(cleaned, component_hint=component_hint):
-        return None
-    offset = value_text.find(cleaned)
-    return CandidateDraft(
-        attr_type=PIIAttributeType.NAME,
-        start=value_start + max(0, offset),
-        end=value_start + max(0, offset) + len(cleaned),
-        text=cleaned,
-        source=source,
-        source_kind=source_kind,
-        claim_strength=ClaimStrength.SOFT,
-        metadata={"matched_by": [source_kind], "name_component": [component_hint.value]},
-        label_clue_ids={label_clue_id} if label_clue_id else set(),
-        label_driven=label_driven,
-    )
-
-
-def build_organization_candidate_from_value(
-    *,
-    source,
-    value_text: str,
-    value_start: int,
-    value_end: int,
-    source_kind: str,
-    label_clue_id: str | None = None,
-    label_driven: bool = False,
-) -> CandidateDraft | None:
-    del value_end
-    cleaned = _strip_leading_address_label(_clean_value(value_text))
-    if not _is_plausible_organization(cleaned, label_driven=label_driven):
-        return None
-    offset = value_text.find(cleaned)
-    return CandidateDraft(
-        attr_type=PIIAttributeType.ORGANIZATION,
-        start=value_start + max(0, offset),
-        end=value_start + max(0, offset) + len(cleaned),
-        text=cleaned,
-        source=source,
-        source_kind=source_kind,
-        claim_strength=ClaimStrength.SOFT,
-        metadata={"matched_by": [source_kind]},
-        label_clue_ids={label_clue_id} if label_clue_id else set(),
-        label_driven=label_driven,
-    )
-
-
-def has_organization_suffix(text: str) -> bool:
-    return _ORG_SUFFIX_RE.search(str(text or "")) is not None
-
-
-def has_address_signal(text: str) -> bool:
-    return _ADDRESS_SIGNAL_RE.search(str(text or "")) is not None
-
-
-def looks_like_name_value(text: str, *, component_hint: NameComponentHint = NameComponentHint.FULL) -> bool:
-    return _is_plausible_name(_clean_value(text), component_hint=component_hint)
-
-
-def looks_like_organization_value(text: str, *, label_driven: bool = False) -> bool:
-    return _is_plausible_organization(_strip_leading_address_label(_clean_value(text)), label_driven=label_driven)
-
-
-def name_component_hint(candidate: CandidateDraft) -> NameComponentHint:
-    values = candidate.metadata.get("name_component")
-    return NameComponentHint(str(values[0])) if values else NameComponentHint.FULL
-
-
-def build_address_candidate_from_value(
-    *,
-    source,
-    value_text: str,
-    value_start: int,
-    value_end: int,
-    source_kind: str,
-    label_clue_id: str | None = None,
-    metadata: dict[str, list[str]] | None = None,
-    label_driven: bool = False,
-) -> CandidateDraft | None:
-    cleaned = _clean_value(value_text)
-    if not cleaned:
-        return None
-    offset = value_text.find(cleaned)
-    candidate_metadata = {"matched_by": [source_kind], "address_kind": ["private_address"]}
-    if metadata:
-        candidate_metadata = merge_metadata(candidate_metadata, metadata)
-    return CandidateDraft(
-        attr_type=PIIAttributeType.ADDRESS,
-        start=value_start + max(0, offset),
-        end=value_start + max(0, offset) + len(cleaned),
-        text=cleaned,
-        source=source,
-        source_kind=source_kind,
-        claim_strength=ClaimStrength.SOFT,
-        metadata=candidate_metadata,
-        label_clue_ids={label_clue_id} if label_clue_id else set(),
-        label_driven=label_driven,
-    )
-
-
-def _slice_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, end: int) -> CandidateDraft | None:
-    if start >= end:
-        return None
-    segment = raw_text[start:end]
-    metadata_base = candidate.metadata
-    if candidate.attr_type == PIIAttributeType.NAME:
-        rebuilt = build_name_candidate_from_value(
-            source=candidate.source,
-            value_text=segment,
-            value_start=start,
-            value_end=end,
-            source_kind=candidate.source_kind,
-            component_hint=name_component_hint(candidate),
-            label_driven=candidate.label_driven,
-        )
-    elif candidate.attr_type == PIIAttributeType.ORGANIZATION:
-        rebuilt = build_organization_candidate_from_value(
-            source=candidate.source,
-            value_text=segment,
-            value_start=start,
-            value_end=end,
-            source_kind=candidate.source_kind,
-            label_driven=candidate.label_driven,
-        )
-    elif candidate.attr_type == PIIAttributeType.ADDRESS:
-        metadata_base = {
-            key: values
-            for key, values in candidate.metadata.items()
-            if not key.startswith("address_component") and not key.startswith("address_details")
-        }
-        rebuilt = build_address_candidate_from_value(
-            source=candidate.source,
-            value_text=segment,
-            value_start=start,
-            value_end=end,
-            source_kind=candidate.source_kind,
-            metadata=merge_metadata(metadata_base, {"address_match_origin": ["trimmed"]}),
-            label_driven=candidate.label_driven,
-        )
-    else:
-        rebuilt = None
-    if rebuilt is None:
-        return None
-    rebuilt.claim_strength = candidate.claim_strength
-    rebuilt.metadata = merge_metadata(metadata_base, rebuilt.metadata)
-    rebuilt.label_clue_ids = set(candidate.label_clue_ids)
-    rebuilt.label_driven = candidate.label_driven
-    return rebuilt
 
 
 @dataclass(slots=True)
@@ -567,13 +463,13 @@ class StackManager:
         name = incoming if incoming.attr_type == PIIAttributeType.NAME else existing
         if not has_organization_suffix(organization.text):
             return ConflictOutcome(incoming=incoming if incoming.attr_type == PIIAttributeType.NAME else None)
-        suffix_start = _organization_suffix_start(organization.text)
+        suffix_start = organization_suffix_start(organization.text)
         if suffix_start <= 0:
             return ConflictOutcome(incoming=organization if incoming is organization else None, drop_existing=name is existing)
         if organization is incoming:
-            trimmed = _slice_candidate(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
+            trimmed = trim_candidate(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
             return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
-        trimmed = _slice_candidate(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
+        trimmed = trim_candidate(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
         return ConflictOutcome(incoming=trimmed)
 
     def _resolve_name_address(self, raw_text: str, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
@@ -596,50 +492,8 @@ class StackManager:
         if blocker.start <= candidate.start and blocker.end >= candidate.end:
             return None
         if blocker.start <= candidate.start:
-            return _slice_candidate(candidate, raw_text, start=blocker.end, end=candidate.end)
-        return _slice_candidate(candidate, raw_text, start=candidate.start, end=blocker.start)
-
-
-def _resolve_family_boundary(raw_text: str, clues: tuple[Clue, ...], start_index: int, *, family: ClueFamily, initial_end: int) -> tuple[int, int, set[str]]:
-    end = initial_end
-    consumed = {clues[start_index].clue_id}
-    index = start_index + 1
-    while index < len(clues):
-        clue = clues[index]
-        if clue.family == ClueFamily.BREAK or clue.family != family:
-            break
-        if _blocked_between(raw_text, clues, end, clue.start, allow_family=family):
-            break
-        end = max(end, clue.end)
-        consumed.add(clue.clue_id)
-        index += 1
-    return (end, index, consumed)
-
-
-def _blocked_between(raw_text: str, clues: tuple[Clue, ...], start: int, end: int, *, allow_family: ClueFamily) -> bool:
-    if start >= end:
-        return False
-    gap = raw_text[start:end]
-    if _HARD_BREAK_RE.search(gap) or _OCR_SEMANTIC_BREAK_TOKEN in gap:
-        return True
-    for clue in clues:
-        if clue.family == ClueFamily.BREAK and clue.start < end and clue.end > start:
-            return True
-        if clue.family not in {allow_family, ClueFamily.BREAK} and clue.start < end and clue.end > start:
-            return True
-    return False
-
-
-def _find_next_same_attr_hard(clues: tuple[Clue, ...], start_index: int, attr_type: PIIAttributeType | None) -> tuple[Clue | None, int]:
-    for index in range(start_index, len(clues)):
-        clue = clues[index]
-        if clue.family == ClueFamily.BREAK:
-            break
-        if clue.role == ClueRole.HARD and clue.attr_type == attr_type:
-            return (clue, index)
-        if clue.role == ClueRole.LABEL and clue.attr_type != attr_type:
-            break
-    return (None, -1)
+            return trim_candidate(candidate, raw_text, start=blocker.end, end=candidate.end)
+        return trim_candidate(candidate, raw_text, start=candidate.start, end=blocker.start)
 
 
 def _next_address_index(clues: tuple[Clue, ...], start_index: int) -> int | None:
@@ -789,7 +643,7 @@ def _address_metadata(origin_clue: Clue, components: list[dict[str, object]]) ->
 
 
 def _normalize_address_value(component_type: AddressComponentType, raw_value: str) -> str:
-    cleaned = _clean_value(raw_value)
+    cleaned = clean_value(raw_value)
     if component_type in _DETAIL_COMPONENTS:
         alnum = "".join(re.findall(r"[A-Za-z0-9]+", cleaned))
         if re.search(r"[A-Za-z]", alnum):
@@ -806,11 +660,6 @@ def _candidate_hard_source_rank(candidate: CandidateDraft) -> int:
         return 0
     source = str(values[0])
     return {"session": 4, "local": 3, "prompt": 2, "regex": 1}.get(source, 0)
-
-
-def _organization_suffix_start(text: str) -> int:
-    match = _ORG_SUFFIX_RE.search(text)
-    return match.start() if match else -1
 
 
 def _skip_separators(text: str, start: int) -> int:
@@ -841,10 +690,6 @@ def _left_expand_text_boundary(raw_text: str, clues: tuple[Clue, ...], start: in
     return index
 
 
-_ZH_CHAR_RE = re.compile(r"[\u4e00-\u9fff·]")
-_EN_NAME_CHAR_RE = re.compile(r"[A-Za-z.'\- ]")
-
-
 def _extend_name_boundary(raw_text: str, start: int, end: int, clues: tuple[Clue, ...], next_clue_index: int) -> int:
     """从 end 向右扩展，捕获紧邻的姓名字符。
 
@@ -862,13 +707,13 @@ def _extend_name_boundary(raw_text: str, start: int, end: int, clues: tuple[Clue
             upper = min(upper, c.start)
             break
     # 判断是中文名还是英文名。
-    is_zh = start < len(raw_text) and _ZH_CHAR_RE.match(raw_text[start])
+    is_zh = start < len(raw_text) and re.match(r"[\u4e00-\u9fff·]", raw_text[start])
     if is_zh:
         # 中文名：从 start 算起最多 4 个汉字（覆盖复姓 + 双字名）。
         max_end = start
         zh_count = 0
         while max_end < upper and zh_count < 4:
-            if _ZH_CHAR_RE.match(raw_text[max_end]):
+            if re.match(r"[\u4e00-\u9fff·]", raw_text[max_end]):
                 zh_count += 1
                 max_end += 1
             elif raw_text[max_end] == '·':
@@ -883,54 +728,10 @@ def _extend_name_boundary(raw_text: str, start: int, end: int, clues: tuple[Clue
         ch = raw_text[cursor]
         if _HARD_BREAK_RE.match(ch) or ch in ",，;；|/\\()（）":
             break
-        if _EN_NAME_CHAR_RE.match(ch):
+        if re.match(r"[A-Za-z.'\- ]", ch):
             cursor += 1
             continue
         break
     if cursor - start > 80:
         cursor = start + 80
     return cursor
-
-
-def _clean_value(text: str) -> str:
-    cleaned = str(text or "")
-    cleaned = cleaned.replace(_OCR_SEMANTIC_BREAK_TOKEN, " ")
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n:：-—|,，;；/\\")
-    cleaned = re.sub(r"[。！!？?]+$", "", cleaned).strip()
-    return cleaned
-
-
-def _is_plausible_name(text: str, *, component_hint: NameComponentHint) -> bool:
-    if not text or len(text) > 80 or "@" in text:
-        return False
-    if any(char.isdigit() for char in text):
-        return False
-    compact_lower = re.sub(r"\s+", " ", text).strip().lower()
-    if compact_lower in _NAME_PRONOUNS or text in _NAME_BLOCKLIST_ZH:
-        return False
-    compact_no_space = re.sub(r"\s+", "", text)
-    if _ZH_NAME_RE.fullmatch(compact_no_space):
-        return True
-    tokens = [token for token in re.split(r"\s+", text) if token]
-    if component_hint in {NameComponentHint.FAMILY, NameComponentHint.GIVEN, NameComponentHint.MIDDLE}:
-        return len(tokens) == 1 and _EN_NAME_TOKEN_RE.fullmatch(tokens[0]) is not None
-    return 1 <= len(tokens) <= 4 and all(_EN_NAME_TOKEN_RE.fullmatch(token) is not None for token in tokens)
-
-
-def _is_plausible_organization(text: str, *, label_driven: bool) -> bool:
-    if not text or len(text) < 2 or len(text) > 120 or "@" in text:
-        return False
-    if _ADDRESS_SIGNAL_RE.search(text) and not _ORG_SUFFIX_RE.search(text):
-        return False
-    if label_driven:
-        return True
-    return _ORG_SUFFIX_RE.search(text) is not None
-
-
-def _strip_leading_address_label(text: str) -> str:
-    stripped = str(text or "")
-    while True:
-        updated = _LEADING_ADDRESS_LABEL_RE.sub("", stripped, count=1)
-        if updated == stripped:
-            return stripped
-        stripped = updated.strip()

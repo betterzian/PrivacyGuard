@@ -19,7 +19,7 @@ from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemory
 from privacyguard.infrastructure.mapping.json_mapping_store import JsonMappingStore
 from privacyguard.infrastructure.ocr.ppocr_adapter import PPOCREngineAdapter
 from privacyguard.infrastructure.persona.json_persona_repository import JsonPersonaRepository
-from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector
+from privacyguard.infrastructure.pii.detector.rule_based import RuleBasedPIIDetector
 from privacyguard.infrastructure.rendering.fill_strategies import (
     CVFillStrategy,
     GradientFillStrategy,

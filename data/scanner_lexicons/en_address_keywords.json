@@ -1,0 +1,18 @@
+[
+  {
+    "component_type": "street",
+    "keywords": ["street", "st", "road", "rd", "avenue", "ave", "boulevard", "blvd", "drive", "dr", "lane", "ln", "court", "ct", "place", "pl", "parkway", "pkwy", "terrace", "ter", "circle", "cir", "way", "highway", "hwy"]
+  },
+  {
+    "component_type": "unit",
+    "keywords": ["apt", "apartment", "suite", "ste", "unit", "#"]
+  },
+  {
+    "component_type": "floor",
+    "keywords": ["floor", "fl"]
+  },
+  {
+    "component_type": "room",
+    "keywords": ["room", "rm"]
+  }
+]

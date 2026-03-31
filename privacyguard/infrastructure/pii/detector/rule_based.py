@@ -274,7 +274,6 @@ class RuleBasedPIIDetector:
                     block_id=draft.block_id,
                     span_start=draft.span_start if draft.source == PIISourceType.OCR else draft.start,
                     span_end=draft.span_end if draft.source == PIISourceType.OCR else draft.end,
-                    confidence=draft.confidence,
                     metadata={key: list(dict.fromkeys(values)) for key, values in draft.metadata.items()},
                 )
             )

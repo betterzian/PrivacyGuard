@@ -63,7 +63,7 @@ OCR / prompt parse
 
 ## 3. 核心对象
 
-当前 detector 主实现是 `privacyguard/infrastructure/pii/rule_based_detector.py` 中的
+当前 detector 主实现是 `privacyguard/infrastructure/pii/detector/rule_based.py` 中的
 `RuleBasedPIIDetector`。
 
 初始化时会完成这些准备：

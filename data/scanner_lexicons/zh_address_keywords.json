@@ -1,0 +1,50 @@
+[
+  {
+    "component_type": "province",
+    "keywords": ["特别行政区", "自治区", "省"]
+  },
+  {
+    "component_type": "city",
+    "keywords": ["自治州", "地区", "盟", "市"]
+  },
+  {
+    "component_type": "district",
+    "keywords": ["新区", "区", "县", "旗"]
+  },
+  {
+    "component_type": "street_admin",
+    "keywords": ["街道"]
+  },
+  {
+    "component_type": "town",
+    "keywords": ["镇", "乡"]
+  },
+  {
+    "component_type": "village",
+    "keywords": ["社区", "村"]
+  },
+  {
+    "component_type": "road",
+    "keywords": ["大道", "胡同", "路", "街", "道", "巷", "弄"]
+  },
+  {
+    "component_type": "compound",
+    "keywords": ["小区", "公寓", "大厦", "园区", "花园", "家园", "苑", "庭", "府", "湾", "宿舍"]
+  },
+  {
+    "component_type": "building",
+    "keywords": ["号楼", "栋", "幢", "座", "楼"]
+  },
+  {
+    "component_type": "unit",
+    "keywords": ["单元"]
+  },
+  {
+    "component_type": "floor",
+    "keywords": ["层"]
+  },
+  {
+    "component_type": "room",
+    "keywords": ["室", "房", "户"]
+  }
+]

@@ -47,13 +47,6 @@ class CandidateResolverService:
             if previous is None:
                 deduped[key] = candidate
                 continue
-            if candidate.confidence > previous.confidence:
-                merged = candidate.model_copy(deep=True)
-                if merged.canonical_source_text is None:
-                    merged.canonical_source_text = previous.canonical_source_text
-                merged.metadata = self._merge_metadata(previous, candidate)
-                deduped[key] = merged
-                continue
             if previous.canonical_source_text is None and candidate.canonical_source_text is not None:
                 previous.canonical_source_text = candidate.canonical_source_text
             previous.metadata = self._merge_metadata(previous, candidate)

@@ -23,7 +23,7 @@ class EnGeoLexicon:
 
 
 def _data_root() -> Path:
-    return Path(__file__).resolve().parents[4] / "data"
+    return Path(__file__).resolve().parents[4] / "data" / "scanner_lexicons"
 
 
 @lru_cache(maxsize=1)

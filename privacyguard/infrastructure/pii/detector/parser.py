@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, ParseResult, StreamInput
+from privacyguard.infrastructure.pii.detector.negative_utils import has_negative_at
 from privacyguard.infrastructure.pii.detector.stacks import (
     AddressStack,
     BaseStack,
@@ -39,11 +40,7 @@ class StackContext:
     handled_label_clue_ids: set[str] = field(default_factory=set)
 
     def has_negative_at(self, start: int, end: int) -> bool:
-        """检查指定区间是否存在负向 clue。"""
-        return any(
-            not (end <= neg.start or start >= neg.end)
-            for neg in self.negative_clues
-        )
+        return has_negative_at(self.negative_clues, start, end)
 
 
 class StreamParser:

@@ -1,5 +1,0 @@
-"""Public detector entry."""
-
-from privacyguard.infrastructure.pii.detector.rule_based import RuleBasedPIIDetector
-
-__all__ = ["RuleBasedPIIDetector"]

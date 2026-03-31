@@ -44,8 +44,8 @@ from privacyguard.app.schemas import (
     RestoreRequestModel,
     SanitizeRequestModel,
 )
+from privacyguard.infrastructure.pii.detector.rule_based import RuleBasedPIIDetector
 from privacyguard.infrastructure.pii.json_privacy_repository import DEFAULT_PRIVACY_REPOSITORY_PATH, JsonPrivacyRepository
-from privacyguard.infrastructure.pii.rule_based_detector import RuleBasedPIIDetector
 
 
 def _build_ocr_component_config(ocr_config: dict[str, Any] | None) -> dict[str, Any]:

@@ -60,6 +60,13 @@ class BreakType(str, Enum):
     NEWLINE = "newline"
 
 
+class NegativeDecision(str, Enum):
+    IGNORE = "ignore"
+    PENALTY = "penalty"
+    VETO = "veto"
+    STOP = "stop"
+
+
 class NameComponentHint(str, Enum):
     FULL = "full"
     FAMILY = "family"
@@ -125,7 +132,6 @@ class CandidateDraft:
     text: str
     source: PIISourceType
     source_kind: str
-    confidence: float = 1.0
     claim_strength: ClaimStrength = ClaimStrength.SOFT
     metadata: dict[str, list[str]] = field(default_factory=dict)
     label_clue_ids: set[str] = field(default_factory=set)
@@ -165,13 +171,6 @@ class ClueBundle:
     def label_clues(self) -> tuple[Clue, ...]:
         return tuple(clue for clue in self.all_clues if clue.role == ClueRole.LABEL)
 
-    def has_negative_at(self, start: int, end: int) -> bool:
-        """检查指定区间是否存在负向 clue 覆盖。"""
-        return any(
-            not (end <= neg.start or start >= neg.end)
-            for neg in self.negative_clues
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class DictionaryEntry:
@@ -180,7 +179,6 @@ class DictionaryEntry:
     variants: tuple[str, ...]
     matched_by: str
     metadata: dict[str, list[str]] = field(default_factory=dict)
-    confidence: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,3 +203,10 @@ class ParseResult:
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     handled_label_clue_ids: set[str] = field(default_factory=set)
+
+
+@dataclass(frozen=True, slots=True)
+class NegativeEffect:
+    decision: NegativeDecision
+    matched_clue_ids: tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()

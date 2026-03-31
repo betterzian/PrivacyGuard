@@ -9,7 +9,18 @@ from functools import lru_cache
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.address.geo_db import load_china_geo_lexicon, load_en_geo_lexicon
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.labels import _LABEL_SPECS
+from privacyguard.infrastructure.pii.detector.lexicon_loader import (
+    load_company_suffixes,
+    load_en_address_keyword_groups,
+    load_family_names,
+    load_label_specs,
+    load_name_start_keywords,
+    load_negative_address_words,
+    load_negative_name_words,
+    load_negative_org_words,
+    load_negative_ui_words,
+    load_zh_address_keyword_groups,
+)
 from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
@@ -71,171 +82,11 @@ _BANK_ACCOUNT_CANDIDATE_PATTERN = re.compile(r"(?<!\d)\d(?:[ -]?\d){11,22}(?!\d)
 # 通用长数字兜底：12+ 位连续数字（可含空格/连字符），未被其他规则归类时归入 NUMERIC。
 _GENERIC_NUMBER_PATTERN = re.compile(r"(?<!\d)\d(?:[ \t\-]?\d){11,30}(?!\d)")
 
-_COMPANY_SUFFIXES = (
-    "股份有限公司",
-    "有限责任公司",
-    "有限公司",
-    "研究院",
-    "实验室",
-    "工作室",
-    "事务所",
-    "集团",
-    "公司",
-    "大学",
-    "学院",
-    "银行",
-    "酒店",
-    "医院",
-    "中心",
-    "incorporated",
-    "corporation",
-    "company",
-    "limited",
-    "inc",
-    "corp",
-    "co",
-    "ltd",
-    "llc",
-    "plc",
-    "gmbh",
-    "pte",
-    "university",
-    "college",
-    "bank",
-    "hotel",
-    "hospital",
-    "clinic",
-    "lab",
-    "labs",
-)
-
-_NAME_START_KEYWORDS = (
-    "我是",
-    "我叫",
-    "姓名是",
-    "名字叫",
-    "this is",
-    "i am",
-    "i'm",
-    "my name is",
-    "name is",
-)
-
-_COMMON_FAMILY_NAMES = tuple(
-    sorted(
-        {
-            "赵", "钱", "孙", "李", "周", "吴", "郑", "王", "冯", "陈", "褚", "卫", "蒋", "沈", "韩", "杨",
-            "朱", "秦", "尤", "许", "何", "吕", "施", "张", "孔", "曹", "严", "华", "金", "魏", "陶", "姜",
-            "戚", "谢", "邹", "喻", "柏", "水", "窦", "章", "云", "苏", "潘", "葛", "奚", "范", "彭", "郎",
-            "鲁", "韦", "昌", "马", "苗", "凤", "花", "方", "俞", "任", "袁", "柳", "酆", "鲍", "史", "唐",
-            "费", "廉", "岑", "薛", "雷", "贺", "倪", "汤", "滕", "殷", "罗", "毕", "郝", "邬", "安", "常",
-            "乐", "于", "时", "傅", "皮", "卞", "齐", "康", "伍", "余", "元", "卜", "顾", "孟", "平", "黄",
-            "和", "穆", "萧", "尹", "姚", "邵", "湛", "汪", "祁", "毛", "禹", "狄", "米", "贝", "明", "臧",
-            "计", "伏", "成", "戴", "谈", "宋", "茅", "庞", "熊", "纪", "舒", "屈", "项", "祝", "董", "梁",
-            "杜", "阮", "蓝", "闵", "席", "季", "麻", "强", "贾", "路", "娄", "危", "江", "童", "颜", "郭",
-            "梅", "盛", "林", "刁", "钟", "徐", "邱", "骆", "高", "夏", "蔡", "田", "樊", "胡", "凌", "霍",
-            "虞", "万", "支", "柯", "昝", "管", "卢", "莫", "经", "房", "裘", "缪", "干", "解", "应", "宗",
-            "丁", "宣", "贲", "邓", "郁", "单", "杭", "洪", "包", "诸", "左", "石", "崔", "吉", "钮", "龚",
-            "程", "嵇", "邢", "滑", "裴", "陆", "荣", "翁", "荀", "羊", "於", "惠", "甄", "曲", "家", "封",
-            "芮", "羿", "储", "靳", "汲", "邴", "糜", "松", "井", "段", "富", "巫", "乌", "焦", "巴", "弓",
-            "牧", "隗", "山", "谷", "车", "侯", "宓", "蓬", "全", "郗", "班", "仰", "秋", "仲", "伊", "宫",
-            "宁", "仇", "栾", "暴", "甘", "斜", "厉", "戎", "祖", "武", "符", "刘", "景", "詹", "束", "龙",
-            "叶", "幸", "司", "韶", "郜", "黎", "蓟", "薄", "印", "宿", "白", "怀", "蒲", "邰", "从", "鄂",
-            "索", "咸", "籍", "赖", "卓", "蔺", "屠", "蒙", "池", "乔", "阴", "鬱", "胥", "能", "苍", "双",
-            "闻", "莘", "党", "翟", "谭", "贡", "劳", "逄", "姬", "申", "扶", "堵", "冉", "宰", "郦", "雍",
-            "却", "璩", "桑", "桂", "濮", "牛", "寿", "通", "边", "扈", "燕", "冀", "郏", "浦", "尚", "农",
-            "温", "别", "庄", "晏", "柴", "瞿", "阎", "充", "慕", "连", "茹", "习", "宦", "艾", "鱼", "容",
-            "向", "古", "易", "慎", "戈", "廖", "庾", "终", "暨", "居", "衡", "步", "都", "耿", "满", "弘",
-            "匡", "国", "文", "寇", "广", "禄", "阙", "东", "欧阳", "司马", "上官", "夏侯", "诸葛", "闻人",
-            "东方", "赫连", "皇甫", "尉迟", "公羊", "澹台", "公冶", "宗政", "濮阳", "淳于", "单于", "太叔",
-            "申屠", "公孙", "仲孙", "轩辕", "令狐", "钟离", "宇文", "长孙", "慕容", "鲜于", "闾丘", "司徒",
-            "司空", "丌官", "司寇", "南宫",
-        },
-        key=len,
-        reverse=True,
-    )
-)
-
-_ZH_ADDRESS_ATTRS: tuple[tuple[AddressComponentType, tuple[str, ...]], ...] = (
-    (AddressComponentType.PROVINCE, ("特别行政区", "自治区", "省")),
-    (AddressComponentType.CITY, ("自治州", "地区", "盟", "市")),
-    (AddressComponentType.DISTRICT, ("新区", "区", "县", "旗")),
-    (AddressComponentType.STREET_ADMIN, ("街道",)),
-    (AddressComponentType.TOWN, ("镇", "乡")),
-    (AddressComponentType.VILLAGE, ("社区", "村")),
-    (AddressComponentType.ROAD, ("大道", "胡同", "路", "街", "道", "巷", "弄")),
-    (AddressComponentType.COMPOUND, ("小区", "公寓", "大厦", "园区", "花园", "家园", "苑", "庭", "府", "湾", "宿舍")),
-    (AddressComponentType.BUILDING, ("号楼", "栋", "幢", "座", "楼")),
-    (AddressComponentType.UNIT, ("单元",)),
-    (AddressComponentType.FLOOR, ("层",)),
-    (AddressComponentType.ROOM, ("室", "房", "户")),
-)
-
-_EN_ADDRESS_ATTRS: tuple[tuple[AddressComponentType, tuple[str, ...]], ...] = (
-    (AddressComponentType.STREET, ("street", "st", "road", "rd", "avenue", "ave", "boulevard", "blvd", "drive", "dr", "lane", "ln", "court", "ct", "place", "pl", "parkway", "pkwy", "terrace", "ter", "circle", "cir", "way", "highway", "hwy")),
-    (AddressComponentType.UNIT, ("apt", "apartment", "suite", "ste", "unit", "#")),
-    (AddressComponentType.FLOOR, ("floor", "fl")),
-    (AddressComponentType.ROOM, ("room", "rm")),
-)
-
 _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
     (BreakType.PUNCT, "break_punct", re.compile(r"[;；。！？!?]")),
     (BreakType.NEWLINE, "break_newline", re.compile(r"(?:\r?\n){2,}")),
 )
 
-# ---- 负向黑名单 ----
-# 姓氏后接常见非人名字组成的词。
-_NEGATIVE_NAME_WORDS: tuple[str, ...] = (
-    "高兴", "高度", "高速", "高级", "高端", "高效", "高考", "高峰",
-    "白天", "白色", "白名单",
-    "田野", "田径", "田地",
-    "金融", "金属", "金额", "金牌",
-    "花园", "花费", "花样",
-    "安全", "安装", "安排", "安静", "安卓",
-    "马上", "马路",
-    "池塘",
-    "方便", "方案", "方向", "方法", "方式",
-    "常见", "常用", "常规",
-    "任务", "任何", "任意",
-    "余额", "余下",
-    "万元", "万人", "万一",
-    "石头",
-    "易用",
-    "江南", "江河",
-    "龙头",
-    "向上", "向下", "向前",
-    "明天", "明确", "明显",
-    "成功", "成本", "成员", "成为",
-    "丁香",
-    "范围", "范本",
-    "路线", "路过", "路由", "路径",
-    "单位", "单独", "单元",
-)
-# 地址成分字后接常见非地址字组成的词。
-_NEGATIVE_ADDRESS_WORDS: tuple[str, ...] = (
-    "道具", "道理", "道歉", "道德",
-    "路线", "路过", "路由", "路径",
-    "街舞",
-    "区别", "区间", "区域",
-    "省略", "省心", "省事",
-    "市场", "市值",
-    "县级",
-)
-# 公司后缀的非公司组合。
-_NEGATIVE_ORG_WORDS: tuple[str, ...] = (
-    "有限的", "有限制", "有限元",
-    "集团军",
-    "公司法",
-)
-# GUI / 系统文本。
-_NEGATIVE_UI_WORDS: tuple[str, ...] = (
-    "确认", "取消", "提交", "返回", "下一步", "上一步",
-    "首页", "设置", "帮助", "关于", "退出",
-    "请输入", "必填", "加载中", "已完成", "进行中",
-    "保存", "删除", "编辑", "复制", "粘贴",
-    "搜索", "筛选", "排序", "刷新", "更多",
-    "登录", "注册", "忘记密码", "验证码",
-)
 # 数字的非隐私上下文模式。
 _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\d{4}年"),
@@ -243,13 +94,6 @@ _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"第\d+[条项页章节]"),
     re.compile(r"No\.\d+"),
     re.compile(r"\d+(?:kg|cm|mm|m|km|g|ml|px|pt|em|rem|dp)\b"),
-)
-
-_ALL_NEGATIVE_WORDS: tuple[str, ...] = (
-    *_NEGATIVE_NAME_WORDS,
-    *_NEGATIVE_ADDRESS_WORDS,
-    *_NEGATIVE_ORG_WORDS,
-    *_NEGATIVE_UI_WORDS,
 )
 
 _ASCII_KEYWORD_CHARS_RE = re.compile(r"[A-Za-z0-9 #.'-]+")
@@ -756,7 +600,7 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                 end=raw_end,
                 text=match.matched_text,
                 priority=600,
-                source_kind="negative_word",
+                source_kind=str(match.payload),
             )
         )
     # 数字非隐私上下文模式（年份、百分比、序号、计量单位等）。
@@ -785,11 +629,22 @@ def _negative_word_matcher() -> AhoMatcher:
         tuple(
             AhoPattern(
                 text=word,
-                payload=word,
+                payload=source_kind,
                 ascii_boundary=_needs_ascii_keyword_boundary(word),
             )
-            for word in sorted(set(_ALL_NEGATIVE_WORDS), key=len, reverse=True)
+            for word, source_kind in _iter_negative_word_specs()
         )
+    )
+
+
+def _iter_negative_word_specs() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        [
+            *((word, "negative_name_word") for word in load_negative_name_words()),
+            *((word, "negative_address_word") for word in load_negative_address_words()),
+            *((word, "negative_org_word") for word in load_negative_org_words()),
+            *((word, "negative_ui_word") for word in load_negative_ui_words()),
+        ]
     )
 
 
@@ -883,7 +738,7 @@ def _label_matcher() -> AhoMatcher:
                 payload=spec,
                 ascii_boundary=spec.ascii_boundary,
             )
-            for spec in _LABEL_SPECS
+            for spec in load_label_specs()
         )
     )
 
@@ -897,7 +752,7 @@ def _name_start_matcher() -> AhoMatcher:
                 payload=keyword,
                 ascii_boundary=_needs_ascii_keyword_boundary(keyword),
             )
-            for keyword in sorted(set(_NAME_START_KEYWORDS), key=len, reverse=True)
+            for keyword in load_name_start_keywords()
         )
     )
 
@@ -911,7 +766,7 @@ def _family_name_matcher() -> AhoMatcher:
                 payload=surname,
                 ascii_boundary=_needs_ascii_keyword_boundary(surname),
             )
-            for surname in _COMMON_FAMILY_NAMES
+            for surname in load_family_names()
         )
     )
 
@@ -925,7 +780,7 @@ def _company_suffix_matcher() -> AhoMatcher:
                 payload=suffix,
                 ascii_boundary=_needs_ascii_keyword_boundary(suffix),
             )
-            for suffix in sorted(set(_COMPANY_SUFFIXES), key=len, reverse=True)
+            for suffix in load_company_suffixes()
         )
     )
 
@@ -955,12 +810,12 @@ def _zh_address_value_matcher() -> AhoMatcher:
 @lru_cache(maxsize=1)
 def _zh_address_key_matcher() -> AhoMatcher:
     patterns: list[AhoPattern] = []
-    for component_type, keywords in _ZH_ADDRESS_ATTRS:
-        for keyword in sorted(set(keywords), key=len, reverse=True):
+    for group in load_zh_address_keyword_groups():
+        for keyword in group.keywords:
             patterns.append(
                 AhoPattern(
                     text=keyword,
-                    payload=_AddressPatternPayload(component_type=component_type, canonical_text=keyword),
+                    payload=_AddressPatternPayload(component_type=group.component_type, canonical_text=keyword),
                     ascii_boundary=_needs_ascii_keyword_boundary(keyword),
                 )
             )
@@ -990,12 +845,12 @@ def _en_address_value_matcher() -> AhoMatcher:
 @lru_cache(maxsize=1)
 def _en_address_key_matcher() -> AhoMatcher:
     patterns: list[AhoPattern] = []
-    for component_type, keywords in _EN_ADDRESS_ATTRS:
-        for keyword in sorted(set(keywords), key=len, reverse=True):
+    for group in load_en_address_keyword_groups():
+        for keyword in group.keywords:
             patterns.append(
                 AhoPattern(
                     text=keyword,
-                    payload=_AddressPatternPayload(component_type=component_type, canonical_text=keyword),
+                    payload=_AddressPatternPayload(component_type=group.component_type, canonical_text=keyword),
                     ascii_boundary=_needs_ascii_keyword_boundary(keyword),
                 )
             )

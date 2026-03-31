@@ -6,9 +6,7 @@ from dataclasses import dataclass, replace
 from statistics import median
 
 from privacyguard.domain.enums import PIISourceType, PIIAttributeType
-from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Clue, NameComponentHint, OCRScene, OCRSceneBlock, ParseResult, StreamInput
-from privacyguard.infrastructure.pii.detector.stacks import (
+from privacyguard.infrastructure.pii.detector.candidate_utils import (
     build_address_candidate_from_value,
     build_name_candidate_from_value,
     build_organization_candidate_from_value,
@@ -17,6 +15,8 @@ from privacyguard.infrastructure.pii.detector.stacks import (
     looks_like_name_value,
     looks_like_organization_value,
 )
+from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Clue, NameComponentHint, OCRScene, OCRSceneBlock, ParseResult, StreamInput
 
 
 @dataclass(frozen=True, slots=True)

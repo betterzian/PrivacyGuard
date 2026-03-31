@@ -404,8 +404,8 @@ payload
   `rule_based` 词库示例，包含 `true_personas`
 - `data/personas.sample.json`
   fake persona 示例；当 `data/persona_repository.json` 不存在时，`JsonPersonaRepository` 会默认回退到这个样例文件
-- `data/china_geo_lexicon.json`
-  内置地理词典，供地址和 location clue 规则使用
+- `data/scanner_lexicons/china_geo_lexicon.json`
+  内置地理词典，供 scanner 地址 clue 规则使用
 
 ## 训练 `de_model`
 
