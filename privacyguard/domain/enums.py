@@ -19,18 +19,29 @@ class PIISourceType(str, Enum):
 
 
 class ProtectionLevel(str, Enum):
-    """规则检测保护度（单档）。
+    """规则检测保护度（三档）。
 
-    原先 balanced / weak 已废弃；入参中的 ``balanced`` / ``weak`` 会经
-    `normalize_protection_level` 归一到本值，规则始终以最强档运行。
+    - STRONG: 最高灵敏度，单 surname 即可触发姓名检测。
+    - BALANCED: 需 label 或上下文确认才启动 soft 检测。
+    - WEAK: 仅 label-driven 和 hard clue（正则/词典）生效。
     """
 
     STRONG = "strong"
+    BALANCED = "balanced"
+    WEAK = "weak"
 
 
-def normalize_protection_level(_value: ProtectionLevel | str | None = None) -> ProtectionLevel:
-    """将任意历史档位字符串归一为 `STRONG`（单档运行）。"""
-    return ProtectionLevel.STRONG
+def normalize_protection_level(value: ProtectionLevel | str | None = None) -> ProtectionLevel:
+    """将字符串归一为 ProtectionLevel 枚举。无效值默认返回 STRONG。"""
+    if value is None:
+        return ProtectionLevel.STRONG
+    if isinstance(value, ProtectionLevel):
+        return value
+    normalized = str(value).strip().lower()
+    try:
+        return ProtectionLevel(normalized)
+    except ValueError:
+        return ProtectionLevel.STRONG
 
 
 class PIIAttributeType(str, Enum):

@@ -1,4 +1,4 @@
-"""Public detector entry."""
+"""Rewritten stream detector package."""
 
 from privacyguard.infrastructure.pii.detector.rule_based import RuleBasedPIIDetector
 

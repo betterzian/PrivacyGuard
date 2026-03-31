@@ -1,5 +1,9 @@
-"""Structured address detection pipeline."""
+"""新地址子系统。"""
 
-from privacyguard.infrastructure.pii.address.pipeline import collect_address_candidates
+from privacyguard.infrastructure.pii.address.lexicon import collect_components
+from privacyguard.infrastructure.pii.address.types import AddressComponent
 
-__all__ = ["collect_address_candidates"]
+__all__ = [
+    "AddressComponent",
+    "collect_components",
+]
