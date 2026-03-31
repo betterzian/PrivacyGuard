@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
+
+from privacyguard.infrastructure.pii.lexicon_store import read_scanner_lexicon_json
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,14 +22,9 @@ class EnGeoLexicon:
     tier_b_places: tuple[str, ...]
 
 
-def _data_root() -> Path:
-    return Path(__file__).resolve().parents[4] / "data" / "scanner_lexicons"
-
-
 @lru_cache(maxsize=1)
 def load_china_geo_lexicon() -> ChinaGeoLexicon:
-    path = _data_root() / "china_geo_lexicon.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = read_scanner_lexicon_json("china_geo_lexicon.json")
     return ChinaGeoLexicon(
         provinces=tuple(str(item).strip() for item in payload.get("provinces", []) if str(item).strip()),
         cities=tuple(str(item).strip() for item in payload.get("cities", []) if str(item).strip()),
@@ -39,8 +34,7 @@ def load_china_geo_lexicon() -> ChinaGeoLexicon:
 
 @lru_cache(maxsize=1)
 def load_en_geo_lexicon() -> EnGeoLexicon:
-    path = _data_root() / "en_geo_lexicon.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = read_scanner_lexicon_json("en_geo_lexicon.json")
     return EnGeoLexicon(
         tier_a_state_names=tuple(str(item).strip() for item in payload.get("tier_a_state_names", []) if str(item).strip()),
         tier_a_state_codes=tuple(str(item).strip() for item in payload.get("tier_a_state_codes", []) if str(item).strip()),

@@ -134,51 +134,154 @@ class StructuredValueStack(BaseStack):
 
 @dataclass(slots=True)
 class NameStack(BaseStack):
+    """姓名检测 stack，根据 seed clue 附近文本判断中英文，分方向构建候选。
+
+    入口分派逻辑：
+    - LABEL / START → 从左往右（L→R）吃 token。
+    - SURNAME（无 label/start 前驱）→ 依语言选方向：
+      中文姓氏在前，L→R；英文姓氏在末，R→L。
+    - GIVEN_NAME → 依语言选方向：
+      中文名字在后，R→L；英文名字在前，L→R。
+    """
+
     def run(self) -> StackRun | None:
+        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
+            return self._run_ltr()
+        if self.clue.role == ClueRole.SURNAME:
+            locale = _detect_locale(self.context.stream.raw_text, self.clue.start, self.clue.end)
+            if locale == "zh":
+                return self._run_ltr()
+            return self._run_rtl()
+        if self.clue.role == ClueRole.GIVEN_NAME:
+            locale = _detect_locale(self.context.stream.raw_text, self.clue.start, self.clue.end)
+            if locale == "zh":
+                return self._run_rtl()
+            return self._run_ltr()
+        return None
+
+    # ------------------------------------------------------------------
+    # L→R：label / start / 中文 surname / 英文 given name
+    # ------------------------------------------------------------------
+
+    def _run_ltr(self) -> StackRun | None:
         is_label_seed = self.clue.role == ClueRole.LABEL
-        start = self._resolve_left_boundary()
-        if start is None:
-            return None
+        # 左边界。
+        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
+            start = _skip_separators(self.context.stream.raw_text, self.clue.end)
+        else:
+            start = self.clue.start
+        # 向右消费相邻 NAME clue 并扩展字符边界。
         end, next_index, consumed_ids = self._resolve_right_boundary()
-        # 名字 clue 只覆盖姓氏，需向右扩展以捕获完整姓名（如"张"→"张三"）。
         end = _extend_name_boundary(self.context.stream.raw_text, start, end, self.context.clues, next_index)
         if end <= start:
             return None
+        # 候选构建。
+        component_hint = self._effective_hint(start, end)
         candidate = build_name_candidate_from_value(
             source=self.context.stream.source,
             value_text=self.context.stream.raw_text[start:end],
             value_start=start,
             value_end=end,
             source_kind=self.clue.source_kind,
-            component_hint=self._component_hint(),
+            component_hint=component_hint,
             label_clue_id=self.clue.clue_id if is_label_seed else None,
             label_driven=is_label_seed,
         )
         if candidate is None:
             return None
-        # 非 label-driven 时，若候选区间被负向 clue 覆盖则拒绝。
+        # 负向 clue 处理（label-driven 跳过）。
         if not is_label_seed:
-            effect = evaluate_negative_effect(
-                ClueFamily.NAME,
-                overlapping_negative_clues(self.context.negative_clues, candidate.start, candidate.end),
-            )
-            if effect.decision == NegativeDecision.VETO:
+            candidate = self._apply_negative(candidate)
+            if candidate is None:
                 return None
-            if effect.decision == NegativeDecision.PENALTY:
-                candidate.metadata = merge_metadata(candidate.metadata, {"negative_signals": list(effect.reasons)})
-        return StackRun(ClueFamily.NAME, candidate, consumed_ids, {self.clue.clue_id} if is_label_seed else set(), next_index)
+        return StackRun(
+            ClueFamily.NAME, candidate, consumed_ids,
+            {self.clue.clue_id} if is_label_seed else set(),
+            next_index,
+        )
 
-    def _resolve_left_boundary(self) -> int | None:
-        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            return _skip_separators(self.context.stream.raw_text, self.clue.end)
-        if self.clue.role == ClueRole.SURNAME:
-            return self.clue.start
-        return None
+    # ------------------------------------------------------------------
+    # R→L：英文 surname / 中文 given name
+    # ------------------------------------------------------------------
+
+    def _run_rtl(self) -> StackRun | None:
+        end = self.clue.end
+        # 向左扩展字符边界。
+        start = _extend_name_boundary_left(
+            self.context.stream.raw_text, self.clue.start, end,
+            self.context.clues, self.clue_index,
+        )
+        if end <= start:
+            return None
+        component_hint = self._effective_hint(start, end)
+        candidate = build_name_candidate_from_value(
+            source=self.context.stream.source,
+            value_text=self.context.stream.raw_text[start:end],
+            value_start=start,
+            value_end=end,
+            source_kind=self.clue.source_kind,
+            component_hint=component_hint,
+            label_driven=False,
+        )
+        if candidate is None:
+            return None
+        candidate = self._apply_negative(candidate)
+        if candidate is None:
+            return None
+        return StackRun(
+            ClueFamily.NAME, candidate, {self.clue.clue_id},
+            set(), self.clue_index + 1,
+        )
+
+    # ------------------------------------------------------------------
+    # 共用工具方法
+    # ------------------------------------------------------------------
+
+    def _effective_hint(self, start: int, end: int) -> NameComponentHint:
+        """若扩展后文本比 seed 更长，提升为 FULL；否则保留原始 hint。"""
+        base = self._component_hint()
+        if base in {NameComponentHint.FAMILY, NameComponentHint.GIVEN}:
+            candidate_text = self.context.stream.raw_text[start:end].strip()
+            if len(candidate_text) > len(self.clue.text):
+                return NameComponentHint.FULL
+        return base
 
     def _component_hint(self) -> NameComponentHint:
         if self.clue.role == ClueRole.SURNAME:
             return NameComponentHint.FAMILY
+        if self.clue.role == ClueRole.GIVEN_NAME:
+            return NameComponentHint.GIVEN
         return self.clue.component_hint or NameComponentHint.FULL
+
+    def _apply_negative(self, candidate: CandidateDraft) -> CandidateDraft | None:
+        """按语言执行负向 clue 处理。
+
+        中文：遇到 negative 直接丢弃候选。
+        英文：截到最早 negative 前；截完只剩 1 个 token 则丢弃。
+        """
+        negatives = overlapping_negative_clues(self.context.negative_clues, candidate.start, candidate.end)
+        if not negatives:
+            return candidate
+        locale = _detect_locale(self.context.stream.raw_text, candidate.start, candidate.end)
+        if locale == "zh":
+            return None
+        # 英文：截到最早 negative 前。
+        earliest_start = min(neg.start for neg in negatives)
+        if earliest_start <= candidate.start:
+            return None
+        truncated = self.context.stream.raw_text[candidate.start:earliest_start].strip()
+        tokens = truncated.split()
+        if len(tokens) <= 1:
+            return None
+        return build_name_candidate_from_value(
+            source=self.context.stream.source,
+            value_text=truncated,
+            value_start=candidate.start,
+            value_end=candidate.start + len(truncated),
+            source_kind=candidate.source_kind,
+            component_hint=NameComponentHint.FULL,
+            label_driven=candidate.label_driven,
+        )
 
     def _resolve_right_boundary(self) -> tuple[int, int, set[str]]:
         raw_text = self.context.stream.raw_text
@@ -735,3 +838,70 @@ def _extend_name_boundary(raw_text: str, start: int, end: int, clues: tuple[Clue
     if cursor - start > 80:
         cursor = start + 80
     return cursor
+
+
+def _extend_name_boundary_left(raw_text: str, start: int, end: int, clues: tuple[Clue, ...], clue_index: int) -> int:
+    """从 start 向左扩展，捕获紧邻的姓名字符。返回新的左边界。
+
+    用于 R→L 方向：英文 surname 向左找 given/middle name，
+    中文 given name 向左找姓氏。
+    """
+    # 向左查找最近的 non-name clue 或 break 的 end 作为下界。
+    lower = 0
+    for i in range(clue_index - 1, -1, -1):
+        c = clues[i]
+        if c.family == ClueFamily.BREAK:
+            lower = c.end
+            break
+        if c.family != ClueFamily.NAME:
+            lower = c.end
+            break
+    # 判断是中文还是英文（基于 seed 首字符）。
+    is_zh = start > 0 and re.match(r"[\u4e00-\u9fff·]", raw_text[start - 1]) is not None
+    if is_zh:
+        # 中文：向左最多 4 个汉字（覆盖复姓 + 双字名）。
+        cursor = start
+        zh_count = 0
+        while cursor > lower and zh_count < 4:
+            if re.match(r"[\u4e00-\u9fff·]", raw_text[cursor - 1]):
+                zh_count += 1
+                cursor -= 1
+            else:
+                break
+        return cursor
+    # 英文：向左扩展连续英文 token。
+    cursor = start
+    while cursor > lower:
+        ch = raw_text[cursor - 1]
+        if _HARD_BREAK_RE.match(ch) or ch in ",，;；|/\\()（）":
+            break
+        if re.match(r"[A-Za-z.'\- ]", ch):
+            cursor -= 1
+        else:
+            break
+    if start - cursor > 80:
+        cursor = start - 80
+    return cursor
+
+
+def _detect_locale(raw_text: str, start: int, end: int) -> str:
+    """根据 seed 附近文本判断中英文上下文。
+
+    在 seed 前后各 20 字符窗口内统计 CJK 与 ASCII 字母数量。
+    CJK 多则返回 "zh"，ASCII 多则返回 "en"；
+    平局时根据 seed 本身字符决定。
+    """
+    window_start = max(0, start - 20)
+    window_end = min(len(raw_text), end + 20)
+    window = raw_text[window_start:window_end]
+    zh_count = sum(1 for ch in window if "\u4e00" <= ch <= "\u9fff")
+    en_count = sum(1 for ch in window if "A" <= ch <= "Z" or "a" <= ch <= "z")
+    if zh_count > en_count:
+        return "zh"
+    if en_count > zh_count:
+        return "en"
+    # 平局：检查 seed 本身。
+    seed_text = raw_text[start:end]
+    if any("\u4e00" <= ch <= "\u9fff" for ch in seed_text):
+        return "zh"
+    return "en"

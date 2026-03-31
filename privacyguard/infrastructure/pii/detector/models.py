@@ -31,6 +31,7 @@ class ClueRole(str, Enum):
     VALUE = "value"
     START = "start"
     SURNAME = "surname"
+    GIVEN_NAME = "given_name"
     SUFFIX = "suffix"
     BREAK = "break"
     NEGATIVE = "negative"
@@ -58,6 +59,7 @@ class BreakType(str, Enum):
     OCR = "ocr"
     PUNCT = "punct"
     NEWLINE = "newline"
+    CONNECTOR = "connector"
 
 
 class NegativeDecision(str, Enum):

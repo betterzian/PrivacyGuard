@@ -57,15 +57,15 @@ def _structured_accept_always(_clue: Clue, _sctx: _StrategyContext) -> bool:
 # ---------------------------------------------------------------------------
 
 def _name_should_start_strong(clue: Clue, _sctx: _StrategyContext) -> bool:
-    """STRONG: 单 surname / label / name_start 均可触发。"""
-    return clue.role in {ClueRole.LABEL, ClueRole.START, ClueRole.SURNAME}
+    """STRONG: surname / given_name / label / name_start 均可触发。"""
+    return clue.role in {ClueRole.LABEL, ClueRole.START, ClueRole.SURNAME, ClueRole.GIVEN_NAME}
 
 
 def _name_should_start_balanced(clue: Clue, sctx: _StrategyContext) -> bool:
-    """BALANCED: label / name_start 可触发；单 surname 需有前方 label。"""
+    """BALANCED: label / name_start 可触发；单 surname / given_name 需有前方 label。"""
     if clue.role in {ClueRole.LABEL, ClueRole.START}:
         return True
-    if clue.role == ClueRole.SURNAME:
+    if clue.role in {ClueRole.SURNAME, ClueRole.GIVEN_NAME}:
         return sctx.has_preceding_label
     return False
 

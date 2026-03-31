@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 
 from privacyguard.domain.enums import PIIAttributeType
+from privacyguard.infrastructure.pii.lexicon_store import read_scanner_lexicon_json
 from privacyguard.infrastructure.pii.detector.models import AddressComponentType, LabelSpec, NameComponentHint
 
 
@@ -17,13 +16,8 @@ class AddressKeywordGroup:
     keywords: tuple[str, ...]
 
 
-def _data_root() -> Path:
-    return Path(__file__).resolve().parents[4] / "data" / "scanner_lexicons"
-
-
 def _read_json(filename: str) -> object:
-    path = _data_root() / filename
-    return json.loads(path.read_text(encoding="utf-8"))
+    return read_scanner_lexicon_json(filename)
 
 
 def _clean_str_list(values: object) -> tuple[str, ...]:
@@ -135,6 +129,27 @@ def load_negative_ui_words() -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=1)
+def load_en_surnames() -> tuple[str, ...]:
+    """加载英文姓氏词典，按长度降序排列。"""
+    payload = _clean_str_list(_read_json("en_surnames.json"))
+    return tuple(sorted(set(payload), key=len, reverse=True))
+
+
+@lru_cache(maxsize=1)
+def load_en_given_names() -> tuple[str, ...]:
+    """加载英文名字（given name）词典，按长度降序排列。"""
+    payload = _clean_str_list(_read_json("en_given_names.json"))
+    return tuple(sorted(set(payload), key=len, reverse=True))
+
+
+@lru_cache(maxsize=1)
+def load_zh_given_names() -> tuple[str, ...]:
+    """加载中文名字（given name）词典，按长度降序排列。"""
+    payload = _clean_str_list(_read_json("zh_given_names.json"))
+    return tuple(sorted(set(payload), key=len, reverse=True))
+
+
+@lru_cache(maxsize=1)
 def load_all_negative_words() -> tuple[str, ...]:
     return tuple(
         sorted(
@@ -157,6 +172,8 @@ __all__ = [
     "load_all_negative_words",
     "load_company_suffixes",
     "load_en_address_keyword_groups",
+    "load_en_given_names",
+    "load_en_surnames",
     "load_family_names",
     "load_label_specs",
     "load_name_start_keywords",
@@ -165,4 +182,5 @@ __all__ = [
     "load_negative_org_words",
     "load_negative_ui_words",
     "load_zh_address_keyword_groups",
+    "load_zh_given_names",
 ]

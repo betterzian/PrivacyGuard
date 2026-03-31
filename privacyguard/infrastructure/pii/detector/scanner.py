@@ -12,6 +12,8 @@ from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_company_suffixes,
     load_en_address_keyword_groups,
+    load_en_given_names,
+    load_en_surnames,
     load_family_names,
     load_label_specs,
     load_name_start_keywords,
@@ -20,6 +22,7 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_negative_org_words,
     load_negative_ui_words,
     load_zh_address_keyword_groups,
+    load_zh_given_names,
 )
 from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern
 from privacyguard.infrastructure.pii.detector.models import (
@@ -30,6 +33,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueFamily,
     ClueRole,
     DictionaryEntry,
+    NameComponentHint,
     StreamInput,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
@@ -178,6 +182,10 @@ def build_clue_bundle(
         *(clue for segment in scan_segments for clue in _scan_break_clues(ctx, segment)),
         *(clue for segment in scan_segments for clue in _scan_name_start_clues(ctx, segment)),
         *(clue for segment in scan_segments for clue in _scan_family_name_clues(ctx, segment)),
+        *(clue for segment in scan_segments for clue in _scan_en_surname_clues(ctx, segment)),
+        *(clue for segment in scan_segments for clue in _scan_en_given_name_clues(ctx, segment)),
+        *(clue for segment in scan_segments for clue in _scan_zh_given_name_clues(ctx, segment)),
+        *(clue for segment in scan_segments for clue in _scan_connector_clues(ctx, segment)),
         *(clue for segment in scan_segments for clue in _scan_company_suffix_clues(ctx, segment)),
         *(clue for segment in scan_segments for clue in _scan_address_clues(ctx, segment, locale_profile=locale_profile)),
     ]
@@ -456,6 +464,98 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
                 text=str(match.payload),
                 priority=220,
                 source_kind="family_name",
+            )
+        )
+    return _dedupe_clues(clues)
+
+
+def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
+    """扫描英文姓氏，产出 SURNAME clue。"""
+    clues: list[Clue] = []
+    for match in _en_surname_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NAME,
+                role=ClueRole.SURNAME,
+                attr_type=PIIAttributeType.NAME,
+                start=raw_start,
+                end=raw_end,
+                text=str(match.payload),
+                priority=218,
+                source_kind="en_surname",
+                component_hint=NameComponentHint.FAMILY,
+            )
+        )
+    return _dedupe_clues(clues)
+
+
+def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
+    """扫描英文名字（given name），产出 GIVEN_NAME clue。"""
+    clues: list[Clue] = []
+    for match in _en_given_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NAME,
+                role=ClueRole.GIVEN_NAME,
+                attr_type=PIIAttributeType.NAME,
+                start=raw_start,
+                end=raw_end,
+                text=str(match.payload),
+                priority=215,
+                source_kind="en_given_name",
+                component_hint=NameComponentHint.GIVEN,
+            )
+        )
+    return _dedupe_clues(clues)
+
+
+def _scan_zh_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
+    """扫描中文名字（given name），产出 GIVEN_NAME clue。"""
+    clues: list[Clue] = []
+    for match in _zh_given_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NAME,
+                role=ClueRole.GIVEN_NAME,
+                attr_type=PIIAttributeType.NAME,
+                start=raw_start,
+                end=raw_end,
+                text=str(match.payload),
+                priority=210,
+                source_kind="zh_given_name",
+                component_hint=NameComponentHint.GIVEN,
+            )
+        )
+    return _dedupe_clues(clues)
+
+
+def _scan_connector_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
+    """扫描连接词/介词，产出 BREAK clue（break_type=CONNECTOR）。
+
+    中文：的、得、是、于、去。英文：is、or、at。
+    source_kind 标记为 connector_zh / connector_en，与 ADDRESS 类 clue 属性区分。
+    """
+    clues: list[Clue] = []
+    for match in _connector_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.BREAK,
+                role=ClueRole.BREAK,
+                attr_type=None,
+                start=raw_start,
+                end=raw_end,
+                text=match.matched_text,
+                priority=150,
+                source_kind=str(match.payload),
+                break_type=BreakType.CONNECTOR,
             )
         )
     return _dedupe_clues(clues)
@@ -767,6 +867,75 @@ def _family_name_matcher() -> AhoMatcher:
                 ascii_boundary=_needs_ascii_keyword_boundary(surname),
             )
             for surname in load_family_names()
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _en_surname_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=surname,
+                payload=surname,
+                ascii_boundary=True,
+            )
+            for surname in load_en_surnames()
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _en_given_name_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=name,
+                payload=name,
+                ascii_boundary=True,
+            )
+            for name in load_en_given_names()
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _zh_given_name_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=name,
+                payload=name,
+                ascii_boundary=_needs_ascii_keyword_boundary(name),
+            )
+            for name in load_zh_given_names()
+        )
+    )
+
+
+# 连接词/介词：中文（的、得、是、于、去）、英文（is、or、at）。
+_CONNECTOR_SPECS: tuple[tuple[str, str], ...] = (
+    ("的", "connector_zh"),
+    ("得", "connector_zh"),
+    ("是", "connector_zh"),
+    ("于", "connector_zh"),
+    ("去", "connector_zh"),
+    ("is", "connector_en"),
+    ("or", "connector_en"),
+    ("at", "connector_en"),
+)
+
+
+@lru_cache(maxsize=1)
+def _connector_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=word,
+                payload=source_kind,
+                ascii_boundary=_needs_ascii_keyword_boundary(word),
+            )
+            for word, source_kind in _CONNECTOR_SPECS
         )
     )
 
