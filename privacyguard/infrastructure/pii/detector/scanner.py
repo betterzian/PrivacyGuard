@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from itertools import count
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.address.geo_db import load_china_geo_lexicon, load_en_geo_lexicon
+from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.labels import _LABEL_SPECS
 from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern
 from privacyguard.infrastructure.pii.detector.models import (
@@ -22,14 +22,6 @@ from privacyguard.infrastructure.pii.detector.models import (
     StreamInput,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
-
-_clue_id_seq = count(1)
-
-
-def reset_clue_id_sequence() -> None:
-    """在每个 turn（一次完整 `detect`）开始时将 clue 编号重置为从 1 递增。"""
-    global _clue_id_seq
-    _clue_id_seq = count(1)
 
 _HARD_SOURCE_PRIORITY = {
     "session": 4,
@@ -66,10 +58,18 @@ _HARD_PATTERNS: tuple[tuple[PIIAttributeType, str, re.Pattern[str], int], ...] =
     (PIIAttributeType.PHONE, "regex_phone_cn", re.compile(r"(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)"), 118),
     (PIIAttributeType.PHONE, "regex_phone_us", re.compile(r"(?<!\w)(?:\(\d{3}\)\s*|\d{3}[-. ]?)\d{3}[-. ]\d{4}(?!\w)"), 117),
     (PIIAttributeType.ID_NUMBER, "regex_id_cn", re.compile(r"(?<![\w\d])\d{17}[\dXx](?![\w\d])"), 115),
-    (PIIAttributeType.BANK_ACCOUNT, "regex_bank_account", re.compile(r"(?<!\d)\d(?:[ -]?\d){11,22}(?!\d)"), 110),
-    (PIIAttributeType.PASSPORT_NUMBER, "regex_passport", re.compile(r"(?<![A-Za-z0-9])[A-Z]\d{8}(?![A-Za-z0-9])"), 108),
-    (PIIAttributeType.DRIVER_LICENSE, "regex_driver_license", re.compile(r"(?<![A-Za-z0-9])(?:[A-Z][A-Z0-9\\-]{4,23}|[0-9][A-Z][A-Z0-9\\-]{3,22})(?![A-Za-z0-9])"), 107),
+    # passport: 仅白名单前缀（中国 E/G/D/P/H/M、美国 C 等）视为 hard clue。
+    (PIIAttributeType.PASSPORT_NUMBER, "regex_passport_cn", re.compile(r"(?<![A-Za-z0-9])[EGDPHM]\d{8}(?![A-Za-z0-9])"), 108),
+    (PIIAttributeType.PASSPORT_NUMBER, "regex_passport_us", re.compile(r"(?<![A-Za-z0-9])C\d{8}(?![A-Za-z0-9])"), 107),
+    # driver_license: 中国驾照为 12 位纯数字。
+    (PIIAttributeType.DRIVER_LICENSE, "regex_driver_license_cn", re.compile(r"(?<!\d)\d{12}(?!\d)"), 106),
 )
+
+# bank_account 通用正则——命中后额外做 Luhn 校验，通过归 bank_account，否则归 NUMERIC。
+_BANK_ACCOUNT_CANDIDATE_PATTERN = re.compile(r"(?<!\d)\d(?:[ -]?\d){11,22}(?!\d)")
+
+# 通用长数字兜底：12+ 位连续数字（可含空格/连字符），未被其他规则归类时归入 NUMERIC。
+_GENERIC_NUMBER_PATTERN = re.compile(r"(?<!\d)\d(?:[ \t\-]?\d){11,30}(?!\d)")
 
 _COMPANY_SUFFIXES = (
     "股份有限公司",
@@ -183,6 +183,75 @@ _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
     (BreakType.NEWLINE, "break_newline", re.compile(r"(?:\r?\n){2,}")),
 )
 
+# ---- 负向黑名单 ----
+# 姓氏后接常见非人名字组成的词。
+_NEGATIVE_NAME_WORDS: tuple[str, ...] = (
+    "高兴", "高度", "高速", "高级", "高端", "高效", "高考", "高峰",
+    "白天", "白色", "白名单",
+    "田野", "田径", "田地",
+    "金融", "金属", "金额", "金牌",
+    "花园", "花费", "花样",
+    "安全", "安装", "安排", "安静", "安卓",
+    "马上", "马路",
+    "池塘",
+    "方便", "方案", "方向", "方法", "方式",
+    "常见", "常用", "常规",
+    "任务", "任何", "任意",
+    "余额", "余下",
+    "万元", "万人", "万一",
+    "石头",
+    "易用",
+    "江南", "江河",
+    "龙头",
+    "向上", "向下", "向前",
+    "明天", "明确", "明显",
+    "成功", "成本", "成员", "成为",
+    "丁香",
+    "范围", "范本",
+    "路线", "路过", "路由", "路径",
+    "单位", "单独", "单元",
+)
+# 地址成分字后接常见非地址字组成的词。
+_NEGATIVE_ADDRESS_WORDS: tuple[str, ...] = (
+    "道具", "道理", "道歉", "道德",
+    "路线", "路过", "路由", "路径",
+    "街舞",
+    "区别", "区间", "区域",
+    "省略", "省心", "省事",
+    "市场", "市值",
+    "县级",
+)
+# 公司后缀的非公司组合。
+_NEGATIVE_ORG_WORDS: tuple[str, ...] = (
+    "有限的", "有限制", "有限元",
+    "集团军",
+    "公司法",
+)
+# GUI / 系统文本。
+_NEGATIVE_UI_WORDS: tuple[str, ...] = (
+    "确认", "取消", "提交", "返回", "下一步", "上一步",
+    "首页", "设置", "帮助", "关于", "退出",
+    "请输入", "必填", "加载中", "已完成", "进行中",
+    "保存", "删除", "编辑", "复制", "粘贴",
+    "搜索", "筛选", "排序", "刷新", "更多",
+    "登录", "注册", "忘记密码", "验证码",
+)
+# 数字的非隐私上下文模式。
+_NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\d{4}年"),
+    re.compile(r"\d{1,3}%"),
+    re.compile(r"第\d+[条项页章节]"),
+    re.compile(r"No\.\d+"),
+    re.compile(r"\d+(?:kg|cm|mm|m|km|g|ml|px|pt|em|rem|dp)\b"),
+)
+
+_ALL_NEGATIVE_WORDS: tuple[str, ...] = (
+    *_NEGATIVE_NAME_WORDS,
+    *_NEGATIVE_ADDRESS_WORDS,
+    *_NEGATIVE_ORG_WORDS,
+    *_NEGATIVE_UI_WORDS,
+)
+
 _ASCII_KEYWORD_CHARS_RE = re.compile(r"[A-Za-z0-9 #.'-]+")
 _ASCII_LITERAL_CHARS_RE = re.compile(r"[A-Za-z0-9 .,'@_+\-#/&()]+")
 _POSTAL_CODE_PATTERN = re.compile(r"(?<!\d)\d{5}(?:-\d{4})?(?!\d)")
@@ -223,6 +292,7 @@ class _AddressPatternPayload:
 def build_clue_bundle(
     stream: StreamInput,
     *,
+    ctx: DetectContext,
     session_entries: tuple[DictionaryEntry, ...],
     local_entries: tuple[DictionaryEntry, ...],
     locale_profile: str,
@@ -231,8 +301,9 @@ def build_clue_bundle(
     ocr_break_spans = _find_ocr_break_spans(stream.raw_text)
     hard_clues = _resolve_hard_conflicts(
         [
-            *_scan_hard_patterns(stream.raw_text, ignored_spans=ocr_break_spans),
+            *_scan_hard_patterns(ctx, stream.raw_text, ignored_spans=ocr_break_spans),
             *_scan_dictionary_hard_clues(
+                ctx,
                 stream.raw_text,
                 session_entries,
                 source_kind="session",
@@ -240,6 +311,7 @@ def build_clue_bundle(
                 ignored_spans=ocr_break_spans,
             ),
             *_scan_dictionary_hard_clues(
+                ctx,
                 stream.raw_text,
                 local_entries,
                 source_kind="local",
@@ -253,25 +325,32 @@ def build_clue_bundle(
     label_clues = tuple(
         clue
         for segment in scan_segments
-        for clue in _scan_label_clues(segment)
+        for clue in _scan_label_clues(ctx, segment)
     )
     label_spans = tuple((clue.start, clue.end) for clue in label_clues)
     soft_clues = [
         *label_clues,
-        *_scan_ocr_break_clues(ocr_break_spans),
-        *(clue for segment in scan_segments for clue in _scan_break_clues(segment)),
-        *(clue for segment in scan_segments for clue in _scan_name_start_clues(segment)),
-        *(clue for segment in scan_segments for clue in _scan_family_name_clues(segment)),
-        *(clue for segment in scan_segments for clue in _scan_company_suffix_clues(segment)),
-        *(clue for segment in scan_segments for clue in _scan_address_clues(segment, locale_profile=locale_profile)),
+        *_scan_ocr_break_clues(ctx, ocr_break_spans),
+        *(clue for segment in scan_segments for clue in _scan_break_clues(ctx, segment)),
+        *(clue for segment in scan_segments for clue in _scan_name_start_clues(ctx, segment)),
+        *(clue for segment in scan_segments for clue in _scan_family_name_clues(ctx, segment)),
+        *(clue for segment in scan_segments for clue in _scan_company_suffix_clues(ctx, segment)),
+        *(clue for segment in scan_segments for clue in _scan_address_clues(ctx, segment, locale_profile=locale_profile)),
     ]
     soft_clues = [clue for clue in soft_clues if clue in label_clues or not _overlaps_any(clue.start, clue.end, label_spans)]
+    # 负向 clue：与正向 clue 一并扫描，供 Stack 阶段参考。
+    negative_clues = tuple(
+        clue
+        for segment in scan_segments
+        for clue in _scan_negative_clues(ctx, segment)
+    )
     all_clues = tuple(sorted([*hard_clues, *soft_clues], key=lambda item: (item.start, -item.priority, item.end)))
-    return ClueBundle(all_clues=all_clues)
+    return ClueBundle(all_clues=all_clues, negative_clues=negative_clues)
 
 
-def _scan_hard_patterns(text: str, *, ignored_spans: tuple[tuple[int, int], ...] = ()) -> list[Clue]:
+def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[tuple[int, int], ...] = ()) -> list[Clue]:
     clues: list[Clue] = []
+    hard_spans: list[tuple[int, int]] = []
     for attr_type, matched_by, pattern, priority in _HARD_PATTERNS:
         for match in pattern.finditer(text):
             value = match.group(0).strip()
@@ -281,7 +360,7 @@ def _scan_hard_patterns(text: str, *, ignored_spans: tuple[tuple[int, int], ...]
                 continue
             clues.append(
                 Clue(
-                    clue_id=_next_clue_id(),
+                    clue_id=ctx.next_clue_id(),
                     family=ClueFamily.STRUCTURED,
                     role=ClueRole.HARD,
                     attr_type=attr_type,
@@ -291,9 +370,11 @@ def _scan_hard_patterns(text: str, *, ignored_spans: tuple[tuple[int, int], ...]
                     priority=priority,
                     source_kind=matched_by,
                     hard_source="regex",
-                    placeholder=_PLACEHOLDER_BY_ATTR[attr_type],
+                    placeholder=_PLACEHOLDER_BY_ATTR.get(attr_type, f"<{attr_type.value}>"),
                 )
             )
+            hard_spans.append((match.start(), match.end()))
+    # 银行卡 PAN（Luhn 校验）。
     for match in _CARD_PAN_PATTERN.finditer(text):
         if _overlaps_any(match.start(), match.end(), ignored_spans):
             continue
@@ -303,7 +384,7 @@ def _scan_hard_patterns(text: str, *, ignored_spans: tuple[tuple[int, int], ...]
             continue
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.STRUCTURED,
                 role=ClueRole.HARD,
                 attr_type=PIIAttributeType.CARD_NUMBER,
@@ -316,10 +397,76 @@ def _scan_hard_patterns(text: str, *, ignored_spans: tuple[tuple[int, int], ...]
                 placeholder=_PLACEHOLDER_BY_ATTR[PIIAttributeType.CARD_NUMBER],
             )
         )
+        hard_spans.append((match.start(), match.end()))
+    # bank_account 候选：Luhn 通过→bank_account，否则→NUMERIC 兜底。
+    for match in _BANK_ACCOUNT_CANDIDATE_PATTERN.finditer(text):
+        if _overlaps_any(match.start(), match.end(), ignored_spans):
+            continue
+        if _overlaps_any(match.start(), match.end(), tuple(hard_spans)):
+            continue
+        value = match.group(0).strip()
+        digits = re.sub(r"\D", "", value)
+        if _luhn_valid(digits):
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.STRUCTURED,
+                    role=ClueRole.HARD,
+                    attr_type=PIIAttributeType.BANK_ACCOUNT,
+                    start=match.start(),
+                    end=match.end(),
+                    text=value,
+                    priority=110,
+                    source_kind="regex_bank_account",
+                    hard_source="regex",
+                    placeholder=_PLACEHOLDER_BY_ATTR[PIIAttributeType.BANK_ACCOUNT],
+                )
+            )
+        else:
+            # 不符合 Luhn 的长数字归入 NUMERIC 兜底。
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.STRUCTURED,
+                    role=ClueRole.HARD,
+                    attr_type=PIIAttributeType.NUMERIC,
+                    start=match.start(),
+                    end=match.end(),
+                    text=value,
+                    priority=90,
+                    source_kind="regex_generic_number",
+                    hard_source="regex",
+                    placeholder="<numeric>",
+                )
+            )
+        hard_spans.append((match.start(), match.end()))
+    # 通用长数字兜底：未被以上规则覆盖的长数字串归入 NUMERIC。
+    for match in _GENERIC_NUMBER_PATTERN.finditer(text):
+        if _overlaps_any(match.start(), match.end(), ignored_spans):
+            continue
+        if _overlaps_any(match.start(), match.end(), tuple(hard_spans)):
+            continue
+        value = match.group(0).strip()
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.STRUCTURED,
+                role=ClueRole.HARD,
+                attr_type=PIIAttributeType.NUMERIC,
+                start=match.start(),
+                end=match.end(),
+                text=value,
+                priority=85,
+                source_kind="regex_generic_number",
+                hard_source="regex",
+                placeholder="<numeric>",
+            )
+        )
     return clues
 
 
 def _scan_dictionary_hard_clues(
+    ctx: DetectContext,
     text: str,
     entries: tuple[DictionaryEntry, ...],
     *,
@@ -336,7 +483,7 @@ def _scan_dictionary_hard_clues(
                     continue
                 clues.append(
                     Clue(
-                        clue_id=_next_clue_id(),
+                        clue_id=ctx.next_clue_id(),
                         family=ClueFamily.STRUCTURED,
                         role=ClueRole.HARD,
                         attr_type=entry.attr_type,
@@ -353,7 +500,7 @@ def _scan_dictionary_hard_clues(
     return clues
 
 
-def _scan_label_clues(segment: _ScanSegment) -> tuple[Clue, ...]:
+def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, ...]:
     matches: list[tuple[int, int, object]] = []
     for match in _label_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         matches.append((match.start, match.end, match.payload))
@@ -369,7 +516,7 @@ def _scan_label_clues(segment: _ScanSegment) -> tuple[Clue, ...]:
         raw_start, raw_end = _segment_span_to_raw(segment, start, end)
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=_LABEL_FAMILY_BY_ATTR[spec.attr_type],
                 role=ClueRole.LABEL,
                 attr_type=spec.attr_type,
@@ -385,14 +532,14 @@ def _scan_label_clues(segment: _ScanSegment) -> tuple[Clue, ...]:
     return tuple(clues)
 
 
-def _scan_break_clues(segment: _ScanSegment) -> list[Clue]:
+def _scan_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for break_type, source_kind, pattern in _BREAK_PATTERNS:
         for match in pattern.finditer(segment.text):
             raw_start, raw_end = _segment_span_to_raw(segment, match.start(), match.end())
             clues.append(
                 Clue(
-                    clue_id=_next_clue_id(),
+                    clue_id=ctx.next_clue_id(),
                     family=ClueFamily.BREAK,
                     role=ClueRole.BREAK,
                     attr_type=None,
@@ -407,12 +554,12 @@ def _scan_break_clues(segment: _ScanSegment) -> list[Clue]:
     return _dedupe_clues(clues)
 
 
-def _scan_ocr_break_clues(ocr_break_spans: tuple[tuple[int, int], ...]) -> list[Clue]:
+def _scan_ocr_break_clues(ctx: DetectContext, ocr_break_spans: tuple[tuple[int, int], ...]) -> list[Clue]:
     clues: list[Clue] = []
     for start, end in ocr_break_spans:
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.BREAK,
                 role=ClueRole.BREAK,
                 attr_type=None,
@@ -427,13 +574,13 @@ def _scan_ocr_break_clues(ocr_break_spans: tuple[tuple[int, int], ...]) -> list[
     return clues
 
 
-def _scan_name_start_clues(segment: _ScanSegment) -> list[Clue]:
+def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for match in _name_start_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.NAME,
                 role=ClueRole.START,
                 attr_type=PIIAttributeType.NAME,
@@ -447,7 +594,7 @@ def _scan_name_start_clues(segment: _ScanSegment) -> list[Clue]:
     return _dedupe_clues(clues)
 
 
-def _scan_family_name_clues(segment: _ScanSegment) -> list[Clue]:
+def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for match in _family_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         tail = segment.text[match.end : match.end + 4]
@@ -456,7 +603,7 @@ def _scan_family_name_clues(segment: _ScanSegment) -> list[Clue]:
         raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.NAME,
                 role=ClueRole.SURNAME,
                 attr_type=PIIAttributeType.NAME,
@@ -470,13 +617,13 @@ def _scan_family_name_clues(segment: _ScanSegment) -> list[Clue]:
     return _dedupe_clues(clues)
 
 
-def _scan_company_suffix_clues(segment: _ScanSegment) -> list[Clue]:
+def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for match in _company_suffix_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.ORGANIZATION,
                 role=ClueRole.SUFFIX,
                 attr_type=PIIAttributeType.ORGANIZATION,
@@ -490,23 +637,23 @@ def _scan_company_suffix_clues(segment: _ScanSegment) -> list[Clue]:
     return _dedupe_clues(clues)
 
 
-def _scan_address_clues(segment: _ScanSegment, *, locale_profile: str) -> list[Clue]:
+def _scan_address_clues(ctx: DetectContext, segment: _ScanSegment, *, locale_profile: str) -> list[Clue]:
     clues: list[Clue] = []
     if locale_profile in {"zh_cn", "mixed"}:
-        clues.extend(_scan_zh_address_clues(segment))
+        clues.extend(_scan_zh_address_clues(ctx, segment))
     if locale_profile in {"en_us", "mixed"}:
-        clues.extend(_scan_en_address_clues(segment))
+        clues.extend(_scan_en_address_clues(ctx, segment))
     return _dedupe_clues(clues)
 
 
-def _scan_zh_address_clues(segment: _ScanSegment) -> list[Clue]:
+def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for match in _zh_address_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         payload = match.payload
         raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
@@ -523,7 +670,7 @@ def _scan_zh_address_clues(segment: _ScanSegment) -> list[Clue]:
         raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.ADDRESS,
                 role=ClueRole.KEY,
                 attr_type=PIIAttributeType.ADDRESS,
@@ -538,14 +685,14 @@ def _scan_zh_address_clues(segment: _ScanSegment) -> list[Clue]:
     return clues
 
 
-def _scan_en_address_clues(segment: _ScanSegment) -> list[Clue]:
+def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for match in _en_address_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         payload = match.payload
         raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
@@ -562,7 +709,7 @@ def _scan_en_address_clues(segment: _ScanSegment) -> list[Clue]:
         raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.ADDRESS,
                 role=ClueRole.KEY,
                 attr_type=PIIAttributeType.ADDRESS,
@@ -578,7 +725,7 @@ def _scan_en_address_clues(segment: _ScanSegment) -> list[Clue]:
         raw_start, raw_end = _segment_span_to_raw(segment, token_match.start(), token_match.end())
         clues.append(
             Clue(
-                clue_id=_next_clue_id(),
+                clue_id=ctx.next_clue_id(),
                 family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
@@ -591,6 +738,59 @@ def _scan_en_address_clues(segment: _ScanSegment) -> list[Clue]:
             )
         )
     return clues
+
+
+def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
+    """扫描负向 clue（黑名单词组 + 数字非隐私上下文模式）。"""
+    clues: list[Clue] = []
+    # 词组黑名单（AC 多模匹配）。
+    for match in _negative_word_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NEGATIVE,
+                role=ClueRole.NEGATIVE,
+                attr_type=None,
+                start=raw_start,
+                end=raw_end,
+                text=match.matched_text,
+                priority=600,
+                source_kind="negative_word",
+            )
+        )
+    # 数字非隐私上下文模式（年份、百分比、序号、计量单位等）。
+    for pattern in _NEGATIVE_NUMERIC_PATTERNS:
+        for token_match in pattern.finditer(segment.text):
+            raw_start, raw_end = _segment_span_to_raw(segment, token_match.start(), token_match.end())
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.NEGATIVE,
+                    role=ClueRole.NEGATIVE,
+                    attr_type=None,
+                    start=raw_start,
+                    end=raw_end,
+                    text=token_match.group(0),
+                    priority=600,
+                    source_kind="negative_numeric_context",
+                )
+            )
+    return clues
+
+
+@lru_cache(maxsize=1)
+def _negative_word_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=word,
+                payload=word,
+                ascii_boundary=_needs_ascii_keyword_boundary(word),
+            )
+            for word in sorted(set(_ALL_NEGATIVE_WORDS), key=len, reverse=True)
+        )
+    )
 
 
 def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
@@ -845,7 +1045,3 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
 
 def _overlaps_any(start: int, end: int, spans: tuple[tuple[int, int], ...]) -> bool:
     return any(not (end <= left or start >= right) for left, right in spans)
-
-
-def _next_clue_id() -> str:
-    return f"clue-{next(_clue_id_seq)}"

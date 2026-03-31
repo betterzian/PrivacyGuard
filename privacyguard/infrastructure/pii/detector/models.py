@@ -21,6 +21,7 @@ class ClueFamily(str, Enum):
     NAME = "name"
     ORGANIZATION = "organization"
     BREAK = "break"
+    NEGATIVE = "negative"
 
 
 class ClueRole(str, Enum):
@@ -32,6 +33,7 @@ class ClueRole(str, Enum):
     SURNAME = "surname"
     SUFFIX = "suffix"
     BREAK = "break"
+    NEGATIVE = "negative"
 
 
 class AddressComponentType(str, Enum):
@@ -157,10 +159,18 @@ class Clue:
 @dataclass(slots=True)
 class ClueBundle:
     all_clues: tuple[Clue, ...]
+    negative_clues: tuple[Clue, ...] = ()
 
     @property
     def label_clues(self) -> tuple[Clue, ...]:
         return tuple(clue for clue in self.all_clues if clue.role == ClueRole.LABEL)
+
+    def has_negative_at(self, start: int, end: int) -> bool:
+        """检查指定区间是否存在负向 clue 覆盖。"""
+        return any(
+            not (end <= neg.start or start >= neg.end)
+            for neg in self.negative_clues
+        )
 
 
 @dataclass(frozen=True, slots=True)

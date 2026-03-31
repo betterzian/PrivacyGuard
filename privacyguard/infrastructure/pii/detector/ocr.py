@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from statistics import median
 
 from privacyguard.domain.enums import PIISourceType, PIIAttributeType
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
@@ -32,6 +33,7 @@ def apply_ocr_geometry(
     bundle,
     parsed: ParseResult,
 ) -> list[CandidateDraft]:
+    median_h = _scene_median_height(scene)
     remapped = [_remap_candidate(candidate, stream, scene) for candidate in parsed.candidates]
     label_block_ids = {
         block_id
@@ -46,11 +48,11 @@ def apply_ocr_geometry(
         label_block = _event_scene_block(stream, scene, event)
         if label_block is None:
             continue
-        bound = _find_existing_bound_candidate(event, label_block, remapped, scene)
+        bound = _find_existing_bound_candidate(event, label_block, remapped, scene, median_h=median_h)
         if bound is not None:
             _bind_label_to_candidate(bound, event)
             continue
-        candidate_blocks = _find_candidate_blocks(label_block, scene, label_block_ids)
+        candidate_blocks = _find_candidate_blocks(label_block, scene, label_block_ids, median_h=median_h)
         if not candidate_blocks:
             continue
         proposals.append(
@@ -175,6 +177,7 @@ def _attribute_segment_score(event: Clue, text: str) -> float:
 
 
 def _geometry_score(label_block: OCRSceneBlock, blocks: tuple[OCRSceneBlock, ...]) -> float:
+    """几何评分：同行右侧优于下方行。距离越远得分越低。"""
     first = blocks[0]
     if first.line_index == label_block.line_index and first.order_index > label_block.order_index:
         return 2.0 - (_horizontal_gap(label_block, first) / 500.0)
@@ -191,6 +194,8 @@ def _find_existing_bound_candidate(
     label_block: OCRSceneBlock,
     candidates: list[CandidateDraft],
     scene: OCRScene,
+    *,
+    median_h: float,
 ) -> CandidateDraft | None:
     ranked: list[tuple[float, CandidateDraft]] = []
     for candidate in candidates:
@@ -199,7 +204,7 @@ def _find_existing_bound_candidate(
         anchor_block = _candidate_anchor_block(candidate, scene)
         if anchor_block is None:
             continue
-        score = _existing_binding_score(label_block, anchor_block)
+        score = _existing_binding_score(label_block, anchor_block, median_h=median_h)
         if score <= 0:
             continue
         ranked.append((score, candidate))
@@ -227,11 +232,13 @@ def _candidate_anchor_block(candidate: CandidateDraft, scene: OCRScene) -> OCRSc
     return None
 
 
-def _existing_binding_score(label_block: OCRSceneBlock, candidate_block: OCRSceneBlock) -> float:
+def _existing_binding_score(label_block: OCRSceneBlock, candidate_block: OCRSceneBlock, *, median_h: float) -> float:
+    """已有 candidate 与 label 的绑定评分。阈值按 median_h 归一化。"""
+    norm = max(median_h, 10.0)
     if candidate_block.line_index == label_block.line_index and candidate_block.order_index > label_block.order_index:
-        return 3.0 - (_horizontal_gap(label_block, candidate_block) / 300.0)
+        return 3.0 - (_horizontal_gap(label_block, candidate_block) / (norm * 15.0))
     if candidate_block.line_index in {label_block.line_index + 1, label_block.line_index + 2}:
-        return 2.0 - (_vertical_score(label_block, candidate_block) / 300.0)
+        return 2.0 - (_vertical_score(label_block, candidate_block) / (norm * 15.0))
     return -1.0
 
 
@@ -239,17 +246,27 @@ def _find_candidate_blocks(
     label_block: OCRSceneBlock,
     scene: OCRScene,
     label_block_ids: set[str],
+    *,
+    median_h: float,
 ) -> tuple[OCRSceneBlock, ...]:
+    """查找 label 右侧或下方的候选 block。阈值按 median_h 归一化。"""
+    norm = max(median_h, 10.0)
+    # 同行右侧水平间距阈值：median_h * 12 倍。
+    h_gap_first = norm * 12.0
+    # 同行后续 block 间距阈值：median_h * 4.5 倍。
+    h_gap_follow = norm * 4.5
+    # 下方行垂直距离阈值：median_h * 11 倍。
+    v_gap_max = norm * 11.0
     same_line = scene.line_to_blocks.get(label_block.line_index, ())
     right_blocks = [block for block in same_line if block.order_index > label_block.order_index and block.block_id not in label_block_ids]
     if right_blocks:
         first = right_blocks[0]
-        if _horizontal_gap(label_block, first) <= max(240, _block_height(label_block) * 8):
+        if _horizontal_gap(label_block, first) <= h_gap_first:
             collected = [first]
             for follower in right_blocks[1:]:
                 if follower.block_id in label_block_ids:
                     break
-                if _horizontal_gap(collected[-1], follower) > max(90, _block_height(follower) * 3):
+                if _horizontal_gap(collected[-1], follower) > h_gap_follow:
                     break
                 collected.append(follower)
             return tuple(collected)
@@ -262,12 +279,12 @@ def _find_candidate_blocks(
         if not ranked:
             continue
         candidate = ranked[0]
-        if _vertical_score(label_block, candidate) > max(220, _block_height(label_block) * 6):
+        if _vertical_score(label_block, candidate) > v_gap_max:
             continue
         collected = [candidate]
         followers = [block for block in line_blocks if block.order_index > candidate.order_index and block.block_id not in label_block_ids]
         for follower in followers:
-            if _horizontal_gap(collected[-1], follower) > max(90, _block_height(follower) * 3):
+            if _horizontal_gap(collected[-1], follower) > h_gap_follow:
                 break
             collected.append(follower)
         return tuple(collected)
@@ -356,6 +373,14 @@ def _vertical_score(label: OCRSceneBlock, candidate: OCRSceneBlock) -> int:
 
 def _block_height(block: OCRSceneBlock) -> int:
     return block.block.bbox.height if block.block.bbox is not None else 20
+
+
+def _scene_median_height(scene: OCRScene) -> float:
+    """计算 scene 中所有 block 的中位高度，用于阈值归一化。"""
+    heights = [_block_height(block) for block in scene.blocks]
+    if not heights:
+        return 20.0
+    return float(median(heights))
 
 
 def _union_bbox(boxes):

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, Clue, ClueBundle, ClueFamily, ParseResult, StreamInput
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, ParseResult, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks import (
     AddressStack,
     BaseStack,
@@ -16,6 +17,7 @@ from privacyguard.infrastructure.pii.detector.stacks import (
     StackRun,
     StructuredValueStack,
 )
+from privacyguard.infrastructure.pii.detector.strategies import StackStrategy, build_strategy_context, resolve_strategies
 
 _STACK_REGISTRY = {
     ClueFamily.STRUCTURED: StructuredValueStack,
@@ -30,15 +32,25 @@ class StackContext:
     stream: StreamInput
     locale_profile: str
     clues: tuple[Clue, ...] = ()
+    negative_clues: tuple[Clue, ...] = ()
     committed_until: int = 0
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     handled_label_clue_ids: set[str] = field(default_factory=set)
 
+    def has_negative_at(self, start: int, end: int) -> bool:
+        """检查指定区间是否存在负向 clue。"""
+        return any(
+            not (end <= neg.start or start >= neg.end)
+            for neg in self.negative_clues
+        )
+
 
 class StreamParser:
-    def __init__(self, *, locale_profile: str) -> None:
+    def __init__(self, *, locale_profile: str, ctx: DetectContext) -> None:
         self.locale_profile = locale_profile
+        self.ctx = ctx
+        self.strategies = resolve_strategies(ctx.protection_level, ctx.detector_overrides)
         self.stack_manager = StackManager()
 
     def parse(self, stream: StreamInput, bundle: ClueBundle) -> ParseResult:
@@ -46,6 +58,7 @@ class StreamParser:
             stream=stream,
             locale_profile=self.locale_profile,
             clues=bundle.all_clues,
+            negative_clues=bundle.negative_clues,
         )
         consumed_ids: set[str] = set()
         index = 0
@@ -81,6 +94,17 @@ class StreamParser:
 
     def _run_stack(self, context: StackContext, index: int) -> StackRun | None:
         clue = context.clues[index]
+        strategy = self.strategies.get(clue.family)
+        if strategy is None:
+            return None
+        # 构建策略上下文：检查当前 clue 前方是否存在同 attr_type 的 label。
+        has_label = any(
+            prior.role == ClueRole.LABEL and prior.attr_type == clue.attr_type
+            for prior in context.clues[:index]
+        )
+        sctx = build_strategy_context(has_preceding_label=has_label, locale_profile=context.locale_profile)
+        if not strategy.should_start(clue, sctx):
+            return None
         stack_cls = _STACK_REGISTRY.get(clue.family)
         if stack_cls is None:
             return None

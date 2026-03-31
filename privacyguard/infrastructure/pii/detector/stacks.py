@@ -68,6 +68,8 @@ class StackContextLike(Protocol):
     locale_profile: str
     clues: tuple[Clue, ...]
 
+    def has_negative_at(self, start: int, end: int) -> bool: ...
+
 
 @dataclass(slots=True)
 class StackRun:
@@ -127,6 +129,8 @@ class NameStack(BaseStack):
             family=ClueFamily.NAME,
             initial_end=self.clue.end,
         )
+        # 名字 clue 只覆盖姓氏，需向右扩展以捕获完整姓名（如"张"→"张三"）。
+        end = _extend_name_boundary(self.context.stream.raw_text, start, end, self.context.clues, next_index)
         if end <= start:
             return None
         text = _clean_value(self.context.stream.raw_text[start:end])
@@ -134,6 +138,9 @@ class NameStack(BaseStack):
             return None
         offset = self.context.stream.raw_text[start:end].find(text)
         absolute_start = start + max(0, offset)
+        # 非 label-driven 时，若候选区间被负向 clue 覆盖则拒绝。
+        if not is_label_seed and self.context.has_negative_at(absolute_start, absolute_start + len(text)):
+            return None
         candidate = CandidateDraft(
             attr_type=PIIAttributeType.NAME,
             start=absolute_start,
@@ -190,6 +197,9 @@ class OrganizationStack(BaseStack):
             return None
         offset = self.context.stream.raw_text[start:end].find(text)
         absolute_start = start + max(0, offset)
+        # 非 label-driven 的 suffix 触发，若被负向 clue 覆盖则拒绝。
+        if not is_label_seed and self.context.has_negative_at(absolute_start, absolute_start + len(text)):
+            return None
         candidate = CandidateDraft(
             attr_type=PIIAttributeType.ORGANIZATION,
             start=absolute_start,
@@ -240,7 +250,9 @@ class AddressStack(BaseStack):
             if clue.start < address_start:
                 i += 1
                 continue
-            if clue.start > last_end and _address_gap_blocked(raw_text[last_end:clue.start]):
+            gap_text = raw_text[last_end:clue.start]
+            # 断句符或非地址 clue 阻断，或 component 间距超过 30 字符。
+            if clue.start > last_end and (_address_gap_blocked(gap_text) or len(gap_text.strip()) > 30):
                 break
             component_type = clue.component_type
             if component_type is None:
@@ -529,7 +541,7 @@ class StackManager:
         if attr_pair == {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
             return self._resolve_name_organization(context.stream.raw_text, existing, incoming)
         if attr_pair == {PIIAttributeType.NAME, PIIAttributeType.ADDRESS}:
-            return self._resolve_name_address(existing, incoming)
+            return self._resolve_name_address(context.stream.raw_text, existing, incoming)
         return self._resolve_by_score(existing, incoming)
 
     def _resolve_same_attr(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
@@ -564,12 +576,16 @@ class StackManager:
         trimmed = _slice_candidate(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
         return ConflictOutcome(incoming=trimmed)
 
-    def _resolve_name_address(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
+    def _resolve_name_address(self, raw_text: str, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
+        """Name vs Address：address 优先，name 做 trim；trim 后无效则丢弃 name。"""
         address = incoming if incoming.attr_type == PIIAttributeType.ADDRESS else existing
         name = incoming if incoming.attr_type == PIIAttributeType.NAME else existing
-        if address is existing:
-            return ConflictOutcome(incoming=None)
-        return ConflictOutcome(incoming=incoming, drop_existing=True)
+        if name is incoming:
+            trimmed = self._trim_candidate(raw_text, name, address)
+            return ConflictOutcome(incoming=trimmed)
+        # name 是 existing，address 是 incoming。
+        trimmed = self._trim_candidate(raw_text, name, address)
+        return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
 
     def _resolve_by_score(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
         if self.score(incoming) > self.score(existing):
@@ -735,8 +751,9 @@ def _scan_forward_value_end(raw_text: str, start: int, upper_bound: int) -> int:
 
 
 def _extend_street_tail(raw_text: str, end: int) -> int:
+    """扩展路/街后的门牌号，支持：123号、甲1号、之2、3-5号 等变体。"""
     tail = raw_text[end:]
-    match = re.match(r"\s*\d{1,6}(?:号|號)?", tail)
+    match = re.match(r"\s*[甲乙丙丁]?\d{1,6}(?:[之\-]\d{1,4})?(?:号|號)?", tail)
     if match is None:
         return end
     return end + match.end()
@@ -822,6 +839,57 @@ def _left_expand_text_boundary(raw_text: str, clues: tuple[Clue, ...], start: in
             break
         index -= 1
     return index
+
+
+_ZH_CHAR_RE = re.compile(r"[\u4e00-\u9fff·]")
+_EN_NAME_CHAR_RE = re.compile(r"[A-Za-z.'\- ]")
+
+
+def _extend_name_boundary(raw_text: str, start: int, end: int, clues: tuple[Clue, ...], next_clue_index: int) -> int:
+    """从 end 向右扩展，捕获紧邻的姓名字符。
+
+    中文名：从 start 算起最多 4 个汉字（含姓氏），覆盖绝大多数中文姓名。
+    英文名：扩展连续英文 token，最多 80 字符。
+    """
+    # 下一个 non-name clue 的起始位置作为上界。
+    upper = len(raw_text)
+    for i in range(next_clue_index, len(clues)):
+        c = clues[i]
+        if c.family == ClueFamily.BREAK:
+            upper = min(upper, c.start)
+            break
+        if c.family != ClueFamily.NAME:
+            upper = min(upper, c.start)
+            break
+    # 判断是中文名还是英文名。
+    is_zh = start < len(raw_text) and _ZH_CHAR_RE.match(raw_text[start])
+    if is_zh:
+        # 中文名：从 start 算起最多 4 个汉字（覆盖复姓 + 双字名）。
+        max_end = start
+        zh_count = 0
+        while max_end < upper and zh_count < 4:
+            if _ZH_CHAR_RE.match(raw_text[max_end]):
+                zh_count += 1
+                max_end += 1
+            elif raw_text[max_end] == '·':
+                # 少数民族名中的间隔号。
+                max_end += 1
+            else:
+                break
+        return max(end, max_end)
+    # 英文名：扩展连续英文 token。
+    cursor = end
+    while cursor < upper:
+        ch = raw_text[cursor]
+        if _HARD_BREAK_RE.match(ch) or ch in ",，;；|/\\()（）":
+            break
+        if _EN_NAME_CHAR_RE.match(ch):
+            cursor += 1
+            continue
+        break
+    if cursor - start > 80:
+        cursor = start + 80
+    return cursor
 
 
 def _clean_value(text: str) -> str:

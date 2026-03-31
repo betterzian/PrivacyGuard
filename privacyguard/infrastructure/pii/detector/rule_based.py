@@ -10,11 +10,12 @@ from privacyguard.domain.enums import PIIAttributeType, PIISourceType, Protectio
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.models.ocr import OCRTextBlock
 from privacyguard.domain.models.pii import PIICandidate
+from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.ocr import apply_ocr_geometry
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
-from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle, reset_clue_id_sequence
+from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 from privacyguard.infrastructure.pii.json_privacy_repository import DEFAULT_PRIVACY_REPOSITORY_PATH, JsonPrivacyRepository, parse_privacy_repository_document
 from privacyguard.utils.pii_value import (
     address_components_from_levels,
@@ -57,15 +58,20 @@ class RuleBasedPIIDetector:
         protection_level: ProtectionLevel | str = ProtectionLevel.STRONG,
         detector_overrides: dict[PIIAttributeType | str, float] | None = None,
     ) -> list[PIICandidate]:
-        del protection_level, detector_overrides
-        reset_clue_id_sequence()
+        ctx = DetectContext(
+            protection_level=ProtectionLevel(protection_level) if isinstance(protection_level, str) else protection_level,
+            detector_overrides=detector_overrides,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
         session_entries = self._load_session_dictionary(session_id=session_id, turn_id=turn_id)
-        parser = StreamParser(locale_profile=self.locale_profile)
+        parser = StreamParser(locale_profile=self.locale_profile, ctx=ctx)
         candidates: list[PIICandidate] = []
 
         prompt_stream = build_prompt_stream(prompt_text)
         prompt_bundle = build_clue_bundle(
             prompt_stream,
+            ctx=ctx,
             session_entries=session_entries,
             local_entries=self.local_entries,
             locale_profile=self.locale_profile,
@@ -76,6 +82,7 @@ class RuleBasedPIIDetector:
         ocr_stream, ocr_scene = build_ocr_stream(ocr_blocks)
         ocr_bundle = build_clue_bundle(
             ocr_stream,
+            ctx=ctx,
             session_entries=session_entries,
             local_entries=self.local_entries,
             locale_profile=self.locale_profile,
