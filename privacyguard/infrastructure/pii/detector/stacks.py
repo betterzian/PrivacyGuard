@@ -13,6 +13,7 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import (
     build_organization_candidate_from_value,
     clean_value,
     has_organization_suffix,
+    name_component_hint,
     organization_suffix_start,
     trim_candidate,
 )
@@ -31,23 +32,41 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMA
 _HARD_BREAK_RE = re.compile(r"[;；。！？!?]")
 _STRUCTURED_BINDABLE_GAP_RE = re.compile(r"^[\s:：\-—|,，]*$")
 
-_ADDRESS_COMPONENT_ORDER = {
-    AddressComponentType.PROVINCE: 1,
-    AddressComponentType.CITY: 2,
-    AddressComponentType.DISTRICT: 3,
-    AddressComponentType.STREET_ADMIN: 4,
-    AddressComponentType.TOWN: 5,
-    AddressComponentType.VILLAGE: 6,
-    AddressComponentType.ROAD: 7,
-    AddressComponentType.STREET: 7,
-    AddressComponentType.COMPOUND: 8,
-    AddressComponentType.BUILDING: 9,
-    AddressComponentType.UNIT: 10,
-    AddressComponentType.FLOOR: 11,
-    AddressComponentType.ROOM: 12,
-    AddressComponentType.STATE: 13,
-    AddressComponentType.POSTAL_CODE: 14,
+# 地址组件层级（粗粒度）。
+# 同一层内任意顺序；跨层允许回退 1 层（容忍跳级和轻微逆序）。
+# 层级设计同时兼容中文（大→小）和英文（小→大）地址。
+#
+# 示例：
+#   中文 "四川成都阳光小区"     → 省(T1) 市(T1) 小区(T2)           ✅ 跳过区级
+#   中文 "上海，中国"          → 市(T1) 省(T1)                    ✅ 同层内逆序
+#   英文 "123 Main St, NYC, NY" → 路(T2) 市(T1) 州(T1)           ✅ 回退 1 层
+#   英文 "Portland, OR 97201"  → 市(T1) 州(T1) 邮编(T4)          ✅ 跳过 T2/T3
+
+_TIER_ADMIN = 1       # 行政区划（省/市/区/州/县/镇/乡/村）
+_TIER_STREET = 2      # 街道级（路/街/道/小区/大厦）
+_TIER_DETAIL = 3      # 楼层详情（栋/单元/层/室）
+_TIER_POSTAL = 4      # 邮编
+
+_COMPONENT_TIER: dict[AddressComponentType, int] = {
+    AddressComponentType.PROVINCE: _TIER_ADMIN,
+    AddressComponentType.STATE: _TIER_ADMIN,
+    AddressComponentType.CITY: _TIER_ADMIN,
+    AddressComponentType.DISTRICT: _TIER_ADMIN,
+    AddressComponentType.STREET_ADMIN: _TIER_ADMIN,
+    AddressComponentType.TOWN: _TIER_ADMIN,
+    AddressComponentType.VILLAGE: _TIER_ADMIN,
+    AddressComponentType.ROAD: _TIER_STREET,
+    AddressComponentType.STREET: _TIER_STREET,
+    AddressComponentType.COMPOUND: _TIER_STREET,
+    AddressComponentType.BUILDING: _TIER_DETAIL,
+    AddressComponentType.UNIT: _TIER_DETAIL,
+    AddressComponentType.FLOOR: _TIER_DETAIL,
+    AddressComponentType.ROOM: _TIER_DETAIL,
+    AddressComponentType.POSTAL_CODE: _TIER_POSTAL,
 }
+
+# 允许的最大层级回退幅度。1 表示允许从 TIER_STREET 回到 TIER_ADMIN。
+_MAX_TIER_BACKTRACK = 1
 _DETAIL_COMPONENTS = {
     AddressComponentType.BUILDING,
     AddressComponentType.UNIT,
@@ -80,6 +99,36 @@ class BaseStack:
 
     def run(self) -> StackRun | None:
         raise NotImplementedError
+
+    def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
+        """被更高优先级 candidate 抢占 [blocker_start, blocker_end) 后，尝试缩减自身候选。
+
+        默认实现：用 trim_candidate 做文本级截断。
+        子类可覆盖以提供更精确的语义级回缩。
+        返回缩减后的 StackRun，或 None（缩减后无效，放弃）。
+        """
+        c = run.candidate
+        raw_text = self.context.stream.raw_text
+        # 计算截断后的新区间。
+        if blocker_start <= c.start:
+            # blocker 覆盖候选左侧 → 右移 start。
+            new_start, new_end = blocker_end, c.end
+        elif blocker_end >= c.end:
+            # blocker 覆盖候选右侧 → 左移 end。
+            new_start, new_end = c.start, blocker_start
+        else:
+            # blocker 在候选中间 → 保留左半。
+            new_start, new_end = c.start, blocker_start
+        trimmed = trim_candidate(c, raw_text, start=new_start, end=new_end)
+        if trimmed is None:
+            return None
+        return StackRun(
+            attr_type=run.attr_type,
+            candidate=trimmed,
+            consumed_ids=run.consumed_ids,
+            handled_label_clue_ids=run.handled_label_clue_ids,
+            next_index=run.next_index,
+        )
 
     def _build_hard_run(self) -> StackRun | None:
         if self.clue.attr_type is None:
@@ -225,7 +274,10 @@ class NameStack(BaseStack):
         else:
             start = self.clue.start
         # 向右消费相邻 NAME clue 并扩展字符边界。
-        end, next_index, consumed_ids = self._resolve_right_boundary()
+        # label / start 驱动时，end 的初始值应为值区域起点，而非 seed 末尾。
+        end, next_index, consumed_ids = self._resolve_right_boundary(
+            value_start=start if self.clue.role in {ClueRole.LABEL, ClueRole.START} else None,
+        )
         end = _extend_name_boundary(self.context.stream.raw_text, start, end, self.context.clues, next_index)
         if end <= start:
             return None
@@ -303,9 +355,14 @@ class NameStack(BaseStack):
             return NameComponentHint.GIVEN
         return self.clue.component_hint or NameComponentHint.FULL
 
-    def _resolve_right_boundary(self) -> tuple[int, int, set[str]]:
+    def _resolve_right_boundary(self, *, value_start: int | None = None) -> tuple[int, int, set[str]]:
+        """向右消费相邻 NAME clue，返回 (end, next_index, consumed_ids)。
+
+        value_start: label / start 驱动时传入跳过分隔符后的值起点，
+        作为 end 的初始值，避免 end 停在 seed 末尾的分隔符上。
+        """
         raw_text = self.context.stream.raw_text
-        end = self.clue.end
+        end = value_start if value_start is not None else self.clue.end
         consumed = {self.clue.clue_id}
         index = self.clue_index + 1
         while index < len(self.context.clues):
@@ -327,6 +384,30 @@ class NameStack(BaseStack):
 
 @dataclass(slots=True)
 class OrganizationStack(BaseStack):
+    def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
+        """组织名回缩：后缀被截 → 放弃；前缀被截 → 重建并检查后缀是否仍在。"""
+        c = run.candidate
+        raw_text = self.context.stream.raw_text
+        if blocker_start <= c.start:
+            new_start, new_end = blocker_end, c.end
+        elif blocker_end >= c.end:
+            new_start, new_end = c.start, blocker_start
+        else:
+            new_start, new_end = c.start, blocker_start
+        trimmed = trim_candidate(c, raw_text, start=new_start, end=new_end)
+        if trimmed is None:
+            return None
+        # 组织名没有后缀 且 非 label 驱动 → 无效。
+        if not has_organization_suffix(trimmed.text) and not trimmed.label_driven:
+            return None
+        return StackRun(
+            attr_type=run.attr_type,
+            candidate=trimmed,
+            consumed_ids=run.consumed_ids,
+            handled_label_clue_ids=run.handled_label_clue_ids,
+            next_index=run.next_index,
+        )
+
     def run(self) -> StackRun | None:
         if self.clue.role == ClueRole.HARD:
             return self._build_hard_run()
@@ -388,90 +469,154 @@ class OrganizationStack(BaseStack):
 
 @dataclass(slots=True)
 class AddressStack(BaseStack):
+    def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
+        """地址回缩：截断后检查剩余文本是否仍含地址信号。"""
+        from privacyguard.infrastructure.pii.detector.candidate_utils import has_address_signal
+        c = run.candidate
+        raw_text = self.context.stream.raw_text
+        if blocker_start <= c.start:
+            new_start, new_end = blocker_end, c.end
+        elif blocker_end >= c.end:
+            new_start, new_end = c.start, blocker_start
+        else:
+            new_start, new_end = c.start, blocker_start
+        trimmed = trim_candidate(c, raw_text, start=new_start, end=new_end)
+        if trimmed is None:
+            return None
+        # 截断后仍需含地址信号词（省/市/路/street 等）。
+        if not has_address_signal(trimmed.text) and not trimmed.label_driven:
+            return None
+        return StackRun(
+            attr_type=run.attr_type,
+            candidate=trimmed,
+            consumed_ids=run.consumed_ids,
+            handled_label_clue_ids=run.handled_label_clue_ids,
+            next_index=run.next_index,
+        )
+
     def run(self) -> StackRun | None:
+        """地址 stack 主入口。
+
+        组件串联规则：
+        1. VALUE / KEY 都独立构成一个"证据 clue"。
+        2. VALUE + 同层 KEY 合并为 1 个证据；VALUE + 不同层 KEY / VALUE+VALUE / KEY+KEY 各自独立计数。
+        3. KEY 入口或独立 KEY 会向左扩展取值（中文 2 字符，英文 1 单词）。
+        4. 按 protection_level 决定提交门槛（见 _meets_commit_threshold）。
+        """
         if self.clue.role == ClueRole.HARD:
             return self._build_hard_run()
+
         raw_text = self.context.stream.raw_text
         is_label_seed = self.clue.role == ClueRole.LABEL
+
         if is_label_seed:
             address_start = _skip_separators(raw_text, self.clue.end)
             first_index = _next_address_index(self.context.clues, self.clue_index + 1)
             if first_index is None:
                 return None
-            index = first_index
-            consumed_ids = {self.clue.clue_id}
-            handled_labels = {self.clue.clue_id}
+            scan_index = first_index
+            consumed_ids: set[str] = {self.clue.clue_id}
+            handled_labels: set[str] = {self.clue.clue_id}
+            evidence_count = 1  # label 自身算 1 个证据。
         else:
             address_start = self._seed_left_boundary()
-            index = self.clue_index
+            scan_index = self.clue_index
             consumed_ids = set()
             handled_labels = set()
+            evidence_count = 0
         if address_start is None:
             return None
+
+        # ── 串联地址 clue ──
         components: list[dict[str, object]] = []
-        pending_names: dict[AddressComponentType, Clue] = {}
-        segment_cursor = address_start
         last_end = address_start
-        last_component_order = 0
-        i = index
+        last_tier = 0
+        # pending_value: 等待被后续同层 KEY 合并的 VALUE clue。
+        pending_value: dict[AddressComponentType, Clue] = {}
+        i = scan_index
+
         while i < len(self.context.clues):
             clue = self.context.clues[i]
-            if _is_stop_control_clue(clue):
+
+            # 非 address clue 处理。
+            if clue.attr_type != PIIAttributeType.ADDRESS:
+                if is_break_clue(clue) or is_negative_clue(clue):
+                    break
+                if _has_nearby_address_clue(self.context.clues, i + 1, last_end,
+                                            locale=self.context.locale_profile):
+                    i += 1
+                    continue
                 break
-            if clue.attr_type != PIIAttributeType.ADDRESS or clue.role == ClueRole.LABEL:
-                break
+            if clue.role == ClueRole.LABEL:
+                i += 1
+                continue
             if clue.start < address_start:
                 i += 1
                 continue
+
+            # 间距检查。
             gap_text = raw_text[last_end:clue.start]
-            # 断句符或非地址 clue 阻断，或 component 间距超过 30 字符。
-            if clue.start > last_end and (_address_gap_blocked(gap_text) or len(gap_text.strip()) > 30):
+            if clue.start > last_end and _address_gap_too_wide(gap_text, self.context.locale_profile):
                 break
-            component_type = clue.component_type
-            if component_type is None:
+
+            comp_type = clue.component_type
+            if comp_type is None:
                 i += 1
                 continue
-            component_order = _ADDRESS_COMPONENT_ORDER.get(component_type, 999)
-            if last_component_order and component_order < last_component_order:
+            tier = _COMPONENT_TIER.get(comp_type, 999)
+            if last_tier and tier < last_tier - _MAX_TIER_BACKTRACK:
                 break
+
             consumed_ids.add(clue.clue_id)
+
             if clue.role == ClueRole.VALUE:
-                if component_type == AddressComponentType.POSTAL_CODE:
-                    component = _build_standalone_address_component(clue, component_type)
-                    if component is not None:
-                        components.append(component)
-                        segment_cursor = clue.end
-                        last_end = clue.end
-                        last_component_order = component_order
-                    i += 1
-                    continue
-                pending_names[component_type] = clue
+                # 检查是否有等待中的同层 VALUE → 独立刷出。
+                self._flush_pending_values(
+                    raw_text, pending_value, tier, components, address_start,
+                )
+                pending_value[comp_type] = clue
                 last_end = max(last_end, clue.end)
+                last_tier = tier
                 i += 1
                 continue
-            component = _build_address_component_from_attr(
-                raw_text,
-                clue=clue,
-                component_type=component_type,
-                segment_cursor=segment_cursor,
-                pending_name=pending_names.get(component_type),
-                clues=self.context.clues,
-                clue_index=i,
+
+            # KEY clue 处理。
+            same_tier_value = pending_value.pop(comp_type, None)
+            # 先刷出其他不同层的 pending value。
+            flushed = self._flush_pending_values(
+                raw_text, pending_value, tier, components, address_start,
             )
-            if component is None:
-                break
-            components.append(component)
-            segment_cursor = int(component["end"])
-            last_end = segment_cursor
-            last_component_order = component_order
-            pending_names = {
-                key: value
-                for key, value in pending_names.items()
-                if value.end > segment_cursor
-            }
+            evidence_count += flushed
+
+            if same_tier_value is not None:
+                # VALUE + 同层 KEY → 合并为 1 个组件，1 个证据。
+                comp = _build_value_key_component(raw_text, same_tier_value, clue, comp_type)
+            else:
+                # 独立 KEY → 左扩取值，1 个证据。
+                comp = _build_key_only_component(
+                    raw_text, clue, comp_type,
+                    floor=_left_address_floor(self.context.clues, i),
+                    locale=self.context.locale_profile,
+                )
+            if comp is not None:
+                components.append(comp)
+                evidence_count += 1
+                last_end = max(last_end, int(comp["end"]))
+                last_tier = tier
             i += 1
+
+        # 刷出剩余的 pending values。
+        evidence_count += self._flush_all_pending(
+            raw_text, pending_value, components, address_start,
+        )
+
         if not components:
             return None
+        if not _meets_commit_threshold(
+            evidence_count, components, self.context.locale_profile,
+        ):
+            return None
+
         final_start = int(components[0]["start"])
         final_end = int(components[-1]["end"])
         text = clean_value(raw_text[final_start:final_end])
@@ -498,6 +643,47 @@ class AddressStack(BaseStack):
             handled_label_clue_ids=handled_labels,
             next_index=i,
         )
+
+    def _flush_pending_values(
+        self,
+        raw_text: str,
+        pending: dict[AddressComponentType, Clue],
+        current_tier: int,
+        components: list[dict[str, object]],
+        address_start: int,
+    ) -> int:
+        """将不同层的 pending VALUE 刷出为独立组件。返回刷出的证据数。"""
+        flushed = 0
+        to_remove: list[AddressComponentType] = []
+        for comp_type, value_clue in pending.items():
+            value_tier = _COMPONENT_TIER.get(comp_type, 999)
+            if value_tier == current_tier:
+                continue  # 同层，留给后续 KEY 合并。
+            comp = _build_standalone_address_component(value_clue, comp_type)
+            if comp is not None:
+                components.append(comp)
+                flushed += 1
+            to_remove.append(comp_type)
+        for key in to_remove:
+            del pending[key]
+        return flushed
+
+    def _flush_all_pending(
+        self,
+        raw_text: str,
+        pending: dict[AddressComponentType, Clue],
+        components: list[dict[str, object]],
+        address_start: int,
+    ) -> int:
+        """刷出所有剩余的 pending VALUE 为独立组件。"""
+        flushed = 0
+        for comp_type, value_clue in pending.items():
+            comp = _build_standalone_address_component(value_clue, comp_type)
+            if comp is not None:
+                components.append(comp)
+                flushed += 1
+        pending.clear()
+        return flushed
 
     def _seed_left_boundary(self) -> int | None:
         raw_text = self.context.stream.raw_text
@@ -618,9 +804,16 @@ class StackManager:
 
 
 def _next_address_index(clues: tuple[Clue, ...], start_index: int) -> int | None:
+    """从 start_index 向右查找第一个非 label 的 address clue。
+
+    跳过夹在中间的非 address soft clue（如与路名重合的姓氏），
+    但遇到 break / negative 时中断。
+    跳过上限：距离上一个位置不超过 30 字符，否则认为地址已结束。
+    """
+    last_pos = clues[start_index - 1].end if start_index > 0 else 0
     for index in range(start_index, len(clues)):
         clue = clues[index]
-        if _is_stop_control_clue(clue):
+        if is_break_clue(clue) or is_negative_clue(clue):
             return None
         if clue.attr_type == PIIAttributeType.ADDRESS and clue.role == ClueRole.LABEL:
             continue
@@ -628,9 +821,24 @@ def _next_address_index(clues: tuple[Clue, ...], start_index: int) -> int | None
             return index
         if is_control_clue(clue):
             continue
-        if clue.attr_type != PIIAttributeType.ADDRESS:
+        # 非 address 的 soft clue：检查距离，过远则放弃。
+        if clue.start - last_pos > 30:
             return None
+        continue
     return None
+
+
+def _has_nearby_address_clue(clues: tuple[Clue, ...], start_index: int, last_end: int, *, max_gap: int) -> bool:
+    """检查从 start_index 起、距离 last_end 不超过 max_gap 字符内是否有 address clue。"""
+    for index in range(start_index, len(clues)):
+        clue = clues[index]
+        if clue.start - last_end > max_gap:
+            return False
+        if is_break_clue(clue) or is_negative_clue(clue):
+            return False
+        if clue.attr_type == PIIAttributeType.ADDRESS and clue.role != ClueRole.LABEL:
+            return True
+    return False
 
 
 def _address_gap_blocked(gap: str) -> bool:

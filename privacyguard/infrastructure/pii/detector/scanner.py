@@ -137,6 +137,18 @@ class _AddressPatternPayload:
     canonical_text: str
 
 
+_DictionaryMetadataItems = tuple[tuple[str, tuple[str, ...]], ...]
+_DictionaryMatcherSignature = tuple[tuple[PIIAttributeType, tuple[str, ...], str, _DictionaryMetadataItems], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _DictionaryMatchPayload:
+    attr_type: PIIAttributeType
+    matched_by: str
+    metadata_items: _DictionaryMetadataItems
+    emission_order: int
+
+
 def build_clue_bundle(
     stream: StreamInput,
     *,
@@ -150,7 +162,6 @@ def build_clue_bundle(
     Pass 1 — hard clue 扫描与裁决，确定屏蔽区间。
     Pass 2 — segment-major soft clue 扫描，事件扫描线裁决。
     """
-    literal_pattern_cache: dict[tuple[str, bool], re.Pattern[str]] = {}
     ocr_break_spans = _find_ocr_break_spans(stream.raw_text)
 
     # ── Pass 1: hard clue 扫描与裁决 ──
@@ -162,7 +173,6 @@ def build_clue_bundle(
                 stream.raw_text,
                 session_entries,
                 source_kind="session",
-                pattern_cache=literal_pattern_cache,
                 ignored_spans=ocr_break_spans,
             ),
             *_scan_dictionary_hard_clues(
@@ -170,7 +180,6 @@ def build_clue_bundle(
                 stream.raw_text,
                 local_entries,
                 source_kind="local",
-                pattern_cache=literal_pattern_cache,
                 ignored_spans=ocr_break_spans,
             ),
         ]
@@ -317,31 +326,36 @@ def _scan_dictionary_hard_clues(
     entries: tuple[DictionaryEntry, ...],
     *,
     source_kind: str,
-    pattern_cache: dict[tuple[str, bool], re.Pattern[str]],
     ignored_spans: tuple[tuple[int, int], ...] = (),
 ) -> list[Clue]:
+    if not entries:
+        return []
     clues: list[Clue] = []
     priority = 300 if source_kind == "session" else 290
-    for entry in entries:
-        for variant in sorted({item for item in entry.variants if str(item).strip()}, key=len, reverse=True):
-            for match in _iter_literal_matches(text, variant, pattern_cache=pattern_cache):
-                if _overlaps_any(match.start(), match.end(), ignored_spans):
-                    continue
-                clues.append(
-                    Clue(
-                        clue_id=ctx.next_clue_id(),
-                        role=ClueRole.HARD,
-                        attr_type=entry.attr_type,
-                        start=match.start(),
-                        end=match.end(),
-                        text=match.group(0),
-                        priority=priority,
-                        source_kind=entry.matched_by,
-                        hard_source=source_kind,
-                        placeholder=_PLACEHOLDER_BY_ATTR.get(entry.attr_type, f"<{entry.attr_type.value}>"),
-                        source_metadata={key: list(values) for key, values in entry.metadata.items()},
-                    )
-                )
+    signature = _dictionary_matcher_signature(entries)
+    matcher = _session_dictionary_matcher(signature) if source_kind == "session" else _local_dictionary_matcher(signature)
+    # 这里按旧实现的“entry/variant 注册顺序”恢复输出顺序，避免等长重叠命中的稳定性发生漂移。
+    matches = matcher.find_matches(text, folded_text=text.lower())
+    matches.sort(key=lambda item: (item.payload.emission_order, item.start, item.end))
+    for match in matches:
+        if _overlaps_any(match.start, match.end, ignored_spans):
+            continue
+        payload = match.payload
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                role=ClueRole.HARD,
+                attr_type=payload.attr_type,
+                start=match.start,
+                end=match.end,
+                text=match.matched_text,
+                priority=priority,
+                source_kind=payload.matched_by,
+                hard_source=source_kind,
+                placeholder=_PLACEHOLDER_BY_ATTR.get(payload.attr_type, f"<{payload.attr_type.value}>"),
+                source_metadata={key: list(values) for key, values in payload.metadata_items},
+            )
+        )
     return clues
 
 
@@ -796,21 +810,64 @@ def _needs_ascii_keyword_boundary(keyword: str) -> bool:
     return bool(_ASCII_KEYWORD_CHARS_RE.fullmatch(keyword))
 
 
-def _compile_literal_pattern(literal: str, *, ascii_boundary: bool) -> re.Pattern[str]:
-    escaped = re.escape(literal)
-    if ascii_boundary:
-        return re.compile(rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])", flags=re.IGNORECASE)
-    return re.compile(escaped)
+def _dictionary_matcher_signature(entries: tuple[DictionaryEntry, ...]) -> _DictionaryMatcherSignature:
+    return tuple(
+        (
+            entry.attr_type,
+            _dictionary_variants(entry.variants),
+            entry.matched_by,
+            _dictionary_metadata_items(entry.metadata),
+        )
+        for entry in entries
+    )
 
 
-def _iter_literal_matches(text: str, literal: str, *, pattern_cache: dict[tuple[str, bool], re.Pattern[str]]):
-    ascii_boundary = bool(_ASCII_LITERAL_CHARS_RE.fullmatch(literal))
-    cache_key = (literal, ascii_boundary)
-    pattern = pattern_cache.get(cache_key)
-    if pattern is None:
-        pattern = _compile_literal_pattern(literal, ascii_boundary=ascii_boundary)
-        pattern_cache[cache_key] = pattern
-    return pattern.finditer(text)
+def _dictionary_variants(variants: tuple[str, ...]) -> tuple[str, ...]:
+    ordered = tuple(dict.fromkeys(variant for raw in variants if (variant := str(raw).strip())))
+    return tuple(sorted(ordered, key=len, reverse=True))
+
+
+def _dictionary_metadata_items(metadata: dict[str, list[str]]) -> _DictionaryMetadataItems:
+    normalized: list[tuple[str, tuple[str, ...]]] = []
+    for key in sorted(metadata):
+        values = metadata[key]
+        normalized.append((key, tuple(dict.fromkeys(str(item) for item in values if str(item)))))
+    return tuple(normalized)
+
+
+def _dictionary_matcher_patterns(signature: _DictionaryMatcherSignature) -> tuple[AhoPattern, ...]:
+    patterns: list[AhoPattern] = []
+    emission_order = 0
+    for attr_type, variants, matched_by, metadata_items in signature:
+        for variant in variants:
+            patterns.append(
+                AhoPattern(
+                    text=variant,
+                    payload=_DictionaryMatchPayload(
+                        attr_type=attr_type,
+                        matched_by=matched_by,
+                        metadata_items=metadata_items,
+                        emission_order=emission_order,
+                    ),
+                    ascii_boundary=bool(_ASCII_LITERAL_CHARS_RE.fullmatch(variant)),
+                )
+            )
+            emission_order += 1
+    return tuple(patterns)
+
+
+def _build_dictionary_matcher(signature: _DictionaryMatcherSignature) -> AhoMatcher:
+    return AhoMatcher.from_patterns(_dictionary_matcher_patterns(signature))
+
+
+@lru_cache(maxsize=8)
+def _local_dictionary_matcher(signature: _DictionaryMatcherSignature) -> AhoMatcher:
+    return _build_dictionary_matcher(signature)
+
+
+@lru_cache(maxsize=64)
+def _session_dictionary_matcher(signature: _DictionaryMatcherSignature) -> AhoMatcher:
+    return _build_dictionary_matcher(signature)
 
 
 @lru_cache(maxsize=1)

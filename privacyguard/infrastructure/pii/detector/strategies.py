@@ -97,4 +97,18 @@ def resolve_strategies(
     return strategies
 
 
-__all__ = ["StackStrategy", "STACK_STRATEGIES", "resolve_strategies"]
+# soft 类型间冲突的静态优先级。数值越大越优先保留。
+# 结构化类型（email / phone / id 等）只由 hard clue 驱动，不参与 soft 竞争。
+ATTR_TYPE_PRIORITY: dict[PIIAttributeType, int] = {
+    PIIAttributeType.ADDRESS: 30,
+    PIIAttributeType.NAME: 20,
+    PIIAttributeType.ORGANIZATION: 10,
+}
+
+
+def attr_priority(attr_type: PIIAttributeType) -> int:
+    """返回 soft 类型的冲突优先级；未注册类型返回 0。"""
+    return ATTR_TYPE_PRIORITY.get(attr_type, 0)
+
+
+__all__ = ["StackStrategy", "STACK_STRATEGIES", "resolve_strategies", "ATTR_TYPE_PRIORITY", "attr_priority"]
