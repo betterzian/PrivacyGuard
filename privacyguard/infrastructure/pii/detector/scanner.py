@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -144,8 +145,15 @@ def build_clue_bundle(
     local_entries: tuple[DictionaryEntry, ...],
     locale_profile: str,
 ) -> ClueBundle:
+    """两遍扫描构建 ClueBundle。
+
+    Pass 1 — hard clue 扫描与裁决，确定屏蔽区间。
+    Pass 2 — segment-major soft clue 扫描，事件扫描线裁决。
+    """
     literal_pattern_cache: dict[tuple[str, bool], re.Pattern[str]] = {}
     ocr_break_spans = _find_ocr_break_spans(stream.raw_text)
+
+    # ── Pass 1: hard clue 扫描与裁决 ──
     hard_clues = _resolve_hard_conflicts(
         [
             *_scan_hard_patterns(ctx, stream.raw_text, ignored_spans=ocr_break_spans),
@@ -167,30 +175,27 @@ def build_clue_bundle(
             ),
         ]
     )
+
+    # ── Pass 2: soft clue 扫描（segment-major，对缓存局部性友好）──
     scan_segments = _build_soft_scan_segments(stream.raw_text, hard_clues, extra_blocked_spans=ocr_break_spans)
-    label_clues = tuple(
-        clue
-        for segment in scan_segments
-        for clue in _scan_label_clues(ctx, segment)
-    )
-    all_clues = [
-        *hard_clues,
-        *label_clues,
-        *_scan_ocr_break_clues(ctx, ocr_break_spans),
-        *(clue for segment in scan_segments for clue in _scan_break_clues(ctx, segment)),
-        *(clue for segment in scan_segments for clue in _scan_name_start_clues(ctx, segment)),
-        *(clue for segment in scan_segments for clue in _scan_family_name_clues(ctx, segment)),
-        *(clue for segment in scan_segments for clue in _scan_en_surname_clues(ctx, segment)),
-        *(clue for segment in scan_segments for clue in _scan_en_given_name_clues(ctx, segment)),
-        *(clue for segment in scan_segments for clue in _scan_zh_given_name_clues(ctx, segment)),
-        *(clue for segment in scan_segments for clue in _scan_connector_clues(ctx, segment)),
-        *(clue for segment in scan_segments for clue in _scan_company_suffix_clues(ctx, segment)),
-        *(clue for segment in scan_segments for clue in _scan_address_clues(ctx, segment, locale_profile=locale_profile)),
-        *(clue for segment in scan_segments for clue in _scan_negative_clues(ctx, segment)),
-    ]
-    deduped_clues = _dedupe_clues(all_clues)
-    reduced_clues = _resolve_clue_overlaps(stream.raw_text, deduped_clues)
-    ordered_clues = tuple(sorted(reduced_clues, key=lambda item: (item.start, -item.priority, item.end)))
+    soft_clues: list[Clue] = []
+    for segment in scan_segments:
+        soft_clues.extend(_scan_label_clues(ctx, segment))
+        soft_clues.extend(_scan_break_clues(ctx, segment))
+        soft_clues.extend(_scan_name_start_clues(ctx, segment))
+        soft_clues.extend(_scan_family_name_clues(ctx, segment))
+        soft_clues.extend(_scan_en_surname_clues(ctx, segment))
+        soft_clues.extend(_scan_en_given_name_clues(ctx, segment))
+        soft_clues.extend(_scan_zh_given_name_clues(ctx, segment))
+        soft_clues.extend(_scan_connector_clues(ctx, segment))
+        soft_clues.extend(_scan_company_suffix_clues(ctx, segment))
+        soft_clues.extend(_scan_address_clues(ctx, segment, locale_profile=locale_profile))
+        soft_clues.extend(_scan_negative_clues(ctx, segment))
+
+    # ── 事件扫描线裁决 ──
+    all_clues = [*hard_clues, *_scan_ocr_break_clues(ctx, ocr_break_spans), *soft_clues]
+    resolved_clues = _sweep_resolve(stream.raw_text, all_clues)
+    ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, -item.priority, item.end)))
     return ClueBundle(all_clues=ordered_clues)
 
 
@@ -246,7 +251,7 @@ def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[t
     for match in _BANK_ACCOUNT_CANDIDATE_PATTERN.finditer(text):
         if _overlaps_any(match.start(), match.end(), ignored_spans):
             continue
-        if _overlaps_any(match.start(), match.end(), tuple(hard_spans)):
+        if _overlaps_any(match.start(), match.end(), hard_spans):
             continue
         value = match.group(0).strip()
         digits = re.sub(r"\D", "", value)
@@ -286,7 +291,7 @@ def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[t
     for match in _GENERIC_NUMBER_PATTERN.finditer(text):
         if _overlaps_any(match.start(), match.end(), ignored_spans):
             continue
-        if _overlaps_any(match.start(), match.end(), tuple(hard_spans)):
+        if _overlaps_any(match.start(), match.end(), hard_spans):
             continue
         value = match.group(0).strip()
         clues.append(
@@ -719,20 +724,29 @@ def _iter_negative_word_specs() -> tuple[tuple[str, str], ...]:
 
 
 def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
-    resolved: list[Clue] = []
-    for clue in sorted(clues, key=lambda item: (item.start, item.end, -item.priority)):
-        replaced = False
-        for index, existing in enumerate(list(resolved)):
-            if clue.end <= existing.start or clue.start >= existing.end:
-                continue
-            if _hard_clue_wins(clue, existing):
-                resolved[index] = clue
-            replaced = True
-            break
-        if not replaced:
-            resolved.append(clue)
-    resolved.sort(key=lambda item: (item.start, item.end, -item.priority))
-    return tuple(resolved)
+    """加权区间调度：优先保留更长 / 更高来源优先级的 hard clue。
+
+    按"赢"的标准降序排列后贪心选取，跳过与已选 clue 重叠的候选。
+    解决旧实现只替换第一个重叠者、遗漏后续被覆盖 clue 的问题。
+    """
+    if not clues:
+        return ()
+    # 优先保留更长的 clue；等长则按来源优先级降序；再按 start 升序（稳定性）。
+    ranked = sorted(
+        clues,
+        key=lambda c: (
+            -(c.end - c.start),
+            -_HARD_SOURCE_PRIORITY.get(str(c.hard_source or ""), 0),
+            c.start,
+        ),
+    )
+    accepted: list[Clue] = []
+    for clue in ranked:
+        if any(clue.start < a.end and clue.end > a.start for a in accepted):
+            continue
+        accepted.append(clue)
+    accepted.sort(key=lambda c: (c.start, c.end, -c.priority))
+    return tuple(accepted)
 
 
 def _hard_clue_wins(incoming: Clue, existing: Clue) -> bool:
@@ -1032,100 +1046,205 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
     return sorted(ordered, key=lambda item: (item.start, item.end, -item.priority))
 
 
-def _resolve_clue_overlaps(raw_text: str, clues: list[Clue]) -> list[Clue]:
-    """按显式矩阵裁决 scanner clue 重叠关系。"""
+def _sweep_resolve(raw_text: str, clues: list[Clue]) -> list[Clue]:
+    """事件扫描线裁决所有 clue 重叠。
 
-    survivors = list(clues)
-    hard_spans = tuple((clue.start, clue.end) for clue in survivors if clue.role == ClueRole.HARD)
-    survivors = [
-        clue
-        for clue in survivors
-        if clue.role == ClueRole.HARD or not _overlaps_any(clue.start, clue.end, hard_spans)
-    ]
+    三步：
+    1. 扫描轮 1：hard / break 遮蔽过滤，同时收集 seed 连通块。
+    2. Seed 裁决：每个连通块选出 winner，移除败选 seed。
+    3. 扫描轮 2：seed 依赖规则（soft_control / soft_content 遮蔽）。
+    4. Label vs soft content 裁决（保留原有语义）。
+    """
+    if not clues:
+        return []
+    text_len = len(raw_text)
+    deduped = _dedupe_clues(clues)
 
-    break_spans = tuple((clue.start, clue.end) for clue in survivors if clue.role == ClueRole.BREAK)
-    survivors = [
-        clue
-        for clue in survivors
-        if clue.role in {ClueRole.HARD, ClueRole.BREAK} or not _overlaps_any(clue.start, clue.end, break_spans)
-    ]
+    # ── 轮 1：hard / break 遮蔽 + seed 连通块 ──
+    survivors, seed_groups = _sweep_pass1(deduped, text_len)
 
-    seed_winner_ids = {
-        clue.clue_id
-        for clue in _resolve_seed_conflicts(
-            [clue for clue in survivors if clue.role in _SEED_ROLES]
-        )
-    }
+    # ── Seed 裁决 ──
+    seed_winner_ids: set[str] = set()
+    for group in seed_groups:
+        winner = max(group, key=_seed_winner_key)
+        seed_winner_ids.add(winner.clue_id)
     survivors = [
-        clue
-        for clue in survivors
+        clue for clue in survivors
         if clue.role not in _SEED_ROLES or clue.clue_id in seed_winner_ids
     ]
 
-    seed_spans = tuple((clue.start, clue.end) for clue in survivors if clue.role in _SEED_ROLES)
-    survivors = [
-        clue
-        for clue in survivors
-        if clue.role not in _SOFT_CONTROL_ROLES or not _overlaps_any(clue.start, clue.end, seed_spans)
-    ]
+    # ── 轮 2：seed 依赖规则 ──
+    survivors = _sweep_pass2(survivors, text_len)
 
-    start_spans = tuple((clue.start, clue.end) for clue in survivors if clue.role == ClueRole.START)
-    survivors = [
-        clue
-        for clue in survivors
-        if clue.role not in _SOFT_CONTENT_ROLES or not _overlaps_any(clue.start, clue.end, start_spans)
-    ]
+    # ── Label vs soft content ──
+    return _label_vs_soft_filter(raw_text, survivors)
 
-    dropped_ids: set[str] = set()
-    label_clues = [clue for clue in survivors if clue.role == ClueRole.LABEL]
-    soft_clues = [clue for clue in survivors if clue.role in _SOFT_CONTENT_ROLES]
-    break_clues = [clue for clue in survivors if clue.role == ClueRole.BREAK]
+
+def _build_events(
+    clues: list[Clue],
+    text_len: int,
+) -> tuple[list[list[Clue]], list[list[Clue]]]:
+    """构建 start / end 事件数组。O(n) 注册，每个 clue 只写两个位置。"""
+    start_events: list[list[Clue]] = [[] for _ in range(text_len + 1)]
+    end_events: list[list[Clue]] = [[] for _ in range(text_len + 1)]
+    for clue in clues:
+        start_events[clue.start].append(clue)
+        end_events[clue.end].append(clue)
+    return start_events, end_events
+
+
+def _sweep_pass1(
+    clues: list[Clue],
+    text_len: int,
+) -> tuple[list[Clue], list[list[Clue]]]:
+    """扫描轮 1：hard / break 遮蔽 + seed 连通块收集。
+
+    从左到右遍历每个字符位置：
+    - 先处理 end 事件（移出 active）。
+    - 再处理 start 事件（准入判断 + 加入 active）。
+    同时维护 seed 连通块：如果当前 seed 的 start < 上一组 seed_group_end，
+    则合并到同一组。
+    """
+    start_events, end_events = _build_events(clues, text_len)
+
+    active_hard = 0
+    active_break = 0
+    survivors: list[Clue] = []
+
+    seed_groups: list[list[Clue]] = []
+    cur_seed_group: list[Clue] = []
+    seed_group_end = -1
+
+    for pos in range(text_len + 1):
+        # 移除到期 clue。
+        for clue in end_events[pos]:
+            if clue.role == ClueRole.HARD:
+                active_hard -= 1
+            elif clue.role == ClueRole.BREAK:
+                active_break -= 1
+
+        # 刷新 seed 组：当前位置已超出连通块右端。
+        if cur_seed_group and pos >= seed_group_end:
+            seed_groups.append(cur_seed_group)
+            cur_seed_group = []
+            seed_group_end = -1
+
+        for clue in start_events[pos]:
+            role = clue.role
+
+            # HARD / BREAK 无条件通过。
+            if role == ClueRole.HARD:
+                active_hard += 1
+                survivors.append(clue)
+                continue
+            if role == ClueRole.BREAK:
+                active_break += 1
+                survivors.append(clue)
+                continue
+
+            # 被 hard 遮蔽。
+            if active_hard > 0:
+                continue
+            # 被 break 遮蔽。
+            if active_break > 0:
+                continue
+
+            survivors.append(clue)
+
+            # 追踪 seed 连通块。
+            if role in _SEED_ROLES:
+                if clue.start < seed_group_end:
+                    cur_seed_group.append(clue)
+                else:
+                    if cur_seed_group:
+                        seed_groups.append(cur_seed_group)
+                    cur_seed_group = [clue]
+                seed_group_end = max(seed_group_end, clue.end)
+
+    # 收尾：最后一组 seed。
+    if cur_seed_group:
+        seed_groups.append(cur_seed_group)
+
+    return survivors, seed_groups
+
+
+def _sweep_pass2(clues: list[Clue], text_len: int) -> list[Clue]:
+    """扫描轮 2：seed 遮蔽 soft_control，START 遮蔽 soft_content。
+
+    此时 seed 列表已完成连通块裁决，仅含 winner。
+    """
+    start_events, end_events = _build_events(clues, text_len)
+
+    active_seed = 0
+    active_start = 0
+    survivors: list[Clue] = []
+
+    for pos in range(text_len + 1):
+        for clue in end_events[pos]:
+            if clue.role in _SEED_ROLES:
+                active_seed -= 1
+                if clue.role == ClueRole.START:
+                    active_start -= 1
+
+        for clue in start_events[pos]:
+            role = clue.role
+
+            if role in _SEED_ROLES:
+                active_seed += 1
+                if role == ClueRole.START:
+                    active_start += 1
+                survivors.append(clue)
+                continue
+
+            # SOFT_CONTROL（NEGATIVE / CONNECTOR）被 seed 遮蔽。
+            if role in _SOFT_CONTROL_ROLES and active_seed > 0:
+                continue
+            # SOFT_CONTENT（SURNAME / GIVEN_NAME / VALUE 等）被 START 遮蔽。
+            if role in _SOFT_CONTENT_ROLES and active_start > 0:
+                continue
+
+            survivors.append(clue)
+
+    return survivors
+
+
+def _label_vs_soft_filter(raw_text: str, clues: list[Clue]) -> list[Clue]:
+    """Label vs soft content 裁决。
+
+    逻辑与重构前一致：
+    - label 输给同属性更长的 soft content → 移除 label 及不同属性 soft。
+    - 否则 label 赢 → 移除所有重叠 soft content。
+    """
+    label_clues = [c for c in clues if c.role == ClueRole.LABEL]
+    soft_content_clues = [c for c in clues if c.role in _SOFT_CONTENT_ROLES]
+    if not label_clues or not soft_content_clues:
+        return clues
+
+    break_clues = [c for c in clues if c.role == ClueRole.BREAK]
     break_start_map = _build_break_start_map(break_clues)
     break_end_map = _build_break_end_map(break_clues)
+    dropped_ids: set[str] = set()
+
     for label in label_clues:
+        if label.clue_id in dropped_ids:
+            continue
         overlapping_soft = [
-            clue
-            for clue in soft_clues
-            if clue.clue_id not in dropped_ids and _clues_overlap(label, clue)
+            c for c in soft_content_clues
+            if c.clue_id not in dropped_ids and _clues_overlap(label, c)
         ]
         if not overlapping_soft:
             continue
-        same_attr_conflicts = [clue for clue in overlapping_soft if clue.attr_type == label.attr_type]
-        if _label_loses_to_same_attr_soft(raw_text, label, same_attr_conflicts, break_start_map, break_end_map):
+        same_attr = [c for c in overlapping_soft if c.attr_type == label.attr_type]
+        if _label_loses_to_same_attr_soft(raw_text, label, same_attr, break_start_map, break_end_map):
             dropped_ids.add(label.clue_id)
-            for clue in overlapping_soft:
-                if clue.attr_type != label.attr_type:
-                    dropped_ids.add(clue.clue_id)
+            for c in overlapping_soft:
+                if c.attr_type != label.attr_type:
+                    dropped_ids.add(c.clue_id)
             continue
-        for clue in overlapping_soft:
-            dropped_ids.add(clue.clue_id)
+        for c in overlapping_soft:
+            dropped_ids.add(c.clue_id)
 
-    return [
-        clue
-        for clue in survivors
-        if clue.clue_id not in dropped_ids
-    ]
-
-
-def _resolve_seed_conflicts(seed_clues: list[Clue]) -> list[Clue]:
-    """在重叠的 label/start 连通块内只保留一个 winner。"""
-
-    if not seed_clues:
-        return []
-    sorted_clues = sorted(seed_clues, key=lambda item: (item.start, item.end, -item.priority))
-    groups: list[list[Clue]] = []
-    current_group: list[Clue] = [sorted_clues[0]]
-    current_end = sorted_clues[0].end
-    for clue in sorted_clues[1:]:
-        if clue.start < current_end:
-            current_group.append(clue)
-            current_end = max(current_end, clue.end)
-            continue
-        groups.append(current_group)
-        current_group = [clue]
-        current_end = clue.end
-    groups.append(current_group)
-    return [max(group, key=_seed_winner_key) for group in groups]
+    return [c for c in clues if c.clue_id not in dropped_ids]
 
 
 def _seed_winner_key(clue: Clue) -> tuple[int, int, int, int]:
@@ -1241,5 +1360,5 @@ def _clues_overlap(left: Clue, right: Clue) -> bool:
     return not (left.end <= right.start or left.start >= right.end)
 
 
-def _overlaps_any(start: int, end: int, spans: tuple[tuple[int, int], ...]) -> bool:
+def _overlaps_any(start: int, end: int, spans: Sequence[tuple[int, int]]) -> bool:
     return any(not (end <= left or start >= right) for left, right in spans)
