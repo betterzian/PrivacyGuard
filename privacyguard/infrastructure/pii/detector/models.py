@@ -14,16 +14,6 @@ class ClaimStrength(str, Enum):
     HARD = "hard"
     SOFT = "soft"
 
-
-class ClueFamily(str, Enum):
-    STRUCTURED = "structured"
-    ADDRESS = "address"
-    NAME = "name"
-    ORGANIZATION = "organization"
-    BREAK = "break"
-    NEGATIVE = "negative"
-
-
 class ClueRole(str, Enum):
     HARD = "hard"
     LABEL = "label"
@@ -34,6 +24,7 @@ class ClueRole(str, Enum):
     GIVEN_NAME = "given_name"
     SUFFIX = "suffix"
     BREAK = "break"
+    CONNECTOR = "connector"
     NEGATIVE = "negative"
 
 
@@ -59,14 +50,6 @@ class BreakType(str, Enum):
     OCR = "ocr"
     PUNCT = "punct"
     NEWLINE = "newline"
-    CONNECTOR = "connector"
-
-
-class NegativeDecision(str, Enum):
-    IGNORE = "ignore"
-    PENALTY = "penalty"
-    VETO = "veto"
-    STOP = "stop"
 
 
 class NameComponentHint(str, Enum):
@@ -148,7 +131,6 @@ class CandidateDraft:
 @dataclass(frozen=True, slots=True)
 class Clue:
     clue_id: str
-    family: ClueFamily
     role: ClueRole
     attr_type: PIIAttributeType | None
     start: int
@@ -167,7 +149,6 @@ class Clue:
 @dataclass(slots=True)
 class ClueBundle:
     all_clues: tuple[Clue, ...]
-    negative_clues: tuple[Clue, ...] = ()
 
     @property
     def label_clues(self) -> tuple[Clue, ...]:
@@ -205,10 +186,3 @@ class ParseResult:
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     handled_label_clue_ids: set[str] = field(default_factory=set)
-
-
-@dataclass(frozen=True, slots=True)
-class NegativeEffect:
-    decision: NegativeDecision
-    matched_clue_ids: tuple[str, ...] = ()
-    reasons: tuple[str, ...] = ()

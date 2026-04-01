@@ -30,7 +30,6 @@ from privacyguard.infrastructure.pii.detector.models import (
     BreakType,
     Clue,
     ClueBundle,
-    ClueFamily,
     ClueRole,
     DictionaryEntry,
     NameComponentHint,
@@ -55,19 +54,6 @@ _PLACEHOLDER_BY_ATTR = {
     PIIAttributeType.DRIVER_LICENSE: "<driver_license>",
 }
 
-_LABEL_FAMILY_BY_ATTR: dict[PIIAttributeType, ClueFamily] = {
-    PIIAttributeType.EMAIL: ClueFamily.STRUCTURED,
-    PIIAttributeType.PHONE: ClueFamily.STRUCTURED,
-    PIIAttributeType.ID_NUMBER: ClueFamily.STRUCTURED,
-    PIIAttributeType.CARD_NUMBER: ClueFamily.STRUCTURED,
-    PIIAttributeType.BANK_ACCOUNT: ClueFamily.STRUCTURED,
-    PIIAttributeType.PASSPORT_NUMBER: ClueFamily.STRUCTURED,
-    PIIAttributeType.DRIVER_LICENSE: ClueFamily.STRUCTURED,
-    PIIAttributeType.NAME: ClueFamily.NAME,
-    PIIAttributeType.ORGANIZATION: ClueFamily.ORGANIZATION,
-    PIIAttributeType.ADDRESS: ClueFamily.ADDRESS,
-}
-
 _HARD_PATTERNS: tuple[tuple[PIIAttributeType, str, re.Pattern[str], int], ...] = (
     (PIIAttributeType.EMAIL, "regex_email", re.compile(r"(?<![\w.+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w.-])"), 120),
     (PIIAttributeType.PHONE, "regex_phone_cn", re.compile(r"(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)"), 118),
@@ -90,6 +76,19 @@ _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
     (BreakType.PUNCT, "break_punct", re.compile(r"[;；。！？!?]")),
     (BreakType.NEWLINE, "break_newline", re.compile(r"(?:\r?\n){2,}")),
 )
+
+_LABEL_FIELD_SEPARATOR_CHARS = ":：-—–=|"
+_SEED_ROLES = frozenset({ClueRole.LABEL, ClueRole.START})
+_SOFT_CONTENT_ROLES = frozenset(
+    {
+        ClueRole.SUFFIX,
+        ClueRole.KEY,
+        ClueRole.VALUE,
+        ClueRole.SURNAME,
+        ClueRole.GIVEN_NAME,
+    }
+)
+_SOFT_CONTROL_ROLES = frozenset({ClueRole.NEGATIVE, ClueRole.CONNECTOR})
 
 # 数字的非隐私上下文模式。
 _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -169,14 +168,13 @@ def build_clue_bundle(
         ]
     )
     scan_segments = _build_soft_scan_segments(stream.raw_text, hard_clues, extra_blocked_spans=ocr_break_spans)
-
     label_clues = tuple(
         clue
         for segment in scan_segments
         for clue in _scan_label_clues(ctx, segment)
     )
-    label_spans = tuple((clue.start, clue.end) for clue in label_clues)
-    soft_clues = [
+    all_clues = [
+        *hard_clues,
         *label_clues,
         *_scan_ocr_break_clues(ctx, ocr_break_spans),
         *(clue for segment in scan_segments for clue in _scan_break_clues(ctx, segment)),
@@ -188,16 +186,12 @@ def build_clue_bundle(
         *(clue for segment in scan_segments for clue in _scan_connector_clues(ctx, segment)),
         *(clue for segment in scan_segments for clue in _scan_company_suffix_clues(ctx, segment)),
         *(clue for segment in scan_segments for clue in _scan_address_clues(ctx, segment, locale_profile=locale_profile)),
+        *(clue for segment in scan_segments for clue in _scan_negative_clues(ctx, segment)),
     ]
-    soft_clues = [clue for clue in soft_clues if clue in label_clues or not _overlaps_any(clue.start, clue.end, label_spans)]
-    # 负向 clue：与正向 clue 一并扫描，供 Stack 阶段参考。
-    negative_clues = tuple(
-        clue
-        for segment in scan_segments
-        for clue in _scan_negative_clues(ctx, segment)
-    )
-    all_clues = tuple(sorted([*hard_clues, *soft_clues], key=lambda item: (item.start, -item.priority, item.end)))
-    return ClueBundle(all_clues=all_clues, negative_clues=negative_clues)
+    deduped_clues = _dedupe_clues(all_clues)
+    reduced_clues = _resolve_clue_overlaps(stream.raw_text, deduped_clues)
+    ordered_clues = tuple(sorted(reduced_clues, key=lambda item: (item.start, -item.priority, item.end)))
+    return ClueBundle(all_clues=ordered_clues)
 
 
 def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[tuple[int, int], ...] = ()) -> list[Clue]:
@@ -213,7 +207,6 @@ def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[t
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
-                    family=ClueFamily.STRUCTURED,
                     role=ClueRole.HARD,
                     attr_type=attr_type,
                     start=match.start(),
@@ -237,7 +230,6 @@ def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[t
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.STRUCTURED,
                 role=ClueRole.HARD,
                 attr_type=PIIAttributeType.CARD_NUMBER,
                 start=match.start(),
@@ -262,7 +254,6 @@ def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[t
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
-                    family=ClueFamily.STRUCTURED,
                     role=ClueRole.HARD,
                     attr_type=PIIAttributeType.BANK_ACCOUNT,
                     start=match.start(),
@@ -279,7 +270,6 @@ def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[t
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
-                    family=ClueFamily.STRUCTURED,
                     role=ClueRole.HARD,
                     attr_type=PIIAttributeType.NUMERIC,
                     start=match.start(),
@@ -302,7 +292,6 @@ def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[t
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.STRUCTURED,
                 role=ClueRole.HARD,
                 attr_type=PIIAttributeType.NUMERIC,
                 start=match.start(),
@@ -336,7 +325,6 @@ def _scan_dictionary_hard_clues(
                 clues.append(
                     Clue(
                         clue_id=ctx.next_clue_id(),
-                        family=ClueFamily.STRUCTURED,
                         role=ClueRole.HARD,
                         attr_type=entry.attr_type,
                         start=match.start(),
@@ -369,7 +357,6 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=_LABEL_FAMILY_BY_ATTR[spec.attr_type],
                 role=ClueRole.LABEL,
                 attr_type=spec.attr_type,
                 start=raw_start,
@@ -392,7 +379,6 @@ def _scan_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
-                    family=ClueFamily.BREAK,
                     role=ClueRole.BREAK,
                     attr_type=None,
                     start=raw_start,
@@ -412,7 +398,6 @@ def _scan_ocr_break_clues(ctx: DetectContext, ocr_break_spans: tuple[tuple[int, 
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.BREAK,
                 role=ClueRole.BREAK,
                 attr_type=None,
                 start=start,
@@ -433,7 +418,6 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.NAME,
                 role=ClueRole.START,
                 attr_type=PIIAttributeType.NAME,
                 start=raw_start,
@@ -456,7 +440,6 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.NAME,
                 role=ClueRole.SURNAME,
                 attr_type=PIIAttributeType.NAME,
                 start=raw_start,
@@ -477,7 +460,6 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.NAME,
                 role=ClueRole.SURNAME,
                 attr_type=PIIAttributeType.NAME,
                 start=raw_start,
@@ -499,7 +481,6 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.NAME,
                 role=ClueRole.GIVEN_NAME,
                 attr_type=PIIAttributeType.NAME,
                 start=raw_start,
@@ -521,7 +502,6 @@ def _scan_zh_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.NAME,
                 role=ClueRole.GIVEN_NAME,
                 attr_type=PIIAttributeType.NAME,
                 start=raw_start,
@@ -536,10 +516,10 @@ def _scan_zh_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
 
 
 def _scan_connector_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
-    """扫描连接词/介词，产出 BREAK clue（break_type=CONNECTOR）。
+    """扫描连接词/介词，产出 CONNECTOR clue。
 
     中文：的、得、是、于、去。英文：is、or、at。
-    source_kind 标记为 connector_zh / connector_en，与 ADDRESS 类 clue 属性区分。
+    这类 clue 不起栈，但会被 stack 当作软控制信号读取。
     """
     clues: list[Clue] = []
     for match in _connector_matcher().find_matches(segment.text, folded_text=segment.folded_text):
@@ -547,15 +527,13 @@ def _scan_connector_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clu
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.BREAK,
-                role=ClueRole.BREAK,
+                role=ClueRole.CONNECTOR,
                 attr_type=None,
                 start=raw_start,
                 end=raw_end,
                 text=match.matched_text,
                 priority=150,
                 source_kind=str(match.payload),
-                break_type=BreakType.CONNECTOR,
             )
         )
     return _dedupe_clues(clues)
@@ -568,7 +546,6 @@ def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> lis
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ORGANIZATION,
                 role=ClueRole.SUFFIX,
                 attr_type=PIIAttributeType.ORGANIZATION,
                 start=raw_start,
@@ -598,7 +575,6 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
                 start=raw_start,
@@ -615,7 +591,6 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ADDRESS,
                 role=ClueRole.KEY,
                 attr_type=PIIAttributeType.ADDRESS,
                 start=raw_start,
@@ -637,7 +612,6 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
                 start=raw_start,
@@ -654,7 +628,6 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ADDRESS,
                 role=ClueRole.KEY,
                 attr_type=PIIAttributeType.ADDRESS,
                 start=raw_start,
@@ -670,7 +643,6 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
                 start=raw_start,
@@ -693,7 +665,6 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                family=ClueFamily.NEGATIVE,
                 role=ClueRole.NEGATIVE,
                 attr_type=None,
                 start=raw_start,
@@ -710,7 +681,6 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
-                    family=ClueFamily.NEGATIVE,
                     role=ClueRole.NEGATIVE,
                     attr_type=None,
                     start=raw_start,
@@ -1027,6 +997,8 @@ def _en_address_key_matcher() -> AhoMatcher:
 
 
 def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
+    """只去掉完全同义的 clue，不在这里做覆盖裁决。"""
+
     seen: set[tuple[object, ...]] = set()
     ordered: list[Clue] = []
     for clue in sorted(
@@ -1035,15 +1007,20 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
             item.start,
             -(item.end - item.start),
             -item.priority,
-            item.family.value,
             item.role.value,
+            item.attr_type.value if item.attr_type is not None else "",
             item.component_type or "",
+            item.break_type or "",
         ),
     ):
         key = (
-            clue.family,
             clue.role,
+            clue.attr_type,
             clue.component_type,
+            clue.component_hint,
+            clue.break_type,
+            clue.hard_source,
+            clue.source_kind,
             clue.start,
             clue.end,
             clue.text.lower(),
@@ -1052,19 +1029,216 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
             continue
         seen.add(key)
         ordered.append(clue)
-    occupied: list[tuple[int, int]] = []
-    filtered: list[Clue] = []
-    for clue in ordered:
-        if clue.family == ClueFamily.BREAK:
-            filtered.append(clue)
+    return sorted(ordered, key=lambda item: (item.start, item.end, -item.priority))
+
+
+def _resolve_clue_overlaps(raw_text: str, clues: list[Clue]) -> list[Clue]:
+    """按显式矩阵裁决 scanner clue 重叠关系。"""
+
+    survivors = list(clues)
+    hard_spans = tuple((clue.start, clue.end) for clue in survivors if clue.role == ClueRole.HARD)
+    survivors = [
+        clue
+        for clue in survivors
+        if clue.role == ClueRole.HARD or not _overlaps_any(clue.start, clue.end, hard_spans)
+    ]
+
+    break_spans = tuple((clue.start, clue.end) for clue in survivors if clue.role == ClueRole.BREAK)
+    survivors = [
+        clue
+        for clue in survivors
+        if clue.role in {ClueRole.HARD, ClueRole.BREAK} or not _overlaps_any(clue.start, clue.end, break_spans)
+    ]
+
+    seed_winner_ids = {
+        clue.clue_id
+        for clue in _resolve_seed_conflicts(
+            [clue for clue in survivors if clue.role in _SEED_ROLES]
+        )
+    }
+    survivors = [
+        clue
+        for clue in survivors
+        if clue.role not in _SEED_ROLES or clue.clue_id in seed_winner_ids
+    ]
+
+    seed_spans = tuple((clue.start, clue.end) for clue in survivors if clue.role in _SEED_ROLES)
+    survivors = [
+        clue
+        for clue in survivors
+        if clue.role not in _SOFT_CONTROL_ROLES or not _overlaps_any(clue.start, clue.end, seed_spans)
+    ]
+
+    start_spans = tuple((clue.start, clue.end) for clue in survivors if clue.role == ClueRole.START)
+    survivors = [
+        clue
+        for clue in survivors
+        if clue.role not in _SOFT_CONTENT_ROLES or not _overlaps_any(clue.start, clue.end, start_spans)
+    ]
+
+    dropped_ids: set[str] = set()
+    label_clues = [clue for clue in survivors if clue.role == ClueRole.LABEL]
+    soft_clues = [clue for clue in survivors if clue.role in _SOFT_CONTENT_ROLES]
+    break_clues = [clue for clue in survivors if clue.role == ClueRole.BREAK]
+    break_start_map = _build_break_start_map(break_clues)
+    break_end_map = _build_break_end_map(break_clues)
+    for label in label_clues:
+        overlapping_soft = [
+            clue
+            for clue in soft_clues
+            if clue.clue_id not in dropped_ids and _clues_overlap(label, clue)
+        ]
+        if not overlapping_soft:
             continue
-        if any(not (clue.end <= left or clue.start >= right) for left, right in occupied):
-            if clue.role in {ClueRole.LABEL, ClueRole.KEY}:
-                continue
-        filtered.append(clue)
-        if clue.role in {ClueRole.LABEL, ClueRole.KEY, ClueRole.VALUE}:
-            occupied.append((clue.start, clue.end))
-    return sorted(filtered, key=lambda item: (item.start, item.end, -item.priority))
+        same_attr_conflicts = [clue for clue in overlapping_soft if clue.attr_type == label.attr_type]
+        if _label_loses_to_same_attr_soft(raw_text, label, same_attr_conflicts, break_start_map, break_end_map):
+            dropped_ids.add(label.clue_id)
+            for clue in overlapping_soft:
+                if clue.attr_type != label.attr_type:
+                    dropped_ids.add(clue.clue_id)
+            continue
+        for clue in overlapping_soft:
+            dropped_ids.add(clue.clue_id)
+
+    return [
+        clue
+        for clue in survivors
+        if clue.clue_id not in dropped_ids
+    ]
+
+
+def _resolve_seed_conflicts(seed_clues: list[Clue]) -> list[Clue]:
+    """在重叠的 label/start 连通块内只保留一个 winner。"""
+
+    if not seed_clues:
+        return []
+    sorted_clues = sorted(seed_clues, key=lambda item: (item.start, item.end, -item.priority))
+    groups: list[list[Clue]] = []
+    current_group: list[Clue] = [sorted_clues[0]]
+    current_end = sorted_clues[0].end
+    for clue in sorted_clues[1:]:
+        if clue.start < current_end:
+            current_group.append(clue)
+            current_end = max(current_end, clue.end)
+            continue
+        groups.append(current_group)
+        current_group = [clue]
+        current_end = clue.end
+    groups.append(current_group)
+    return [max(group, key=_seed_winner_key) for group in groups]
+
+
+def _seed_winner_key(clue: Clue) -> tuple[int, int, int, int]:
+    return (
+        clue.end - clue.start,
+        clue.priority,
+        -clue.start,
+        clue.end,
+    )
+
+
+def _label_loses_to_same_attr_soft(
+    raw_text: str,
+    label_clue: Clue,
+    same_attr_conflicts: list[Clue],
+    break_start_map: dict[int, list[Clue]],
+    break_end_map: dict[int, list[Clue]],
+) -> bool:
+    """同属性 label vs soft content：先比长度，等长再看字段边界。"""
+
+    if not same_attr_conflicts:
+        return False
+    label_length = label_clue.end - label_clue.start
+    for clue in same_attr_conflicts:
+        clue_length = clue.end - clue.start
+        if label_length > clue_length:
+            continue
+        if label_length < clue_length:
+            return True
+        if not _label_wins_equal_length_conflict(raw_text, label_clue, break_start_map, break_end_map):
+            return True
+    return False
+
+
+def _label_wins_equal_length_conflict(
+    raw_text: str,
+    label_clue: Clue,
+    break_start_map: dict[int, list[Clue]],
+    break_end_map: dict[int, list[Clue]],
+) -> bool:
+    """等长冲突时，优先保留更像字段标题的 label。"""
+
+    if _has_label_field_separator_after(raw_text, label_clue):
+        return True
+    return _label_is_wrapped_by_boundaries(raw_text, label_clue, break_start_map, break_end_map)
+
+
+def _has_label_field_separator_after(raw_text: str, label_clue: Clue) -> bool:
+    index = _skip_whitespace_right(raw_text, label_clue.end)
+    return index < len(raw_text) and raw_text[index] in _LABEL_FIELD_SEPARATOR_CHARS
+
+
+def _label_is_wrapped_by_boundaries(
+    raw_text: str,
+    label_clue: Clue,
+    break_start_map: dict[int, list[Clue]],
+    break_end_map: dict[int, list[Clue]],
+) -> bool:
+    return (
+        _is_left_label_boundary(raw_text, label_clue.start, break_end_map)
+        and _is_right_label_boundary(raw_text, label_clue.end, break_start_map)
+    )
+
+
+def _build_break_start_map(break_clues: list[Clue]) -> dict[int, list[Clue]]:
+    mapping: dict[int, list[Clue]] = {}
+    for clue in break_clues:
+        mapping.setdefault(clue.start, []).append(clue)
+    return mapping
+
+
+def _build_break_end_map(break_clues: list[Clue]) -> dict[int, list[Clue]]:
+    mapping: dict[int, list[Clue]] = {}
+    for clue in break_clues:
+        mapping.setdefault(clue.end, []).append(clue)
+    return mapping
+
+
+def _is_left_label_boundary(raw_text: str, start: int, break_end_map: dict[int, list[Clue]]) -> bool:
+    index = start
+    while index > 0:
+        if index in break_end_map:
+            return True
+        previous = raw_text[index - 1]
+        if previous.isspace():
+            index -= 1
+            continue
+        return False
+    return True
+
+
+def _is_right_label_boundary(raw_text: str, end: int, break_start_map: dict[int, list[Clue]]) -> bool:
+    index = end
+    while index < len(raw_text):
+        if index in break_start_map:
+            return True
+        current = raw_text[index]
+        if current.isspace():
+            index += 1
+            continue
+        return False
+    return True
+
+
+def _skip_whitespace_right(raw_text: str, start: int) -> int:
+    index = start
+    while index < len(raw_text) and raw_text[index].isspace():
+        index += 1
+    return index
+
+
+def _clues_overlap(left: Clue, right: Clue) -> bool:
+    return not (left.end <= right.start or left.start >= right.end)
 
 
 def _overlaps_any(start: int, end: int, spans: tuple[tuple[int, int], ...]) -> bool:

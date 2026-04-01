@@ -13,7 +13,6 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import (
     build_organization_candidate_from_value,
     clean_value,
     has_organization_suffix,
-    name_component_hint,
     organization_suffix_start,
     trim_candidate,
 )
@@ -23,16 +22,14 @@ from privacyguard.infrastructure.pii.detector.models import (
     CandidateDraft,
     ClaimStrength,
     Clue,
-    ClueFamily,
     ClueRole,
     NameComponentHint,
-    NegativeDecision,
     StreamInput,
 )
-from privacyguard.infrastructure.pii.detector.negative_utils import evaluate_negative_effect, overlapping_negative_clues
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
 
 _HARD_BREAK_RE = re.compile(r"[;；。！？!?]")
+_STRUCTURED_BINDABLE_GAP_RE = re.compile(r"^[\s:：\-—|,，]*$")
 
 _ADDRESS_COMPONENT_ORDER = {
     AddressComponentType.PROVINCE: 1,
@@ -64,14 +61,11 @@ class StackContextLike(Protocol):
     stream: StreamInput
     locale_profile: str
     clues: tuple[Clue, ...]
-    negative_clues: tuple[Clue, ...]
-
-    def has_negative_at(self, start: int, end: int) -> bool: ...
 
 
 @dataclass(slots=True)
 class StackRun:
-    family: ClueFamily
+    attr_type: PIIAttributeType
     candidate: CandidateDraft
     consumed_ids: set[str]
     handled_label_clue_ids: set[str] = field(default_factory=set)
@@ -87,13 +81,42 @@ class BaseStack:
     def run(self) -> StackRun | None:
         raise NotImplementedError
 
+    def _build_hard_run(self) -> StackRun | None:
+        if self.clue.attr_type is None:
+            return None
+        candidate = _build_hard_candidate(self.clue, self.context.stream.source)
+        return StackRun(
+            attr_type=candidate.attr_type,
+            candidate=candidate,
+            consumed_ids={self.clue.clue_id},
+            next_index=self.clue_index + 1,
+        )
+
+def is_break_clue(clue: Clue) -> bool:
+    return clue.role == ClueRole.BREAK
+
+
+def is_negative_clue(clue: Clue) -> bool:
+    return clue.role == ClueRole.NEGATIVE
+
+
+def is_connector_clue(clue: Clue) -> bool:
+    return clue.role == ClueRole.CONNECTOR
+
+
+def is_control_clue(clue: Clue) -> bool:
+    return clue.attr_type is None
+
+
+def _is_stop_control_clue(clue: Clue) -> bool:
+    return clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.CONNECTOR}
+
 
 @dataclass(slots=True)
-class StructuredValueStack(BaseStack):
+class StructuredBaseStack(BaseStack):
     def run(self) -> StackRun | None:
         if self.clue.role == ClueRole.HARD:
-            candidate = _build_hard_candidate(self.clue, self.context.stream.source)
-            return StackRun(ClueFamily.STRUCTURED, candidate, {self.clue.clue_id}, next_index=self.clue_index + 1)
+            return self._build_hard_run()
         if self.clue.role != ClueRole.LABEL:
             return None
         hard_clue, hard_index = self._find_bound_hard_clue()
@@ -103,7 +126,7 @@ class StructuredValueStack(BaseStack):
         candidate.label_clue_ids.add(self.clue.clue_id)
         candidate.metadata = merge_metadata(candidate.metadata, {"bound_label_clue_ids": [self.clue.clue_id]})
         return StackRun(
-            family=ClueFamily.STRUCTURED,
+            attr_type=candidate.attr_type,
             candidate=candidate,
             consumed_ids={self.clue.clue_id, hard_clue.clue_id},
             handled_label_clue_ids={self.clue.clue_id},
@@ -115,21 +138,50 @@ class StructuredValueStack(BaseStack):
         cursor = self.clue.end
         for index in range(self.clue_index + 1, len(self.context.clues)):
             clue = self.context.clues[index]
-            if clue.family == ClueFamily.BREAK:
-                return (None, -1)
+            if is_control_clue(clue):
+                cursor = max(cursor, clue.end)
+                continue
             gap_text = raw_text[cursor:clue.start]
-            if gap_text and (_HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text):
-                return (None, -1)
-            if gap_text.strip():
+            if gap_text and _STRUCTURED_BINDABLE_GAP_RE.fullmatch(gap_text) is None:
                 return (None, -1)
             if clue.role == ClueRole.HARD and clue.attr_type == self.clue.attr_type:
                 return (clue, index)
-            if clue.role == ClueRole.LABEL and clue.attr_type != self.clue.attr_type:
-                return (None, -1)
-            if clue.family != ClueFamily.STRUCTURED:
+            if clue.role in {ClueRole.LABEL, ClueRole.HARD} and clue.attr_type != self.clue.attr_type:
                 return (None, -1)
             cursor = max(cursor, clue.end)
         return (None, -1)
+
+
+class EmailStack(StructuredBaseStack):
+    pass
+
+
+class PhoneStack(StructuredBaseStack):
+    pass
+
+
+class IdNumberStack(StructuredBaseStack):
+    pass
+
+
+class CardNumberStack(StructuredBaseStack):
+    pass
+
+
+class BankAccountStack(StructuredBaseStack):
+    pass
+
+
+class PassportStack(StructuredBaseStack):
+    pass
+
+
+class DriverLicenseStack(StructuredBaseStack):
+    pass
+
+
+class NumericStack(StructuredBaseStack):
+    pass
 
 
 @dataclass(slots=True)
@@ -145,6 +197,8 @@ class NameStack(BaseStack):
     """
 
     def run(self) -> StackRun | None:
+        if self.clue.role == ClueRole.HARD:
+            return self._build_hard_run()
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
             return self._run_ltr()
         if self.clue.role == ClueRole.SURNAME:
@@ -189,15 +243,12 @@ class NameStack(BaseStack):
         )
         if candidate is None:
             return None
-        # 负向 clue 处理（label-driven 跳过）。
-        if not is_label_seed:
-            candidate = self._apply_negative(candidate)
-            if candidate is None:
-                return None
         return StackRun(
-            ClueFamily.NAME, candidate, consumed_ids,
-            {self.clue.clue_id} if is_label_seed else set(),
-            next_index,
+            attr_type=PIIAttributeType.NAME,
+            candidate=candidate,
+            consumed_ids=consumed_ids,
+            handled_label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
+            next_index=next_index,
         )
 
     # ------------------------------------------------------------------
@@ -225,12 +276,11 @@ class NameStack(BaseStack):
         )
         if candidate is None:
             return None
-        candidate = self._apply_negative(candidate)
-        if candidate is None:
-            return None
         return StackRun(
-            ClueFamily.NAME, candidate, {self.clue.clue_id},
-            set(), self.clue_index + 1,
+            attr_type=PIIAttributeType.NAME,
+            candidate=candidate,
+            consumed_ids={self.clue.clue_id},
+            next_index=self.clue_index + 1,
         )
 
     # ------------------------------------------------------------------
@@ -253,36 +303,6 @@ class NameStack(BaseStack):
             return NameComponentHint.GIVEN
         return self.clue.component_hint or NameComponentHint.FULL
 
-    def _apply_negative(self, candidate: CandidateDraft) -> CandidateDraft | None:
-        """按语言执行负向 clue 处理。
-
-        中文：遇到 negative 直接丢弃候选。
-        英文：截到最早 negative 前；截完只剩 1 个 token 则丢弃。
-        """
-        negatives = overlapping_negative_clues(self.context.negative_clues, candidate.start, candidate.end)
-        if not negatives:
-            return candidate
-        locale = _detect_locale(self.context.stream.raw_text, candidate.start, candidate.end)
-        if locale == "zh":
-            return None
-        # 英文：截到最早 negative 前。
-        earliest_start = min(neg.start for neg in negatives)
-        if earliest_start <= candidate.start:
-            return None
-        truncated = self.context.stream.raw_text[candidate.start:earliest_start].strip()
-        tokens = truncated.split()
-        if len(tokens) <= 1:
-            return None
-        return build_name_candidate_from_value(
-            source=self.context.stream.source,
-            value_text=truncated,
-            value_start=candidate.start,
-            value_end=candidate.start + len(truncated),
-            source_kind=candidate.source_kind,
-            component_hint=NameComponentHint.FULL,
-            label_driven=candidate.label_driven,
-        )
-
     def _resolve_right_boundary(self) -> tuple[int, int, set[str]]:
         raw_text = self.context.stream.raw_text
         end = self.clue.end
@@ -290,14 +310,14 @@ class NameStack(BaseStack):
         index = self.clue_index + 1
         while index < len(self.context.clues):
             clue = self.context.clues[index]
-            if clue.family == ClueFamily.BREAK:
+            if _is_stop_control_clue(clue):
                 break
             gap_text = raw_text[end:clue.start]
             if gap_text and (_HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text):
                 break
             if gap_text.strip():
                 break
-            if clue.family != ClueFamily.NAME:
+            if clue.attr_type != PIIAttributeType.NAME:
                 break
             end = max(end, clue.end)
             consumed.add(clue.clue_id)
@@ -308,6 +328,8 @@ class NameStack(BaseStack):
 @dataclass(slots=True)
 class OrganizationStack(BaseStack):
     def run(self) -> StackRun | None:
+        if self.clue.role == ClueRole.HARD:
+            return self._build_hard_run()
         is_label_seed = self.clue.role == ClueRole.LABEL
         if is_label_seed:
             start = _skip_separators(self.context.stream.raw_text, self.clue.end)
@@ -334,17 +356,13 @@ class OrganizationStack(BaseStack):
         )
         if candidate is None:
             return None
-        # 非 label-driven 的 suffix 触发，若被负向 clue 覆盖则拒绝。
-        if not is_label_seed:
-            effect = evaluate_negative_effect(
-                ClueFamily.ORGANIZATION,
-                overlapping_negative_clues(self.context.negative_clues, candidate.start, candidate.end),
-            )
-            if effect.decision == NegativeDecision.VETO:
-                return None
-            if effect.decision == NegativeDecision.PENALTY:
-                candidate.metadata = merge_metadata(candidate.metadata, {"negative_signals": list(effect.reasons)})
-        return StackRun(ClueFamily.ORGANIZATION, candidate, consumed_ids, handled, next_index)
+        return StackRun(
+            attr_type=PIIAttributeType.ORGANIZATION,
+            candidate=candidate,
+            consumed_ids=consumed_ids,
+            handled_label_clue_ids=handled,
+            next_index=next_index,
+        )
 
     def _resolve_right_boundary(self) -> tuple[int, int, set[str]]:
         raw_text = self.context.stream.raw_text
@@ -353,14 +371,14 @@ class OrganizationStack(BaseStack):
         index = self.clue_index + 1
         while index < len(self.context.clues):
             clue = self.context.clues[index]
-            if clue.family == ClueFamily.BREAK:
+            if _is_stop_control_clue(clue):
                 break
             gap_text = raw_text[end:clue.start]
             if gap_text and (_HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text):
                 break
             if gap_text.strip():
                 break
-            if clue.family != ClueFamily.ORGANIZATION:
+            if clue.attr_type != PIIAttributeType.ORGANIZATION:
                 break
             end = max(end, clue.end)
             consumed.add(clue.clue_id)
@@ -371,6 +389,8 @@ class OrganizationStack(BaseStack):
 @dataclass(slots=True)
 class AddressStack(BaseStack):
     def run(self) -> StackRun | None:
+        if self.clue.role == ClueRole.HARD:
+            return self._build_hard_run()
         raw_text = self.context.stream.raw_text
         is_label_seed = self.clue.role == ClueRole.LABEL
         if is_label_seed:
@@ -396,9 +416,9 @@ class AddressStack(BaseStack):
         i = index
         while i < len(self.context.clues):
             clue = self.context.clues[i]
-            if clue.family == ClueFamily.BREAK:
+            if _is_stop_control_clue(clue):
                 break
-            if clue.family != ClueFamily.ADDRESS or clue.role == ClueRole.LABEL:
+            if clue.attr_type != PIIAttributeType.ADDRESS or clue.role == ClueRole.LABEL:
                 break
             if clue.start < address_start:
                 i += 1
@@ -471,22 +491,20 @@ class AddressStack(BaseStack):
             label_clue_ids=handled_labels,
             label_driven=is_label_seed,
         )
-        effect = evaluate_negative_effect(
-            ClueFamily.ADDRESS,
-            overlapping_negative_clues(self.context.negative_clues, candidate.start, candidate.end),
+        return StackRun(
+            attr_type=PIIAttributeType.ADDRESS,
+            candidate=candidate,
+            consumed_ids=consumed_ids,
+            handled_label_clue_ids=handled_labels,
+            next_index=i,
         )
-        if effect.decision == NegativeDecision.VETO:
-            return None
-        if effect.decision == NegativeDecision.PENALTY:
-            candidate.metadata = merge_metadata(candidate.metadata, {"negative_signals": list(effect.reasons)})
-        return StackRun(ClueFamily.ADDRESS, candidate, consumed_ids, handled_labels, i)
 
     def _seed_left_boundary(self) -> int | None:
         raw_text = self.context.stream.raw_text
         if self.clue.role == ClueRole.VALUE:
             return self.clue.start
         if self.clue.role == ClueRole.KEY:
-            floor = _left_family_floor(self.context.clues, self.clue_index)
+            floor = _left_address_floor(self.context.clues, self.clue_index)
             return _left_expand_value(raw_text, self.clue.start, floor=floor)
         return None
 
@@ -602,11 +620,15 @@ class StackManager:
 def _next_address_index(clues: tuple[Clue, ...], start_index: int) -> int | None:
     for index in range(start_index, len(clues)):
         clue = clues[index]
-        if clue.family == ClueFamily.BREAK:
+        if _is_stop_control_clue(clue):
             return None
-        if clue.family == ClueFamily.ADDRESS and clue.role != ClueRole.LABEL:
+        if clue.attr_type == PIIAttributeType.ADDRESS and clue.role == ClueRole.LABEL:
+            continue
+        if clue.attr_type == PIIAttributeType.ADDRESS and clue.role != ClueRole.LABEL:
             return index
-        if clue.family not in {ClueFamily.ADDRESS, ClueFamily.BREAK}:
+        if is_control_clue(clue):
+            continue
+        if clue.attr_type != PIIAttributeType.ADDRESS:
             return None
     return None
 
@@ -653,7 +675,7 @@ def _build_address_component_from_attr(
         component_start = segment_cursor
         raw_value = raw_text[segment_cursor:clue.start]
         if not raw_value.strip():
-            component_start = _left_expand_value(raw_text, clue.start, floor=_left_family_floor(clues, clue_index))
+            component_start = _left_expand_value(raw_text, clue.start, floor=_left_address_floor(clues, clue_index))
             raw_value = raw_text[component_start:clue.start]
     value = _normalize_address_value(component_type, raw_value)
     if not value:
@@ -664,12 +686,14 @@ def _build_address_component_from_attr(
     return {"component_type": component_type, "start": component_start, "end": component_end, "value": value, "key": key_text, "is_detail": component_type in _DETAIL_COMPONENTS}
 
 
-def _left_family_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
+def _left_address_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
     for index in range(clue_index - 1, -1, -1):
         clue = clues[index]
-        if clue.family == ClueFamily.BREAK:
+        if _is_stop_control_clue(clue):
             return clue.end
-        if clue.family != ClueFamily.ADDRESS:
+        if is_control_clue(clue):
+            continue
+        if clue.attr_type != PIIAttributeType.ADDRESS:
             return clue.end
     return 0
 
@@ -689,8 +713,10 @@ def _left_expand_value(raw_text: str, attr_start: int, *, floor: int) -> int:
 def _next_clue_start(clues: tuple[Clue, ...], start_index: int, *, default: int) -> int:
     for index in range(start_index, len(clues)):
         clue = clues[index]
-        if clue.family == ClueFamily.BREAK:
+        if _is_stop_control_clue(clue):
             return clue.start
+        if is_control_clue(clue):
+            continue
         return clue.start
     return default
 
@@ -776,7 +802,7 @@ def _left_expand_text_boundary(raw_text: str, clues: tuple[Clue, ...], start: in
     floor = 0
     for clue in reversed(clues):
         if clue.end <= start:
-            if clue.family == ClueFamily.BREAK:
+            if _is_stop_control_clue(clue):
                 floor = clue.end
                 break
             if clue.role == ClueRole.LABEL:
@@ -803,10 +829,12 @@ def _extend_name_boundary(raw_text: str, start: int, end: int, clues: tuple[Clue
     upper = len(raw_text)
     for i in range(next_clue_index, len(clues)):
         c = clues[i]
-        if c.family == ClueFamily.BREAK:
+        if _is_stop_control_clue(c):
             upper = min(upper, c.start)
             break
-        if c.family != ClueFamily.NAME:
+        if is_control_clue(c):
+            continue
+        if c.attr_type != PIIAttributeType.NAME:
             upper = min(upper, c.start)
             break
     # 判断是中文名还是英文名。
@@ -850,10 +878,12 @@ def _extend_name_boundary_left(raw_text: str, start: int, end: int, clues: tuple
     lower = 0
     for i in range(clue_index - 1, -1, -1):
         c = clues[i]
-        if c.family == ClueFamily.BREAK:
+        if _is_stop_control_clue(c):
             lower = c.end
             break
-        if c.family != ClueFamily.NAME:
+        if is_control_clue(c):
+            continue
+        if c.attr_type != PIIAttributeType.NAME:
             lower = c.end
             break
     # 判断是中文还是英文（基于 seed 首字符）。

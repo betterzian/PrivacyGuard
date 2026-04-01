@@ -1,31 +1,50 @@
-"""Clean single-main-stack parser."""
+"""按 attr_type 路由的单主栈 parser。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, ParseResult, StreamInput
-from privacyguard.infrastructure.pii.detector.negative_utils import has_negative_at
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, Clue, ClueBundle, ParseResult, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks import (
     AddressStack,
+    BankAccountStack,
     BaseStack,
-    ConflictOutcome,
+    CardNumberStack,
+    DriverLicenseStack,
+    EmailStack,
+    IdNumberStack,
     NameStack,
+    NumericStack,
     OrganizationStack,
+    PassportStack,
+    PhoneStack,
     StackManager,
     StackRun,
-    StructuredValueStack,
 )
-from privacyguard.infrastructure.pii.detector.strategies import StackStrategy, build_strategy_context, resolve_strategies
+from privacyguard.infrastructure.pii.detector.strategies import resolve_strategies
 
-_STACK_REGISTRY = {
-    ClueFamily.STRUCTURED: StructuredValueStack,
-    ClueFamily.ADDRESS: AddressStack,
-    ClueFamily.NAME: NameStack,
-    ClueFamily.ORGANIZATION: OrganizationStack,
+_STACK_REGISTRY: dict[PIIAttributeType, type[BaseStack]] = {
+    PIIAttributeType.EMAIL: EmailStack,
+    PIIAttributeType.PHONE: PhoneStack,
+    PIIAttributeType.ID_NUMBER: IdNumberStack,
+    PIIAttributeType.CARD_NUMBER: CardNumberStack,
+    PIIAttributeType.BANK_ACCOUNT: BankAccountStack,
+    PIIAttributeType.PASSPORT_NUMBER: PassportStack,
+    PIIAttributeType.DRIVER_LICENSE: DriverLicenseStack,
+    PIIAttributeType.NUMERIC: NumericStack,
+    PIIAttributeType.NAME: NameStack,
+    PIIAttributeType.ORGANIZATION: OrganizationStack,
+    PIIAttributeType.ADDRESS: AddressStack,
 }
+
+
+def _is_control_clue(clue: Clue) -> bool:
+    """控制 clue 不建 stack，只供 stack 扩张时观察。"""
+
+    return clue.attr_type is None
 
 
 @dataclass(slots=True)
@@ -33,14 +52,10 @@ class StackContext:
     stream: StreamInput
     locale_profile: str
     clues: tuple[Clue, ...] = ()
-    negative_clues: tuple[Clue, ...] = ()
     committed_until: int = 0
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     handled_label_clue_ids: set[str] = field(default_factory=set)
-
-    def has_negative_at(self, start: int, end: int) -> bool:
-        return has_negative_at(self.negative_clues, start, end)
 
 
 class StreamParser:
@@ -55,13 +70,12 @@ class StreamParser:
             stream=stream,
             locale_profile=self.locale_profile,
             clues=bundle.all_clues,
-            negative_clues=bundle.negative_clues,
         )
         consumed_ids: set[str] = set()
         index = 0
         while index < len(context.clues):
             clue = context.clues[index]
-            if clue.clue_id in consumed_ids or clue.family == ClueFamily.BREAK:
+            if clue.clue_id in consumed_ids or _is_control_clue(clue):
                 index += 1
                 continue
             current = self._run_stack(context, index)
@@ -73,14 +87,17 @@ class StreamParser:
             challenger = None
             if next_index is not None:
                 next_clue = context.clues[next_index]
-                if next_clue.family not in {ClueFamily.BREAK, current.family}:
+                if next_clue.attr_type != current.attr_type:
                     challenger = self._run_stack(context, next_index)
-            if challenger is not None:
-                if challenger.candidate.start < current.candidate.end:
-                    consumed_ids |= challenger.consumed_ids
-                    self._apply_conflict(context, current, challenger)
-                    index = self._next_unconsumed_index(context.clues, max(current.next_index, challenger.next_index), consumed_ids) or len(context.clues)
-                    continue
+            if challenger is not None and challenger.candidate.start < current.candidate.end:
+                consumed_ids |= challenger.consumed_ids
+                self._apply_conflict(context, current, challenger)
+                index = self._next_unconsumed_index(
+                    context.clues,
+                    max(current.next_index, challenger.next_index),
+                    consumed_ids,
+                ) or len(context.clues)
+                continue
             self._commit_run(context, current)
             index = self._next_unconsumed_index(context.clues, current.next_index, consumed_ids) or len(context.clues)
         return ParseResult(
@@ -91,21 +108,16 @@ class StreamParser:
 
     def _run_stack(self, context: StackContext, index: int) -> StackRun | None:
         clue = context.clues[index]
-        strategy = self.strategies.get(clue.family)
-        if strategy is None:
+        attr_type = clue.attr_type
+        if attr_type is None:
             return None
-        # 构建策略上下文：检查当前 clue 前方是否存在同 attr_type 的 label。
-        has_label = any(
-            prior.role == ClueRole.LABEL and prior.attr_type == clue.attr_type
-            for prior in context.clues[:index]
-        )
-        sctx = build_strategy_context(has_preceding_label=has_label, locale_profile=context.locale_profile)
-        if not strategy.should_start(clue, sctx):
+        strategy = self.strategies.get(attr_type)
+        if strategy is None or not strategy.should_start(clue):
             return None
-        stack_cls = _STACK_REGISTRY.get(clue.family)
+        stack_cls = _STACK_REGISTRY.get(attr_type)
         if stack_cls is None:
             return None
-        stack: BaseStack = stack_cls(clue=clue, clue_index=index, context=context)
+        stack = stack_cls(clue=clue, clue_index=index, context=context)
         run = stack.run()
         if run is None or not run.candidate.text.strip():
             return None
@@ -160,6 +172,8 @@ class StreamParser:
 
     def _next_unconsumed_index(self, clues: tuple[Clue, ...], start_index: int, consumed_ids: set[str]) -> int | None:
         for index in range(start_index, len(clues)):
-            if clues[index].clue_id not in consumed_ids:
-                return index
+            clue = clues[index]
+            if clue.clue_id in consumed_ids or _is_control_clue(clue):
+                continue
+            return index
         return None
