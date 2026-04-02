@@ -37,6 +37,8 @@ def build_name_candidate_from_value(
     value_end: int,
     source_kind: str,
     component_hint: NameComponentHint,
+    unit_start: int = 0,
+    unit_end: int = 0,
     label_clue_id: str | None = None,
     label_driven: bool = False,
 ) -> CandidateDraft | None:
@@ -49,6 +51,8 @@ def build_name_candidate_from_value(
         attr_type=PIIAttributeType.NAME,
         start=value_start + max(0, offset),
         end=value_start + max(0, offset) + len(cleaned),
+        unit_start=unit_start,
+        unit_end=unit_end,
         text=cleaned,
         source=source,
         source_kind=source_kind,
@@ -66,6 +70,8 @@ def build_organization_candidate_from_value(
     value_start: int,
     value_end: int,
     source_kind: str,
+    unit_start: int = 0,
+    unit_end: int = 0,
     label_clue_id: str | None = None,
     label_driven: bool = False,
 ) -> CandidateDraft | None:
@@ -78,6 +84,8 @@ def build_organization_candidate_from_value(
         attr_type=PIIAttributeType.ORGANIZATION,
         start=value_start + max(0, offset),
         end=value_start + max(0, offset) + len(cleaned),
+        unit_start=unit_start,
+        unit_end=unit_end,
         text=cleaned,
         source=source,
         source_kind=source_kind,
@@ -95,6 +103,8 @@ def build_address_candidate_from_value(
     value_start: int,
     value_end: int,
     source_kind: str,
+    unit_start: int = 0,
+    unit_end: int = 0,
     label_clue_id: str | None = None,
     metadata: dict[str, list[str]] | None = None,
     label_driven: bool = False,
@@ -111,6 +121,8 @@ def build_address_candidate_from_value(
         attr_type=PIIAttributeType.ADDRESS,
         start=value_start + max(0, offset),
         end=value_start + max(0, offset) + len(cleaned),
+        unit_start=unit_start,
+        unit_end=unit_end,
         text=cleaned,
         source=source,
         source_kind=source_kind,
@@ -121,10 +133,20 @@ def build_address_candidate_from_value(
     )
 
 
-def trim_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, end: int) -> CandidateDraft | None:
+def trim_candidate(
+    candidate: CandidateDraft,
+    raw_text: str,
+    *,
+    start: int,
+    end: int,
+    unit_start: int | None = None,
+    unit_end: int | None = None,
+) -> CandidateDraft | None:
     if start >= end:
         return None
     segment = raw_text[start:end]
+    next_unit_start = candidate.unit_start if unit_start is None else unit_start
+    next_unit_end = candidate.unit_end if unit_end is None else unit_end
     metadata_base = candidate.metadata
     if candidate.attr_type == PIIAttributeType.NAME:
         rebuilt = build_name_candidate_from_value(
@@ -134,6 +156,8 @@ def trim_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, end:
             value_end=end,
             source_kind=candidate.source_kind,
             component_hint=name_component_hint(candidate),
+            unit_start=next_unit_start,
+            unit_end=next_unit_end,
             label_driven=candidate.label_driven,
         )
     elif candidate.attr_type == PIIAttributeType.ORGANIZATION:
@@ -143,6 +167,8 @@ def trim_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, end:
             value_start=start,
             value_end=end,
             source_kind=candidate.source_kind,
+            unit_start=next_unit_start,
+            unit_end=next_unit_end,
             label_driven=candidate.label_driven,
         )
     elif candidate.attr_type == PIIAttributeType.ADDRESS:
@@ -157,6 +183,8 @@ def trim_candidate(candidate: CandidateDraft, raw_text: str, *, start: int, end:
             value_start=start,
             value_end=end,
             source_kind=candidate.source_kind,
+            unit_start=next_unit_start,
+            unit_end=next_unit_end,
             metadata=merge_metadata(metadata_base, {"address_match_origin": ["trimmed"]}),
             label_driven=candidate.label_driven,
         )

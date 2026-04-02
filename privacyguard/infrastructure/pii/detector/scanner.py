@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 
 from privacyguard.domain.enums import PIIAttributeType
@@ -36,6 +36,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     NameComponentHint,
     StreamInput,
 )
+from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.rule_based_detector_shared import (
     _OCR_INLINE_GAP_TOKEN,
     _OCR_SEMANTIC_BREAK_TOKEN,
@@ -129,6 +130,7 @@ def _luhn_valid(digits: str) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class _ScanSegment:
+    stream: StreamInput
     text: str
     raw_start: int
     folded_text: str
@@ -165,22 +167,22 @@ def build_clue_bundle(
     Pass 1 — hard clue 扫描与裁决，确定屏蔽区间。
     Pass 2 — segment-major soft clue 扫描，事件扫描线裁决。
     """
-    ocr_break_spans = _find_ocr_break_spans(stream.text)
+    ocr_break_spans = _find_ocr_break_spans(stream)
 
     # ── Pass 1: hard clue 扫描与裁决 ──
     hard_clues = _resolve_hard_conflicts(
         [
-            *_scan_hard_patterns(ctx, stream.text, ignored_spans=ocr_break_spans),
+            *_scan_hard_patterns(ctx, stream, ignored_spans=ocr_break_spans),
             *_scan_dictionary_hard_clues(
                 ctx,
-                stream.text,
+                stream,
                 session_entries,
                 source_kind="session",
                 ignored_spans=ocr_break_spans,
             ),
             *_scan_dictionary_hard_clues(
                 ctx,
-                stream.text,
+                stream,
                 local_entries,
                 source_kind="local",
                 ignored_spans=ocr_break_spans,
@@ -189,7 +191,7 @@ def build_clue_bundle(
     )
 
     # ── Pass 2: soft clue 扫描（segment-major，对缓存局部性友好）──
-    scan_segments = _build_soft_scan_segments(stream.text, hard_clues, extra_blocked_spans=ocr_break_spans)
+    scan_segments = _build_soft_scan_segments(stream, hard_clues, extra_blocked_spans=ocr_break_spans)
     soft_clues: list[Clue] = []
     for segment in scan_segments:
         soft_clues.extend(_scan_label_clues(ctx, segment))
@@ -205,13 +207,14 @@ def build_clue_bundle(
         soft_clues.extend(_scan_negative_clues(ctx, segment))
 
     # ── 事件扫描线裁决 ──
-    all_clues = [*hard_clues, *_scan_ocr_break_clues(ctx, stream.text, ocr_break_spans), *soft_clues]
-    resolved_clues = _sweep_resolve(stream.text, all_clues)
+    all_clues = [*hard_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_spans), *soft_clues]
+    resolved_clues = _attach_unit_spans(stream, _sweep_resolve(stream.text, all_clues))
     ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, -item.priority, item.end)))
     return ClueBundle(all_clues=ordered_clues)
 
 
-def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[tuple[int, int], ...] = ()) -> list[Clue]:
+def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_spans: tuple[tuple[int, int], ...] = ()) -> list[Clue]:
+    text = stream.text
     clues: list[Clue] = []
     hard_spans: list[tuple[int, int]] = []
     for attr_type, matched_by, pattern, priority in _HARD_PATTERNS:
@@ -325,12 +328,14 @@ def _scan_hard_patterns(ctx: DetectContext, text: str, *, ignored_spans: tuple[t
 
 def _scan_dictionary_hard_clues(
     ctx: DetectContext,
-    text: str,
+    stream: StreamInput | str,
     entries: tuple[DictionaryEntry, ...],
     *,
     source_kind: str,
     ignored_spans: tuple[tuple[int, int], ...] = (),
 ) -> list[Clue]:
+    if isinstance(stream, str):
+        stream = build_prompt_stream(stream)
     if not entries:
         return []
     clues: list[Clue] = []
@@ -338,10 +343,14 @@ def _scan_dictionary_hard_clues(
     signature = _dictionary_matcher_signature(entries)
     matcher = _session_dictionary_matcher(signature) if source_kind == "session" else _local_dictionary_matcher(signature)
     # 这里按旧实现的“entry/variant 注册顺序”恢复输出顺序，避免等长重叠命中的稳定性发生漂移。
-    matches = matcher.find_matches(text, folded_text=text.lower())
+    matches = matcher.find_matches(stream.text, folded_text=stream.text.lower())
     matches.sort(key=lambda item: (item.payload.emission_order, item.start, item.end))
     for match in matches:
-        if _overlaps_any(match.start, match.end, ignored_spans):
+        normalized = _normalize_ascii_match(stream, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        start, end, matched_text = normalized
+        if _overlaps_any(start, end, ignored_spans):
             continue
         payload = match.payload
         clues.append(
@@ -349,9 +358,9 @@ def _scan_dictionary_hard_clues(
                 clue_id=ctx.next_clue_id(),
                 role=ClueRole.HARD,
                 attr_type=payload.attr_type,
-                start=match.start,
-                end=match.end,
-                text=match.matched_text,
+                start=start,
+                end=end,
+                text=matched_text,
                 priority=priority,
                 source_kind=payload.matched_by,
                 hard_source=source_kind,
@@ -365,7 +374,18 @@ def _scan_dictionary_hard_clues(
 def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, ...]:
     matches: list[tuple[int, int, object]] = []
     for match in _label_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        matches.append((match.start, match.end, match.payload))
+        normalized = _normalize_segment_ascii_match(
+            segment,
+            match.start,
+            match.end,
+            match.matched_text,
+            match.pattern_text,
+            match.ascii_boundary,
+        )
+        if normalized is None:
+            continue
+        raw_start, raw_end, _matched_text = normalized
+        matches.append((raw_start, raw_end, match.payload))
     accepted: list[tuple[int, int, object]] = []
     occupied: list[tuple[int, int]] = []
     for start, end, spec in sorted(matches, key=lambda item: (-(item[1] - item[0]), -len(item[2].keyword), -item[2].priority, item[0])):
@@ -375,14 +395,13 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
         accepted.append((start, end, spec))
     clues: list[Clue] = []
     for start, end, spec in sorted(accepted, key=lambda item: (item[0], item[1])):
-        raw_start, raw_end = _segment_span_to_raw(segment, start, end)
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
                 role=ClueRole.LABEL,
                 attr_type=spec.attr_type,
-                start=raw_start,
-                end=raw_end,
+                start=start,
+                end=end,
                 text=spec.keyword,
                 priority=spec.priority,
                 source_kind=spec.source_kind,
@@ -416,7 +435,7 @@ def _scan_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
 
 def _scan_ocr_break_clues(
     ctx: DetectContext,
-    text: str,
+    stream: StreamInput,
     ocr_break_spans: tuple[tuple[int, int], ...],
 ) -> list[Clue]:
     clues: list[Clue] = []
@@ -428,7 +447,7 @@ def _scan_ocr_break_clues(
                 attr_type=None,
                 start=start,
                 end=end,
-                text=text[start:end],
+                text=stream.text[start:end],
                 priority=500,
                 source_kind="break_ocr",
                 break_type=BreakType.OCR,
@@ -440,7 +459,10 @@ def _scan_ocr_break_clues(
 def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for match in _name_start_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, _matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -459,10 +481,13 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
 def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for match in _family_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
         tail = segment.text[match.end : match.end + 4]
         if any(keyword in tail for keyword in ("省", "市", "区", "县", "旗", "路", "街", "道", "大道", "小区", "单元", "栋", "室", "住址", "地址")):
             continue
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        raw_start, raw_end, _matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -482,7 +507,10 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
     """扫描英文姓氏，产出 SURNAME clue。"""
     clues: list[Clue] = []
     for match in _en_surname_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -490,7 +518,7 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 attr_type=PIIAttributeType.NAME,
                 start=raw_start,
                 end=raw_end,
-                text=str(match.payload),
+                text=matched_text,
                 priority=218,
                 source_kind="en_surname",
                 component_hint=NameComponentHint.FAMILY,
@@ -503,7 +531,10 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
     """扫描英文名字（given name），产出 GIVEN_NAME clue。"""
     clues: list[Clue] = []
     for match in _en_given_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -511,7 +542,7 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 attr_type=PIIAttributeType.NAME,
                 start=raw_start,
                 end=raw_end,
-                text=str(match.payload),
+                text=matched_text,
                 priority=215,
                 source_kind="en_given_name",
                 component_hint=NameComponentHint.GIVEN,
@@ -524,7 +555,10 @@ def _scan_zh_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
     """扫描中文名字（given name），产出 GIVEN_NAME clue。"""
     clues: list[Clue] = []
     for match in _zh_given_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, _matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -549,7 +583,10 @@ def _scan_connector_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clu
     """
     clues: list[Clue] = []
     for match in _connector_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -557,7 +594,7 @@ def _scan_connector_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clu
                 attr_type=None,
                 start=raw_start,
                 end=raw_end,
-                text=match.matched_text,
+                text=matched_text,
                 priority=150,
                 source_kind=str(match.payload),
             )
@@ -568,7 +605,10 @@ def _scan_connector_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clu
 def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for match in _company_suffix_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -576,7 +616,7 @@ def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> lis
                 attr_type=PIIAttributeType.ORGANIZATION,
                 start=raw_start,
                 end=raw_end,
-                text=str(match.payload),
+                text=matched_text,
                 priority=240,
                 source_kind="company_suffix",
             )
@@ -597,7 +637,10 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
     clues: list[Clue] = []
     for match in _zh_address_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         payload = match.payload
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, _matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -613,7 +656,10 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         )
     for match in _zh_address_key_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         payload = match.payload
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, _matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -634,7 +680,10 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
     clues: list[Clue] = []
     for match in _en_address_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         payload = match.payload
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, _matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -650,7 +699,10 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         )
     for match in _en_address_key_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         payload = match.payload
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -658,7 +710,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 attr_type=PIIAttributeType.ADDRESS,
                 start=raw_start,
                 end=raw_end,
-                text=match.matched_text,
+                text=matched_text,
                 priority=204,
                 source_kind="address_keyword",
                 component_type=payload.component_type,
@@ -687,7 +739,10 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
     clues: list[Clue] = []
     # 词组黑名单（AC 多模匹配）。
     for match in _negative_word_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        raw_start, raw_end = _segment_span_to_raw(segment, match.start, match.end)
+        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
+        if normalized is None:
+            continue
+        raw_start, raw_end, matched_text = normalized
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -695,7 +750,7 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                 attr_type=None,
                 start=raw_start,
                 end=raw_end,
-                text=match.matched_text,
+                text=matched_text,
                 priority=600,
                 source_kind=str(match.payload),
             )
@@ -771,7 +826,7 @@ def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
 
 
 def _build_soft_scan_segments(
-    text: str,
+    stream: StreamInput,
     hard_clues: tuple[Clue, ...],
     *,
     extra_blocked_spans: tuple[tuple[int, int], ...] = (),
@@ -786,12 +841,12 @@ def _build_soft_scan_segments(
         if start < cursor:
             continue
         if cursor < start:
-            segment_text = text[cursor:start]
-            segments.append(_ScanSegment(text=segment_text, raw_start=cursor, folded_text=segment_text.lower()))
+            segment_text = stream.text[cursor:start]
+            segments.append(_ScanSegment(stream=stream, text=segment_text, raw_start=cursor, folded_text=segment_text.lower()))
         cursor = end
-    if cursor < len(text):
-        segment_text = text[cursor:]
-        segments.append(_ScanSegment(text=segment_text, raw_start=cursor, folded_text=segment_text.lower()))
+    if cursor < len(stream.text):
+        segment_text = stream.text[cursor:]
+        segments.append(_ScanSegment(stream=stream, text=segment_text, raw_start=cursor, folded_text=segment_text.lower()))
     return tuple(segments)
 
 
@@ -799,13 +854,84 @@ def _segment_span_to_raw(segment: _ScanSegment, start: int, end: int) -> tuple[i
     return (segment.raw_start + start, segment.raw_start + end)
 
 
-def _find_ocr_break_spans(text: str) -> tuple[tuple[int, int], ...]:
-    spans = [
-        (match.start(), match.end())
-        for token in (_OCR_SEMANTIC_BREAK_TOKEN, _OCR_INLINE_GAP_TOKEN)
-        for match in re.finditer(re.escape(token), text)
+def _attach_unit_spans(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
+    return [
+        replace(clue, unit_start=_char_span_to_unit_span(stream, clue.start, clue.end)[0], unit_end=_char_span_to_unit_span(stream, clue.start, clue.end)[1])
+        for clue in clues
     ]
-    return tuple(sorted(spans, key=lambda item: (item[0], item[1])))
+
+
+def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[int, int]:
+    if not stream.char_to_unit or start >= end:
+        return (0, 0)
+    return (stream.char_to_unit[start], stream.char_to_unit[end - 1] + 1)
+
+
+def _normalize_ascii_match(
+    stream: StreamInput,
+    start: int,
+    end: int,
+    matched_text: str,
+    pattern_text: str,
+    ascii_boundary: bool,
+) -> tuple[int, int, str] | None:
+    if not ascii_boundary:
+        return (start, end, matched_text)
+    if not stream.char_to_unit or start < 0 or end > len(stream.text) or start >= end:
+        return None
+    unit_start, unit_end = _char_span_to_unit_span(stream, start, end)
+    if unit_start >= unit_end:
+        return None
+    first_unit = stream.units[unit_start]
+    last_unit = stream.units[unit_end - 1]
+    if unit_start == unit_end - 1 and first_unit.kind == "ascii_word":
+        if not _ascii_unit_text_matches(first_unit.text, pattern_text):
+            return None
+        return (first_unit.char_start, first_unit.char_end, first_unit.text)
+    if start != first_unit.char_start or end != last_unit.char_end:
+        return None
+    return (start, end, matched_text)
+
+
+def _ascii_unit_text_matches(unit_text: str, pattern_text: str) -> bool:
+    folded_unit = unit_text.lower()
+    folded_pattern = pattern_text.lower()
+    return folded_unit in {
+        folded_pattern,
+        f"{folded_pattern}s",
+        f"{folded_pattern}es",
+    }
+
+
+def _normalize_segment_ascii_match(
+    segment: _ScanSegment,
+    start: int,
+    end: int,
+    matched_text: str,
+    pattern_text: str,
+    ascii_boundary: bool,
+) -> tuple[int, int, str] | None:
+    normalized = _normalize_ascii_match(
+        segment.stream,
+        segment.raw_start + start,
+        segment.raw_start + end,
+        matched_text,
+        pattern_text,
+        ascii_boundary,
+    )
+    if normalized is None:
+        return None
+    raw_start, raw_end, text = normalized
+    return (raw_start, raw_end, text)
+
+
+def _find_ocr_break_spans(stream: StreamInput) -> tuple[tuple[int, int], ...]:
+    spans = [
+        (unit.char_start, unit.char_end)
+        for unit in stream.units
+        if unit.kind in {"inline_gap", "semantic_break"}
+    ]
+    return tuple(spans)
 
 
 def _needs_ascii_keyword_boundary(keyword: str) -> bool:

@@ -30,13 +30,17 @@ class AhoMatch:
     start: int
     end: int
     matched_text: str
+    pattern_text: str
+    ascii_boundary: bool
     payload: object
 
 
 @dataclass(frozen=True, slots=True)
 class _CompiledPattern:
     length: int
+    text: str
     payload: object
+    ascii_boundary: bool
 
 
 @dataclass(slots=True)
@@ -86,7 +90,14 @@ class AhoMatcher:
                     nodes[state].transitions[char] = next_state
                     nodes.append(_Node())
                 state = next_state
-            nodes[state].outputs.append(_CompiledPattern(length=len(pattern.text), payload=pattern.payload))
+            nodes[state].outputs.append(
+                _CompiledPattern(
+                    length=len(pattern.text),
+                    text=pattern.text,
+                    payload=pattern.payload,
+                    ascii_boundary=pattern.ascii_boundary,
+                )
+            )
 
         queue: deque[int] = deque()
         for child_state in nodes[0].transitions.values():
@@ -108,10 +119,10 @@ class AhoMatcher:
     def find_matches(self, text: str, *, folded_text: str | None = None) -> list[AhoMatch]:
         matches: list[AhoMatch] = []
         if self._has_exact:
-            matches.extend(self._scan(self._exact_nodes, text, text, check_ascii_boundary=False))
+            matches.extend(self._scan(self._exact_nodes, text, text))
         if self._has_ascii:
             folded = folded_text if folded_text is not None else text.lower()
-            matches.extend(self._scan(self._ascii_nodes, folded, text, check_ascii_boundary=True))
+            matches.extend(self._scan(self._ascii_nodes, folded, text))
         matches.sort(key=lambda item: (item.start, item.end, -(item.end - item.start)))
         return matches
 
@@ -120,8 +131,6 @@ class AhoMatcher:
         nodes: tuple[_Node, ...],
         haystack: str,
         raw_text: str,
-        *,
-        check_ascii_boundary: bool,
     ) -> list[AhoMatch]:
         matches: list[AhoMatch] = []
         state = 0
@@ -136,13 +145,13 @@ class AhoMatcher:
                 end = index + 1
                 if start < 0:
                     continue
-                if check_ascii_boundary and not _ascii_boundary_ok(raw_text, start, end):
-                    continue
                 matches.append(
                     AhoMatch(
                         start=start,
                         end=end,
                         matched_text=raw_text[start:end],
+                        pattern_text=output.text,
+                        ascii_boundary=output.ascii_boundary,
                         payload=output.payload,
                     )
                 )

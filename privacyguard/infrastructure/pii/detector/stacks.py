@@ -111,18 +111,24 @@ class BaseStack:
         返回缩减后的 StackRun，或 None（缩减后无效，放弃）。
         """
         c = run.candidate
-        raw_text = self.context.stream.raw_text
-        # 计算截断后的新区间。
-        if blocker_start <= c.start:
-            # blocker 覆盖候选左侧 → 右移 start。
-            new_start, new_end = blocker_end, c.end
-        elif blocker_end >= c.end:
-            # blocker 覆盖候选右侧 → 左移 end。
-            new_start, new_end = c.start, blocker_start
+        stream = self.context.stream
+        raw_text = stream.text
+        if blocker_start <= c.unit_start:
+            new_unit_start, new_unit_end = blocker_end, c.unit_end
+        elif blocker_end >= c.unit_end:
+            new_unit_start, new_unit_end = c.unit_start, blocker_start
         else:
-            # blocker 在候选中间 → 保留左半。
-            new_start, new_end = c.start, blocker_start
-        trimmed = trim_candidate(c, raw_text, start=new_start, end=new_end)
+            new_unit_start, new_unit_end = c.unit_start, blocker_start
+        new_start = _unit_char_start(stream, new_unit_start)
+        new_end = _unit_char_end(stream, new_unit_end)
+        trimmed = trim_candidate(
+            c,
+            raw_text,
+            start=new_start,
+            end=new_end,
+            unit_start=new_unit_start,
+            unit_end=new_unit_end,
+        )
         if trimmed is None:
             return None
         return StackRun(
@@ -140,7 +146,7 @@ class BaseStack:
         - SURNAME / GIVEN_NAME / VALUE / SUFFIX 等值型 seed → 看 seed 自身文本首字符。
         返回 "zh" 或 "en"。
         """
-        raw_text = self.context.stream.raw_text
+        raw_text = self.context.stream.text
         if self.clue.role in {ClueRole.LABEL, ClueRole.START, ClueRole.KEY}:
             pos = _skip_separators(raw_text, self.clue.end)
             if pos < len(raw_text) and "\u4e00" <= raw_text[pos] <= "\u9fff":
@@ -205,7 +211,7 @@ class StructuredBaseStack(BaseStack):
         )
 
     def _find_bound_hard_clue(self) -> tuple[Clue | None, int]:
-        raw_text = self.context.stream.raw_text
+        raw_text = self.context.stream.text
         cursor = self.clue.end
         for index in range(self.clue_index + 1, len(self.context.clues)):
             clue = self.context.clues[index]
@@ -292,7 +298,7 @@ class NameStack(BaseStack):
         is_label_seed = self.clue.role == ClueRole.LABEL
         # 左边界。
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            start = _skip_separators(self.context.stream.raw_text, self.clue.end)
+            start = _skip_separators(self.context.stream.text, self.clue.end)
         else:
             start = self.clue.start
         # 向右消费相邻 NAME clue 并扩展字符边界。
@@ -300,18 +306,20 @@ class NameStack(BaseStack):
         end, next_index, consumed_ids = self._resolve_right_boundary(
             value_start=start if self.clue.role in {ClueRole.LABEL, ClueRole.START} else None,
         )
-        end = _extend_name_boundary(self.context.stream.raw_text, start, end, self.context.clues, next_index)
+        end = _extend_name_boundary(self.context.stream.text, start, end, self.context.clues, next_index)
         if end <= start:
             return None
         # 候选构建。
         component_hint = self._effective_hint(start, end)
         candidate = build_name_candidate_from_value(
             source=self.context.stream.source,
-            value_text=self.context.stream.raw_text[start:end],
+            value_text=self.context.stream.text[start:end],
             value_start=start,
             value_end=end,
             source_kind=self.clue.source_kind,
             component_hint=component_hint,
+            unit_start=_char_span_to_unit_span(self.context.stream, start, end)[0],
+            unit_end=_char_span_to_unit_span(self.context.stream, start, end)[1],
             label_clue_id=self.clue.clue_id if is_label_seed else None,
             label_driven=is_label_seed,
         )
@@ -333,7 +341,7 @@ class NameStack(BaseStack):
         end = self.clue.end
         # 向左扩展字符边界。
         start = _extend_name_boundary_left(
-            self.context.stream.raw_text, self.clue.start, end,
+            self.context.stream.text, self.clue.start, end,
             self.context.clues, self.clue_index,
         )
         if end <= start:
@@ -341,11 +349,13 @@ class NameStack(BaseStack):
         component_hint = self._effective_hint(start, end)
         candidate = build_name_candidate_from_value(
             source=self.context.stream.source,
-            value_text=self.context.stream.raw_text[start:end],
+            value_text=self.context.stream.text[start:end],
             value_start=start,
             value_end=end,
             source_kind=self.clue.source_kind,
             component_hint=component_hint,
+            unit_start=_char_span_to_unit_span(self.context.stream, start, end)[0],
+            unit_end=_char_span_to_unit_span(self.context.stream, start, end)[1],
             label_driven=False,
         )
         if candidate is None:
@@ -365,7 +375,7 @@ class NameStack(BaseStack):
         """若扩展后文本比 seed 更长，提升为 FULL；否则保留原始 hint。"""
         base = self._component_hint()
         if base in {NameComponentHint.FAMILY, NameComponentHint.GIVEN}:
-            candidate_text = self.context.stream.raw_text[start:end].strip()
+            candidate_text = self.context.stream.text[start:end].strip()
             if len(candidate_text) > len(self.clue.text):
                 return NameComponentHint.FULL
         return base
@@ -383,7 +393,7 @@ class NameStack(BaseStack):
         value_start: label / start 驱动时传入跳过分隔符后的值起点，
         作为 end 的初始值，避免 end 停在 seed 末尾的分隔符上。
         """
-        raw_text = self.context.stream.raw_text
+        raw_text = self.context.stream.text
         end = value_start if value_start is not None else self.clue.end
         consumed = {self.clue.clue_id}
         index = self.clue_index + 1
@@ -413,14 +423,22 @@ class OrganizationStack(BaseStack):
     def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
         """组织名回缩：后缀被截 → 放弃；前缀被截 → 重建并检查后缀是否仍在。"""
         c = run.candidate
-        raw_text = self.context.stream.raw_text
-        if blocker_start <= c.start:
-            new_start, new_end = blocker_end, c.end
-        elif blocker_end >= c.end:
-            new_start, new_end = c.start, blocker_start
+        stream = self.context.stream
+        raw_text = stream.text
+        if blocker_start <= c.unit_start:
+            new_unit_start, new_unit_end = blocker_end, c.unit_end
+        elif blocker_end >= c.unit_end:
+            new_unit_start, new_unit_end = c.unit_start, blocker_start
         else:
-            new_start, new_end = c.start, blocker_start
-        trimmed = trim_candidate(c, raw_text, start=new_start, end=new_end)
+            new_unit_start, new_unit_end = c.unit_start, blocker_start
+        trimmed = trim_candidate(
+            c,
+            raw_text,
+            start=_unit_char_start(stream, new_unit_start),
+            end=_unit_char_end(stream, new_unit_end),
+            unit_start=new_unit_start,
+            unit_end=new_unit_end,
+        )
         if trimmed is None:
             return None
         # 组织名没有后缀 且 非 label 驱动 → 无效。
@@ -439,11 +457,11 @@ class OrganizationStack(BaseStack):
             return self._build_hard_run()
         is_label_seed = self.clue.role == ClueRole.LABEL
         if is_label_seed:
-            start = _skip_separators(self.context.stream.raw_text, self.clue.end)
+            start = _skip_separators(self.context.stream.text, self.clue.end)
             end, next_index, consumed_ids = self._resolve_right_boundary()
             handled = {self.clue.clue_id}
         elif self.clue.role == ClueRole.SUFFIX:
-            start = _left_expand_text_boundary(self.context.stream.raw_text, self.context.clues, self.clue.start)
+            start = _left_expand_text_boundary(self.context.stream.text, self.context.clues, self.clue.start)
             end = self.clue.end
             next_index = self.clue_index + 1
             consumed_ids = {self.clue.clue_id}
@@ -454,10 +472,12 @@ class OrganizationStack(BaseStack):
             return None
         candidate = build_organization_candidate_from_value(
             source=self.context.stream.source,
-            value_text=self.context.stream.raw_text[start:end],
+            value_text=self.context.stream.text[start:end],
             value_start=start,
             value_end=end,
             source_kind=self.clue.source_kind,
+            unit_start=_char_span_to_unit_span(self.context.stream, start, end)[0],
+            unit_end=_char_span_to_unit_span(self.context.stream, start, end)[1],
             label_clue_id=self.clue.clue_id if is_label_seed else None,
             label_driven=is_label_seed,
         )
@@ -472,7 +492,7 @@ class OrganizationStack(BaseStack):
         )
 
     def _resolve_right_boundary(self) -> tuple[int, int, set[str]]:
-        raw_text = self.context.stream.raw_text
+        raw_text = self.context.stream.text
         end = self.clue.end
         consumed = {self.clue.clue_id}
         index = self.clue_index + 1
@@ -503,14 +523,22 @@ class AddressStack(BaseStack):
         """地址回缩：截断后检查剩余文本是否仍含地址信号。"""
         from privacyguard.infrastructure.pii.detector.candidate_utils import has_address_signal
         c = run.candidate
-        raw_text = self.context.stream.raw_text
-        if blocker_start <= c.start:
-            new_start, new_end = blocker_end, c.end
-        elif blocker_end >= c.end:
-            new_start, new_end = c.start, blocker_start
+        stream = self.context.stream
+        raw_text = stream.text
+        if blocker_start <= c.unit_start:
+            new_unit_start, new_unit_end = blocker_end, c.unit_end
+        elif blocker_end >= c.unit_end:
+            new_unit_start, new_unit_end = c.unit_start, blocker_start
         else:
-            new_start, new_end = c.start, blocker_start
-        trimmed = trim_candidate(c, raw_text, start=new_start, end=new_end)
+            new_unit_start, new_unit_end = c.unit_start, blocker_start
+        trimmed = trim_candidate(
+            c,
+            raw_text,
+            start=_unit_char_start(stream, new_unit_start),
+            end=_unit_char_end(stream, new_unit_end),
+            unit_start=new_unit_start,
+            unit_end=new_unit_end,
+        )
         if trimmed is None:
             return None
         # 截断后仍需含地址信号词（省/市/路/street 等）。
@@ -536,7 +564,7 @@ class AddressStack(BaseStack):
         if self.clue.role == ClueRole.HARD:
             return self._build_hard_run()
 
-        raw_text = self.context.stream.raw_text
+        raw_text = self.context.stream.text
         locale = self._value_locale()
         is_label_seed = self.clue.role == ClueRole.LABEL
 
@@ -684,6 +712,8 @@ class AddressStack(BaseStack):
             attr_type=PIIAttributeType.ADDRESS,
             start=absolute_start,
             end=absolute_start + len(text),
+            unit_start=_char_span_to_unit_span(self.context.stream, absolute_start, absolute_start + len(text))[0],
+            unit_end=_char_span_to_unit_span(self.context.stream, absolute_start, absolute_start + len(text))[1],
             text=text,
             source=self.context.stream.source,
             source_kind=self.clue.source_kind,
@@ -806,6 +836,8 @@ def _build_hard_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
         attr_type=clue.attr_type,
         start=clue.start,
         end=clue.end,
+        unit_start=clue.unit_start,
+        unit_end=clue.unit_end,
         text=clue.text,
         source=source,
         source_kind=clue.source_kind,
@@ -837,39 +869,39 @@ class StackManager:
         if existing.attr_type == incoming.attr_type:
             return self._resolve_same_attr(existing, incoming)
         if existing.claim_strength == ClaimStrength.HARD and incoming.claim_strength != ClaimStrength.HARD:
-            trimmed = self._trim_candidate(context.stream.raw_text, incoming, existing)
+            trimmed = self._trim_candidate(context.stream, incoming, existing)
             return ConflictOutcome(incoming=trimmed)
         if incoming.claim_strength == ClaimStrength.HARD and existing.claim_strength != ClaimStrength.HARD:
-            trimmed = self._trim_candidate(context.stream.raw_text, existing, incoming)
+            trimmed = self._trim_candidate(context.stream, existing, incoming)
             return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
         attr_pair = frozenset({existing.attr_type, incoming.attr_type})
         if attr_pair == {PIIAttributeType.ADDRESS, PIIAttributeType.ORGANIZATION}:
-            return self._resolve_address_organization(context.stream.raw_text, existing, incoming)
+            return self._resolve_address_organization(context.stream, existing, incoming)
         if attr_pair == {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
-            return self._resolve_name_organization(context.stream.raw_text, existing, incoming)
+            return self._resolve_name_organization(context.stream, existing, incoming)
         if attr_pair == {PIIAttributeType.NAME, PIIAttributeType.ADDRESS}:
-            return self._resolve_name_address(context.stream.raw_text, existing, incoming)
+            return self._resolve_name_address(context.stream, existing, incoming)
         return self._resolve_by_score(existing, incoming)
 
     def _resolve_same_attr(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
         if self.score(incoming) > self.score(existing):
             return ConflictOutcome(incoming=incoming, drop_existing=True)
-        if (incoming.end - incoming.start) > (existing.end - existing.start):
+        if (incoming.unit_end - incoming.unit_start) > (existing.unit_end - existing.unit_start):
             return ConflictOutcome(incoming=incoming, drop_existing=True)
         return ConflictOutcome(incoming=None)
 
-    def _resolve_address_organization(self, raw_text: str, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
+    def _resolve_address_organization(self, stream: StreamInput, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
         organization = incoming if incoming.attr_type == PIIAttributeType.ORGANIZATION else existing
         address = incoming if incoming.attr_type == PIIAttributeType.ADDRESS else existing
         if not has_organization_suffix(organization.text):
             return self._resolve_by_score(existing, incoming)
         if organization is incoming:
-            trimmed = self._trim_candidate(raw_text, address, organization)
+            trimmed = self._trim_candidate(stream, address, organization)
             return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
-        trimmed = self._trim_candidate(raw_text, address, organization)
+        trimmed = self._trim_candidate(stream, address, organization)
         return ConflictOutcome(incoming=trimmed)
 
-    def _resolve_name_organization(self, raw_text: str, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
+    def _resolve_name_organization(self, stream: StreamInput, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
         organization = incoming if incoming.attr_type == PIIAttributeType.ORGANIZATION else existing
         name = incoming if incoming.attr_type == PIIAttributeType.NAME else existing
         if not has_organization_suffix(organization.text):
@@ -877,21 +909,37 @@ class StackManager:
         suffix_start = organization_suffix_start(organization.text)
         if suffix_start <= 0:
             return ConflictOutcome(incoming=organization if incoming is organization else None, drop_existing=name is existing)
+        trim_end = min(name.end, organization.start + suffix_start)
+        trim_unit_start, trim_unit_end = _char_span_to_unit_span(stream, name.start, trim_end)
         if organization is incoming:
-            trimmed = trim_candidate(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
+            trimmed = trim_candidate(
+                name,
+                stream.text,
+                start=name.start,
+                end=trim_end,
+                unit_start=trim_unit_start,
+                unit_end=trim_unit_end,
+            )
             return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
-        trimmed = trim_candidate(name, raw_text, start=name.start, end=min(name.end, organization.start + suffix_start))
+        trimmed = trim_candidate(
+            name,
+            stream.text,
+            start=name.start,
+            end=trim_end,
+            unit_start=trim_unit_start,
+            unit_end=trim_unit_end,
+        )
         return ConflictOutcome(incoming=trimmed)
 
-    def _resolve_name_address(self, raw_text: str, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
+    def _resolve_name_address(self, stream: StreamInput, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
         """Name vs Address：address 优先，name 做 trim；trim 后无效则丢弃 name。"""
         address = incoming if incoming.attr_type == PIIAttributeType.ADDRESS else existing
         name = incoming if incoming.attr_type == PIIAttributeType.NAME else existing
         if name is incoming:
-            trimmed = self._trim_candidate(raw_text, name, address)
+            trimmed = self._trim_candidate(stream, name, address)
             return ConflictOutcome(incoming=trimmed)
         # name 是 existing，address 是 incoming。
-        trimmed = self._trim_candidate(raw_text, name, address)
+        trimmed = self._trim_candidate(stream, name, address)
         return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
 
     def _resolve_by_score(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
@@ -899,12 +947,21 @@ class StackManager:
             return ConflictOutcome(incoming=incoming, drop_existing=True)
         return ConflictOutcome(incoming=None)
 
-    def _trim_candidate(self, raw_text: str, candidate: CandidateDraft, blocker: CandidateDraft) -> CandidateDraft | None:
-        if blocker.start <= candidate.start and blocker.end >= candidate.end:
+    def _trim_candidate(self, stream: StreamInput, candidate: CandidateDraft, blocker: CandidateDraft) -> CandidateDraft | None:
+        if blocker.unit_start <= candidate.unit_start and blocker.unit_end >= candidate.unit_end:
             return None
-        if blocker.start <= candidate.start:
-            return trim_candidate(candidate, raw_text, start=blocker.end, end=candidate.end)
-        return trim_candidate(candidate, raw_text, start=candidate.start, end=blocker.start)
+        if blocker.unit_start <= candidate.unit_start:
+            next_unit_start, next_unit_end = blocker.unit_end, candidate.unit_end
+        else:
+            next_unit_start, next_unit_end = candidate.unit_start, blocker.unit_start
+        return trim_candidate(
+            candidate,
+            stream.text,
+            start=_unit_char_start(stream, next_unit_start),
+            end=_unit_char_end(stream, next_unit_end),
+            unit_start=next_unit_start,
+            unit_end=next_unit_end,
+        )
 
 
 def _next_address_index(
@@ -1191,6 +1248,32 @@ def _candidate_hard_source_rank(candidate: CandidateDraft) -> int:
         return 0
     source = str(values[0])
     return {"session": 4, "local": 3, "prompt": 2, "regex": 1}.get(source, 0)
+
+
+def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[int, int]:
+    if not stream.char_to_unit or start >= end:
+        return (0, 0)
+    return (stream.char_to_unit[start], stream.char_to_unit[end - 1] + 1)
+
+
+def _unit_char_start(stream: StreamInput, unit_index: int) -> int:
+    if not stream.units:
+        return 0
+    if unit_index <= 0:
+        return 0
+    if unit_index >= len(stream.units):
+        return len(stream.text)
+    return stream.units[unit_index].char_start
+
+
+def _unit_char_end(stream: StreamInput, unit_index: int) -> int:
+    if not stream.units:
+        return 0
+    if unit_index <= 0:
+        return 0
+    if unit_index > len(stream.units):
+        return len(stream.text)
+    return stream.units[unit_index - 1].char_end
 
 
 def _skip_separators(text: str, start: int) -> int:

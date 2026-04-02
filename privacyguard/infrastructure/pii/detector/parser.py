@@ -62,7 +62,7 @@ def _is_control_clue(clue: Clue) -> bool:
 
 
 def _candidates_overlap(a: CandidateDraft, b: CandidateDraft) -> bool:
-    return a.start < b.end and b.start < a.end
+    return a.unit_start < b.unit_end and b.unit_start < a.unit_end
 
 
 @dataclass(slots=True)
@@ -213,7 +213,7 @@ class StreamParser:
             return
 
         wc = winner_run.candidate
-        shrunk = loser_stack.shrink(loser_run, wc.start, wc.end)
+        shrunk = loser_stack.shrink(loser_run, wc.unit_start, wc.unit_end)
         if shrunk is not None:
             self._commit_run(context, shrunk, consumed_ids)
         else:
@@ -292,7 +292,7 @@ class StreamParser:
             )
         )
         context.handled_label_clue_ids |= candidate.label_clue_ids
-        context.committed_until = max(context.committed_until, candidate.end)
+        context.committed_until = max(context.committed_until, candidate.unit_end)
 
     # ------------------------------------------------------------------
     # 工具方法
@@ -302,6 +302,8 @@ class StreamParser:
         for existing in candidates:
             if (
                 existing.attr_type == candidate.attr_type
+                and existing.unit_start == candidate.unit_start
+                and existing.unit_end == candidate.unit_end
                 and existing.start == candidate.start
                 and existing.end == candidate.end
                 and existing.text == candidate.text

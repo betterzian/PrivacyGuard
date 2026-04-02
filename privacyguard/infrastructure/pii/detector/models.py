@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
-
-from enum import Enum
 
 
 class ClaimStrength(str, Enum):
@@ -69,30 +68,25 @@ class SourceRef:
 
 
 @dataclass(frozen=True, slots=True)
-class StreamSpan:
+class StreamUnit:
     kind: str
-    start: int
-    end: int
-    block_id: str | None = None
-    bbox: BoundingBox | None = None
+    text: str
+    char_start: int
+    char_end: int
 
 
 @dataclass(slots=True)
 class StreamInput:
     source: PIISourceType
     text: str
+    units: tuple[StreamUnit, ...]
+    char_to_unit: tuple[int, ...]
     char_refs: tuple[SourceRef | None, ...]
-    spans: tuple[StreamSpan, ...]
     metadata: dict[str, object] = field(default_factory=dict)
 
     @property
     def is_ocr(self) -> bool:
         return self.source == PIISourceType.OCR
-
-    @property
-    def raw_text(self) -> str:
-        """兼容旧调用点，始终返回 detector 使用的 clean 文本。"""
-        return self.text
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +117,8 @@ class CandidateDraft:
     text: str
     source: PIISourceType
     source_kind: str
+    unit_start: int = 0
+    unit_end: int = 0
     canonical_text: str | None = None
     claim_strength: ClaimStrength = ClaimStrength.SOFT
     metadata: dict[str, list[str]] = field(default_factory=dict)
@@ -145,6 +141,8 @@ class Clue:
     text: str
     priority: int
     source_kind: str
+    unit_start: int = 0
+    unit_end: int = 0
     component_type: AddressComponentType | None = None
     component_hint: NameComponentHint | None = None
     break_type: BreakType | None = None
@@ -182,7 +180,6 @@ class OCRSceneBlock:
     clean_start: int
     clean_end: int
     clean_text: str
-    clean_char_to_raw_block_index: tuple[int | None, ...]
 
 
 @dataclass(slots=True)
@@ -196,13 +193,7 @@ class OCRScene:
 class PreparedOCRContext:
     raw_text: str
     stream: StreamInput
-    raw_char_refs: tuple[SourceRef | None, ...]
-    raw_spans: tuple[StreamSpan, ...]
     scene: OCRScene
-
-    @property
-    def clean_text(self) -> str:
-        return self.stream.text
 
 
 @dataclass(slots=True)

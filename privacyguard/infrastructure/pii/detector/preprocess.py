@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
+from dataclasses import dataclass
 from statistics import mean
 
 from privacyguard.domain.enums import PIISourceType
@@ -13,7 +14,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     PreparedOCRContext,
     SourceRef,
     StreamInput,
-    StreamSpan,
+    StreamUnit,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import (
     _OCR_INLINE_GAP_TOKEN,
@@ -21,11 +22,19 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import (
 )
 
 _ZERO_WIDTH_CHARS = frozenset({"\u200b", "\u200c", "\u200d", "\ufeff", "\u2060"})
-_EDGE_NOISE_CHARS = frozenset("`~^_|/\\.,，。;；:：'\"-—–()[]{}<>《》")
+_EDGE_NOISE_CHARS = frozenset("`~^_|/\\<>《》")
+
+
+@dataclass(frozen=True, slots=True)
+class _BlockToken:
+    kind: str
+    text: str
+    raw_indices: tuple[int | None, ...]
 
 
 def build_prompt_stream(text: str) -> StreamInput:
     clean_text = text or ""
+    units, char_to_unit = _build_stream_units(clean_text)
     char_refs = tuple(
         SourceRef(
             source=PIISourceType.PROMPT,
@@ -36,23 +45,20 @@ def build_prompt_stream(text: str) -> StreamInput:
         )
         for index, _char in enumerate(clean_text)
     )
-    spans = (StreamSpan(kind="prompt_text", start=0, end=len(clean_text)),)
     return StreamInput(
         source=PIISourceType.PROMPT,
         text=clean_text,
+        units=units,
+        char_to_unit=char_to_unit,
         char_refs=char_refs,
-        spans=spans,
     )
 
 
 def build_ocr_stream(blocks: list[OCRTextBlock]) -> PreparedOCRContext:
     ordered_lines = _group_ocr_lines(blocks)
     raw_chunks: list[str] = []
-    raw_char_refs: list[SourceRef | None] = []
-    raw_spans: list[StreamSpan] = []
     clean_chunks: list[str] = []
     clean_char_refs: list[SourceRef | None] = []
-    clean_spans: list[StreamSpan] = []
     scene_blocks: list[OCRSceneBlock] = []
     raw_cursor = 0
     clean_cursor = 0
@@ -69,76 +75,41 @@ def build_ocr_stream(blocks: list[OCRTextBlock]) -> PreparedOCRContext:
         ]
 
         if raw_chunks:
-            raw_cursor = _append_synthetic_text(
-                token=_OCR_SEMANTIC_BREAK_TOKEN,
-                kind="ocr_break",
-                chunks=raw_chunks,
-                char_refs=raw_char_refs,
-                spans=raw_spans,
-                cursor=raw_cursor,
-            )
+            raw_chunks.append(_OCR_SEMANTIC_BREAK_TOKEN)
+            raw_cursor += len(_OCR_SEMANTIC_BREAK_TOKEN)
         if clean_chunks and any(clean_text for _block, _block_id, (clean_text, _mapping) in prepared_line):
-            clean_cursor = _append_synthetic_text(
+            _append_clean_token(
+                clean_chunks=clean_chunks,
+                clean_char_refs=clean_char_refs,
                 token=_OCR_SEMANTIC_BREAK_TOKEN,
-                kind="ocr_break",
-                chunks=clean_chunks,
-                char_refs=clean_char_refs,
-                spans=clean_spans,
-                cursor=clean_cursor,
             )
+            clean_cursor += len(_OCR_SEMANTIC_BREAK_TOKEN)
 
         previous_clean_text: str | None = None
-        for block_offset, (block, block_id, (clean_text, clean_map)) in enumerate(prepared_line):
+        for block_offset, (block, block_id, (clean_text, clean_raw_indices)) in enumerate(prepared_line):
             if block_offset:
-                raw_cursor = _append_synthetic_text(
-                    token=" ",
-                    kind="ocr_inline_gap",
-                    chunks=raw_chunks,
-                    char_refs=raw_char_refs,
-                    spans=raw_spans,
-                    cursor=raw_cursor,
-                )
+                raw_chunks.append(" ")
+                raw_cursor += 1
 
             raw_start = raw_cursor
             raw_text = block.text or ""
             raw_chunks.append(raw_text)
-            for block_char_index, _char in enumerate(raw_text):
-                raw_char_refs.append(
-                    SourceRef(
-                        source=PIISourceType.OCR,
-                        block_id=block_id,
-                        bbox=block.bbox,
-                        block_char_index=block_char_index,
-                        raw_index=raw_start + block_char_index,
-                    )
-                )
             raw_cursor += len(raw_text)
             raw_end = raw_cursor
-            raw_spans.append(
-                StreamSpan(
-                    kind="ocr_block",
-                    start=raw_start,
-                    end=raw_end,
-                    block_id=block_id,
-                    bbox=block.bbox,
-                )
-            )
 
             if clean_text:
                 join_text = _join_clean_blocks(previous_clean_text, clean_text)
                 if join_text:
-                    clean_cursor = _append_synthetic_text(
+                    _append_clean_token(
+                        clean_chunks=clean_chunks,
+                        clean_char_refs=clean_char_refs,
                         token=join_text,
-                        kind="ocr_inline_gap" if join_text == _OCR_INLINE_GAP_TOKEN else "ocr_join",
-                        chunks=clean_chunks,
-                        char_refs=clean_char_refs,
-                        spans=clean_spans,
-                        cursor=clean_cursor,
                     )
+                    clean_cursor += len(join_text)
                 clean_start = clean_cursor
                 clean_chunks.append(clean_text)
-                for block_char_index in clean_map:
-                    if block_char_index is None:
+                for raw_block_index in clean_raw_indices:
+                    if raw_block_index is None:
                         clean_char_refs.append(None)
                         continue
                     clean_char_refs.append(
@@ -146,22 +117,12 @@ def build_ocr_stream(blocks: list[OCRTextBlock]) -> PreparedOCRContext:
                             source=PIISourceType.OCR,
                             block_id=block_id,
                             bbox=block.bbox,
-                            block_char_index=block_char_index,
-                            raw_index=raw_start + block_char_index,
+                            block_char_index=raw_block_index,
+                            raw_index=raw_start + raw_block_index,
                         )
                     )
                 clean_cursor += len(clean_text)
                 clean_end = clean_cursor
-                clean_spans.append(
-                    StreamSpan(
-                        kind="ocr_block",
-                        start=clean_start,
-                        end=clean_end,
-                        block_id=block_id,
-                        bbox=block.bbox,
-                    )
-                )
-                _append_inline_gap_spans(clean_spans, clean_text, clean_start)
                 previous_clean_text = clean_text
             else:
                 clean_start = clean_cursor
@@ -178,25 +139,24 @@ def build_ocr_stream(blocks: list[OCRTextBlock]) -> PreparedOCRContext:
                     clean_start=clean_start,
                     clean_end=clean_end,
                     clean_text=clean_text,
-                    clean_char_to_raw_block_index=clean_map,
                 )
             )
             order_index += 1
 
-    scene = _build_scene(scene_blocks)
+    stream_text = "".join(clean_chunks)
+    units, char_to_unit = _build_stream_units(stream_text)
     stream = StreamInput(
         source=PIISourceType.OCR,
-        text="".join(clean_chunks),
+        text=stream_text,
+        units=units,
+        char_to_unit=char_to_unit,
         char_refs=tuple(clean_char_refs),
-        spans=tuple(clean_spans),
         metadata={"ocr_block_count": len(scene_blocks)},
     )
     return PreparedOCRContext(
         raw_text="".join(raw_chunks),
         stream=stream,
-        raw_char_refs=tuple(raw_char_refs),
-        raw_spans=tuple(raw_spans),
-        scene=scene,
+        scene=_build_scene(scene_blocks),
     )
 
 
@@ -212,7 +172,7 @@ def _normalize_block_chars(text: str) -> tuple[list[str], list[int | None]]:
     chars: list[str] = []
     raw_indices: list[int | None] = []
     for raw_index, raw_char in enumerate(text):
-        normalized = unicodedata.normalize("NFKC", raw_char)
+        normalized = raw_char if unicodedata.category(raw_char).startswith("P") else unicodedata.normalize("NFKC", raw_char)
         for char in normalized:
             rewritten = _normalize_intermediate_char(char)
             if not rewritten:
@@ -234,52 +194,160 @@ def _normalize_intermediate_char(char: str) -> str:
 
 
 def _rewrite_whitespace(chars: list[str], raw_indices: list[int | None]) -> tuple[list[str], list[int | None]]:
+    if not chars:
+        return (chars, raw_indices)
+    tokens = _tokenize_intermediate(chars, raw_indices)
+    gap_outputs = _plan_gap_outputs(tokens)
     rewritten_chars: list[str] = []
     rewritten_indices: list[int | None] = []
-    index = 0
-    while index < len(chars):
-        current = chars[index]
-        if current != " ":
-            rewritten_chars.append(current)
-            rewritten_indices.append(raw_indices[index])
-            index += 1
+    for index, token in enumerate(tokens):
+        if token.kind != "space_run":
+            rewritten_chars.extend(token.text)
+            rewritten_indices.extend(token.raw_indices)
             continue
-
-        gap_start = index
-        while index < len(chars) and chars[index] == " ":
-            index += 1
-        gap_end = index
-        gap_text = _classify_gap(chars, gap_start, gap_end, rewritten_chars)
-        if not gap_text:
+        output = gap_outputs.get(index, "")
+        if not output:
             continue
-        if gap_text == _OCR_INLINE_GAP_TOKEN:
-            rewritten_chars.extend(gap_text)
-            rewritten_indices.extend([None] * len(gap_text))
+        if output == " ":
+            rewritten_chars.append(" ")
+            rewritten_indices.append(token.raw_indices[0] if token.raw_indices else None)
             continue
-        rewritten_chars.append(gap_text)
-        rewritten_indices.append(raw_indices[gap_start])
+        if output == _OCR_INLINE_GAP_TOKEN:
+            rewritten_chars.extend(output)
+            rewritten_indices.extend([None] * len(output))
+            continue
+        rewritten_chars.extend(output)
+        rewritten_indices.extend([None] * len(output))
     return (rewritten_chars, rewritten_indices)
 
 
-def _classify_gap(
-    chars: list[str],
-    gap_start: int,
-    gap_end: int,
-    rewritten_chars: list[str],
-) -> str:
-    prev_char = rewritten_chars[-1] if rewritten_chars else None
-    next_char = chars[gap_end] if gap_end < len(chars) else None
-    if prev_char is None or next_char is None:
+def _tokenize_intermediate(chars: list[str], raw_indices: list[int | None]) -> list[_BlockToken]:
+    tokens: list[_BlockToken] = []
+    cursor = 0
+    while cursor < len(chars):
+        char = chars[cursor]
+        if char == " ":
+            end = cursor + 1
+            while end < len(chars) and chars[end] == " ":
+                end += 1
+            tokens.append(_BlockToken(kind="space_run", text="".join(chars[cursor:end]), raw_indices=tuple(raw_indices[cursor:end])))
+            cursor = end
+            continue
+        if _is_cjk(char):
+            end = cursor + 1
+            while end < len(chars) and _is_cjk(chars[end]):
+                end += 1
+            tokens.append(_BlockToken(kind="cjk_run", text="".join(chars[cursor:end]), raw_indices=tuple(raw_indices[cursor:end])))
+            cursor = end
+            continue
+        if _is_ascii_letter(char):
+            end = cursor + 1
+            while end < len(chars) and _is_ascii_letter(chars[end]):
+                end += 1
+            tokens.append(_BlockToken(kind="ascii_word", text="".join(chars[cursor:end]), raw_indices=tuple(raw_indices[cursor:end])))
+            cursor = end
+            continue
+        if _is_ascii_digit(char):
+            end = cursor + 1
+            while end < len(chars) and _is_ascii_digit(chars[end]):
+                end += 1
+            tokens.append(_BlockToken(kind="digit_run", text="".join(chars[cursor:end]), raw_indices=tuple(raw_indices[cursor:end])))
+            cursor = end
+            continue
+        if _is_punctuation(char):
+            tokens.append(_BlockToken(kind="punct", text=char, raw_indices=(raw_indices[cursor],)))
+            cursor += 1
+            continue
+        end = cursor + 1
+        while (
+            end < len(chars)
+            and chars[end] != " "
+            and not _is_cjk(chars[end])
+            and not _is_ascii_letter(chars[end])
+            and not _is_ascii_digit(chars[end])
+            and not _is_punctuation(chars[end])
+        ):
+            end += 1
+        tokens.append(_BlockToken(kind="other_run", text="".join(chars[cursor:end]), raw_indices=tuple(raw_indices[cursor:end])))
+        cursor = end
+    return tokens
+
+
+def _plan_gap_outputs(tokens: list[_BlockToken]) -> dict[int, str]:
+    outputs: dict[int, str] = {}
+    handled: set[int] = set()
+    for index in range(1, len(tokens) - 3):
+        if tokens[index].kind != "space_run":
+            continue
+        left = tokens[index - 1]
+        middle = tokens[index + 1]
+        right_gap = tokens[index + 2]
+        right = tokens[index + 3]
+        if (
+            left.kind == "cjk_run"
+            and middle.kind == "cjk_run"
+            and len(middle.text) == 1
+            and right_gap.kind == "space_run"
+            and right.kind == "cjk_run"
+        ):
+            left_len = len(tokens[index].text)
+            right_len = len(right_gap.text)
+            if abs(left_len - right_len) <= 1:
+                outputs[index] = ""
+                outputs[index + 2] = ""
+            elif left_len < right_len:
+                outputs[index] = ""
+                outputs[index + 2] = _preserve_gap_text(right_len)
+            else:
+                outputs[index] = _preserve_gap_text(left_len)
+                outputs[index + 2] = ""
+            handled.add(index)
+            handled.add(index + 2)
+    for index, token in enumerate(tokens):
+        if token.kind != "space_run":
+            continue
+        if index in handled:
+            continue
+        prev_token = tokens[index - 1] if index > 0 else None
+        next_token = tokens[index + 1] if index + 1 < len(tokens) else None
+        outputs[index] = _default_gap_output(prev_token, next_token, len(token.text))
+        if prev_token is None or next_token is None:
+            continue
+        if prev_token.kind == "cjk_run" and next_token.kind == "cjk_run" and len(next_token.text) == 1:
+            outputs[index] = "" if len(token.text) <= 2 else _preserve_gap_text(len(token.text))
+            continue
+        if (
+            prev_token.kind == "cjk_run"
+            and len(prev_token.text) == 1
+            and next_token.kind == "cjk_run"
+            and not _has_left_cjk_attachment(tokens, index)
+        ):
+            outputs[index] = "" if len(token.text) <= 2 else _preserve_gap_text(len(token.text))
+    return outputs
+
+
+def _has_left_cjk_attachment(tokens: list[_BlockToken], gap_index: int) -> bool:
+    return (
+        gap_index >= 3
+        and tokens[gap_index - 1].kind == "cjk_run"
+        and len(tokens[gap_index - 1].text) == 1
+        and tokens[gap_index - 2].kind == "space_run"
+        and tokens[gap_index - 3].kind == "cjk_run"
+    )
+
+
+def _default_gap_output(prev_token: _BlockToken | None, next_token: _BlockToken | None, gap_len: int) -> str:
+    if prev_token is None or next_token is None:
         return ""
-    if _is_punctuation(prev_char) or _is_punctuation(next_char):
+    if prev_token.kind == "punct" or next_token.kind == "punct":
         return ""
-    if _is_cjk(prev_char) and _is_cjk(next_char):
-        if _adjacent_cjk_length_left(chars, gap_start) == 1 or _adjacent_cjk_length_right(chars, gap_end) == 1:
-            return ""
-        if gap_end - gap_start >= 2:
-            return _OCR_INLINE_GAP_TOKEN
-        return " "
+    if prev_token.kind == "cjk_run" and next_token.kind == "cjk_run":
+        return " " if gap_len == 1 else _OCR_INLINE_GAP_TOKEN
     return " "
+
+
+def _preserve_gap_text(gap_len: int) -> str:
+    return " " if gap_len == 1 else _OCR_INLINE_GAP_TOKEN
 
 
 def _strip_edge_noise(chars: list[str], raw_indices: list[int | None]) -> tuple[list[str], list[int | None]]:
@@ -312,14 +380,16 @@ def _apply_ambiguity_fixes(text: str) -> str:
 
 def _protected_mask(text: str) -> list[bool]:
     protected = [False] * len(text)
-    start = 0
-    while True:
-        index = text.find(_OCR_INLINE_GAP_TOKEN, start)
-        if index < 0:
-            return protected
-        for cursor in range(index, index + len(_OCR_INLINE_GAP_TOKEN)):
-            protected[cursor] = True
-        start = index + len(_OCR_INLINE_GAP_TOKEN)
+    for token in (_OCR_INLINE_GAP_TOKEN, _OCR_SEMANTIC_BREAK_TOKEN):
+        start = 0
+        while True:
+            index = text.find(token, start)
+            if index < 0:
+                break
+            for cursor in range(index, index + len(token)):
+                protected[cursor] = True
+            start = index + len(token)
+    return protected
 
 
 def _resolve_ambiguous_char(chars: list[str], protected: list[bool], index: int, char: str) -> str | None:
@@ -346,73 +416,96 @@ def _adjacent_neighbor(chars: list[str], protected: list[bool], index: int) -> s
     return chars[index]
 
 
-def _is_ascii_letter(char: str) -> bool:
-    return ("A" <= char <= "Z") or ("a" <= char <= "z")
-
-
-def _is_ascii_digit(char: str) -> bool:
-    return "0" <= char <= "9"
-
-
-def _adjacent_cjk_length_left(chars: list[str], gap_start: int) -> int:
-    count = 0
-    cursor = gap_start - 1
-    while cursor >= 0 and _is_cjk(chars[cursor]):
-        count += 1
-        cursor -= 1
-    return count
-
-
-def _adjacent_cjk_length_right(chars: list[str], gap_end: int) -> int:
-    count = 0
-    cursor = gap_end
-    while cursor < len(chars) and _is_cjk(chars[cursor]):
-        count += 1
-        cursor += 1
-    return count
+def _append_clean_token(
+    *,
+    clean_chunks: list[str],
+    clean_char_refs: list[SourceRef | None],
+    token: str,
+) -> None:
+    if not token:
+        return
+    clean_chunks.append(token)
+    clean_char_refs.extend([None] * len(token))
 
 
 def _join_clean_blocks(left_text: str | None, right_text: str) -> str:
     if not left_text or not right_text:
         return ""
-    left_char = left_text[-1]
-    right_char = right_text[0]
-    if _is_punctuation(left_char) or _is_punctuation(right_char):
+    if _is_punctuation(left_text[-1]) or _is_punctuation(right_text[0]):
         return ""
     return " "
 
 
-def _append_synthetic_text(
-    *,
-    token: str,
-    kind: str,
-    chunks: list[str],
-    char_refs: list[SourceRef | None],
-    spans: list[StreamSpan],
-    cursor: int,
-) -> int:
-    if not token:
-        return cursor
-    chunks.append(token)
-    spans.append(StreamSpan(kind=kind, start=cursor, end=cursor + len(token)))
-    char_refs.extend([None] * len(token))
-    return cursor + len(token)
-
-
-def _append_inline_gap_spans(spans: list[StreamSpan], text: str, start: int) -> None:
+def _build_stream_units(text: str) -> tuple[tuple[StreamUnit, ...], tuple[int, ...]]:
+    if not text:
+        return ((), ())
+    units: list[StreamUnit] = []
+    char_to_unit: list[int] = []
     cursor = 0
-    while True:
-        index = text.find(_OCR_INLINE_GAP_TOKEN, cursor)
-        if index < 0:
-            return
-        spans.append(
-            StreamSpan(
-                kind="ocr_inline_gap",
-                start=start + index,
-                end=start + index + len(_OCR_INLINE_GAP_TOKEN),
+    while cursor < len(text):
+        if text.startswith(_OCR_INLINE_GAP_TOKEN, cursor):
+            cursor = _append_unit(
+                units,
+                char_to_unit,
+                kind="inline_gap",
+                text=_OCR_INLINE_GAP_TOKEN,
+                start=cursor,
+                end=cursor + len(_OCR_INLINE_GAP_TOKEN),
             )
-        )
-        cursor = index + len(_OCR_INLINE_GAP_TOKEN)
+            continue
+        if text.startswith(_OCR_SEMANTIC_BREAK_TOKEN, cursor):
+            cursor = _append_unit(
+                units,
+                char_to_unit,
+                kind="semantic_break",
+                text=_OCR_SEMANTIC_BREAK_TOKEN,
+                start=cursor,
+                end=cursor + len(_OCR_SEMANTIC_BREAK_TOKEN),
+            )
+            continue
+        char = text[cursor]
+        if char == " ":
+            cursor = _append_unit(units, char_to_unit, kind="space", text=" ", start=cursor, end=cursor + 1)
+            continue
+        if _is_cjk(char):
+            cursor = _append_unit(units, char_to_unit, kind="cjk_char", text=char, start=cursor, end=cursor + 1)
+            continue
+        if _is_ascii_letter(char):
+            end = cursor + 1
+            while end < len(text) and _is_ascii_letter(text[end]):
+                end += 1
+            cursor = _append_unit(
+                units,
+                char_to_unit,
+                kind="ascii_word",
+                text=text[cursor:end],
+                start=cursor,
+                end=end,
+            )
+            continue
+        if _is_ascii_digit(char):
+            cursor = _append_unit(units, char_to_unit, kind="digit_char", text=char, start=cursor, end=cursor + 1)
+            continue
+        if _is_punctuation(char):
+            cursor = _append_unit(units, char_to_unit, kind="punct", text=char, start=cursor, end=cursor + 1)
+            continue
+        cursor = _append_unit(units, char_to_unit, kind="other_char", text=char, start=cursor, end=cursor + 1)
+    return (tuple(units), tuple(char_to_unit))
+
+
+def _append_unit(
+    units: list[StreamUnit],
+    char_to_unit: list[int],
+    *,
+    kind: str,
+    text: str,
+    start: int,
+    end: int,
+) -> int:
+    unit_index = len(units)
+    units.append(StreamUnit(kind=kind, text=text, char_start=start, char_end=end))
+    char_to_unit.extend([unit_index] * (end - start))
+    return end
 
 
 def _is_cjk(char: str) -> bool:
@@ -424,6 +517,14 @@ def _is_cjk(char: str) -> bool:
         or 0x3040 <= codepoint <= 0x30FF
         or 0xAC00 <= codepoint <= 0xD7AF
     )
+
+
+def _is_ascii_letter(char: str) -> bool:
+    return ("A" <= char <= "Z") or ("a" <= char <= "z")
+
+
+def _is_ascii_digit(char: str) -> bool:
+    return "0" <= char <= "9"
 
 
 def _is_punctuation(char: str) -> bool:

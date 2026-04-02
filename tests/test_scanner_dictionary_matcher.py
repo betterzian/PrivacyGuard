@@ -5,11 +5,17 @@ from __future__ import annotations
 import pytest
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
+from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.models import ClueRole, DictionaryEntry
-from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
+from privacyguard.infrastructure.pii.detector.parser import StreamParser
+from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
+from privacyguard.infrastructure.pii.rule_based_detector_shared import (
+    _OCR_INLINE_GAP_TOKEN,
+    _OCR_SEMANTIC_BREAK_TOKEN,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +41,15 @@ def _entry(
         variants=variants or (text,),
         matched_by=matched_by,
         metadata=metadata or {},
+    )
+
+
+def _ocr_block(text: str, *, block_id: str, line_id: int, x: int = 0, y: int = 0) -> OCRTextBlock:
+    return OCRTextBlock(
+        text=text,
+        block_id=block_id,
+        line_id=line_id,
+        bbox=BoundingBox(x=x, y=y, width=max(10, len(text) * 10), height=20),
     )
 
 
@@ -100,6 +115,22 @@ def test_ascii_literal_keeps_word_boundary_behavior():
     assert [clue.text for clue in clues] == ["Ann", "ann"]
 
 
+def test_prompt_stream_builds_single_layer_units_for_ascii_digit_cjk_and_tokens():
+    stream = build_prompt_stream(f"12345678 apples 张三 {_OCR_INLINE_GAP_TOKEN} {_OCR_SEMANTIC_BREAK_TOKEN}")
+
+    assert len(stream.char_to_unit) == len(stream.text)
+    assert [unit.text for unit in stream.units if unit.kind == "digit_char"] == list("12345678")
+    assert [unit.text for unit in stream.units if unit.kind == "ascii_word"] == ["apples"]
+    assert [unit.text for unit in stream.units if unit.kind == "cjk_char"] == ["张", "三"]
+    assert [unit.text for unit in stream.units if unit.kind == "inline_gap"] == [_OCR_INLINE_GAP_TOKEN]
+    assert [unit.text for unit in stream.units if unit.kind == "semantic_break"] == [_OCR_SEMANTIC_BREAK_TOKEN]
+
+    inline_start = stream.text.index(_OCR_INLINE_GAP_TOKEN)
+    semantic_start = stream.text.index(_OCR_SEMANTIC_BREAK_TOKEN)
+    assert len(set(stream.char_to_unit[inline_start : inline_start + len(_OCR_INLINE_GAP_TOKEN)])) == 1
+    assert len(set(stream.char_to_unit[semantic_start : semantic_start + len(_OCR_SEMANTIC_BREAK_TOKEN)])) == 1
+
+
 def test_non_ascii_literal_still_matches_substring():
     entry = _entry(text="张三", matched_by="dictionary_local")
 
@@ -114,6 +145,22 @@ def test_non_ascii_literal_still_matches_substring():
     assert clues[0].text == "张三"
     assert clues[0].start == 1
     assert clues[0].end == 3
+
+
+@pytest.mark.parametrize(
+    ("raw_text", "expected_text"),
+    [
+        ("张 三 宝", "张三宝"),
+        ("张 三  宝", "张三宝"),
+        ("张 三   宝", f"张三{_OCR_INLINE_GAP_TOKEN}宝"),
+        ("张三 宝，", "张三宝，"),
+        ("张三   宝，", f"张三{_OCR_INLINE_GAP_TOKEN}宝，"),
+    ],
+)
+def test_build_ocr_stream_rewrites_cjk_whitespace(raw_text: str, expected_text: str):
+    prepared = build_ocr_stream([_ocr_block(raw_text, block_id="b1", line_id=0)])
+
+    assert prepared.stream.text == expected_text
 
 
 def test_ignored_spans_still_filter_dictionary_matches():
@@ -131,6 +178,48 @@ def test_ignored_spans_still_filter_dictionary_matches():
     assert clues[0].text == "Jordan"
     assert clues[0].start == 7
     assert clues[0].end == 13
+
+
+def test_ascii_dictionary_match_only_accepts_exact_s_and_es_word_units():
+    entry = _entry(text="apple", matched_by="dictionary_local")
+    stream = build_prompt_stream("apple apples applees pineapple applex appel applies")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(entry,),
+        locale_profile="mixed",
+    )
+
+    dictionary_clues = [
+        clue
+        for clue in bundle.all_clues
+        if clue.role == ClueRole.HARD and clue.source_kind == "dictionary_local"
+    ]
+    assert [clue.text for clue in dictionary_clues] == ["apple", "apples", "applees"]
+    assert [clue.unit_end - clue.unit_start for clue in dictionary_clues] == [1, 1, 1]
+    assert [stream.units[clue.unit_start].text for clue in dictionary_clues] == ["apple", "apples", "applees"]
+
+
+def test_find_ocr_break_spans_reads_from_synthetic_units():
+    prepared = build_ocr_stream(
+        [
+            _ocr_block("张 三   宝", block_id="b1", line_id=0, y=0),
+            _ocr_block("第二行", block_id="b2", line_id=1, y=40),
+        ]
+    )
+
+    spans = scanner_module._find_ocr_break_spans(prepared.stream)
+
+    assert [prepared.stream.text[start:end] for start, end in spans] == [
+        _OCR_INLINE_GAP_TOKEN,
+        _OCR_SEMANTIC_BREAK_TOKEN,
+    ]
+    assert [
+        prepared.stream.units[prepared.stream.char_to_unit[start]].kind
+        for start, _end in spans
+    ] == ["inline_gap", "semantic_break"]
 
 
 def test_build_clue_bundle_still_resolves_multi_variant_overlap_to_longer_match():
@@ -155,6 +244,27 @@ def test_build_clue_bundle_still_resolves_multi_variant_overlap_to_longer_match(
     ]
     assert len(dictionary_clues) == 1
     assert dictionary_clues[0].text == "Jordan Demo"
+
+
+def test_parser_keeps_char_span_and_unit_span_for_hard_dictionary_candidate():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    entry = _entry(text="Jordan Demo", matched_by="dictionary_local")
+    stream = build_prompt_stream("Please contact Jordan Demo today.")
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(entry,),
+        locale_profile="mixed",
+    )
+
+    parsed = StreamParser(locale_profile="mixed", ctx=ctx).parse(stream, bundle)
+    dictionary_candidates = [candidate for candidate in parsed.candidates if candidate.source_kind == "dictionary_local"]
+
+    assert len(dictionary_candidates) == 1
+    candidate = dictionary_candidates[0]
+    assert stream.text[candidate.start : candidate.end] == "Jordan Demo"
+    assert [unit.text for unit in stream.units[candidate.unit_start : candidate.unit_end]] == ["Jordan", " ", "Demo"]
 
 
 def test_session_dictionary_matcher_cache_reuses_same_content_signature():
