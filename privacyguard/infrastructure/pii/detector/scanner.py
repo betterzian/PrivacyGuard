@@ -36,7 +36,10 @@ from privacyguard.infrastructure.pii.detector.models import (
     NameComponentHint,
     StreamInput,
 )
-from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
+from privacyguard.infrastructure.pii.rule_based_detector_shared import (
+    _OCR_INLINE_GAP_TOKEN,
+    _OCR_SEMANTIC_BREAK_TOKEN,
+)
 
 _HARD_SOURCE_PRIORITY = {
     "session": 4,
@@ -162,22 +165,22 @@ def build_clue_bundle(
     Pass 1 — hard clue 扫描与裁决，确定屏蔽区间。
     Pass 2 — segment-major soft clue 扫描，事件扫描线裁决。
     """
-    ocr_break_spans = _find_ocr_break_spans(stream.raw_text)
+    ocr_break_spans = _find_ocr_break_spans(stream.text)
 
     # ── Pass 1: hard clue 扫描与裁决 ──
     hard_clues = _resolve_hard_conflicts(
         [
-            *_scan_hard_patterns(ctx, stream.raw_text, ignored_spans=ocr_break_spans),
+            *_scan_hard_patterns(ctx, stream.text, ignored_spans=ocr_break_spans),
             *_scan_dictionary_hard_clues(
                 ctx,
-                stream.raw_text,
+                stream.text,
                 session_entries,
                 source_kind="session",
                 ignored_spans=ocr_break_spans,
             ),
             *_scan_dictionary_hard_clues(
                 ctx,
-                stream.raw_text,
+                stream.text,
                 local_entries,
                 source_kind="local",
                 ignored_spans=ocr_break_spans,
@@ -186,7 +189,7 @@ def build_clue_bundle(
     )
 
     # ── Pass 2: soft clue 扫描（segment-major，对缓存局部性友好）──
-    scan_segments = _build_soft_scan_segments(stream.raw_text, hard_clues, extra_blocked_spans=ocr_break_spans)
+    scan_segments = _build_soft_scan_segments(stream.text, hard_clues, extra_blocked_spans=ocr_break_spans)
     soft_clues: list[Clue] = []
     for segment in scan_segments:
         soft_clues.extend(_scan_label_clues(ctx, segment))
@@ -202,8 +205,8 @@ def build_clue_bundle(
         soft_clues.extend(_scan_negative_clues(ctx, segment))
 
     # ── 事件扫描线裁决 ──
-    all_clues = [*hard_clues, *_scan_ocr_break_clues(ctx, ocr_break_spans), *soft_clues]
-    resolved_clues = _sweep_resolve(stream.raw_text, all_clues)
+    all_clues = [*hard_clues, *_scan_ocr_break_clues(ctx, stream.text, ocr_break_spans), *soft_clues]
+    resolved_clues = _sweep_resolve(stream.text, all_clues)
     ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, -item.priority, item.end)))
     return ClueBundle(all_clues=ordered_clues)
 
@@ -411,7 +414,11 @@ def _scan_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     return _dedupe_clues(clues)
 
 
-def _scan_ocr_break_clues(ctx: DetectContext, ocr_break_spans: tuple[tuple[int, int], ...]) -> list[Clue]:
+def _scan_ocr_break_clues(
+    ctx: DetectContext,
+    text: str,
+    ocr_break_spans: tuple[tuple[int, int], ...],
+) -> list[Clue]:
     clues: list[Clue] = []
     for start, end in ocr_break_spans:
         clues.append(
@@ -421,7 +428,7 @@ def _scan_ocr_break_clues(ctx: DetectContext, ocr_break_spans: tuple[tuple[int, 
                 attr_type=None,
                 start=start,
                 end=end,
-                text=_OCR_SEMANTIC_BREAK_TOKEN,
+                text=text[start:end],
                 priority=500,
                 source_kind="break_ocr",
                 break_type=BreakType.OCR,
@@ -793,9 +800,12 @@ def _segment_span_to_raw(segment: _ScanSegment, start: int, end: int) -> tuple[i
 
 
 def _find_ocr_break_spans(text: str) -> tuple[tuple[int, int], ...]:
-    if _OCR_SEMANTIC_BREAK_TOKEN not in text:
-        return ()
-    return tuple((match.start(), match.end()) for match in re.finditer(re.escape(_OCR_SEMANTIC_BREAK_TOKEN), text))
+    spans = [
+        (match.start(), match.end())
+        for token in (_OCR_SEMANTIC_BREAK_TOKEN, _OCR_INLINE_GAP_TOKEN)
+        for match in re.finditer(re.escape(token), text)
+    ]
+    return tuple(sorted(spans, key=lambda item: (item[0], item[1])))
 
 
 def _needs_ascii_keyword_boundary(keyword: str) -> bool:

@@ -26,7 +26,10 @@ from privacyguard.infrastructure.pii.detector.models import (
     NameComponentHint,
     StreamInput,
 )
-from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
+from privacyguard.infrastructure.pii.rule_based_detector_shared import (
+    _OCR_INLINE_GAP_TOKEN,
+    _OCR_SEMANTIC_BREAK_TOKEN,
+)
 
 _HARD_BREAK_RE = re.compile(r"[;；。！？!?]")
 _STRUCTURED_BINDABLE_GAP_RE = re.compile(r"^[\s:：\-—|,，]*$")
@@ -389,7 +392,11 @@ class NameStack(BaseStack):
             if _is_stop_control_clue(clue):
                 break
             gap_text = raw_text[end:clue.start]
-            if gap_text and (_HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text):
+            if gap_text and (
+                _HARD_BREAK_RE.search(gap_text)
+                or _OCR_SEMANTIC_BREAK_TOKEN in gap_text
+                or _OCR_INLINE_GAP_TOKEN in gap_text
+            ):
                 break
             if gap_text.strip():
                 break
@@ -474,7 +481,11 @@ class OrganizationStack(BaseStack):
             if _is_stop_control_clue(clue):
                 break
             gap_text = raw_text[end:clue.start]
-            if gap_text and (_HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text):
+            if gap_text and (
+                _HARD_BREAK_RE.search(gap_text)
+                or _OCR_SEMANTIC_BREAK_TOKEN in gap_text
+                or _OCR_INLINE_GAP_TOKEN in gap_text
+            ):
                 break
             if gap_text.strip():
                 break
@@ -976,7 +987,7 @@ def _address_gap_too_wide(gap_text: str, locale: str) -> bool:
     """
     if not gap_text:
         return False
-    if _HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text:
+    if _HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text or _OCR_INLINE_GAP_TOKEN in gap_text:
         return True
     if locale.startswith("en"):
         return len(gap_text.split()) > 3

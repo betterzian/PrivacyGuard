@@ -16,7 +16,16 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import (
     looks_like_organization_value,
 )
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Clue, NameComponentHint, OCRScene, OCRSceneBlock, ParseResult, StreamInput
+from privacyguard.infrastructure.pii.detector.models import (
+    CandidateDraft,
+    Clue,
+    NameComponentHint,
+    OCRScene,
+    OCRSceneBlock,
+    ParseResult,
+    PreparedOCRContext,
+    StreamInput,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,13 +37,14 @@ class OCROwnershipProposal:
 
 def apply_ocr_geometry(
     *,
-    stream: StreamInput,
-    scene: OCRScene,
+    prepared: PreparedOCRContext,
     bundle,
     parsed: ParseResult,
 ) -> list[CandidateDraft]:
+    stream = prepared.stream
+    scene = prepared.scene
     median_h = _scene_median_height(scene)
-    remapped = [_remap_candidate(candidate, stream, scene) for candidate in parsed.candidates]
+    remapped = [_remap_candidate(candidate, prepared) for candidate in parsed.candidates]
     label_block_ids = {
         block_id
         for event in bundle.label_clues
@@ -67,16 +77,16 @@ def apply_ocr_geometry(
         generated = _build_candidate_from_blocks(proposal.event, proposal.candidate_blocks)
         if generated is None:
             continue
-        extras.append(_remap_candidate(generated, stream, scene))
+        extras.append(_remap_candidate(generated, prepared))
     return _merge_ocr_candidates([*remapped, *extras])
 
 
 def _build_candidate_from_blocks(event: Clue, blocks: tuple[OCRSceneBlock, ...]) -> CandidateDraft | None:
-    text = " ".join(block.block.text.strip() for block in blocks if block.block.text.strip())
+    text = " ".join(block.clean_text.strip() for block in blocks if block.clean_text.strip())
     if not text:
         return None
-    start = blocks[0].raw_start
-    end = blocks[-1].raw_end
+    start = blocks[0].clean_start
+    end = blocks[-1].clean_end
     source_kind = str(event.ocr_source_kind or event.source_kind)
     component_hint = event.component_hint or NameComponentHint.FULL
     if event.attr_type == PIIAttributeType.NAME:
@@ -134,7 +144,7 @@ def _resolve_ownership_proposals(proposals: list[OCROwnershipProposal]) -> list[
 
 
 def _proposal_score(proposal: OCROwnershipProposal) -> tuple[float, float, float]:
-    text = " ".join(block.block.text.strip() for block in proposal.candidate_blocks if block.block.text.strip())
+    text = " ".join(block.clean_text.strip() for block in proposal.candidate_blocks if block.clean_text.strip())
     attr_score = _attribute_segment_score(proposal.event, text)
     geometry_score = _geometry_score(proposal.label_block, proposal.candidate_blocks)
     distance_score = _distance_fallback_score(proposal.label_block, proposal.candidate_blocks)
@@ -291,29 +301,41 @@ def _find_candidate_blocks(
     return ()
 
 
-def _remap_candidate(candidate: CandidateDraft, stream: StreamInput, scene: OCRScene) -> CandidateDraft:
+def _remap_candidate(candidate: CandidateDraft, prepared: PreparedOCRContext) -> CandidateDraft:
+    stream = prepared.stream
+    scene = prepared.scene
+    mapped_refs = [
+        ref
+        for ref in stream.char_refs[candidate.start : candidate.end]
+        if ref is not None and ref.block_id is not None and ref.raw_index is not None
+    ]
+    if not mapped_refs:
+        return candidate
     block_refs = []
-    for ref in stream.char_refs[candidate.start : candidate.end]:
-        if ref is None or ref.block_id is None:
-            continue
+    for ref in mapped_refs:
         if block_refs and block_refs[-1].block_id == ref.block_id:
             continue
         block_refs.append(ref)
-    if not block_refs:
-        return candidate
     block_ids = tuple(ref.block_id for ref in block_refs if ref.block_id)
     boxes = [scene.id_to_block[block_id].block.bbox for block_id in block_ids if block_id in scene.id_to_block]
     metadata = dict(candidate.metadata)
     metadata["ocr_block_ids"] = list(block_ids)
-    first_ref = block_refs[0]
-    last_ref = block_refs[-1]
+    first_ref = mapped_refs[0]
+    last_ref = mapped_refs[-1]
+    raw_start = int(first_ref.raw_index)
+    raw_end = int(last_ref.raw_index) + 1
     span_start = first_ref.block_char_index
     span_end = None
     block_id = block_ids[0] if block_ids else None
     if first_ref.block_id == last_ref.block_id and last_ref.block_char_index is not None:
         span_end = last_ref.block_char_index + 1
+    canonical_text = candidate.canonical_text or candidate.text
     return replace(
         candidate,
+        start=raw_start,
+        end=raw_end,
+        text=prepared.raw_text[raw_start:raw_end],
+        canonical_text=canonical_text,
         block_ids=block_ids,
         block_id=block_id,
         bbox=_union_bbox(boxes),

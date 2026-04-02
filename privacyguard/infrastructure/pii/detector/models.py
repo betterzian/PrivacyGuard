@@ -65,6 +65,7 @@ class SourceRef:
     block_id: str | None
     bbox: BoundingBox | None
     block_char_index: int | None
+    raw_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +80,7 @@ class StreamSpan:
 @dataclass(slots=True)
 class StreamInput:
     source: PIISourceType
-    raw_text: str
+    text: str
     char_refs: tuple[SourceRef | None, ...]
     spans: tuple[StreamSpan, ...]
     metadata: dict[str, object] = field(default_factory=dict)
@@ -87,6 +88,11 @@ class StreamInput:
     @property
     def is_ocr(self) -> bool:
         return self.source == PIISourceType.OCR
+
+    @property
+    def raw_text(self) -> str:
+        """兼容旧调用点，始终返回 detector 使用的 clean 文本。"""
+        return self.text
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +123,7 @@ class CandidateDraft:
     text: str
     source: PIISourceType
     source_kind: str
+    canonical_text: str | None = None
     claim_strength: ClaimStrength = ClaimStrength.SOFT
     metadata: dict[str, list[str]] = field(default_factory=dict)
     label_clue_ids: set[str] = field(default_factory=set)
@@ -172,6 +179,10 @@ class OCRSceneBlock:
     line_index: int
     raw_start: int
     raw_end: int
+    clean_start: int
+    clean_end: int
+    clean_text: str
+    clean_char_to_raw_block_index: tuple[int | None, ...]
 
 
 @dataclass(slots=True)
@@ -179,6 +190,19 @@ class OCRScene:
     blocks: tuple[OCRSceneBlock, ...]
     id_to_block: dict[str, OCRSceneBlock]
     line_to_blocks: dict[int, tuple[OCRSceneBlock, ...]]
+
+
+@dataclass(slots=True)
+class PreparedOCRContext:
+    raw_text: str
+    stream: StreamInput
+    raw_char_refs: tuple[SourceRef | None, ...]
+    raw_spans: tuple[StreamSpan, ...]
+    scene: OCRScene
+
+    @property
+    def clean_text(self) -> str:
+        return self.stream.text
 
 
 @dataclass(slots=True)

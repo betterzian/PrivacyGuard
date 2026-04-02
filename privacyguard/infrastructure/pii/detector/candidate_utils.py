@@ -7,7 +7,10 @@ import re
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, NameComponentHint
-from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_SEMANTIC_BREAK_TOKEN
+from privacyguard.infrastructure.pii.rule_based_detector_shared import (
+    _OCR_INLINE_GAP_TOKEN,
+    _OCR_SEMANTIC_BREAK_TOKEN,
+)
 
 _ORG_SUFFIX_RE = re.compile(
     r"(?i)(股份有限公司|有限责任公司|有限公司|研究院|实验室|工作室|事务所|集团|公司|大学|学院|银行|酒店|医院|中心"
@@ -200,6 +203,7 @@ def clean_value(text: str) -> str:
 
 def _clean_value(text: str) -> str:
     cleaned = str(text or "")
+    cleaned = cleaned.replace(_OCR_INLINE_GAP_TOKEN, " ")
     cleaned = cleaned.replace(_OCR_SEMANTIC_BREAK_TOKEN, " ")
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n:：-—|,，;；/\\")
     cleaned = re.sub(r"[。！!？?]+$", "", cleaned).strip()

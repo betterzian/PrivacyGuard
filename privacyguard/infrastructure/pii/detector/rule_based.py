@@ -79,7 +79,8 @@ class RuleBasedPIIDetector:
         prompt_result = parser.parse(prompt_stream, prompt_bundle)
         candidates.extend(self._to_pii_candidates(prompt_result.candidates))
 
-        ocr_stream, ocr_scene = build_ocr_stream(ocr_blocks)
+        prepared_ocr = build_ocr_stream(ocr_blocks)
+        ocr_stream = prepared_ocr.stream
         ocr_bundle = build_clue_bundle(
             ocr_stream,
             ctx=ctx,
@@ -89,8 +90,7 @@ class RuleBasedPIIDetector:
         )
         ocr_result = parser.parse(ocr_stream, ocr_bundle)
         ocr_drafts = apply_ocr_geometry(
-            stream=ocr_stream,
-            scene=ocr_scene,
+            prepared=prepared_ocr,
             bundle=ocr_bundle,
             parsed=ocr_result,
         )
@@ -252,7 +252,8 @@ class RuleBasedPIIDetector:
     def _to_pii_candidates(self, drafts: list[CandidateDraft]) -> list[PIICandidate]:
         output: list[PIICandidate] = []
         for draft in drafts:
-            normalized_text = self._normalize_candidate_text(draft.attr_type, draft.text)
+            canonical_source_text = draft.canonical_text or draft.text
+            normalized_text = self._normalize_candidate_text(draft.attr_type, canonical_source_text)
             entity_id = self.resolver.build_candidate_id(
                 detector_mode=self.detector_mode,
                 source=draft.source.value,
@@ -266,7 +267,7 @@ class RuleBasedPIIDetector:
                 PIICandidate(
                     entity_id=entity_id,
                     text=draft.text,
-                    canonical_source_text=draft.text,
+                    canonical_source_text=canonical_source_text,
                     normalized_text=normalized_text,
                     attr_type=draft.attr_type,
                     source=draft.source,
