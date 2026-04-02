@@ -89,12 +89,9 @@ STACK_STRATEGIES: dict[ProtectionLevel, dict[PIIAttributeType, StackStrategy]] =
 
 def resolve_strategies(
     level: ProtectionLevel,
-    overrides: dict | None = None,
 ) -> dict[PIIAttributeType, StackStrategy]:
     """根据 protection_level 返回最终策略集。"""
-
-    strategies = dict(STACK_STRATEGIES.get(level, STACK_STRATEGIES[ProtectionLevel.STRONG]))
-    return strategies
+    return dict(STACK_STRATEGIES.get(level, STACK_STRATEGIES[ProtectionLevel.STRONG]))
 
 
 # soft 类型间冲突的静态优先级。数值越大越优先保留。

@@ -763,14 +763,6 @@ def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
     return tuple(accepted)
 
 
-def _hard_clue_wins(incoming: Clue, existing: Clue) -> bool:
-    incoming_length = incoming.end - incoming.start
-    existing_length = existing.end - existing.start
-    if incoming_length != existing_length:
-        return incoming_length > existing_length
-    return _HARD_SOURCE_PRIORITY.get(str(incoming.hard_source or ""), 0) > _HARD_SOURCE_PRIORITY.get(str(existing.hard_source or ""), 0)
-
-
 def _build_soft_scan_segments(
     text: str,
     hard_clues: tuple[Clue, ...],

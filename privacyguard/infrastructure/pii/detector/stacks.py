@@ -6,9 +6,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from privacyguard.domain.enums import PIIAttributeType, PIISourceType
+from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import (
-    build_address_candidate_from_value,
     build_name_candidate_from_value,
     build_organization_candidate_from_value,
     clean_value,
@@ -79,6 +78,7 @@ _PREFIX_EN_KEYWORDS = {"apt", "apartment", "suite", "ste", "unit", "#", "floor",
 class StackContextLike(Protocol):
     stream: StreamInput
     locale_profile: str
+    protection_level: ProtectionLevel
     clues: tuple[Clue, ...]
 
 
@@ -129,6 +129,25 @@ class BaseStack:
             handled_label_clue_ids=run.handled_label_clue_ids,
             next_index=run.next_index,
         )
+
+    def _value_locale(self) -> str:
+        """以栈即将处理的第一个字符判断语言。
+
+        - LABEL / START / KEY 等引导型 seed → 跳过分隔符后看第一个字符。
+        - SURNAME / GIVEN_NAME / VALUE / SUFFIX 等值型 seed → 看 seed 自身文本首字符。
+        返回 "zh" 或 "en"。
+        """
+        raw_text = self.context.stream.raw_text
+        if self.clue.role in {ClueRole.LABEL, ClueRole.START, ClueRole.KEY}:
+            pos = _skip_separators(raw_text, self.clue.end)
+            if pos < len(raw_text) and "\u4e00" <= raw_text[pos] <= "\u9fff":
+                return "zh"
+            return "en"
+        # 值型 seed：看自身文本首字符。
+        text = self.clue.text
+        if text and "\u4e00" <= text[0] <= "\u9fff":
+            return "zh"
+        return "en"
 
     def _build_hard_run(self) -> StackRun | None:
         if self.clue.attr_type is None:
@@ -235,14 +254,16 @@ class NumericStack(StructuredBaseStack):
 
 @dataclass(slots=True)
 class NameStack(BaseStack):
-    """姓名检测 stack，根据 seed clue 附近文本判断中英文，分方向构建候选。
+    """姓名检测 stack，根据即将处理的第一个字符判断中英文，分方向构建候选。
 
-    入口分派逻辑：
-    - LABEL / START → 从左往右（L→R）吃 token。
-    - SURNAME（无 label/start 前驱）→ 依语言选方向：
-      中文姓氏在前，L→R；英文姓氏在末，R→L。
-    - GIVEN_NAME → 依语言选方向：
-      中文名字在后，R→L；英文名字在前，L→R。
+    语言判断规则：以栈将要处理的第一个字/词为准。
+    - LABEL / START → 跳过分隔符后的第一个字符。
+    - SURNAME / GIVEN_NAME → seed 自身文本的第一个字符。
+
+    方向分派：
+    - LABEL / START → L→R。
+    - SURNAME：中文姓在前 L→R；英文姓在末 R→L。
+    - GIVEN_NAME：中文名在后 R→L；英文名在前 L→R。
     """
 
     def run(self) -> StackRun | None:
@@ -251,13 +272,11 @@ class NameStack(BaseStack):
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
             return self._run_ltr()
         if self.clue.role == ClueRole.SURNAME:
-            locale = _detect_locale(self.context.stream.raw_text, self.clue.start, self.clue.end)
-            if locale == "zh":
+            if self._value_locale() == "zh":
                 return self._run_ltr()
             return self._run_rtl()
         if self.clue.role == ClueRole.GIVEN_NAME:
-            locale = _detect_locale(self.context.stream.raw_text, self.clue.start, self.clue.end)
-            if locale == "zh":
+            if self._value_locale() == "zh":
                 return self._run_rtl()
             return self._run_ltr()
         return None
@@ -507,11 +526,15 @@ class AddressStack(BaseStack):
             return self._build_hard_run()
 
         raw_text = self.context.stream.raw_text
+        locale = self._value_locale()
         is_label_seed = self.clue.role == ClueRole.LABEL
 
         if is_label_seed:
             address_start = _skip_separators(raw_text, self.clue.end)
-            first_index = _next_address_index(self.context.clues, self.clue_index + 1)
+            first_index = _next_address_index(
+                self.context.clues, self.clue_index + 1,
+                locale=locale, raw_text=raw_text,
+            )
             if first_index is None:
                 return None
             scan_index = first_index
@@ -543,7 +566,7 @@ class AddressStack(BaseStack):
                 if is_break_clue(clue) or is_negative_clue(clue):
                     break
                 if _has_nearby_address_clue(self.context.clues, i + 1, last_end,
-                                            locale=self.context.locale_profile):
+                                            locale=locale, raw_text=raw_text):
                     i += 1
                     continue
                 break
@@ -556,7 +579,7 @@ class AddressStack(BaseStack):
 
             # 间距检查。
             gap_text = raw_text[last_end:clue.start]
-            if clue.start > last_end and _address_gap_too_wide(gap_text, self.context.locale_profile):
+            if clue.start > last_end and _address_gap_too_wide(gap_text, locale):
                 break
 
             comp_type = clue.component_type
@@ -570,7 +593,9 @@ class AddressStack(BaseStack):
             consumed_ids.add(clue.clue_id)
 
             if clue.role == ClueRole.VALUE:
-                # 检查是否有等待中的同层 VALUE → 独立刷出。
+                if comp_type in pending_value:
+                    # 同 comp_type 再次出现 → 地址序列结束。
+                    break
                 self._flush_pending_values(
                     raw_text, pending_value, tier, components, address_start,
                 )
@@ -589,20 +614,39 @@ class AddressStack(BaseStack):
             evidence_count += flushed
 
             if same_tier_value is not None:
-                # VALUE + 同层 KEY → 合并为 1 个组件，1 个证据。
-                comp = _build_value_key_component(raw_text, same_tier_value, clue, comp_type)
+                # VALUE + 同层 KEY → 尝试合并。
+                comp, merged = _build_value_key_component(
+                    raw_text, same_tier_value, clue, comp_type,
+                    locale=locale,
+                )
+                if merged:
+                    # 紧连合并成功 → 1 个组件，1 个证据。
+                    if comp is not None:
+                        components.append(comp)
+                        evidence_count += 1
+                        last_end = max(last_end, int(comp["end"]))
+                        last_tier = tier
+                else:
+                    # 不紧连 → VALUE 和 KEY 各自独立。
+                    standalone = _build_standalone_address_component(same_tier_value, comp_type)
+                    if standalone is not None:
+                        components.append(standalone)
+                        evidence_count += 1
+                        last_end = max(last_end, int(standalone["end"]))
+                    key_comp = self._build_key_component(raw_text, clue, comp_type, i, locale)
+                    if key_comp is not None:
+                        components.append(key_comp)
+                        evidence_count += 1
+                        last_end = max(last_end, int(key_comp["end"]))
+                    last_tier = tier
             else:
                 # 独立 KEY → 左扩取值，1 个证据。
-                comp = _build_key_only_component(
-                    raw_text, clue, comp_type,
-                    floor=_left_address_floor(self.context.clues, i),
-                    locale=self.context.locale_profile,
-                )
-            if comp is not None:
-                components.append(comp)
-                evidence_count += 1
-                last_end = max(last_end, int(comp["end"]))
-                last_tier = tier
+                comp = self._build_key_component(raw_text, clue, comp_type, i, locale)
+                if comp is not None:
+                    components.append(comp)
+                    evidence_count += 1
+                    last_end = max(last_end, int(comp["end"]))
+                    last_tier = tier
             i += 1
 
         # 刷出剩余的 pending values。
@@ -613,12 +657,13 @@ class AddressStack(BaseStack):
         if not components:
             return None
         if not _meets_commit_threshold(
-            evidence_count, components, self.context.locale_profile,
+            evidence_count, components, locale,
+            protection_level=self.context.protection_level,
         ):
             return None
 
-        final_start = int(components[0]["start"])
-        final_end = int(components[-1]["end"])
+        final_start = min(int(c["start"]) for c in components)
+        final_end = max(int(c["end"]) for c in components)
         text = clean_value(raw_text[final_start:final_end])
         if not text:
             return None
@@ -685,13 +730,61 @@ class AddressStack(BaseStack):
         pending.clear()
         return flushed
 
+    def _build_key_component(
+        self,
+        raw_text: str,
+        clue: Clue,
+        comp_type: AddressComponentType,
+        clue_index: int,
+        locale: str,
+    ) -> dict[str, object] | None:
+        """用边界函数左扩（或前缀 KEY 右取）构建 KEY 组件。"""
+        key_text = clue.text
+
+        # 前缀 KEY（apt / suite 等）→ 向右取值。
+        if key_text.lower() in _PREFIX_EN_KEYWORDS:
+            value_start = _skip_separators(raw_text, clue.end)
+            value_end = _scan_forward_value_end(
+                raw_text, value_start,
+                upper_bound=min(len(raw_text), clue.end + 30),
+            )
+            if value_end <= value_start:
+                return None
+            value = _normalize_address_value(comp_type, raw_text[value_start:value_end])
+            if not value:
+                return None
+            return {
+                "component_type": comp_type,
+                "start": clue.start,
+                "end": value_end,
+                "value": value,
+                "key": key_text,
+                "is_detail": comp_type in _DETAIL_COMPONENTS,
+            }
+
+        # 后缀 KEY → 用边界函数左扩。
+        floor = _left_address_floor(self.context.clues, clue_index)
+        if locale.startswith("en"):
+            expand_start = _left_expand_en_word(raw_text, clue.start, floor)
+        else:
+            expand_start = _left_expand_zh_chars(raw_text, clue.start, floor, max_chars=2)
+
+        value = _normalize_address_value(comp_type, raw_text[expand_start:clue.start])
+        if not value:
+            return None
+        return {
+            "component_type": comp_type,
+            "start": expand_start,
+            "end": clue.end,
+            "value": value,
+            "key": key_text,
+            "is_detail": comp_type in _DETAIL_COMPONENTS,
+        }
+
     def _seed_left_boundary(self) -> int | None:
-        raw_text = self.context.stream.raw_text
-        if self.clue.role == ClueRole.VALUE:
+        """seed 左边界。KEY 的左扩由 _build_key_component 统一处理。"""
+        if self.clue.role in {ClueRole.VALUE, ClueRole.KEY}:
             return self.clue.start
-        if self.clue.role == ClueRole.KEY:
-            floor = _left_address_floor(self.context.clues, self.clue_index)
-            return _left_expand_value(raw_text, self.clue.start, floor=floor)
         return None
 
 
@@ -803,12 +896,18 @@ class StackManager:
         return trim_candidate(candidate, raw_text, start=candidate.start, end=blocker.start)
 
 
-def _next_address_index(clues: tuple[Clue, ...], start_index: int) -> int | None:
+def _next_address_index(
+    clues: tuple[Clue, ...],
+    start_index: int,
+    *,
+    locale: str,
+    raw_text: str,
+) -> int | None:
     """从 start_index 向右查找第一个非 label 的 address clue。
 
     跳过夹在中间的非 address soft clue（如与路名重合的姓氏），
     但遇到 break / negative 时中断。
-    跳过上限：距离上一个位置不超过 30 字符，否则认为地址已结束。
+    距离阈值：英文 ≤5 词，中文 ≤10 字符。
     """
     last_pos = clues[start_index - 1].end if start_index > 0 else 0
     for index in range(start_index, len(clues)):
@@ -822,29 +921,176 @@ def _next_address_index(clues: tuple[Clue, ...], start_index: int) -> int | None
         if is_control_clue(clue):
             continue
         # 非 address 的 soft clue：检查距离，过远则放弃。
-        if clue.start - last_pos > 30:
-            return None
+        gap_text = raw_text[last_pos:clue.start]
+        if locale.startswith("en"):
+            if len(gap_text.split()) > 5:
+                return None
+        else:
+            if len(gap_text) > 10:
+                return None
         continue
     return None
 
 
-def _has_nearby_address_clue(clues: tuple[Clue, ...], start_index: int, last_end: int, *, max_gap: int) -> bool:
-    """检查从 start_index 起、距离 last_end 不超过 max_gap 字符内是否有 address clue。"""
+def _has_nearby_address_clue(
+    clues: tuple[Clue, ...],
+    start_index: int,
+    last_end: int,
+    *,
+    locale: str,
+    raw_text: str | None = None,
+) -> bool:
+    """检查从 start_index 起，距离 last_end 不超过阈值内是否有 address clue。
+
+    距离阈值因 locale 而异：英文按单词数（≤3 词），中文按字符数（≤6 字符）。
+    """
     for index in range(start_index, len(clues)):
         clue = clues[index]
-        if clue.start - last_end > max_gap:
+        gap_chars = clue.start - last_end
+        if gap_chars > 30:
+            # 绝对上界：无论语言都不跨越 30 字符。
             return False
         if is_break_clue(clue) or is_negative_clue(clue):
             return False
         if clue.attr_type == PIIAttributeType.ADDRESS and clue.role != ClueRole.LABEL:
+            # 对英文按单词数校验；中文按字符数。
+            if locale.startswith("en") and raw_text is not None:
+                gap_text = raw_text[last_end:clue.start]
+                if len(gap_text.split()) > 3:
+                    return False
+            elif gap_chars > 6:
+                return False
             return True
     return False
 
 
-def _address_gap_blocked(gap: str) -> bool:
-    if not gap:
+# ---------------------------------------------------------------------------
+# 地址证据模型 helper
+# ---------------------------------------------------------------------------
+
+def _address_gap_too_wide(gap_text: str, locale: str) -> bool:
+    """判断两个地址组件之间的间距是否过大。
+
+    英文按单词数（>3 词即过宽），中文按字符数（>6 字符即过宽）。
+    硬断句（句号、感叹号等）或 OCR 语义分割符也视为过宽。
+    """
+    if not gap_text:
         return False
-    return bool(_HARD_BREAK_RE.search(gap) or _OCR_SEMANTIC_BREAK_TOKEN in gap)
+    if _HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text:
+        return True
+    if locale.startswith("en"):
+        return len(gap_text.split()) > 3
+    return len(gap_text) > 6
+
+
+_EN_VALUE_KEY_GAP_RE = re.compile(r"^[ ]*$")
+
+
+def _build_value_key_component(
+    raw_text: str,
+    value_clue: Clue,
+    key_clue: Clue,
+    comp_type: AddressComponentType,
+    locale: str,
+) -> tuple[dict[str, object] | None, bool]:
+    """VALUE + 同层 KEY 尝试合并为 1 个组件。
+
+    返回 (component, merged)：
+    - merged=True 时 component 是合并后的单组件。
+    - merged=False 时两者不紧连，不能合并，component 为 None；
+      调用方应将 VALUE 和 KEY 各自作为独立证据处理。
+
+    紧连规则：
+    - 中文：VALUE.end == KEY.start，不允许任何间距（直连）。
+    - 英文：之间只允许空格。
+    """
+    # 确定前后顺序。
+    if value_clue.end <= key_clue.start:
+        gap = raw_text[value_clue.end:key_clue.start]
+    elif key_clue.end <= value_clue.start:
+        gap = raw_text[key_clue.end:value_clue.start]
+    else:
+        gap = ""  # 重叠，视为紧连。
+
+    if gap:
+        if locale.startswith("en"):
+            if not _EN_VALUE_KEY_GAP_RE.fullmatch(gap):
+                return None, False
+        else:
+            # 中文：不允许任何间距。
+            return None, False
+
+    start = min(value_clue.start, key_clue.start)
+    end = max(value_clue.end, key_clue.end)
+    value = _normalize_address_value(comp_type, value_clue.text)
+    if not value:
+        return None, True  # 合并成功但 value 无效。
+    return {
+        "component_type": comp_type,
+        "start": start,
+        "end": end,
+        "value": value,
+        "key": key_clue.text,
+        "is_detail": comp_type in _DETAIL_COMPONENTS,
+    }, True
+
+
+def _left_expand_en_word(raw_text: str, pos: int, floor: int) -> int:
+    """从 pos 向左跳过空白后取 1 个英文单词的起始位置。"""
+    cursor = pos
+    # 跳过紧邻的空白。
+    while cursor > floor and raw_text[cursor - 1] in " \t":
+        cursor -= 1
+    # 向左取连续字母/数字（1 个单词）。
+    while cursor > floor and raw_text[cursor - 1].isalnum():
+        cursor -= 1
+    return cursor
+
+
+def _left_expand_zh_chars(raw_text: str, pos: int, floor: int, *, max_chars: int) -> int:
+    """从 pos 向左取最多 max_chars 个 CJK 字符。"""
+    cursor = pos
+    count = 0
+    while cursor > floor and count < max_chars:
+        ch = raw_text[cursor - 1]
+        if "\u4e00" <= ch <= "\u9fff":
+            cursor -= 1
+            count += 1
+        else:
+            break
+    return cursor
+
+
+_SINGLE_EVIDENCE_ADMIN = {
+    AddressComponentType.PROVINCE,
+    AddressComponentType.STATE,
+    AddressComponentType.CITY,
+}
+
+
+def _meets_commit_threshold(
+    evidence_count: int,
+    components: list[dict[str, object]],
+    locale: str,
+    protection_level: ProtectionLevel = ProtectionLevel.STRONG,
+) -> bool:
+    """根据 protection_level 判断累计证据数是否满足提交门槛。
+
+    - STRONG：1 个证据即可提交。
+    - BALANCED：省/市/州单证据可提交；其余需 ≥2。
+    - WEAK：一律 ≥2。
+    """
+    if evidence_count <= 0:
+        return False
+    if protection_level == ProtectionLevel.STRONG:
+        return True
+    if protection_level == ProtectionLevel.BALANCED:
+        if evidence_count >= 2:
+            return True
+        # 单证据时，仅省/市/州放行。
+        return any(comp["component_type"] in _SINGLE_EVIDENCE_ADMIN for comp in components)
+    # WEAK：需 ≥2 证据。
+    return evidence_count >= 2
 
 
 def _build_standalone_address_component(clue: Clue, component_type: AddressComponentType) -> dict[str, object] | None:
@@ -852,46 +1098,6 @@ def _build_standalone_address_component(clue: Clue, component_type: AddressCompo
     if not value:
         return None
     return {"component_type": component_type, "start": clue.start, "end": clue.end, "value": value, "key": "", "is_detail": component_type in _DETAIL_COMPONENTS}
-
-
-def _build_address_component_from_attr(
-    raw_text: str,
-    *,
-    clue: Clue,
-    component_type: AddressComponentType,
-    segment_cursor: int,
-    pending_name: Clue | None,
-    clues: tuple[Clue, ...],
-    clue_index: int,
-) -> dict[str, object] | None:
-    key_text = clue.text
-    affix = "prefix" if key_text.lower() in _PREFIX_EN_KEYWORDS else "suffix"
-    if affix == "prefix":
-        value_start = _skip_separators(raw_text, clue.end)
-        next_start = _next_clue_start(clues, clue_index + 1, default=len(raw_text))
-        value_end = _scan_forward_value_end(raw_text, value_start, next_start)
-        if value_end <= value_start:
-            return None
-        value = _normalize_address_value(component_type, raw_text[value_start:value_end])
-        if not value:
-            return None
-        return {"component_type": component_type, "start": clue.start, "end": value_end, "value": value, "key": key_text, "is_detail": component_type in _DETAIL_COMPONENTS}
-    if pending_name is not None and segment_cursor <= pending_name.start < clue.start:
-        component_start = pending_name.start
-        raw_value = raw_text[pending_name.start:pending_name.end]
-    else:
-        component_start = segment_cursor
-        raw_value = raw_text[segment_cursor:clue.start]
-        if not raw_value.strip():
-            component_start = _left_expand_value(raw_text, clue.start, floor=_left_address_floor(clues, clue_index))
-            raw_value = raw_text[component_start:clue.start]
-    value = _normalize_address_value(component_type, raw_value)
-    if not value:
-        return None
-    component_end = clue.end
-    if component_type in {AddressComponentType.ROAD, AddressComponentType.STREET}:
-        component_end = _extend_street_tail(raw_text, component_end)
-    return {"component_type": component_type, "start": component_start, "end": component_end, "value": value, "key": key_text, "is_detail": component_type in _DETAIL_COMPONENTS}
 
 
 def _left_address_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
@@ -904,29 +1110,6 @@ def _left_address_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
         if clue.attr_type != PIIAttributeType.ADDRESS:
             return clue.end
     return 0
-
-
-def _left_expand_value(raw_text: str, attr_start: int, *, floor: int) -> int:
-    index = attr_start
-    while index > floor:
-        previous = raw_text[index - 1]
-        if previous.isspace() or previous in ",，:：;；|/\\()（）":
-            break
-        if _HARD_BREAK_RE.match(previous):
-            break
-        index -= 1
-    return index
-
-
-def _next_clue_start(clues: tuple[Clue, ...], start_index: int, *, default: int) -> int:
-    for index in range(start_index, len(clues)):
-        clue = clues[index]
-        if _is_stop_control_clue(clue):
-            return clue.start
-        if is_control_clue(clue):
-            continue
-        return clue.start
-    return default
 
 
 def _scan_forward_value_end(raw_text: str, start: int, upper_bound: int) -> int:
@@ -1122,24 +1305,3 @@ def _extend_name_boundary_left(raw_text: str, start: int, end: int, clues: tuple
     return cursor
 
 
-def _detect_locale(raw_text: str, start: int, end: int) -> str:
-    """根据 seed 附近文本判断中英文上下文。
-
-    在 seed 前后各 20 字符窗口内统计 CJK 与 ASCII 字母数量。
-    CJK 多则返回 "zh"，ASCII 多则返回 "en"；
-    平局时根据 seed 本身字符决定。
-    """
-    window_start = max(0, start - 20)
-    window_end = min(len(raw_text), end + 20)
-    window = raw_text[window_start:window_end]
-    zh_count = sum(1 for ch in window if "\u4e00" <= ch <= "\u9fff")
-    en_count = sum(1 for ch in window if "A" <= ch <= "Z" or "a" <= ch <= "z")
-    if zh_count > en_count:
-        return "zh"
-    if en_count > zh_count:
-        return "en"
-    # 平局：检查 seed 本身。
-    seed_text = raw_text[start:end]
-    if any("\u4e00" <= ch <= "\u9fff" for ch in seed_text):
-        return "zh"
-    return "en"
