@@ -54,8 +54,53 @@ def build_prompt_stream(text: str) -> StreamInput:
     )
 
 
-def build_ocr_stream(blocks: list[OCRTextBlock]) -> PreparedOCRContext:
-    ordered_lines = _group_ocr_lines(blocks)
+def build_ocr_stream(
+    blocks: list[OCRTextBlock],
+    *,
+    image_height: int | None = None,
+) -> PreparedOCRContext:
+    """构建 OCR 流。
+
+    先经过 UI 结构理解层（裁剪→分行→行内切分→区域分割→布局拼接）
+    得到语义分组，再按组构建 stream。组间插 semantic break，组内
+    不同视觉行之间仅用普通间隔。
+    """
+    from privacyguard.infrastructure.pii.detector.ui_layout import (
+        analyze_ui_layout,
+        group_into_lines,
+    )
+
+    groups = analyze_ui_layout(blocks, image_height=image_height)
+
+    # 无有效分组时回退：跳过裁剪，直接用旧分行逻辑，每行作为独立组。
+    if not groups:
+        fallback_lines = _group_ocr_lines(blocks)
+        groups_as_lines = [[line] for line in fallback_lines]
+        return _build_stream_from_line_groups(groups_as_lines)
+
+    # 每个语义组内部再按视觉行排列，保留行结构供 ocr.py 几何搜索使用。
+    groups_as_lines: list[list[list[OCRTextBlock]]] = []
+    for group in groups:
+        lines = group_into_lines(group.blocks)
+        if lines:
+            groups_as_lines.append(lines)
+
+    if not groups_as_lines:
+        fallback_lines = _group_ocr_lines(blocks)
+        groups_as_lines = [[line] for line in fallback_lines]
+
+    return _build_stream_from_line_groups(groups_as_lines)
+
+
+def _build_stream_from_line_groups(
+    groups_as_lines: list[list[list[OCRTextBlock]]],
+) -> PreparedOCRContext:
+    """从「语义组→视觉行→blocks」三层结构构建 stream。
+
+    - 组间：插入 semantic break。
+    - 组内不同视觉行间：普通空格间隔（不插 semantic break）。
+    - 同一视觉行内不同 block 间：空格。
+    """
     raw_chunks: list[str] = []
     clean_chunks: list[str] = []
     clean_char_refs: list[SourceRef | None] = []
@@ -63,85 +108,96 @@ def build_ocr_stream(blocks: list[OCRTextBlock]) -> PreparedOCRContext:
     raw_cursor = 0
     clean_cursor = 0
     order_index = 0
+    line_index = 0
 
-    for line_index, line_blocks in enumerate(ordered_lines):
-        prepared_line = [
-            (
-                block,
-                block.block_id or f"ocr-{order_index + offset}",
-                _prepare_ocr_block_text(block.text or ""),
-            )
-            for offset, block in enumerate(line_blocks)
-        ]
-
-        if raw_chunks:
+    for group_idx, group_lines in enumerate(groups_as_lines):
+        # 组间插 semantic break。
+        if group_idx > 0 and raw_chunks:
             raw_chunks.append(_OCR_SEMANTIC_BREAK_TOKEN)
             raw_cursor += len(_OCR_SEMANTIC_BREAK_TOKEN)
-        if clean_chunks and any(clean_text for _block, _block_id, (clean_text, _mapping) in prepared_line):
-            _append_clean_token(
-                clean_chunks=clean_chunks,
-                clean_char_refs=clean_char_refs,
-                token=_OCR_SEMANTIC_BREAK_TOKEN,
-            )
-            clean_cursor += len(_OCR_SEMANTIC_BREAK_TOKEN)
+            if clean_chunks:
+                _append_clean_token(
+                    clean_chunks=clean_chunks,
+                    clean_char_refs=clean_char_refs,
+                    token=_OCR_SEMANTIC_BREAK_TOKEN,
+                )
+                clean_cursor += len(_OCR_SEMANTIC_BREAK_TOKEN)
 
-        previous_clean_text: str | None = None
-        for block_offset, (block, block_id, (clean_text, clean_raw_indices)) in enumerate(prepared_line):
-            if block_offset:
+        for local_line_idx, line_blocks in enumerate(group_lines):
+            prepared_line = [
+                (
+                    block,
+                    block.block_id or f"ocr-{order_index + offset}",
+                    _prepare_ocr_block_text(block.text or ""),
+                )
+                for offset, block in enumerate(line_blocks)
+            ]
+
+            # 组内非首行：用普通空格分隔（不插 semantic break）。
+            if local_line_idx > 0 and raw_chunks:
                 raw_chunks.append(" ")
                 raw_cursor += 1
+            # 首组首行之后的组首行由上面的 semantic break 处理，无需额外分隔。
 
-            raw_start = raw_cursor
-            raw_text = block.text or ""
-            raw_chunks.append(raw_text)
-            raw_cursor += len(raw_text)
-            raw_end = raw_cursor
+            previous_clean_text: str | None = None
+            for block_offset, (block, block_id, (clean_text, clean_raw_indices)) in enumerate(prepared_line):
+                if block_offset:
+                    raw_chunks.append(" ")
+                    raw_cursor += 1
 
-            if clean_text:
-                join_text = _join_clean_blocks(previous_clean_text, clean_text)
-                if join_text:
-                    _append_clean_token(
-                        clean_chunks=clean_chunks,
-                        clean_char_refs=clean_char_refs,
-                        token=join_text,
-                    )
-                    clean_cursor += len(join_text)
-                clean_start = clean_cursor
-                clean_chunks.append(clean_text)
-                for raw_block_index in clean_raw_indices:
-                    if raw_block_index is None:
-                        clean_char_refs.append(None)
-                        continue
-                    clean_char_refs.append(
-                        SourceRef(
-                            source=PIISourceType.OCR,
-                            block_id=block_id,
-                            bbox=block.bbox,
-                            block_char_index=raw_block_index,
-                            raw_index=raw_start + raw_block_index,
+                raw_start = raw_cursor
+                raw_text = block.text or ""
+                raw_chunks.append(raw_text)
+                raw_cursor += len(raw_text)
+                raw_end = raw_cursor
+
+                if clean_text:
+                    join_text = _join_clean_blocks(previous_clean_text, clean_text)
+                    if join_text:
+                        _append_clean_token(
+                            clean_chunks=clean_chunks,
+                            clean_char_refs=clean_char_refs,
+                            token=join_text,
                         )
-                    )
-                clean_cursor += len(clean_text)
-                clean_end = clean_cursor
-                previous_clean_text = clean_text
-            else:
-                clean_start = clean_cursor
-                clean_end = clean_cursor
+                        clean_cursor += len(join_text)
+                    clean_start = clean_cursor
+                    clean_chunks.append(clean_text)
+                    for raw_block_index in clean_raw_indices:
+                        if raw_block_index is None:
+                            clean_char_refs.append(None)
+                            continue
+                        clean_char_refs.append(
+                            SourceRef(
+                                source=PIISourceType.OCR,
+                                block_id=block_id,
+                                bbox=block.bbox,
+                                block_char_index=raw_block_index,
+                                raw_index=raw_start + raw_block_index,
+                            )
+                        )
+                    clean_cursor += len(clean_text)
+                    clean_end = clean_cursor
+                    previous_clean_text = clean_text
+                else:
+                    clean_start = clean_cursor
+                    clean_end = clean_cursor
 
-            scene_blocks.append(
-                OCRSceneBlock(
-                    block=block.model_copy(deep=True),
-                    block_id=block_id,
-                    order_index=order_index,
-                    line_index=line_index,
-                    raw_start=raw_start,
-                    raw_end=raw_end,
-                    clean_start=clean_start,
-                    clean_end=clean_end,
-                    clean_text=clean_text,
+                scene_blocks.append(
+                    OCRSceneBlock(
+                        block=block.model_copy(deep=True),
+                        block_id=block_id,
+                        order_index=order_index,
+                        line_index=line_index,
+                        raw_start=raw_start,
+                        raw_end=raw_end,
+                        clean_start=clean_start,
+                        clean_end=clean_end,
+                        clean_text=clean_text,
+                    )
                 )
-            )
-            order_index += 1
+                order_index += 1
+
+            line_index += 1
 
     stream_text = "".join(clean_chunks)
     units, char_to_unit = _build_stream_units(stream_text)
