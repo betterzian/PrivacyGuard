@@ -372,7 +372,7 @@ def _metadata_values(metadata: Mapping[str, object] | None, key: str) -> tuple[s
 
 
 def _normalize_phone_digits(digits: str) -> str:
-    if len(digits) == 13 and digits.startswith("86") and re.fullmatch(r"1[3-9]\d{10}", digits[2:]):
+    if len(digits) == 13 and digits.startswith("86") and re.fullmatch(r"1[3-9]\d{9}", digits[2:]):
         return digits[2:]
     if len(digits) == 11 and digits.startswith("1") and re.fullmatch(r"[2-9]\d{9}", digits[1:]):
         return digits[1:]

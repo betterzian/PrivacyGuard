@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from privacyguard.application.services.placeholder_allocator import SessionPlaceholderAllocator
 from privacyguard.application.services.session_service import SessionService
@@ -48,7 +49,7 @@ class StubPersonaRepository:
         return None
 
 
-def test_rule_based_local_dictionary_uses_address_part_terms_and_alias_component(tmp_path):
+def test_rule_based_local_dictionary_uses_address_part_terms_and_alias_component():
     payload = {
         "true_personas": [
             {
@@ -75,22 +76,25 @@ def test_rule_based_local_dictionary_uses_address_part_terms_and_alias_component
             }
         ]
     }
-    repo_path = tmp_path / "privacy.json"
+    repo_path = Path("tests/_privacy_rule_based_fixture.json")
     repo_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    try:
+        detector = RuleBasedPIIDetector(privacy_repository_path=repo_path)
 
-    detector = RuleBasedPIIDetector(privacy_repository_path=repo_path)
+        address_entries = [entry for entry in detector.local_entries if entry.attr_type == PIIAttributeType.ADDRESS]
+        alias_entries = [
+            entry
+            for entry in detector.local_entries
+            if entry.attr_type == PIIAttributeType.NAME and entry.metadata.get("name_component") == ["alias"]
+        ]
 
-    address_entries = [entry for entry in detector.local_entries if entry.attr_type == PIIAttributeType.ADDRESS]
-    alias_entries = [
-        entry
-        for entry in detector.local_entries
-        if entry.attr_type == PIIAttributeType.NAME and entry.metadata.get("name_component") == ["alias"]
-    ]
-
-    assert len(address_entries) == 1
-    assert address_entries[0].match_terms == ("上海", "浦东", "阳光国际")
-    assert len(alias_entries) == 1
-    assert alias_entries[0].match_terms == ("阿三",)
+        assert len(address_entries) == 1
+        assert address_entries[0].match_terms == ("上海", "浦东", "阳光国际")
+        assert len(alias_entries) == 1
+        assert alias_entries[0].match_terms == ("阿三",)
+    finally:
+        if repo_path.exists():
+            repo_path.unlink()
 
 
 
