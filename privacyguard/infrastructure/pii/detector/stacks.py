@@ -29,10 +29,15 @@ from privacyguard.infrastructure.pii.detector.models import (
 from privacyguard.infrastructure.pii.rule_based_detector_shared import (
     _OCR_INLINE_GAP_TOKEN,
     _OCR_SEMANTIC_BREAK_TOKEN,
+    is_any_break,
+    is_hard_break,
+    is_name_joiner,
+    is_soft_break,
+)
+from privacyguard.infrastructure.pii.rule_based_detector_shared import (
+    _is_cjk as _shared_is_cjk,
 )
 
-_HARD_BREAK_RE = re.compile(r"[;；。！？!?]")
-_STRUCTURED_BINDABLE_GAP_RE = re.compile(r"^[\s:：\-—|,，]*$")
 
 # 地址组件层级（粗粒度）。
 # 同一层内任意顺序；跨层允许回退 1 层（容忍跳级和轻微逆序）。
@@ -219,7 +224,7 @@ class StructuredBaseStack(BaseStack):
                 cursor = max(cursor, clue.end)
                 continue
             gap_text = raw_text[cursor:clue.start]
-            if gap_text and _STRUCTURED_BINDABLE_GAP_RE.fullmatch(gap_text) is None:
+            if gap_text and not all(ch.isspace() or is_soft_break(ch) for ch in gap_text):
                 return (None, -1)
             if clue.role == ClueRole.HARD and clue.attr_type == self.clue.attr_type:
                 return (clue, index)
@@ -306,7 +311,7 @@ class NameStack(BaseStack):
         end, next_index, consumed_ids = self._resolve_right_boundary(
             value_start=start if self.clue.role in {ClueRole.LABEL, ClueRole.START} else None,
         )
-        end = _extend_name_boundary(self.context.stream.text, start, end, self.context.clues, next_index)
+        end = _extend_name_boundary(self.context.stream, start, end, self.context.clues, next_index)
         if end <= start:
             return None
         # 候选构建。
@@ -341,7 +346,7 @@ class NameStack(BaseStack):
         end = self.clue.end
         # 向左扩展字符边界。
         start = _extend_name_boundary_left(
-            self.context.stream.text, self.clue.start, end,
+            self.context.stream, self.clue.start, end,
             self.context.clues, self.clue_index,
         )
         if end <= start:
@@ -403,7 +408,7 @@ class NameStack(BaseStack):
                 break
             gap_text = raw_text[end:clue.start]
             if gap_text and (
-                _HARD_BREAK_RE.search(gap_text)
+                any(is_hard_break(ch) for ch in gap_text)
                 or _OCR_SEMANTIC_BREAK_TOKEN in gap_text
                 or _OCR_INLINE_GAP_TOKEN in gap_text
             ):
@@ -502,7 +507,7 @@ class OrganizationStack(BaseStack):
                 break
             gap_text = raw_text[end:clue.start]
             if gap_text and (
-                _HARD_BREAK_RE.search(gap_text)
+                any(is_hard_break(ch) for ch in gap_text)
                 or _OCR_SEMANTIC_BREAK_TOKEN in gap_text
                 or _OCR_INLINE_GAP_TOKEN in gap_text
             ):
@@ -1039,13 +1044,23 @@ def _has_nearby_address_clue(
 def _address_gap_too_wide(gap_text: str, locale: str) -> bool:
     """判断两个地址组件之间的间距是否过大。
 
-    英文按单词数（>3 词即过宽），中文按字符数（>6 字符即过宽）。
-    硬断句（句号、感叹号等）或 OCR 语义分割符也视为过宽。
+    三层约束：
+    1. 硬断句或 OCR 语义分割符 → 一定过宽。
+    2. 结构检查：至多 1 个标点符号（连续标点不合理）。
+    3. 宽度检查：英文 >3 词、中文 >6 字符即过宽。
     """
     if not gap_text:
         return False
-    if _HARD_BREAK_RE.search(gap_text) or _OCR_SEMANTIC_BREAK_TOKEN in gap_text or _OCR_INLINE_GAP_TOKEN in gap_text:
+    # 硬断句或 OCR 分割符。
+    if _OCR_SEMANTIC_BREAK_TOKEN in gap_text or _OCR_INLINE_GAP_TOKEN in gap_text:
         return True
+    if any(is_hard_break(ch) for ch in gap_text):
+        return True
+    # 结构检查：至多 1 个标点符号。
+    punct_count = sum(1 for ch in gap_text if is_soft_break(ch))
+    if punct_count > 1:
+        return True
+    # 宽度检查。
     if locale.startswith("en"):
         return len(gap_text.split()) > 3
     return len(gap_text) > 6
@@ -1181,12 +1196,11 @@ def _left_address_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
 
 
 def _scan_forward_value_end(raw_text: str, start: int, upper_bound: int) -> int:
+    """向前扫描取值，遇到任何断点符号即停止。"""
     index = start
     while index < upper_bound:
         current = raw_text[index]
-        if current in ",，;；|/\\()（）":
-            break
-        if _HARD_BREAK_RE.match(current):
+        if is_any_break(current):
             break
         index += 1
     return index
@@ -1277,13 +1291,15 @@ def _unit_char_end(stream: StreamInput, unit_index: int) -> int:
 
 
 def _skip_separators(text: str, start: int) -> int:
+    """跳过 label→value 之间的空白和轻分隔符。"""
     index = start
-    while index < len(text) and text[index] in " \t\r\n:：-—|,，":
+    while index < len(text) and (text[index].isspace() or is_soft_break(text[index])):
         index += 1
     return index
 
 
 def _left_expand_text_boundary(raw_text: str, clues: tuple[Clue, ...], start: int) -> int:
+    """组织名向左扩展文本边界。遇到任何断点符号（hard 或 soft）即停止。"""
     floor = 0
     for clue in reversed(clues):
         if clue.end <= start:
@@ -1296,21 +1312,36 @@ def _left_expand_text_boundary(raw_text: str, clues: tuple[Clue, ...], start: in
     index = start
     while index > floor:
         previous = raw_text[index - 1]
-        if previous in ",，;；|/\\()（）":
-            break
-        if _HARD_BREAK_RE.match(previous):
+        if is_any_break(previous):
             break
         index -= 1
     return index
 
 
-def _extend_name_boundary(raw_text: str, start: int, end: int, clues: tuple[Clue, ...], next_clue_index: int) -> int:
-    """从 end 向右扩展，捕获紧邻的姓名字符。
+def _extend_name_boundary(
+    stream: StreamInput,
+    start: int,
+    end: int,
+    clues: tuple[Clue, ...],
+    next_clue_index: int,
+) -> int:
+    """从 end 向右扩展，基于 stream units 逐步推进捕获姓名字符。
 
-    中文名：从 start 算起最多 4 个汉字（含姓氏），覆盖绝大多数中文姓名。
-    英文名：扩展连续英文 token，最多 80 字符。
+    策略：从 end 所在 unit 的下一个 unit 开始，逐个检查：
+    - cjk_char / ascii_word → 扩展（姓名主体）。
+    - space → peek 下一个 unit，是姓名主体则继续，否则停。
+    - punct 且满足三元组（左邻+符号+右邻）→ 扩展。
+    - 其余（hard break、soft break、其他）→ 停。
+
+    中文名：从 start 算起最多 4 个 CJK 字符（含三元组连接符）。
+    英文名：最多 80 字符。
     """
-    # 下一个 non-name clue 的起始位置作为上界。
+    raw_text = stream.text
+    units = stream.units
+    if not units or end >= len(raw_text):
+        return end
+
+    # 上界：下一个 non-name clue 的起始位置。
     upper = len(raw_text)
     for i in range(next_clue_index, len(clues)):
         c = clues[i]
@@ -1322,44 +1353,123 @@ def _extend_name_boundary(raw_text: str, start: int, end: int, clues: tuple[Clue
         if c.attr_type != PIIAttributeType.NAME:
             upper = min(upper, c.start)
             break
-    # 判断是中文名还是英文名。
-    is_zh = start < len(raw_text) and re.match(r"[\u4e00-\u9fff·]", raw_text[start])
+
+    # 判断中英文。
+    is_zh = start < len(raw_text) and _shared_is_cjk(raw_text[start])
     if is_zh:
-        # 中文名：从 start 算起最多 4 个汉字（覆盖复姓 + 双字名）。
-        max_end = start
-        zh_count = 0
-        while max_end < upper and zh_count < 4:
-            if re.match(r"[\u4e00-\u9fff·]", raw_text[max_end]):
-                zh_count += 1
-                max_end += 1
-            elif raw_text[max_end] == '·':
-                # 少数民族名中的间隔号。
-                max_end += 1
-            else:
-                break
-        return max(end, max_end)
-    # 英文名：扩展连续英文 token。
-    cursor = end
-    while cursor < upper:
-        ch = raw_text[cursor]
-        if _HARD_BREAK_RE.match(ch) or ch in ",，;；|/\\()（）":
+        return _extend_name_right_zh(raw_text, units, stream.char_to_unit, start, end, upper)
+    return _extend_name_right_en(raw_text, units, stream.char_to_unit, start, end, upper)
+
+
+def _extend_name_right_zh(
+    raw_text: str,
+    units: tuple[StreamUnit, ...],
+    char_to_unit: tuple[int, ...],
+    start: int,
+    end: int,
+    upper: int,
+) -> int:
+    """中文姓名向右扩展。从 start 算起最多 4 个 CJK 字符。"""
+    # 统计 start→end 之间已有的 CJK 字符数。
+    cjk_count = sum(1 for i in range(start, end) if _shared_is_cjk(raw_text[i]))
+    max_cjk = 4
+
+    cursor_end = end
+    ui = char_to_unit[end - 1] + 1 if end > 0 and end <= len(char_to_unit) else len(units)
+
+    while ui < len(units) and cjk_count < max_cjk:
+        u = units[ui]
+        if u.char_start >= upper:
             break
-        if re.match(r"[A-Za-z.'\- ]", ch):
-            cursor += 1
+        if u.kind == "cjk_char":
+            cjk_count += 1
+            cursor_end = u.char_end
+            ui += 1
             continue
+        if u.kind == "punct":
+            # 三元组检查：左邻 + punct + 右邻。
+            left_char = raw_text[u.char_start - 1] if u.char_start > 0 else None
+            right_char = _peek_unit_first_char(units, ui + 1)
+            if is_name_joiner(u.text, left_char, right_char):
+                cursor_end = u.char_end
+                ui += 1
+                continue
+            break
         break
-    if cursor - start > 80:
-        cursor = start + 80
-    return cursor
+
+    return max(end, cursor_end)
 
 
-def _extend_name_boundary_left(raw_text: str, start: int, end: int, clues: tuple[Clue, ...], clue_index: int) -> int:
-    """从 start 向左扩展，捕获紧邻的姓名字符。返回新的左边界。
+def _extend_name_right_en(
+    raw_text: str,
+    units: tuple[StreamUnit, ...],
+    char_to_unit: tuple[int, ...],
+    start: int,
+    end: int,
+    upper: int,
+) -> int:
+    """英文姓名向右扩展。逐 unit 推进，最多 80 字符。"""
+    cursor_end = end
+    ui = char_to_unit[end - 1] + 1 if end > 0 and end <= len(char_to_unit) else len(units)
+    max_len = 80
+
+    while ui < len(units):
+        u = units[ui]
+        if u.char_start >= upper:
+            break
+        if u.char_end - start > max_len:
+            break
+
+        if u.kind == "ascii_word":
+            cursor_end = u.char_end
+            ui += 1
+            continue
+
+        if u.kind == "space":
+            # peek 下一个非 space unit，是 ascii_word 则继续。
+            next_ui = ui + 1
+            while next_ui < len(units) and units[next_ui].kind == "space":
+                next_ui += 1
+            if next_ui < len(units) and units[next_ui].kind == "ascii_word" and units[next_ui].char_start < upper:
+                cursor_end = u.char_end  # 先纳入 space。
+                ui += 1
+                continue
+            break
+
+        if u.kind == "punct":
+            # 三元组检查。
+            left_char = raw_text[u.char_start - 1] if u.char_start > 0 else None
+            right_char = _peek_unit_first_char(units, ui + 1)
+            if is_name_joiner(u.text, left_char, right_char):
+                cursor_end = u.char_end
+                ui += 1
+                continue
+            break
+
+        # digit_char, cjk_char, other_char, semantic_break, inline_gap → 停。
+        break
+
+    return max(end, cursor_end)
+
+
+def _extend_name_boundary_left(
+    stream: StreamInput,
+    start: int,
+    end: int,
+    clues: tuple[Clue, ...],
+    clue_index: int,
+) -> int:
+    """从 start 向左扩展，基于 stream units 逐步推进捕获姓名字符。
 
     用于 R→L 方向：英文 surname 向左找 given/middle name，
     中文 given name 向左找姓氏。
     """
-    # 向左查找最近的 non-name clue 或 break 的 end 作为下界。
+    raw_text = stream.text
+    units = stream.units
+    if not units or start <= 0:
+        return start
+
+    # 下界：最近的 non-name clue 的 end。
     lower = 0
     for i in range(clue_index - 1, -1, -1):
         c = clues[i]
@@ -1371,31 +1481,114 @@ def _extend_name_boundary_left(raw_text: str, start: int, end: int, clues: tuple
         if c.attr_type != PIIAttributeType.NAME:
             lower = c.end
             break
-    # 判断是中文还是英文（基于 seed 首字符）。
-    is_zh = start > 0 and re.match(r"[\u4e00-\u9fff·]", raw_text[start - 1]) is not None
+
+    # 判断中英文（基于 start 左侧第一个字符）。
+    is_zh = _shared_is_cjk(raw_text[start - 1])
     if is_zh:
-        # 中文：向左最多 4 个汉字（覆盖复姓 + 双字名）。
-        cursor = start
-        zh_count = 0
-        while cursor > lower and zh_count < 4:
-            if re.match(r"[\u4e00-\u9fff·]", raw_text[cursor - 1]):
-                zh_count += 1
-                cursor -= 1
-            else:
-                break
-        return cursor
-    # 英文：向左扩展连续英文 token。
-    cursor = start
-    while cursor > lower:
-        ch = raw_text[cursor - 1]
-        if _HARD_BREAK_RE.match(ch) or ch in ",，;；|/\\()（）":
+        return _extend_name_left_zh(raw_text, units, stream.char_to_unit, start, end, lower)
+    return _extend_name_left_en(raw_text, units, stream.char_to_unit, start, end, lower)
+
+
+def _extend_name_left_zh(
+    raw_text: str,
+    units: tuple[StreamUnit, ...],
+    char_to_unit: tuple[int, ...],
+    start: int,
+    end: int,
+    lower: int,
+) -> int:
+    """中文姓名向左扩展。最多 4 个 CJK 字符。"""
+    cjk_count = sum(1 for i in range(start, end) if _shared_is_cjk(raw_text[i]))
+    max_cjk = 4
+
+    cursor_start = start
+    ui = char_to_unit[start] - 1 if start < len(char_to_unit) else -1
+
+    while ui >= 0 and cjk_count < max_cjk:
+        u = units[ui]
+        if u.char_end <= lower:
             break
-        if re.match(r"[A-Za-z.'\- ]", ch):
-            cursor -= 1
-        else:
+        if u.kind == "cjk_char":
+            cjk_count += 1
+            cursor_start = u.char_start
+            ui -= 1
+            continue
+        if u.kind == "punct":
+            # 三元组检查。
+            left_char = _peek_unit_last_char(units, ui - 1)
+            right_char = raw_text[u.char_end] if u.char_end < len(raw_text) else None
+            if is_name_joiner(u.text, left_char, right_char):
+                cursor_start = u.char_start
+                ui -= 1
+                continue
             break
-    if start - cursor > 80:
-        cursor = start - 80
-    return cursor
+        break
+
+    return min(start, cursor_start)
+
+
+def _extend_name_left_en(
+    raw_text: str,
+    units: tuple[StreamUnit, ...],
+    char_to_unit: tuple[int, ...],
+    start: int,
+    end: int,
+    lower: int,
+) -> int:
+    """英文姓名向左扩展。最多 80 字符。"""
+    cursor_start = start
+    ui = char_to_unit[start] - 1 if start < len(char_to_unit) else -1
+    max_len = 80
+
+    while ui >= 0:
+        u = units[ui]
+        if u.char_end <= lower:
+            break
+        if end - u.char_start > max_len:
+            break
+
+        if u.kind == "ascii_word":
+            cursor_start = u.char_start
+            ui -= 1
+            continue
+
+        if u.kind == "space":
+            # peek 左邻 unit，是 ascii_word 则继续。
+            prev_ui = ui - 1
+            while prev_ui >= 0 and units[prev_ui].kind == "space":
+                prev_ui -= 1
+            if prev_ui >= 0 and units[prev_ui].kind == "ascii_word" and units[prev_ui].char_end > lower:
+                cursor_start = u.char_start  # 先纳入 space。
+                ui -= 1
+                continue
+            break
+
+        if u.kind == "punct":
+            # 三元组检查。
+            left_char = _peek_unit_last_char(units, ui - 1)
+            right_char = raw_text[u.char_end] if u.char_end < len(raw_text) else None
+            if is_name_joiner(u.text, left_char, right_char):
+                cursor_start = u.char_start
+                ui -= 1
+                continue
+            break
+
+        break
+
+    return min(start, cursor_start)
+
+
+def _peek_unit_first_char(units: tuple[StreamUnit, ...], ui: int) -> str | None:
+    """取第 ui 个 unit 的首字符；越界返回 None。"""
+    if ui < 0 or ui >= len(units):
+        return None
+    return units[ui].text[0] if units[ui].text else None
+
+
+def _peek_unit_last_char(units: tuple[StreamUnit, ...], ui: int) -> str | None:
+    """取第 ui 个 unit 的末字符；越界返回 None。"""
+    if ui < 0 or ui >= len(units):
+        return None
+    return units[ui].text[-1] if units[ui].text else None
 
 
