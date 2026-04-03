@@ -86,12 +86,6 @@
         ],
         "address": [
           {
-            "country": {
-              "value": "中国",
-              "aliases": [
-                "中国大陆"
-              ]
-            },
             "province": {
               "value": "浙江省",
               "aliases": [
@@ -108,7 +102,7 @@
               "value": "西湖区",
               "aliases": []
             },
-            "street": {
+            "road": {
               "value": "样例路88号",
               "aliases": [
                 "样例路"
@@ -128,12 +122,6 @@
             }
           },
           {
-            "country": {
-              "value": "中国",
-              "aliases": [
-                "中国大陆"
-              ]
-            },
             "province": {
               "value": "浙江省",
               "aliases": [
@@ -150,7 +138,7 @@
               "value": "西湖区",
               "aliases": []
             },
-            "street": {
+            "road": {
               "value": "测试大道168号",
               "aliases": [
                 "测试大道"
@@ -278,12 +266,6 @@
         ],
         "address": [
           {
-            "country": {
-              "value": "United States",
-              "aliases": [
-                "USA"
-              ]
-            },
             "province": {
               "value": "CA",
               "aliases": [
@@ -294,13 +276,13 @@
               "value": "San Diego",
               "aliases": []
             },
-            "street": {
+            "road": {
               "value": "1200 Harbor Ave",
               "aliases": [
                 "Harbor Avenue"
               ]
             },
-            "building": {
+            "unit": {
               "value": "Apt 7B",
               "aliases": [
                 "Apartment 7B"
@@ -312,12 +294,6 @@
             }
           },
           {
-            "country": {
-              "value": "United States",
-              "aliases": [
-                "USA"
-              ]
-            },
             "province": {
               "value": "CA",
               "aliases": [
@@ -328,13 +304,13 @@
               "value": "San Diego",
               "aliases": []
             },
-            "street": {
+            "road": {
               "value": "88 Demo Plaza",
               "aliases": [
                 "Demo Plaza"
               ]
             },
-            "building": {
+            "unit": {
               "value": "Suite 210",
               "aliases": [
                 "Ste 210"

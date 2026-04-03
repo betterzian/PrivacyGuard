@@ -9,6 +9,21 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+_ADDRESS_LEVEL_FIELDS = (
+    "province",
+    "city",
+    "district",
+    "street_admin",
+    "town",
+    "village",
+    "road",
+    "compound",
+    "building",
+    "unit",
+    "floor",
+    "room",
+    "postal_code",
+)
 
 
 class RepositoryBaseModel(BaseModel):
@@ -21,12 +36,17 @@ class AliasRole(str, Enum):
 
 
 class AddressLevel(str, Enum):
-    COUNTRY = "country"
     PROVINCE = "province"
     CITY = "city"
     DISTRICT = "district"
-    STREET = "street"
+    STREET_ADMIN = "street_admin"
+    TOWN = "town"
+    VILLAGE = "village"
+    ROAD = "road"
+    COMPOUND = "compound"
     BUILDING = "building"
+    UNIT = "unit"
+    FLOOR = "floor"
     ROOM = "room"
     POSTAL_CODE = "postal_code"
 
@@ -39,12 +59,17 @@ class ExposureInfo(RepositoryBaseModel):
 
 
 class AddressLevelExposureStats(RepositoryBaseModel):
-    country: ExposureInfo = Field(default_factory=ExposureInfo)
     province: ExposureInfo = Field(default_factory=ExposureInfo)
     city: ExposureInfo = Field(default_factory=ExposureInfo)
     district: ExposureInfo = Field(default_factory=ExposureInfo)
-    street: ExposureInfo = Field(default_factory=ExposureInfo)
+    street_admin: ExposureInfo = Field(default_factory=ExposureInfo)
+    town: ExposureInfo = Field(default_factory=ExposureInfo)
+    village: ExposureInfo = Field(default_factory=ExposureInfo)
+    road: ExposureInfo = Field(default_factory=ExposureInfo)
+    compound: ExposureInfo = Field(default_factory=ExposureInfo)
     building: ExposureInfo = Field(default_factory=ExposureInfo)
+    unit: ExposureInfo = Field(default_factory=ExposureInfo)
+    floor: ExposureInfo = Field(default_factory=ExposureInfo)
     room: ExposureInfo = Field(default_factory=ExposureInfo)
     postal_code: ExposureInfo = Field(default_factory=ExposureInfo)
 
@@ -101,52 +126,64 @@ class NameSlotStorage(RepositoryBaseModel):
     full: SharedSlotStorage
     family: SharedSlotStorage | None = None
     given: SharedSlotStorage | None = None
+    alias: SharedSlotStorage | None = None
     middle: SharedSlotStorage | None = None
 
     @model_validator(mode="after")
     def _validate_name(self) -> "NameSlotStorage":
-        if not any((self.family, self.given, self.middle)):
+        if not any((self.family, self.given, self.alias, self.middle)):
             raise ValueError("姓名必须至少包含一个拆分字段")
         return self
 
 
 def _validate_address_levels(
-    country: SharedSlotStorage | SharedSlotRuntime | None,
     province: SharedSlotStorage | SharedSlotRuntime | None,
     city: SharedSlotStorage | SharedSlotRuntime | None,
     district: SharedSlotStorage | SharedSlotRuntime | None,
-    street: SharedSlotStorage | SharedSlotRuntime | None,
+    street_admin: SharedSlotStorage | SharedSlotRuntime | None,
+    town: SharedSlotStorage | SharedSlotRuntime | None,
+    village: SharedSlotStorage | SharedSlotRuntime | None,
+    road: SharedSlotStorage | SharedSlotRuntime | None,
+    compound: SharedSlotStorage | SharedSlotRuntime | None,
     building: SharedSlotStorage | SharedSlotRuntime | None,
+    unit: SharedSlotStorage | SharedSlotRuntime | None,
+    floor: SharedSlotStorage | SharedSlotRuntime | None,
     room: SharedSlotStorage | SharedSlotRuntime | None,
     postal_code: SharedSlotStorage | SharedSlotRuntime | None,
 ) -> None:
-    if not any((country, province, city, district, street, building, room, postal_code)):
+    if not any((province, city, district, street_admin, town, village, road, compound, building, unit, floor, room, postal_code)):
         raise ValueError("地址不能为空")
-    if room and not building:
-        raise ValueError("有房间则必须有楼栋")
-    if building and not street:
-        raise ValueError("有楼栋则必须有街道")
 
 
 class AddressSlotStorage(RepositoryBaseModel):
-    country: SharedSlotStorage | None = None
     province: SharedSlotStorage | None = None
     city: SharedSlotStorage | None = None
     district: SharedSlotStorage | None = None
-    street: SharedSlotStorage | None = None
+    street_admin: SharedSlotStorage | None = None
+    town: SharedSlotStorage | None = None
+    village: SharedSlotStorage | None = None
+    road: SharedSlotStorage | None = None
+    compound: SharedSlotStorage | None = None
     building: SharedSlotStorage | None = None
+    unit: SharedSlotStorage | None = None
+    floor: SharedSlotStorage | None = None
     room: SharedSlotStorage | None = None
     postal_code: SharedSlotStorage | None = None
 
     @model_validator(mode="after")
     def _validate_address(self) -> "AddressSlotStorage":
         _validate_address_levels(
-            self.country,
             self.province,
             self.city,
             self.district,
-            self.street,
+            self.street_admin,
+            self.town,
+            self.village,
+            self.road,
+            self.compound,
             self.building,
+            self.unit,
+            self.floor,
             self.room,
             self.postal_code,
         )
@@ -167,11 +204,12 @@ class NameSlotRuntime(RepositoryBaseModel):
     full: SharedSlotRuntime
     family: SharedSlotRuntime | None = None
     given: SharedSlotRuntime | None = None
+    alias: SharedSlotRuntime | None = None
     middle: SharedSlotRuntime | None = None
 
     @model_validator(mode="after")
     def _validate_name(self) -> "NameSlotRuntime":
-        if not any((self.family, self.given, self.middle)):
+        if not any((self.family, self.given, self.alias, self.middle)):
             raise ValueError("姓名必须至少包含一个拆分字段")
         return self
 
@@ -191,24 +229,34 @@ def _validate_address_slot_list(values: list[AddressSlotStorage] | list[AddressS
 
 
 class AddressSlotRuntime(RepositoryBaseModel):
-    country: SharedSlotRuntime | None = None
     province: SharedSlotRuntime | None = None
     city: SharedSlotRuntime | None = None
     district: SharedSlotRuntime | None = None
-    street: SharedSlotRuntime | None = None
+    street_admin: SharedSlotRuntime | None = None
+    town: SharedSlotRuntime | None = None
+    village: SharedSlotRuntime | None = None
+    road: SharedSlotRuntime | None = None
+    compound: SharedSlotRuntime | None = None
     building: SharedSlotRuntime | None = None
+    unit: SharedSlotRuntime | None = None
+    floor: SharedSlotRuntime | None = None
     room: SharedSlotRuntime | None = None
     postal_code: SharedSlotRuntime | None = None
 
     @model_validator(mode="after")
     def _validate_address(self) -> "AddressSlotRuntime":
         _validate_address_levels(
-            self.country,
             self.province,
             self.city,
             self.district,
-            self.street,
+            self.street_admin,
+            self.town,
+            self.village,
+            self.road,
+            self.compound,
             self.building,
+            self.unit,
+            self.floor,
             self.room,
             self.postal_code,
         )
@@ -330,6 +378,7 @@ def _project_name_slot_to_runtime(slot: NameSlotStorage, alias_role: AliasRole) 
         full=_project_scalar_slot_to_runtime(slot.full, alias_role),
         family=_project_scalar_slot_to_runtime(slot.family, alias_role) if slot.family else None,
         given=_project_scalar_slot_to_runtime(slot.given, alias_role) if slot.given else None,
+        alias=_project_scalar_slot_to_runtime(slot.alias, alias_role) if slot.alias else None,
         middle=_project_scalar_slot_to_runtime(slot.middle, alias_role) if slot.middle else None,
     )
 
@@ -346,14 +395,11 @@ def project_storage_slot_to_runtime(
     if isinstance(first, AddressSlotStorage):
         return [
             AddressSlotRuntime(
-                country=_project_scalar_slot_to_runtime(item.country, alias_role) if item.country else None,
-                province=_project_scalar_slot_to_runtime(item.province, alias_role) if item.province else None,
-                city=_project_scalar_slot_to_runtime(item.city, alias_role) if item.city else None,
-                district=_project_scalar_slot_to_runtime(item.district, alias_role) if item.district else None,
-                street=_project_scalar_slot_to_runtime(item.street, alias_role) if item.street else None,
-                building=_project_scalar_slot_to_runtime(item.building, alias_role) if item.building else None,
-                room=_project_scalar_slot_to_runtime(item.room, alias_role) if item.room else None,
-                postal_code=_project_scalar_slot_to_runtime(item.postal_code, alias_role) if item.postal_code else None,
+                **{
+                    field_name: _project_scalar_slot_to_runtime(level_slot, alias_role)
+                    for field_name in _ADDRESS_LEVEL_FIELDS
+                    if (level_slot := getattr(item, field_name, None)) is not None
+                }
             )
             for item in slot
         ]

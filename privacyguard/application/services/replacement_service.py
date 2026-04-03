@@ -13,7 +13,7 @@ def _record_metadata_from_action(action: DecisionAction) -> dict[str, str]:
         for value in action.metadata.get("name_component", [])
         if str(value).strip()
     ]
-    for preferred in ("family", "given", "middle", "full"):
+    for preferred in ("full", "family", "given", "alias", "middle"):
         if preferred in normalized:
             metadata["name_component"] = preferred
             break
@@ -45,6 +45,7 @@ class ReplacementService:
                     turn_id=turn_id,
                     candidate_id=action.candidate_id,
                     source_text=action.source_text or candidate.text,
+                    normalized_source=action.normalized_source or candidate.normalized_source,
                     canonical_source_text=action.canonical_source_text or candidate.canonical_source_text,
                     replacement_text=action.replacement_text or "",
                     attr_type=action.attr_type,

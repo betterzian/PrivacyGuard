@@ -55,6 +55,7 @@ class NameComponentHint(str, Enum):
     FULL = "full"
     FAMILY = "family"
     GIVEN = "given"
+    ALIAS = "alias"
     MIDDLE = "middle"
 
 
@@ -163,8 +164,7 @@ class ClueBundle:
 @dataclass(frozen=True, slots=True)
 class DictionaryEntry:
     attr_type: PIIAttributeType
-    text: str
-    variants: tuple[str, ...]
+    match_terms: tuple[str, ...]
     matched_by: str
     metadata: dict[str, list[str]] = field(default_factory=dict)
 

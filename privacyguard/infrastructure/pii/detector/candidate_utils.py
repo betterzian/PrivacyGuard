@@ -250,7 +250,7 @@ def _is_plausible_name(text: str, *, component_hint: NameComponentHint) -> bool:
     if _ZH_NAME_RE.fullmatch(compact_no_space):
         return True
     tokens = [token for token in re.split(r"\s+", text) if token]
-    if component_hint in {NameComponentHint.FAMILY, NameComponentHint.GIVEN, NameComponentHint.MIDDLE}:
+    if component_hint in {NameComponentHint.FAMILY, NameComponentHint.GIVEN, NameComponentHint.ALIAS, NameComponentHint.MIDDLE}:
         return len(tokens) == 1 and _EN_NAME_TOKEN_RE.fullmatch(tokens[0]) is not None
     return 1 <= len(tokens) <= 4 and all(_EN_NAME_TOKEN_RE.fullmatch(token) is not None for token in tokens)
 

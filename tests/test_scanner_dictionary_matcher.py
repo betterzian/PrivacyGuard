@@ -31,14 +31,13 @@ def _entry(
     *,
     attr_type: PIIAttributeType = PIIAttributeType.NAME,
     text: str,
-    variants: tuple[str, ...] | None = None,
+    match_terms: tuple[str, ...] | None = None,
     matched_by: str,
     metadata: dict[str, list[str]] | None = None,
 ) -> DictionaryEntry:
     return DictionaryEntry(
         attr_type=attr_type,
-        text=text,
-        variants=variants or (text,),
+        match_terms=match_terms or (text,),
         matched_by=matched_by,
         metadata=metadata or {},
     )
@@ -225,7 +224,7 @@ def test_find_ocr_break_spans_reads_from_synthetic_units():
 def test_build_clue_bundle_still_resolves_multi_variant_overlap_to_longer_match():
     entry = _entry(
         text="Jordan Demo",
-        variants=("Jordan Demo", "Jordan"),
+        match_terms=("Jordan Demo", "Jordan"),
         matched_by="dictionary_local",
     )
     stream = build_prompt_stream("Jordan Demo")
@@ -244,6 +243,62 @@ def test_build_clue_bundle_still_resolves_multi_variant_overlap_to_longer_match(
     ]
     assert len(dictionary_clues) == 1
     assert dictionary_clues[0].text == "Jordan Demo"
+
+
+def test_name_full_match_still_wins_over_family_and_given_overlap():
+    entries = (
+        _entry(
+            text="Jordan Demo",
+            matched_by="dictionary_local",
+            metadata={"local_entity_ids": ["persona-1"], "name_component": ["full"]},
+        ),
+        _entry(
+            text="Jordan",
+            matched_by="dictionary_local",
+            metadata={"local_entity_ids": ["persona-1"], "name_component": ["given"]},
+        ),
+        _entry(
+            text="Demo",
+            matched_by="dictionary_local",
+            metadata={"local_entity_ids": ["persona-1"], "name_component": ["family"]},
+        ),
+    )
+    stream = build_prompt_stream("Jordan Demo")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=entries,
+        locale_profile="mixed",
+    )
+
+    dictionary_clues = [
+        clue for clue in bundle.all_clues
+        if clue.role == ClueRole.HARD and clue.source_kind == "dictionary_local"
+    ]
+    assert len(dictionary_clues) == 1
+    assert dictionary_clues[0].text == "Jordan Demo"
+    assert dictionary_clues[0].source_metadata["name_component"] == ["full"]
+
+
+def test_name_alias_entry_is_exposed_as_independent_component():
+    entry = _entry(
+        text="阿宝",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"], "name_component": ["alias"]},
+    )
+
+    clues = scanner_module._scan_dictionary_hard_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        "联系人阿宝今天会到。",
+        (entry,),
+        source_kind="local",
+    )
+
+    assert len(clues) == 1
+    assert clues[0].text == "阿宝"
+    assert clues[0].source_metadata["name_component"] == ["alias"]
 
 
 def test_parser_keeps_char_span_and_unit_span_for_hard_dictionary_candidate():

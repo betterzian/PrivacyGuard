@@ -42,13 +42,18 @@ class CandidateResolverService:
         for candidate in candidates:
             bbox_key = self._bbox_dedup_key(candidate.bbox)
             span_key = (candidate.block_id, candidate.span_start, candidate.span_end)
-            key = (candidate.source.value, candidate.normalized_text, candidate.attr_type.value, bbox_key, span_key)
+            stable_text = candidate.normalized_source.canonical if candidate.normalized_source else candidate.normalized_text
+            key = (candidate.source.value, stable_text, candidate.attr_type.value, bbox_key, span_key)
             previous = deduped.get(key)
             if previous is None:
                 deduped[key] = candidate
                 continue
+            if previous.normalized_source is None and candidate.normalized_source is not None:
+                previous.normalized_source = candidate.normalized_source
             if previous.canonical_source_text is None and candidate.canonical_source_text is not None:
                 previous.canonical_source_text = candidate.canonical_source_text
+            if not previous.normalized_text and candidate.normalized_text:
+                previous.normalized_text = candidate.normalized_text
             previous.metadata = self._merge_metadata(previous, candidate)
         return list(deduped.values())
 

@@ -16,7 +16,7 @@ def _record_metadata_from_action(action) -> dict[str, str]:
         for value in action.metadata.get("name_component", [])
         if str(value).strip()
     ]
-    for preferred in ("family", "given", "middle", "full"):
+    for preferred in ("full", "family", "given", "alias", "middle"):
         if preferred in normalized:
             metadata["name_component"] = preferred
             break
@@ -63,6 +63,7 @@ class PromptRenderer:
                     turn_id=plan.turn_id,
                     candidate_id=action.candidate_id,
                     source_text=source_text,
+                    normalized_source=action.normalized_source,
                     canonical_source_text=canonical_source_text,
                     replacement_text=replacement_text,
                     attr_type=action.attr_type,

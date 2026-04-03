@@ -26,8 +26,22 @@ class InvalidPrivacyRepositoryError(ValueError):
     """磁盘或 patch 中的 JSON 不符合 privacy 文档 schema。"""
 
 
-_ADDRESS_LEVEL_KEYS = ("country", "province", "city", "district", "street", "building", "room", "postal_code")
-_NAME_SLOT_KEYS = ("full", "family", "given", "middle")
+_ADDRESS_LEVEL_KEYS = (
+    "province",
+    "city",
+    "district",
+    "street_admin",
+    "town",
+    "village",
+    "road",
+    "compound",
+    "building",
+    "unit",
+    "floor",
+    "room",
+    "postal_code",
+)
+_NAME_SLOT_KEYS = ("full", "family", "given", "alias", "middle")
 
 
 def parse_privacy_repository_document(payload: dict[str, Any] | None) -> PrivacyRepositoryDocument:
@@ -260,12 +274,17 @@ def _merge_address_stats(left: AddressStats, right: AddressStats) -> AddressStat
     return AddressStats(
         total=_merge_exposure_info(left.total, right.total),
         levels=AddressLevelExposureStats(
-            country=_merge_exposure_info(left.levels.country, right.levels.country),
             province=_merge_exposure_info(left.levels.province, right.levels.province),
             city=_merge_exposure_info(left.levels.city, right.levels.city),
             district=_merge_exposure_info(left.levels.district, right.levels.district),
-            street=_merge_exposure_info(left.levels.street, right.levels.street),
+            street_admin=_merge_exposure_info(left.levels.street_admin, right.levels.street_admin),
+            town=_merge_exposure_info(left.levels.town, right.levels.town),
+            village=_merge_exposure_info(left.levels.village, right.levels.village),
+            road=_merge_exposure_info(left.levels.road, right.levels.road),
+            compound=_merge_exposure_info(left.levels.compound, right.levels.compound),
             building=_merge_exposure_info(left.levels.building, right.levels.building),
+            unit=_merge_exposure_info(left.levels.unit, right.levels.unit),
+            floor=_merge_exposure_info(left.levels.floor, right.levels.floor),
             room=_merge_exposure_info(left.levels.room, right.levels.room),
             postal_code=_merge_exposure_info(left.levels.postal_code, right.levels.postal_code),
         ),

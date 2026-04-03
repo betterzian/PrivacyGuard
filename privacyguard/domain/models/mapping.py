@@ -6,6 +6,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType
+from privacyguard.domain.models.normalized_pii import NormalizedPII
 from privacyguard.domain.models.ocr import BoundingBox
 
 
@@ -17,6 +18,7 @@ class ReplacementRecord(BaseModel):
     turn_id: int = Field(ge=0)
     candidate_id: str
     source_text: str
+    normalized_source: NormalizedPII | None = None
     canonical_source_text: str | None = None
     replacement_text: str
     attr_type: PIIAttributeType

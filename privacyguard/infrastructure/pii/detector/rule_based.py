@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from privacyguard.application.services.resolver_service import CandidateResolverService
@@ -17,20 +16,7 @@ from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 from privacyguard.infrastructure.pii.json_privacy_repository import DEFAULT_PRIVACY_REPOSITORY_PATH, JsonPrivacyRepository, parse_privacy_repository_document
-from privacyguard.utils.pii_value import (
-    address_components_from_levels,
-    canonicalize_name_text,
-    canonicalize_organization_text,
-    compact_bank_account_value,
-    compact_card_number_value,
-    compact_driver_license_value,
-    compact_email_value,
-    compact_id_value,
-    compact_other_code_value,
-    compact_passport_value,
-    compact_phone_value,
-    render_address_components,
-)
+from privacyguard.utils.normalized_pii import normalize_pii, normalized_primary_text
 
 
 class RuleBasedPIIDetector:
@@ -119,45 +105,15 @@ class RuleBasedPIIDetector:
             slots = persona.slots
             persona_metadata = {"local_entity_ids": [persona.persona_id]}
             for slot in slots.name or []:
-                entries.append(
-                    self._dictionary_entry(
-                        attr_type=PIIAttributeType.NAME,
-                        text=slot.full.value,
-                        aliases=list(slot.full.aliases),
-                        matched_by="dictionary_local",
-                        metadata={**persona_metadata, "name_component": ["full"]},
-                    )
-                )
+                entries.append(self._name_entry(component="full", value=slot.full.value, persona_id=persona.persona_id))
                 if slot.family:
-                    entries.append(
-                        self._dictionary_entry(
-                            attr_type=PIIAttributeType.NAME,
-                            text=slot.family.value,
-                            aliases=list(slot.family.aliases),
-                            matched_by="dictionary_local",
-                            metadata={**persona_metadata, "name_component": ["family"]},
-                        )
-                    )
+                    entries.append(self._name_entry(component="family", value=slot.family.value, persona_id=persona.persona_id))
                 if slot.given:
-                    entries.append(
-                        self._dictionary_entry(
-                            attr_type=PIIAttributeType.NAME,
-                            text=slot.given.value,
-                            aliases=list(slot.given.aliases),
-                            matched_by="dictionary_local",
-                            metadata={**persona_metadata, "name_component": ["given"]},
-                        )
-                    )
+                    entries.append(self._name_entry(component="given", value=slot.given.value, persona_id=persona.persona_id))
+                if slot.alias:
+                    entries.append(self._name_entry(component="alias", value=slot.alias.value, persona_id=persona.persona_id))
                 if slot.middle:
-                    entries.append(
-                        self._dictionary_entry(
-                            attr_type=PIIAttributeType.NAME,
-                            text=slot.middle.value,
-                            aliases=list(slot.middle.aliases),
-                            matched_by="dictionary_local",
-                            metadata={**persona_metadata, "name_component": ["middle"]},
-                        )
-                    )
+                    entries.append(self._name_entry(component="middle", value=slot.middle.value, persona_id=persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.PHONE, slots.phone, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.CARD_NUMBER, slots.card_number, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.BANK_ACCOUNT, slots.bank_account, persona.persona_id))
@@ -167,22 +123,14 @@ class RuleBasedPIIDetector:
             entries.extend(self._scalar_slot_entries(PIIAttributeType.ID_NUMBER, slots.id_number, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.ORGANIZATION, slots.organization, persona.persona_id))
             for slot in slots.address or []:
-                components = address_components_from_levels(
-                    country_text=slot.country.value if slot.country else None,
-                    province_text=slot.province.value if slot.province else None,
-                    city_text=slot.city.value if slot.city else None,
-                    district_text=slot.district.value if slot.district else None,
-                    street_text=slot.street.value if slot.street else None,
-                    building_text=slot.building.value if slot.building else None,
-                    room_text=slot.room.value if slot.room else None,
-                    postal_code_text=slot.postal_code.value if slot.postal_code else None,
-                )
-                full_text = render_address_components(components, include_country=bool(components.country_text), granularity="detail")
                 entries.append(
                     self._dictionary_entry(
                         attr_type=PIIAttributeType.ADDRESS,
-                        text=full_text,
-                        aliases=[],
+                        match_terms=normalize_pii(
+                            PIIAttributeType.ADDRESS,
+                            "",
+                            components=self._address_components_from_slot(slot),
+                        ).match_terms,
                         matched_by="dictionary_local",
                         metadata={"local_entity_ids": [persona.persona_id]},
                     )
@@ -197,7 +145,12 @@ class RuleBasedPIIDetector:
         for record in records:
             if turn_id is not None and record.turn_id >= turn_id:
                 continue
-            source_text = record.canonical_source_text or record.source_text
+            normalized = record.normalized_source or normalize_pii(
+                record.attr_type,
+                record.source_text,
+                metadata=record.metadata,
+            )
+            source_text = normalized_primary_text(normalized)
             if not source_text:
                 continue
             metadata: dict[str, list[str]] = {"session_turn_ids": [str(record.turn_id)]}
@@ -205,12 +158,10 @@ class RuleBasedPIIDetector:
                 metadata["local_entity_ids"] = [record.persona_id]
             if record.metadata.get("name_component"):
                 metadata["name_component"] = [record.metadata["name_component"]]
-            aliases = [record.source_text] if record.source_text and record.source_text != source_text else []
             entries.append(
                 self._dictionary_entry(
                     attr_type=record.attr_type,
-                    text=source_text,
-                    aliases=aliases,
+                    match_terms=normalized.match_terms or ((source_text,) if source_text else ()),
                     matched_by="dictionary_session",
                     metadata=metadata,
                 )
@@ -221,16 +172,13 @@ class RuleBasedPIIDetector:
         self,
         *,
         attr_type: PIIAttributeType,
-        text: str,
-        aliases: list[str],
+        match_terms: tuple[str, ...],
         matched_by: str,
         metadata: dict[str, list[str]],
     ) -> DictionaryEntry:
-        variants = tuple(dict.fromkeys([text, *aliases]))
         return DictionaryEntry(
             attr_type=attr_type,
-            text=text,
-            variants=variants,
+            match_terms=tuple(dict.fromkeys(term for term in match_terms if str(term).strip())),
             matched_by=matched_by,
             metadata={key: list(values) for key, values in metadata.items()},
         )
@@ -238,11 +186,11 @@ class RuleBasedPIIDetector:
     def _scalar_slot_entries(self, attr_type, slots, persona_id: str) -> list[DictionaryEntry]:
         entries: list[DictionaryEntry] = []
         for slot in slots or []:
+            normalized = normalize_pii(attr_type, slot.value)
             entries.append(
                 self._dictionary_entry(
                     attr_type=attr_type,
-                    text=slot.value,
-                    aliases=list(slot.aliases),
+                    match_terms=normalized.match_terms or ((normalized_primary_text(normalized),) if normalized_primary_text(normalized) else ()),
                     matched_by="dictionary_local",
                     metadata={"local_entity_ids": [persona_id]},
                 )
@@ -252,8 +200,13 @@ class RuleBasedPIIDetector:
     def _to_pii_candidates(self, drafts: list[CandidateDraft]) -> list[PIICandidate]:
         output: list[PIICandidate] = []
         for draft in drafts:
-            canonical_source_text = draft.canonical_text or draft.text
-            normalized_text = self._normalize_candidate_text(draft.attr_type, canonical_source_text)
+            normalized = normalize_pii(
+                draft.attr_type,
+                draft.text,
+                metadata=draft.metadata,
+            )
+            canonical_source_text = normalized.canonical or None
+            normalized_text = normalized_primary_text(normalized)
             entity_id = self.resolver.build_candidate_id(
                 detector_mode=self.detector_mode,
                 source=draft.source.value,
@@ -267,6 +220,7 @@ class RuleBasedPIIDetector:
                 PIICandidate(
                     entity_id=entity_id,
                     text=draft.text,
+                    normalized_source=normalized,
                     canonical_source_text=canonical_source_text,
                     normalized_text=normalized_text,
                     attr_type=draft.attr_type,
@@ -280,26 +234,37 @@ class RuleBasedPIIDetector:
             )
         return output
 
-    def _normalize_candidate_text(self, attr_type: PIIAttributeType, text: str) -> str:
-        cleaned = str(text or "").strip()
-        if attr_type == PIIAttributeType.NAME:
-            return canonicalize_name_text(cleaned)
-        if attr_type == PIIAttributeType.PHONE:
-            return compact_phone_value(cleaned)
-        if attr_type == PIIAttributeType.CARD_NUMBER:
-            return compact_card_number_value(cleaned)
-        if attr_type == PIIAttributeType.BANK_ACCOUNT:
-            return compact_bank_account_value(cleaned)
-        if attr_type == PIIAttributeType.PASSPORT_NUMBER:
-            return compact_passport_value(cleaned)
-        if attr_type == PIIAttributeType.DRIVER_LICENSE:
-            return compact_driver_license_value(cleaned)
-        if attr_type == PIIAttributeType.EMAIL:
-            return compact_email_value(cleaned)
-        if attr_type == PIIAttributeType.ID_NUMBER:
-            return compact_id_value(cleaned)
-        if attr_type == PIIAttributeType.ORGANIZATION:
-            return canonicalize_organization_text(cleaned)
-        if attr_type in {PIIAttributeType.ADDRESS, PIIAttributeType.DETAILS}:
-            return re.sub(r"[\s,，;；:：/\\\-]+", "", cleaned.lower())
-        return compact_other_code_value(cleaned)
+    def _name_entry(self, *, component: str, value: str, persona_id: str) -> DictionaryEntry:
+        normalized = normalize_pii(
+            PIIAttributeType.NAME,
+            value,
+            components={component: value, "full": value},
+        )
+        match_term = normalized.components.get(component) or value
+        return self._dictionary_entry(
+            attr_type=PIIAttributeType.NAME,
+            match_terms=(match_term,),
+            matched_by="dictionary_local",
+            metadata={"local_entity_ids": [persona_id], "name_component": [component]},
+        )
+
+    def _address_components_from_slot(self, slot) -> dict[str, str]:
+        return {
+            key: getattr(slot, key).value
+            for key in (
+                "province",
+                "city",
+                "district",
+                "street_admin",
+                "town",
+                "village",
+                "road",
+                "compound",
+                "building",
+                "unit",
+                "floor",
+                "room",
+                "postal_code",
+            )
+            if getattr(slot, key, None) is not None
+        }

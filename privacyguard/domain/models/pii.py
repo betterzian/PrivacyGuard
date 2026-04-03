@@ -3,6 +3,7 @@
 from pydantic import BaseModel, Field
 
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
+from privacyguard.domain.models.normalized_pii import NormalizedPII
 from privacyguard.domain.models.ocr import BoundingBox
 
 
@@ -11,6 +12,7 @@ class PIICandidate(BaseModel):
 
     entity_id: str
     text: str
+    normalized_source: NormalizedPII | None = None
     canonical_source_text: str | None = None
     normalized_text: str
     attr_type: PIIAttributeType

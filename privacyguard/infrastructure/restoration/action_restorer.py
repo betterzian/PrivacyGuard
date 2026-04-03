@@ -24,7 +24,7 @@ class ActionRestorer:
                 continue
             if record.replacement_text not in restored_text:
                 continue
-            source_value = record.canonical_source_text or record.source_text
+            source_value = record.normalized_source.raw_text if record.normalized_source else record.source_text
             restored_text = restored_text.replace(record.replacement_text, source_value)
             seen_placeholders.add(record.replacement_text)
             restored_slots.append(

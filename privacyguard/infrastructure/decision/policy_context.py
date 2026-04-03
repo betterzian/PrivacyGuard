@@ -12,7 +12,7 @@ from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.domain.policies.generic_placeholder import GENERIC_PLACEHOLDER_LABELS
-from privacyguard.utils.pii_value import canonicalize_pii_value
+from privacyguard.utils.normalized_pii import normalize_pii, normalized_primary_text, same_entity
 
 _ADDRESS_HINT_TOKENS = ("省", "市", "区", "县", "路", "街", "道", "号", "小区", "公寓")
 _HIGH_CANDIDATE_CONFIDENCE = 0.85
@@ -134,7 +134,7 @@ def _build_candidate_policy_views(context: DecisionContext) -> list[dict[str, ob
     geometry_bounds = _page_geometry_bounds(ocr_items=ocr_items, candidates=candidate_items)
 
     attr_counter = Counter(candidate.attr_type for candidate in candidate_items)
-    text_counter = Counter((candidate.normalized_text or candidate.text) for candidate in candidate_items)
+    text_counter = Counter(_candidate_stable_text(candidate) for candidate in candidate_items)
     alias_by_candidate = {candidate.entity_id: _alias_value(candidate) for candidate in candidate_items}
     alias_counter = Counter(alias_by_candidate.values())
     alias_sources: defaultdict[str, set[PIISourceType]] = defaultdict(set)
@@ -391,10 +391,10 @@ def _build_candidate_policy_view(
 
     history_exact_match_count = _history_exact_match_count(candidate, history_records)
     same_attr_page_count = attr_counter[candidate.attr_type]
-    key_text = candidate.normalized_text or candidate.text
+    key_text = _candidate_stable_text(candidate)
     same_text_page_count = text_counter[key_text]
     relative_area, aspect_ratio, center_x, center_y = _geometry_features(candidate.bbox, geometry_bounds)
-    normalized_text = candidate.normalized_text or candidate.text
+    normalized_text = _candidate_stable_text(candidate)
     digit_ratio = _digit_ratio(normalized_text)
     return {
         "candidate_id": candidate.entity_id,
@@ -432,38 +432,33 @@ def _build_candidate_policy_view(
 
 
 def _record_alias_value(record: ReplacementRecord) -> str | None:
-    source_text = record.canonical_source_text or record.source_text
+    normalized = record.normalized_source or normalize_pii(record.attr_type, record.source_text, metadata=record.metadata)
+    source_text = normalized_primary_text(normalized)
     if not source_text:
         return None
-    try:
-        canonical = canonicalize_pii_value(record.attr_type, source_text)
-    except Exception:
-        canonical = source_text.strip()
-    return f"{record.attr_type.value}:{canonical or source_text.strip()}"
+    return f"{record.attr_type.value}:{source_text}"
 
 
 def _alias_value(candidate: PIICandidate) -> str:
-    source_text = candidate.canonical_source_text or candidate.normalized_text or candidate.text
-    try:
-        canonical = canonicalize_pii_value(candidate.attr_type, source_text)
-    except Exception:
-        canonical = source_text.strip()
-    stable_value = canonical or source_text.strip() or candidate.entity_id
+    normalized = candidate.normalized_source or normalize_pii(candidate.attr_type, candidate.text, metadata=candidate.metadata)
+    stable_value = normalized_primary_text(normalized) or candidate.entity_id
     return f"{candidate.attr_type.value}:{stable_value}"
 
 
 def _history_exact_match_count(candidate: PIICandidate, history_records: list[ReplacementRecord]) -> int:
-    candidate_source_texts = {
-        candidate.text,
-        candidate.normalized_text,
-        candidate.canonical_source_text or "",
-    }
     return sum(
         1
         for record in history_records
-        if (record.canonical_source_text or record.source_text) in candidate_source_texts
-        or record.source_text in candidate_source_texts
+        if same_entity(
+            candidate.normalized_source or normalize_pii(candidate.attr_type, candidate.text, metadata=candidate.metadata),
+            record.normalized_source or normalize_pii(record.attr_type, record.source_text, metadata=record.metadata),
+        )
     )
+
+
+def _candidate_stable_text(candidate: PIICandidate) -> str:
+    normalized = candidate.normalized_source or normalize_pii(candidate.attr_type, candidate.text, metadata=candidate.metadata)
+    return normalized_primary_text(normalized) or candidate.text
 
 
 def _covered_block_ids(candidate: PIICandidate) -> list[str]:

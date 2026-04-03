@@ -942,7 +942,7 @@ def _dictionary_matcher_signature(entries: tuple[DictionaryEntry, ...]) -> _Dict
     return tuple(
         (
             entry.attr_type,
-            _dictionary_variants(entry.variants),
+            _dictionary_match_terms(entry.match_terms),
             entry.matched_by,
             _dictionary_metadata_items(entry.metadata),
         )
@@ -950,8 +950,8 @@ def _dictionary_matcher_signature(entries: tuple[DictionaryEntry, ...]) -> _Dict
     )
 
 
-def _dictionary_variants(variants: tuple[str, ...]) -> tuple[str, ...]:
-    ordered = tuple(dict.fromkeys(variant for raw in variants if (variant := str(raw).strip())))
+def _dictionary_match_terms(match_terms: tuple[str, ...]) -> tuple[str, ...]:
+    ordered = tuple(dict.fromkeys(term for raw in match_terms if (term := str(raw).strip())))
     return tuple(sorted(ordered, key=len, reverse=True))
 
 

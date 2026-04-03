@@ -18,8 +18,9 @@ from datetime import datetime, timezone
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
+from privacyguard.domain.models.normalized_pii import NormalizedPII
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
-from privacyguard.utils.pii_value import canonicalize_pii_value
+from privacyguard.utils.normalized_pii import normalize_pii, same_entity
 
 _SESSION_ALIAS_BINDINGS_KEY = "__session_alias_bindings_v1__"
 _SESSION_ALIAS_COUNTERS_KEY = "__session_alias_counters_v1__"
@@ -77,29 +78,28 @@ class SessionService:
         source_text: str,
         *,
         confidence: float,
-        canonical_source_text: str | None = None,
     ) -> str:
         """解析或分配 session 级 alias。
 
         规则保持保守：
 
-        - 只有在“高置信 + 精确 canonical 命中”时才复用 alias
+        - 只有在“高置信 + same_entity 命中”时才复用 alias
         - 一旦不确定，宁可新建 alias，也不要冒险错复用
         - 错复用比 alias 断裂更危险，因为它会把两个不同实体错误折叠到同一身份上
 
-        该方法不引入复杂 linking；只基于 attr_type 与 canonical value 做保守复用。
+        该方法不引入复杂 linking；只基于 attr_type 与统一归一结果做保守复用。
         """
         binding = self.get_or_create_binding(session_id)
         alias_bindings = self._load_alias_bindings(binding)
         alias_counters = self._load_alias_counters(binding)
-        canonical_value = self._canonical_alias_value(
-            attr_type=attr_type,
-            source_text=canonical_source_text or source_text,
+        normalized = normalize_pii(
+            attr_type,
+            source_text,
+            components=None,
         )
-        matched_alias = self._find_exact_alias(
+        matched_alias = self._find_matching_alias(
             alias_bindings=alias_bindings,
-            attr_type=attr_type,
-            canonical_value=canonical_value,
+            target=normalized,
         )
         if self._should_reuse_alias(confidence=confidence, matched_alias=matched_alias):
             return matched_alias
@@ -113,8 +113,7 @@ class SessionService:
             alias_bindings=alias_bindings,
             alias_counters=alias_counters,
             alias=allocated_alias,
-            attr_type=attr_type,
-            canonical_value=canonical_value,
+            normalized=normalized,
             source_text=source_text,
         )
         return allocated_alias
@@ -140,7 +139,7 @@ class SessionService:
 
         复用条件故意保守：
 
-        - 必须已经找到 attr_type + canonical value 的精确命中
+        - 必须已经找到统一 `same_entity` 命中
         - 必须达到高置信阈值
 
         低置信时即使存在历史 alias，也优先新建，因为错复用比断裂更危险。
@@ -168,11 +167,10 @@ class SessionService:
         self,
         *,
         binding: SessionBinding,
-        alias_bindings: dict[str, dict[str, str]],
+        alias_bindings: dict[str, dict[str, object]],
         alias_counters: dict[str, int],
         alias: str,
-        attr_type: PIIAttributeType,
-        canonical_value: str,
+        normalized: NormalizedPII,
         source_text: str,
     ) -> None:
         """把 alias 绑定写回 session binding metadata。
@@ -181,8 +179,8 @@ class SessionService:
         不引入新的持久层接口。
         """
         alias_bindings[alias] = {
-            "attr_type": attr_type.value,
-            "canonical_value": canonical_value,
+            "attr_type": normalized.attr_type.value,
+            "normalized": normalized.model_dump(mode="json"),
             "source_text": source_text,
         }
         binding.metadata[_SESSION_ALIAS_BINDINGS_KEY] = json.dumps(alias_bindings, ensure_ascii=False, sort_keys=True)
@@ -190,31 +188,29 @@ class SessionService:
         binding.updated_at = datetime.now(timezone.utc)
         self.mapping_store.set_session_binding(binding)
 
-    def _find_exact_alias(
+    def _find_matching_alias(
         self,
         *,
-        alias_bindings: dict[str, dict[str, str]],
-        attr_type: PIIAttributeType,
-        canonical_value: str,
+        alias_bindings: dict[str, dict[str, object]],
+        target: NormalizedPII,
     ) -> str | None:
-        """查找 attr_type + canonical value 的精确 alias 命中。"""
+        """查找同一实体的 alias 命中。"""
         for alias, payload in alias_bindings.items():
-            if payload.get("attr_type") != attr_type.value:
+            if payload.get("attr_type") != target.attr_type.value:
                 continue
-            if payload.get("canonical_value") != canonical_value:
+            normalized_payload = payload.get("normalized")
+            if not isinstance(normalized_payload, dict):
+                continue
+            try:
+                candidate = NormalizedPII.model_validate(normalized_payload)
+            except Exception:
+                continue
+            if not same_entity(candidate, target):
                 continue
             return alias
         return None
 
-    def _canonical_alias_value(self, *, attr_type: PIIAttributeType, source_text: str) -> str:
-        """把原始值归一化为 alias 比对键。"""
-        try:
-            canonical = canonicalize_pii_value(attr_type, source_text)
-        except Exception:
-            canonical = str(source_text).strip()
-        return canonical or str(source_text).strip()
-
-    def _load_alias_bindings(self, binding: SessionBinding) -> dict[str, dict[str, str]]:
+    def _load_alias_bindings(self, binding: SessionBinding) -> dict[str, dict[str, object]]:
         """从 session binding metadata 读取 alias 绑定表。"""
         payload = binding.metadata.get(_SESSION_ALIAS_BINDINGS_KEY, "")
         if not payload:
@@ -225,13 +221,13 @@ class SessionService:
             return {}
         if not isinstance(loaded, dict):
             return {}
-        normalized: dict[str, dict[str, str]] = {}
+        normalized: dict[str, dict[str, object]] = {}
         for alias, item in loaded.items():
             if not isinstance(alias, str) or not isinstance(item, dict):
                 continue
             normalized[alias] = {
                 "attr_type": str(item.get("attr_type", "")).strip(),
-                "canonical_value": str(item.get("canonical_value", "")).strip(),
+                "normalized": item.get("normalized") if isinstance(item.get("normalized"), dict) else {},
                 "source_text": str(item.get("source_text", "")).strip(),
             }
         return normalized

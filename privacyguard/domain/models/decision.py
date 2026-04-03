@@ -3,6 +3,7 @@
 from pydantic import BaseModel, Field
 
 from privacyguard.domain.enums import ActionType, PIIAttributeType, PIISourceType
+from privacyguard.domain.models.normalized_pii import NormalizedPII
 from privacyguard.domain.models.ocr import BoundingBox
 
 
@@ -26,6 +27,7 @@ class DecisionAction(BaseModel):
     source: PIISourceType = PIISourceType.PROMPT
     replacement_text: str | None = None
     source_text: str | None = None
+    normalized_source: NormalizedPII | None = None
     canonical_source_text: str | None = None
     persona_id: str | None = None
     bbox: BoundingBox | None = None

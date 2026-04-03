@@ -1,14 +1,21 @@
 """通用工具导出。"""
 
 from privacyguard.utils.image import ensure_supported_image_input
-from privacyguard.utils.pii_value import canonicalize_address_text, canonicalize_pii_value, parse_address_components, persona_slot_replacement
+from privacyguard.utils.normalized_pii import (
+    build_match_terms,
+    normalize_pii,
+    normalized_primary_text,
+    render_address_text,
+    same_entity,
+)
 from privacyguard.utils.text import normalize_text
 
 __all__ = [
-    "canonicalize_address_text",
-    "canonicalize_pii_value",
+    "build_match_terms",
     "ensure_supported_image_input",
+    "normalize_pii",
     "normalize_text",
-    "parse_address_components",
-    "persona_slot_replacement",
+    "normalized_primary_text",
+    "render_address_text",
+    "same_entity",
 ]

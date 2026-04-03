@@ -86,12 +86,6 @@
         ],
         "address": [
           {
-            "country": {
-              "value": "中国",
-              "aliases": [
-                "中国大陆"
-              ]
-            },
             "province": {
               "value": "江苏省",
               "aliases": [
@@ -108,7 +102,7 @@
               "value": "建邺区",
               "aliases": []
             },
-            "street": {
+            "road": {
               "value": "样本路18号",
               "aliases": [
                 "样本路"
@@ -128,12 +122,6 @@
             }
           },
           {
-            "country": {
-              "value": "中国",
-              "aliases": [
-                "中国大陆"
-              ]
-            },
             "province": {
               "value": "江苏省",
               "aliases": [
@@ -150,7 +138,7 @@
               "value": "雨花台区",
               "aliases": []
             },
-            "street": {
+            "road": {
               "value": "演示大道66号",
               "aliases": [
                 "演示大道"
@@ -272,12 +260,6 @@
         ],
         "address": [
           {
-            "country": {
-              "value": "United States",
-              "aliases": [
-                "USA"
-              ]
-            },
             "province": {
               "value": "WA",
               "aliases": [
@@ -288,13 +270,13 @@
               "value": "Seattle",
               "aliases": []
             },
-            "street": {
+            "road": {
               "value": "410 Sample St",
               "aliases": [
                 "Sample Street"
               ]
             },
-            "building": {
+            "unit": {
               "value": "Unit 5A",
               "aliases": []
             },
@@ -304,12 +286,6 @@
             }
           },
           {
-            "country": {
-              "value": "United States",
-              "aliases": [
-                "USA"
-              ]
-            },
             "province": {
               "value": "WA",
               "aliases": [
@@ -320,13 +296,13 @@
               "value": "Seattle",
               "aliases": []
             },
-            "street": {
+            "road": {
               "value": "900 Demo Blvd",
               "aliases": [
                 "Demo Boulevard"
               ]
             },
-            "building": {
+            "unit": {
               "value": "Suite 480",
               "aliases": [
                 "Ste 480"
