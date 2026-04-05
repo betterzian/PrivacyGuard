@@ -1,0 +1,57 @@
+{
+  "image_name": "email_100.png",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\email_100.ocr.json",
+  "protection_level": "balanced",
+  "detect_elapsed_sec": 0.001268,
+  "candidate_count": 1,
+  "by_attr_type": {
+    "email": 1
+  },
+  "by_source": {
+    "ocr": 1
+  },
+  "candidates": [
+    {
+      "entity_id": "077010010f58b288bb9f35af2e8b08c0",
+      "text": "Message ramesh_petrov@msn.net",
+      "normalized_source": {
+        "attr_type": "email",
+        "raw_text": "Message ramesh_petrov@msn.net",
+        "canonical": "messageramesh_petrov@msn.net",
+        "components": {},
+        "match_terms": [
+          "messageramesh_petrov@msn.net"
+        ],
+        "identity": {
+          "canonical": "messageramesh_petrov@msn.net"
+        }
+      },
+      "canonical_source_text": "messageramesh_petrov@msn.net",
+      "normalized_text": "messageramesh_petrov@msn.net",
+      "attr_type": "email",
+      "source": "ocr",
+      "bbox": {
+        "x": 266,
+        "y": 241,
+        "width": 456,
+        "height": 102
+      },
+      "block_id": "ocr-3-3-267-241-304-50",
+      "span_start": 4,
+      "span_end": null,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "regex_email"
+        ],
+        "hard_source": [
+          "regex"
+        ],
+        "ocr_block_ids": [
+          "ocr-3-3-267-241-304-50",
+          "ocr-6-6-266-303-456-40"
+        ]
+      }
+    }
+  ]
+}

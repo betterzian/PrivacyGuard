@@ -1,4 +1,4 @@
-"""按 attr_type 路由的单主栈 parser。
+"""按 stack 注册表路由的单主栈 parser。
 
 冲突裁决策略：
 - hard clue 直接产出候选，不参与 soft 竞争。
@@ -23,37 +23,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ParseResult,
     StreamInput,
 )
-from privacyguard.infrastructure.pii.detector.stacks import (
-    AddressStack,
-    BankAccountStack,
-    BaseStack,
-    CardNumberStack,
-    DriverLicenseStack,
-    EmailStack,
-    IdNumberStack,
-    NameStack,
-    NumericStack,
-    OrganizationStack,
-    PassportStack,
-    PhoneStack,
-    StackManager,
-    StackRun,
-)
-from privacyguard.infrastructure.pii.detector.strategies import attr_priority, resolve_strategies
-
-_STACK_REGISTRY: dict[PIIAttributeType, type[BaseStack]] = {
-    PIIAttributeType.EMAIL: EmailStack,
-    PIIAttributeType.PHONE: PhoneStack,
-    PIIAttributeType.ID_NUMBER: IdNumberStack,
-    PIIAttributeType.CARD_NUMBER: CardNumberStack,
-    PIIAttributeType.BANK_ACCOUNT: BankAccountStack,
-    PIIAttributeType.PASSPORT_NUMBER: PassportStack,
-    PIIAttributeType.DRIVER_LICENSE: DriverLicenseStack,
-    PIIAttributeType.NUMERIC: NumericStack,
-    PIIAttributeType.NAME: NameStack,
-    PIIAttributeType.ORGANIZATION: OrganizationStack,
-    PIIAttributeType.ADDRESS: AddressStack,
-}
+from privacyguard.infrastructure.pii.detector.stacks import BaseStack, StackManager, StackRun, get_stack_spec
 
 
 def _is_control_clue(clue: Clue) -> bool:
@@ -81,7 +51,6 @@ class StreamParser:
     def __init__(self, *, locale_profile: str, ctx: DetectContext) -> None:
         self.locale_profile = locale_profile
         self.ctx = ctx
-        self.strategies = resolve_strategies(ctx.protection_level)
         self.stack_manager = StackManager()
 
     # ------------------------------------------------------------------
@@ -179,9 +148,9 @@ class StreamParser:
             self._fallback_conflict(context, consumed_ids, run_a, run_b)
             return
 
-        # 都是 soft：按类型优先级。
-        prio_a = attr_priority(ca.attr_type)
-        prio_b = attr_priority(cb.attr_type)
+        # 都是 soft：按注册表优先级。
+        prio_a = self._soft_priority(ca.attr_type)
+        prio_b = self._soft_priority(cb.attr_type)
 
         if prio_a > prio_b:
             self._commit_winner_and_shrink_loser(context, consumed_ids, run_a, stack_a, run_b, stack_b)
@@ -252,17 +221,26 @@ class StreamParser:
         attr_type = clue.attr_type
         if attr_type is None:
             return None, None
-        strategy = self.strategies.get(attr_type)
-        if strategy is None or not strategy.should_start(clue):
+        spec = get_stack_spec(attr_type)
+        if spec is None:
             return None, None
-        stack_cls = _STACK_REGISTRY.get(attr_type)
-        if stack_cls is None:
+        allowed_roles = spec.start_roles_by_level.get(
+            context.protection_level,
+            spec.start_roles_by_level.get(ProtectionLevel.STRONG, frozenset()),
+        )
+        if clue.role not in allowed_roles:
             return None, None
-        stack = stack_cls(clue=clue, clue_index=index, context=context)
+        stack = spec.stack_cls(clue=clue, clue_index=index, context=context)
         run = stack.run()
         if run is None or not run.candidate.text.strip():
             return None, None
         return run, stack
+
+    def _soft_priority(self, attr_type: PIIAttributeType) -> int:
+        spec = get_stack_spec(attr_type)
+        if spec is None:
+            return 0
+        return spec.soft_priority
 
     # ------------------------------------------------------------------
     # Commit

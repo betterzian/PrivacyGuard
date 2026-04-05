@@ -1,0 +1,10 @@
+{
+  "image_name": "wechat_550.png",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\wechat_550.ocr.json",
+  "protection_level": "weak",
+  "detect_elapsed_sec": 0.001884,
+  "candidate_count": 0,
+  "by_attr_type": {},
+  "by_source": {},
+  "candidates": []
+}

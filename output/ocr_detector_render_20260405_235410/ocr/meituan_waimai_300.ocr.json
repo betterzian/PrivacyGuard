@@ -1,0 +1,533 @@
+{
+  "image_name": "meituan_waimai_300.png",
+  "image_path": "D:\\GitHub\\PrivacyGuard\\data\\test\\meituan_waimai_300.png",
+  "ocr_elapsed_sec": 0.450696,
+  "block_count": 35,
+  "blocks": [
+    {
+      "text": "12:23",
+      "bbox": {
+        "x": 141,
+        "y": 59,
+        "width": 145,
+        "height": 54
+      },
+      "block_id": "ocr-0-0-141-59-145-54",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9927754402160645,
+      "line_id": 0,
+      "source": "screenshot"
+    },
+    {
+      "text": "54",
+      "bbox": {
+        "x": 999,
+        "y": 62,
+        "width": 72,
+        "height": 49
+      },
+      "block_id": "ocr-1-1-999-62-72-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9977833032608032,
+      "line_id": 1,
+      "source": "screenshot"
+    },
+    {
+      "text": "×",
+      "bbox": {
+        "x": 1072,
+        "y": 147,
+        "width": 52,
+        "height": 50
+      },
+      "block_id": "ocr-2-2-1072-147-52-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8434780836105347,
+      "line_id": 2,
+      "source": "screenshot"
+    },
+    {
+      "text": "97 Lincoln Street",
+      "bbox": {
+        "x": 68,
+        "y": 292,
+        "width": 465,
+        "height": 57
+      },
+      "block_id": "ocr-3-3-68-292-465-57",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9508377313613892,
+      "line_id": 3,
+      "source": "screenshot"
+    },
+    {
+      "text": ">",
+      "bbox": {
+        "x": 1086,
+        "y": 344,
+        "width": 25,
+        "height": 29
+      },
+      "block_id": "ocr-4-4-1086-344-25-29",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8724637627601624,
+      "line_id": 4,
+      "source": "screenshot"
+    },
+    {
+      "text": "Name: Bobby JacksOn",
+      "bbox": {
+        "x": 76,
+        "y": 374,
+        "width": 445,
+        "height": 44
+      },
+      "block_id": "ocr-5-5-76-374-445-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9681736826896667,
+      "line_id": 5,
+      "source": "screenshot"
+    },
+    {
+      "text": "Phone number: (95) 94215-7906",
+      "bbox": {
+        "x": 75,
+        "y": 430,
+        "width": 632,
+        "height": 47
+      },
+      "block_id": "ocr-6-6-75-430-632-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9978607892990112,
+      "line_id": 6,
+      "source": "screenshot"
+    },
+    {
+      "text": "立即配送",
+      "bbox": {
+        "x": 73,
+        "y": 539,
+        "width": 171,
+        "height": 49
+      },
+      "block_id": "ocr-7-7-73-539-171-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.999761700630188,
+      "line_id": 7,
+      "source": "screenshot"
+    },
+    {
+      "text": "预计12:53送达",
+      "bbox": {
+        "x": 305,
+        "y": 543,
+        "width": 272,
+        "height": 45
+      },
+      "block_id": "ocr-8-8-305-543-272-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9856248497962952,
+      "line_id": 8,
+      "source": "screenshot"
+    },
+    {
+      "text": "预约配送",
+      "bbox": {
+        "x": 72,
+        "y": 687,
+        "width": 173,
+        "height": 49
+      },
+      "block_id": "ocr-9-9-72-687-173-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9993000030517578,
+      "line_id": 9,
+      "source": "screenshot"
+    },
+    {
+      "text": "选择时间>",
+      "bbox": {
+        "x": 302,
+        "y": 688,
+        "width": 201,
+        "height": 49
+      },
+      "block_id": "ocr-10-10-302-688-201-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9269510507583618,
+      "line_id": 10,
+      "source": "screenshot"
+    },
+    {
+      "text": "点餐请适量，环保又健康",
+      "bbox": {
+        "x": 76,
+        "y": 860,
+        "width": 440,
+        "height": 40
+      },
+      "block_id": "ocr-11-11-76-860-440-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9972706437110901,
+      "line_id": 11,
+      "source": "screenshot"
+    },
+    {
+      "text": "麦当劳&麦咖啡（北京善缘街店）",
+      "bbox": {
+        "x": 74,
+        "y": 1026,
+        "width": 503,
+        "height": 34
+      },
+      "block_id": "ocr-12-12-74-1026-503-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9613714814186096,
+      "line_id": 12,
+      "source": "screenshot"
+    },
+    {
+      "text": "商家自配",
+      "bbox": {
+        "x": 970,
+        "y": 1024,
+        "width": 141,
+        "height": 43
+      },
+      "block_id": "ocr-13-13-970-1024-141-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996973276138306,
+      "line_id": 13,
+      "source": "screenshot"
+    },
+    {
+      "text": "神抢手3",
+      "bbox": {
+        "x": 74,
+        "y": 1111,
+        "width": 142,
+        "height": 46
+      },
+      "block_id": "ocr-14-14-74-1111-142-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9205939769744873,
+      "line_id": 14,
+      "source": "screenshot"
+    },
+    {
+      "text": "【爆卖千万单】经典麦辣双...￥123券价￥39.9",
+      "bbox": {
+        "x": 263,
+        "y": 1119,
+        "width": 821,
+        "height": 46
+      },
+      "block_id": "ocr-15-15-263-1119-821-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9770140051841736,
+      "line_id": 15,
+      "source": "screenshot"
+    },
+    {
+      "text": "本单使用1张券，兑换以下商品",
+      "bbox": {
+        "x": 257,
+        "y": 1203,
+        "width": 482,
+        "height": 40
+      },
+      "block_id": "ocr-16-16-257-1203-482-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9978117346763611,
+      "line_id": 16,
+      "source": "screenshot"
+    },
+    {
+      "text": "【神抢手专享】经典麦辣双人餐8件套",
+      "bbox": {
+        "x": 278,
+        "y": 1282,
+        "width": 577,
+        "height": 37
+      },
+      "block_id": "ocr-17-17-278-1282-577-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9974461793899536,
+      "line_id": 17,
+      "source": "screenshot"
+    },
+    {
+      "text": "券后￥0",
+      "bbox": {
+        "x": 959,
+        "y": 1279,
+        "width": 127,
+        "height": 45
+      },
+      "block_id": "ocr-18-18-959-1279-127-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9244163036346436,
+      "line_id": 18,
+      "source": "screenshot"
+    },
+    {
+      "text": "【神抢手专享】经典麦辣双人餐8件套...",
+      "bbox": {
+        "x": 279,
+        "y": 1345,
+        "width": 611,
+        "height": 34
+      },
+      "block_id": "ocr-19-19-279-1345-611-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.984549343585968,
+      "line_id": 19,
+      "source": "screenshot"
+    },
+    {
+      "text": "x1",
+      "bbox": {
+        "x": 250,
+        "y": 1394,
+        "width": 59,
+        "height": 39
+      },
+      "block_id": "ocr-20-20-250-1394-59-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9020589590072632,
+      "line_id": 20,
+      "source": "screenshot"
+    },
+    {
+      "text": "用户配送费",
+      "bbox": {
+        "x": 69,
+        "y": 1523,
+        "width": 217,
+        "height": 48
+      },
+      "block_id": "ocr-21-21-69-1523-217-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997144937515259,
+      "line_id": 21,
+      "source": "screenshot"
+    },
+    {
+      "text": "③活动减3元配送费",
+      "bbox": {
+        "x": 287,
+        "y": 1527,
+        "width": 335,
+        "height": 37
+      },
+      "block_id": "ocr-22-22-287-1527-335-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.982153058052063,
+      "line_id": 22,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥6￥3",
+      "bbox": {
+        "x": 950,
+        "y": 1521,
+        "width": 137,
+        "height": 50
+      },
+      "block_id": "ocr-23-23-950-1521-137-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8790236711502075,
+      "line_id": 23,
+      "source": "screenshot"
+    },
+    {
+      "text": "美团红包",
+      "bbox": {
+        "x": 69,
+        "y": 1624,
+        "width": 175,
+        "height": 50
+      },
+      "block_id": "ocr-24-24-69-1624-175-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9986292719841003,
+      "line_id": 24,
+      "source": "screenshot"
+    },
+    {
+      "text": "暂无可用>",
+      "bbox": {
+        "x": 913,
+        "y": 1625,
+        "width": 200,
+        "height": 46
+      },
+      "block_id": "ocr-25-25-913-1625-200-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9266523122787476,
+      "line_id": 25,
+      "source": "screenshot"
+    },
+    {
+      "text": "总计",
+      "bbox": {
+        "x": 65,
+        "y": 1767,
+        "width": 129,
+        "height": 73
+      },
+      "block_id": "ocr-26-26-65-1767-129-73",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994914531707764,
+      "line_id": 26,
+      "source": "screenshot"
+    },
+    {
+      "text": "已优惠¥86.1￥42.9",
+      "bbox": {
+        "x": 689,
+        "y": 1765,
+        "width": 399,
+        "height": 81
+      },
+      "block_id": "ocr-27-27-689-1765-399-81",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9549850225448608,
+      "line_id": 27,
+      "source": "screenshot"
+    },
+    {
+      "text": "备注",
+      "bbox": {
+        "x": 65,
+        "y": 2007,
+        "width": 97,
+        "height": 59
+      },
+      "block_id": "ocr-28-28-65-2007-97-59",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997129440307617,
+      "line_id": 28,
+      "source": "screenshot"
+    },
+    {
+      "text": "请填写您的要求>",
+      "bbox": {
+        "x": 825,
+        "y": 2017,
+        "width": 288,
+        "height": 34
+      },
+      "block_id": "ocr-29-29-825-2017-288-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9490100145339966,
+      "line_id": 29,
+      "source": "screenshot"
+    },
+    {
+      "text": "餐具",
+      "bbox": {
+        "x": 64,
+        "y": 2115,
+        "width": 98,
+        "height": 59
+      },
+      "block_id": "ocr-30-30-64-2115-98-59",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995719790458679,
+      "line_id": 30,
+      "source": "screenshot"
+    },
+    {
+      "text": "请选择",
+      "bbox": {
+        "x": 966,
+        "y": 2122,
+        "width": 115,
+        "height": 43
+      },
+      "block_id": "ocr-31-31-966-2122-115-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997016787528992,
+      "line_id": 31,
+      "source": "screenshot"
+    },
+    {
+      "text": "合计￥42.9",
+      "bbox": {
+        "x": 88,
+        "y": 2332,
+        "width": 253,
+        "height": 61
+      },
+      "block_id": "ocr-32-32-88-2332-253-61",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9723080396652222,
+      "line_id": 32,
+      "source": "screenshot"
+    },
+    {
+      "text": "提交订单",
+      "bbox": {
+        "x": 908,
+        "y": 2356,
+        "width": 197,
+        "height": 57
+      },
+      "block_id": "ocr-33-33-908-2356-197-57",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9974503517150879,
+      "line_id": 33,
+      "source": "screenshot"
+    },
+    {
+      "text": "已优惠￥86.1",
+      "bbox": {
+        "x": 95,
+        "y": 2397,
+        "width": 192,
+        "height": 38
+      },
+      "block_id": "ocr-34-34-95-2397-192-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9568290114402771,
+      "line_id": 34,
+      "source": "screenshot"
+    }
+  ]
+}

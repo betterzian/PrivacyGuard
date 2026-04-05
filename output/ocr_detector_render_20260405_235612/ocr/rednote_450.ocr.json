@@ -1,0 +1,473 @@
+{
+  "image_name": "rednote_450.png",
+  "image_path": "D:\\GitHub\\PrivacyGuard\\data\\test\\rednote_450.png",
+  "ocr_elapsed_sec": 0.434072,
+  "block_count": 31,
+  "blocks": [
+    {
+      "text": "10:33",
+      "bbox": {
+        "x": 135,
+        "y": 48,
+        "width": 157,
+        "height": 70
+      },
+      "block_id": "ocr-0-0-135-48-157-70",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9788092374801636,
+      "line_id": 0,
+      "source": "screenshot"
+    },
+    {
+      "text": "51",
+      "bbox": {
+        "x": 1005,
+        "y": 60,
+        "width": 69,
+        "height": 49
+      },
+      "block_id": "ocr-1-1-1005-60-69-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9689035415649414,
+      "line_id": 1,
+      "source": "screenshot"
+    },
+    {
+      "text": "三",
+      "bbox": {
+        "x": 24,
+        "y": 180,
+        "width": 99,
+        "height": 82
+      },
+      "block_id": "ocr-2-2-24-180-99-82",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.6674050092697144,
+      "line_id": 2,
+      "source": "screenshot"
+    },
+    {
+      "text": "二",
+      "bbox": {
+        "x": 1004,
+        "y": 192,
+        "width": 40,
+        "height": 36
+      },
+      "block_id": "ocr-3-3-1004-192-40-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.23940099775791168,
+      "line_id": 3,
+      "source": "screenshot"
+    },
+    {
+      "text": "KeiTH JohnSoN",
+      "bbox": {
+        "x": 384,
+        "y": 400,
+        "width": 473,
+        "height": 58
+      },
+      "block_id": "ocr-4-4-384-400-473-58",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9690035581588745,
+      "line_id": 4,
+      "source": "screenshot"
+    },
+    {
+      "text": "Xiaohongshu ID: 0733 714 323",
+      "bbox": {
+        "x": 382,
+        "y": 500,
+        "width": 522,
+        "height": 40
+      },
+      "block_id": "ocr-5-5-382-500-522-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9883121252059937,
+      "line_id": 5,
+      "source": "screenshot"
+    },
+    {
+      "text": "+",
+      "bbox": {
+        "x": 236,
+        "y": 550,
+        "width": 37,
+        "height": 38
+      },
+      "block_id": "ocr-6-6-236-550-37-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9523531794548035,
+      "line_id": 6,
+      "source": "screenshot"
+    },
+    {
+      "text": "IP Address: Poland",
+      "bbox": {
+        "x": 381,
+        "y": 561,
+        "width": 310,
+        "height": 39
+      },
+      "block_id": "ocr-7-7-381-561-310-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9803938269615173,
+      "line_id": 7,
+      "source": "screenshot"
+    },
+    {
+      "text": "14",
+      "bbox": {
+        "x": 67,
+        "y": 793,
+        "width": 75,
+        "height": 57
+      },
+      "block_id": "ocr-8-8-67-793-75-57",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997828602790833,
+      "line_id": 8,
+      "source": "screenshot"
+    },
+    {
+      "text": "18",
+      "bbox": {
+        "x": 249,
+        "y": 791,
+        "width": 76,
+        "height": 58
+      },
+      "block_id": "ocr-9-9-249-791-76-58",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9998135566711426,
+      "line_id": 9,
+      "source": "screenshot"
+    },
+    {
+      "text": "35",
+      "bbox": {
+        "x": 443,
+        "y": 796,
+        "width": 72,
+        "height": 53
+      },
+      "block_id": "ocr-10-10-443-796-72-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995189309120178,
+      "line_id": 10,
+      "source": "screenshot"
+    },
+    {
+      "text": "Edit Profile",
+      "bbox": {
+        "x": 716,
+        "y": 851,
+        "width": 228,
+        "height": 51
+      },
+      "block_id": "ocr-11-11-716-851-228-51",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.994493305683136,
+      "line_id": 11,
+      "source": "screenshot"
+    },
+    {
+      "text": "Following",
+      "bbox": {
+        "x": 39,
+        "y": 872,
+        "width": 140,
+        "height": 41
+      },
+      "block_id": "ocr-12-12-39-872-140-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995693564414978,
+      "line_id": 12,
+      "source": "screenshot"
+    },
+    {
+      "text": "Followers",
+      "bbox": {
+        "x": 219,
+        "y": 873,
+        "width": 138,
+        "height": 37
+      },
+      "block_id": "ocr-13-13-219-873-138-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995080232620239,
+      "line_id": 13,
+      "source": "screenshot"
+    },
+    {
+      "text": "Likes & Saves",
+      "bbox": {
+        "x": 403,
+        "y": 877,
+        "width": 188,
+        "height": 31
+      },
+      "block_id": "ocr-14-14-403-877-188-31",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9364838004112244,
+      "line_id": 14,
+      "source": "screenshot"
+    },
+    {
+      "text": "Inspiration",
+      "bbox": {
+        "x": 49,
+        "y": 1026,
+        "width": 228,
+        "height": 45
+      },
+      "block_id": "ocr-15-15-49-1026-228-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9733912944793701,
+      "line_id": 15,
+      "source": "screenshot"
+    },
+    {
+      "text": "History",
+      "bbox": {
+        "x": 414,
+        "y": 1023,
+        "width": 162,
+        "height": 57
+      },
+      "block_id": "ocr-16-16-414-1023-162-57",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996350407600403,
+      "line_id": 16,
+      "source": "screenshot"
+    },
+    {
+      "text": "Group chat",
+      "bbox": {
+        "x": 787,
+        "y": 1026,
+        "width": 243,
+        "height": 49
+      },
+      "block_id": "ocr-17-17-787-1026-243-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9961754679679871,
+      "line_id": 17,
+      "source": "screenshot"
+    },
+    {
+      "text": "Find inspiration",
+      "bbox": {
+        "x": 47,
+        "y": 1081,
+        "width": 216,
+        "height": 36
+      },
+      "block_id": "ocr-18-18-47-1081-216-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9986695051193237,
+      "line_id": 18,
+      "source": "screenshot"
+    },
+    {
+      "text": "Notes I've read",
+      "bbox": {
+        "x": 418,
+        "y": 1083,
+        "width": 209,
+        "height": 31
+      },
+      "block_id": "ocr-19-19-418-1083-209-31",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9392757415771484,
+      "line_id": 19,
+      "source": "screenshot"
+    },
+    {
+      "text": "View details",
+      "bbox": {
+        "x": 790,
+        "y": 1082,
+        "width": 171,
+        "height": 34
+      },
+      "block_id": "ocr-20-20-790-1082-171-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.999464213848114,
+      "line_id": 20,
+      "source": "screenshot"
+    },
+    {
+      "text": "Notes",
+      "bbox": {
+        "x": 55,
+        "y": 1221,
+        "width": 143,
+        "height": 52
+      },
+      "block_id": "ocr-21-21-55-1221-143-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994772672653198,
+      "line_id": 21,
+      "source": "screenshot"
+    },
+    {
+      "text": "Saves",
+      "bbox": {
+        "x": 287,
+        "y": 1221,
+        "width": 140,
+        "height": 52
+      },
+      "block_id": "ocr-22-22-287-1221-140-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9842097163200378,
+      "line_id": 22,
+      "source": "screenshot"
+    },
+    {
+      "text": "Likes",
+      "bbox": {
+        "x": 521,
+        "y": 1222,
+        "width": 118,
+        "height": 48
+      },
+      "block_id": "ocr-23-23-521-1222-118-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9965093731880188,
+      "line_id": 23,
+      "source": "screenshot"
+    },
+    {
+      "text": "Happy moments in life",
+      "bbox": {
+        "x": 363,
+        "y": 1773,
+        "width": 450,
+        "height": 51
+      },
+      "block_id": "ocr-24-24-363-1773-450-51",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.972200870513916,
+      "line_id": 24,
+      "source": "screenshot"
+    },
+    {
+      "text": "post",
+      "bbox": {
+        "x": 533,
+        "y": 1914,
+        "width": 112,
+        "height": 60
+      },
+      "block_id": "ocr-25-25-533-1914-112-60",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996302723884583,
+      "line_id": 25,
+      "source": "screenshot"
+    },
+    {
+      "text": "+",
+      "bbox": {
+        "x": 561,
+        "y": 2358,
+        "width": 64,
+        "height": 65
+      },
+      "block_id": "ocr-26-26-561-2358-64-65",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8832805156707764,
+      "line_id": 26,
+      "source": "screenshot"
+    },
+    {
+      "text": "Home",
+      "bbox": {
+        "x": 71,
+        "y": 2412,
+        "width": 92,
+        "height": 33
+      },
+      "block_id": "ocr-27-27-71-2412-92-33",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9992030262947083,
+      "line_id": 27,
+      "source": "screenshot"
+    },
+    {
+      "text": "Market",
+      "bbox": {
+        "x": 299,
+        "y": 2411,
+        "width": 112,
+        "height": 35
+      },
+      "block_id": "ocr-28-28-299-2411-112-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9985583424568176,
+      "line_id": 28,
+      "source": "screenshot"
+    },
+    {
+      "text": "Messages",
+      "bbox": {
+        "x": 746,
+        "y": 2410,
+        "width": 157,
+        "height": 38
+      },
+      "block_id": "ocr-29-29-746-2410-157-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9968068599700928,
+      "line_id": 29,
+      "source": "screenshot"
+    },
+    {
+      "text": "Me",
+      "bbox": {
+        "x": 1033,
+        "y": 2410,
+        "width": 56,
+        "height": 38
+      },
+      "block_id": "ocr-30-30-1033-2410-56-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9990121126174927,
+      "line_id": 30,
+      "source": "screenshot"
+    }
+  ]
+}

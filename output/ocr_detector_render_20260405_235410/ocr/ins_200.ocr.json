@@ -1,0 +1,398 @@
+{
+  "image_name": "ins_200.png",
+  "image_path": "D:\\GitHub\\PrivacyGuard\\data\\test\\ins_200.png",
+  "ocr_elapsed_sec": 0.414396,
+  "block_count": 26,
+  "blocks": [
+    {
+      "text": "10:31",
+      "bbox": {
+        "x": 142,
+        "y": 56,
+        "width": 144,
+        "height": 58
+      },
+      "block_id": "ocr-0-0-142-56-144-58",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9966204762458801,
+      "line_id": 0,
+      "source": "screenshot"
+    },
+    {
+      "text": "51",
+      "bbox": {
+        "x": 1005,
+        "y": 62,
+        "width": 63,
+        "height": 49
+      },
+      "block_id": "ocr-1-1-1005-62-63-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9992151856422424,
+      "line_id": 1,
+      "source": "screenshot"
+    },
+    {
+      "text": "Edit profile",
+      "bbox": {
+        "x": 459,
+        "y": 215,
+        "width": 261,
+        "height": 55
+      },
+      "block_id": "ocr-2-2-459-215-261-55",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9800729155540466,
+      "line_id": 2,
+      "source": "screenshot"
+    },
+    {
+      "text": "Edit picture or avatar",
+      "bbox": {
+        "x": 374,
+        "y": 683,
+        "width": 431,
+        "height": 45
+      },
+      "block_id": "ocr-3-3-374-683-431-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9731422662734985,
+      "line_id": 3,
+      "source": "screenshot"
+    },
+    {
+      "text": "Name",
+      "bbox": {
+        "x": 41,
+        "y": 814,
+        "width": 141,
+        "height": 55
+      },
+      "block_id": "ocr-4-4-41-814-141-55",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994350075721741,
+      "line_id": 4,
+      "source": "screenshot"
+    },
+    {
+      "text": "CaROlIne mCinTyRe",
+      "bbox": {
+        "x": 332,
+        "y": 819,
+        "width": 493,
+        "height": 55
+      },
+      "block_id": "ocr-5-5-332-819-493-55",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9705972075462341,
+      "line_id": 5,
+      "source": "screenshot"
+    },
+    {
+      "text": "Username",
+      "bbox": {
+        "x": 45,
+        "y": 962,
+        "width": 229,
+        "height": 49
+      },
+      "block_id": "ocr-6-6-45-962-229-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997442364692688,
+      "line_id": 6,
+      "source": "screenshot"
+    },
+    {
+      "text": "+27 90989 6629",
+      "bbox": {
+        "x": 332,
+        "y": 967,
+        "width": 421,
+        "height": 48
+      },
+      "block_id": "ocr-7-7-332-967-421-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9304706454277039,
+      "line_id": 7,
+      "source": "screenshot"
+    },
+    {
+      "text": "Pronouns",
+      "bbox": {
+        "x": 46,
+        "y": 1107,
+        "width": 212,
+        "height": 45
+      },
+      "block_id": "ocr-8-8-46-1107-212-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996009469032288,
+      "line_id": 8,
+      "source": "screenshot"
+    },
+    {
+      "text": "Pronouns",
+      "bbox": {
+        "x": 335,
+        "y": 1108,
+        "width": 220,
+        "height": 46
+      },
+      "block_id": "ocr-9-9-335-1108-220-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997528791427612,
+      "line_id": 9,
+      "source": "screenshot"
+    },
+    {
+      "text": "Bio",
+      "bbox": {
+        "x": 43,
+        "y": 1247,
+        "width": 79,
+        "height": 52
+      },
+      "block_id": "ocr-10-10-43-1247-79-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9983765482902527,
+      "line_id": 10,
+      "source": "screenshot"
+    },
+    {
+      "text": "Bio",
+      "bbox": {
+        "x": 334,
+        "y": 1248,
+        "width": 78,
+        "height": 51
+      },
+      "block_id": "ocr-11-11-334-1248-78-51",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995104670524597,
+      "line_id": 11,
+      "source": "screenshot"
+    },
+    {
+      "text": "Links",
+      "bbox": {
+        "x": 43,
+        "y": 1380,
+        "width": 123,
+        "height": 50
+      },
+      "block_id": "ocr-12-12-43-1380-123-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9983914494514465,
+      "line_id": 12,
+      "source": "screenshot"
+    },
+    {
+      "text": "Add links",
+      "bbox": {
+        "x": 334,
+        "y": 1382,
+        "width": 214,
+        "height": 48
+      },
+      "block_id": "ocr-13-13-334-1382-214-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.988764762878418,
+      "line_id": 13,
+      "source": "screenshot"
+    },
+    {
+      "text": "Banners",
+      "bbox": {
+        "x": 45,
+        "y": 1527,
+        "width": 184,
+        "height": 47
+      },
+      "block_id": "ocr-14-14-45-1527-184-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9989452362060547,
+      "line_id": 14,
+      "source": "screenshot"
+    },
+    {
+      "text": "1",
+      "bbox": {
+        "x": 1011,
+        "y": 1530,
+        "width": 28,
+        "height": 40
+      },
+      "block_id": "ocr-15-15-1011-1530-28-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9999955892562866,
+      "line_id": 15,
+      "source": "screenshot"
+    },
+    {
+      "text": "Music",
+      "bbox": {
+        "x": 44,
+        "y": 1670,
+        "width": 137,
+        "height": 47
+      },
+      "block_id": "ocr-16-16-44-1670-137-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9993492364883423,
+      "line_id": 16,
+      "source": "screenshot"
+    },
+    {
+      "text": "Add music to your profile",
+      "bbox": {
+        "x": 331,
+        "y": 1667,
+        "width": 579,
+        "height": 57
+      },
+      "block_id": "ocr-17-17-331-1667-579-57",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9719464778900146,
+      "line_id": 17,
+      "source": "screenshot"
+    },
+    {
+      "text": "Show Threadsbanner",
+      "bbox": {
+        "x": 45,
+        "y": 1813,
+        "width": 505,
+        "height": 48
+      },
+      "block_id": "ocr-18-18-45-1813-505-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9756181240081787,
+      "line_id": 18,
+      "source": "screenshot"
+    },
+    {
+      "text": "When turned off, the lnstagram badge on your",
+      "bbox": {
+        "x": 43,
+        "y": 1883,
+        "width": 847,
+        "height": 44
+      },
+      "block_id": "ocr-19-19-43-1883-847-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9671342372894287,
+      "line_id": 19,
+      "source": "screenshot"
+    },
+    {
+      "text": "Threads profile will also disappear.",
+      "bbox": {
+        "x": 42,
+        "y": 1929,
+        "width": 635,
+        "height": 43
+      },
+      "block_id": "ocr-20-20-42-1929-635-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9695690870285034,
+      "line_id": 20,
+      "source": "screenshot"
+    },
+    {
+      "text": "Gender",
+      "bbox": {
+        "x": 43,
+        "y": 2063,
+        "width": 172,
+        "height": 53
+      },
+      "block_id": "ocr-21-21-43-2063-172-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.999509334564209,
+      "line_id": 21,
+      "source": "screenshot"
+    },
+    {
+      "text": "Gender",
+      "bbox": {
+        "x": 335,
+        "y": 2067,
+        "width": 174,
+        "height": 46
+      },
+      "block_id": "ocr-22-22-335-2067-174-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994562268257141,
+      "line_id": 22,
+      "source": "screenshot"
+    },
+    {
+      "text": "Switch to professional account",
+      "bbox": {
+        "x": 46,
+        "y": 2213,
+        "width": 672,
+        "height": 46
+      },
+      "block_id": "ocr-23-23-46-2213-672-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.989966630935669,
+      "line_id": 23,
+      "source": "screenshot"
+    },
+    {
+      "text": "Personal information settings",
+      "bbox": {
+        "x": 45,
+        "y": 2357,
+        "width": 639,
+        "height": 52
+      },
+      "block_id": "ocr-24-24-45-2357-639-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.991252064704895,
+      "line_id": 24,
+      "source": "screenshot"
+    },
+    {
+      "text": "Show that your profile is verified",
+      "bbox": {
+        "x": 45,
+        "y": 2502,
+        "width": 702,
+        "height": 50
+      },
+      "block_id": "ocr-25-25-45-2502-702-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9733449220657349,
+      "line_id": 25,
+      "source": "screenshot"
+    }
+  ]
+}

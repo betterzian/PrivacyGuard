@@ -1,0 +1,278 @@
+{
+  "image_name": "booking_50.png",
+  "image_path": "D:\\GitHub\\PrivacyGuard\\data\\test\\booking_50.png",
+  "ocr_elapsed_sec": 0.359945,
+  "block_count": 18,
+  "blocks": [
+    {
+      "text": "09:39",
+      "bbox": {
+        "x": 136,
+        "y": 58,
+        "width": 157,
+        "height": 57
+      },
+      "block_id": "ocr-0-0-136-58-157-57",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9763323664665222,
+      "line_id": 0,
+      "source": "screenshot"
+    },
+    {
+      "text": "56",
+      "bbox": {
+        "x": 998,
+        "y": 59,
+        "width": 69,
+        "height": 53
+      },
+      "block_id": "ocr-1-1-998-59-69-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9980553388595581,
+      "line_id": 1,
+      "source": "screenshot"
+    },
+    {
+      "text": "Your personal info",
+      "bbox": {
+        "x": 398,
+        "y": 204,
+        "width": 380,
+        "height": 51
+      },
+      "block_id": "ocr-2-2-398-204-380-51",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9977677464485168,
+      "line_id": 2,
+      "source": "screenshot"
+    },
+    {
+      "text": "Name",
+      "bbox": {
+        "x": 41,
+        "y": 350,
+        "width": 132,
+        "height": 53
+      },
+      "block_id": "ocr-3-3-41-350-132-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9992547035217285,
+      "line_id": 3,
+      "source": "screenshot"
+    },
+    {
+      "text": "MiChELle zHaNg",
+      "bbox": {
+        "x": 81,
+        "y": 470,
+        "width": 348,
+        "height": 48
+      },
+      "block_id": "ocr-4-4-81-470-348-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9602288007736206,
+      "line_id": 4,
+      "source": "screenshot"
+    },
+    {
+      "text": "Email Address",
+      "bbox": {
+        "x": 47,
+        "y": 617,
+        "width": 290,
+        "height": 44
+      },
+      "block_id": "ocr-5-5-47-617-290-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9943074584007263,
+      "line_id": 5,
+      "source": "screenshot"
+    },
+    {
+      "text": "alicewilliams@yahoo.org",
+      "bbox": {
+        "x": 77,
+        "y": 734,
+        "width": 488,
+        "height": 48
+      },
+      "block_id": "ocr-6-6-77-734-488-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9760168194770813,
+      "line_id": 6,
+      "source": "screenshot"
+    },
+    {
+      "text": "Mobile number",
+      "bbox": {
+        "x": 46,
+        "y": 883,
+        "width": 308,
+        "height": 45
+      },
+      "block_id": "ocr-7-7-46-883-308-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9980637431144714,
+      "line_id": 7,
+      "source": "screenshot"
+    },
+    {
+      "text": "(380) 852-5146",
+      "bbox": {
+        "x": 459,
+        "y": 994,
+        "width": 314,
+        "height": 52
+      },
+      "block_id": "ocr-8-8-459-994-314-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9797706604003906,
+      "line_id": 8,
+      "source": "screenshot"
+    },
+    {
+      "text": "Country/region",
+      "bbox": {
+        "x": 43,
+        "y": 1144,
+        "width": 307,
+        "height": 53
+      },
+      "block_id": "ocr-9-9-43-1144-307-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.996548056602478,
+      "line_id": 9,
+      "source": "screenshot"
+    },
+    {
+      "text": "Sweden",
+      "bbox": {
+        "x": 76,
+        "y": 1260,
+        "width": 174,
+        "height": 51
+      },
+      "block_id": "ocr-10-10-76-1260-174-51",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995213150978088,
+      "line_id": 10,
+      "source": "screenshot"
+    },
+    {
+      "text": "Save this info to your account",
+      "bbox": {
+        "x": 45,
+        "y": 1444,
+        "width": 580,
+        "height": 44
+      },
+      "block_id": "ocr-11-11-45-1444-580-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9808223247528076,
+      "line_id": 11,
+      "source": "screenshot"
+    },
+    {
+      "text": "What is the primary purpose for your trip?",
+      "bbox": {
+        "x": 43,
+        "y": 1635,
+        "width": 837,
+        "height": 52
+      },
+      "block_id": "ocr-12-12-43-1635-837-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9770913124084473,
+      "line_id": 12,
+      "source": "screenshot"
+    },
+    {
+      "text": "Work",
+      "bbox": {
+        "x": 43,
+        "y": 1782,
+        "width": 110,
+        "height": 44
+      },
+      "block_id": "ocr-13-13-43-1782-110-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996783137321472,
+      "line_id": 13,
+      "source": "screenshot"
+    },
+    {
+      "text": "Leisure",
+      "bbox": {
+        "x": 41,
+        "y": 1914,
+        "width": 152,
+        "height": 47
+      },
+      "block_id": "ocr-14-14-41-1914-152-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994384050369263,
+      "line_id": 14,
+      "source": "screenshot"
+    },
+    {
+      "text": "£245 £221",
+      "bbox": {
+        "x": 42,
+        "y": 2108,
+        "width": 253,
+        "height": 52
+      },
+      "block_id": "ocr-15-15-42-2108-253-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9515455961227417,
+      "line_id": 15,
+      "source": "screenshot"
+    },
+    {
+      "text": "Includes taxes and charges",
+      "bbox": {
+        "x": 44,
+        "y": 2186,
+        "width": 534,
+        "height": 46
+      },
+      "block_id": "ocr-16-16-44-2186-534-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9712343215942383,
+      "line_id": 16,
+      "source": "screenshot"
+    },
+    {
+      "text": "Next step",
+      "bbox": {
+        "x": 477,
+        "y": 2306,
+        "width": 224,
+        "height": 58
+      },
+      "block_id": "ocr-17-17-477-2306-224-58",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9620606303215027,
+      "line_id": 17,
+      "source": "screenshot"
+    }
+  ]
+}

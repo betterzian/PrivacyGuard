@@ -1,0 +1,731 @@
+{
+  "image_name": "meituan_waimai_300.png",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\meituan_waimai_300.ocr.json",
+  "protection_level": "strong",
+  "detect_elapsed_sec": 0.004692,
+  "candidate_count": 14,
+  "by_attr_type": {
+    "address": 4,
+    "name": 10
+  },
+  "by_source": {
+    "ocr": 14
+  },
+  "candidates": [
+    {
+      "entity_id": "5fe0861e6763a215d97b415a31cef770",
+      "text": "Lincoln Street",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "Lincoln Street",
+        "canonical": "road=lincoln",
+        "components": {
+          "road": "Lincoln"
+        },
+        "match_terms": [
+          "Lincoln"
+        ],
+        "identity": {
+          "road": "lincoln",
+          "address_part": "lincoln"
+        }
+      },
+      "canonical_source_text": "road=lincoln",
+      "normalized_text": "road=lincoln",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 68,
+        "y": 292,
+        "width": 465,
+        "height": 57
+      },
+      "block_id": "ocr-3-3-68-292-465-57",
+      "span_start": 3,
+      "span_end": 17,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "address_keyword"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "address_keyword"
+        ],
+        "address_component_type": [
+          "street"
+        ],
+        "address_component_trace": [
+          "street:Lincoln"
+        ],
+        "address_component_key_trace": [
+          "street:Street"
+        ],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-3-3-68-292-465-57"
+        ]
+      }
+    },
+    {
+      "entity_id": "c6391b1359a99ed0ec966b943b42fab3",
+      "text": "Bobby JacksOn Phone number",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "Bobby JacksOn Phone number",
+        "canonical": "bobby jackson phone number",
+        "components": {
+          "full": "Bobby JacksOn Phone number",
+          "family": "number",
+          "given": "Bobby",
+          "middle": "JacksOn Phone"
+        },
+        "match_terms": [
+          "Bobby JacksOn Phone number",
+          "number",
+          "Bobby"
+        ],
+        "identity": {
+          "family": "number",
+          "given": "bobby"
+        }
+      },
+      "canonical_source_text": "bobby jackson phone number",
+      "normalized_text": "bobby jackson phone number",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 75,
+        "y": 374,
+        "width": 632,
+        "height": 103
+      },
+      "block_id": "ocr-5-5-76-374-445-44",
+      "span_start": 6,
+      "span_end": null,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "context_name_field"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-5-5-76-374-445-44",
+          "ocr-6-6-75-430-632-47"
+        ]
+      }
+    },
+    {
+      "entity_id": "aae24e01407a0d492440a9b072cd6cd8",
+      "text": "94215-7906",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "94215-7906",
+        "canonical": "postal_code=942157906",
+        "components": {
+          "postal_code": "94215-7906"
+        },
+        "match_terms": [],
+        "identity": {
+          "postal_code": "942157906"
+        }
+      },
+      "canonical_source_text": "postal_code=942157906",
+      "normalized_text": "postal_code=942157906",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 75,
+        "y": 430,
+        "width": 632,
+        "height": 47
+      },
+      "block_id": "ocr-6-6-75-430-632-47",
+      "span_start": 19,
+      "span_end": 29,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "postal_value"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "postal_value"
+        ],
+        "address_component_type": [
+          "postal_code"
+        ],
+        "address_component_trace": [
+          "postal_code:94215-7906"
+        ],
+        "address_component_key_trace": [],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-6-6-75-430-632-47"
+        ]
+      }
+    },
+    {
+      "entity_id": "6f3c6d65f27204d546b8812068a4f81d",
+      "text": "时间",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "时间",
+        "canonical": "时间",
+        "components": {
+          "full": "时间",
+          "family": "时",
+          "given": "间"
+        },
+        "match_terms": [
+          "时间",
+          "时",
+          "间"
+        ],
+        "identity": {
+          "family": "时",
+          "given": "间"
+        }
+      },
+      "canonical_source_text": "时间",
+      "normalized_text": "时间",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 302,
+        "y": 688,
+        "width": 201,
+        "height": 49
+      },
+      "block_id": "ocr-10-10-302-688-201-49",
+      "span_start": 2,
+      "span_end": 4,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-10-10-302-688-201-49"
+        ]
+      }
+    },
+    {
+      "entity_id": "45fc1d9f1679ee7bcef1da17338e9b8d",
+      "text": "北京善缘街",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "北京善缘街",
+        "canonical": "city=北京|road=善缘",
+        "components": {
+          "city": "北京",
+          "road": "善缘"
+        },
+        "match_terms": [
+          "北京",
+          "善缘"
+        ],
+        "identity": {
+          "city": "北京",
+          "road": "善缘",
+          "address_part": "北京|善缘"
+        }
+      },
+      "canonical_source_text": "city=北京|road=善缘",
+      "normalized_text": "city=北京|road=善缘",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 74,
+        "y": 1026,
+        "width": 503,
+        "height": 34
+      },
+      "block_id": "ocr-12-12-74-1026-503-34",
+      "span_start": 8,
+      "span_end": 13,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "geo_db"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "geo_db"
+        ],
+        "address_component_type": [
+          "city",
+          "road"
+        ],
+        "address_component_trace": [
+          "city:北京",
+          "road:善缘"
+        ],
+        "address_component_key_trace": [
+          "road:街"
+        ],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-12-12-74-1026-503-34"
+        ]
+      }
+    },
+    {
+      "entity_id": "84fa1ed6a76c805ad3119e5d936c920a",
+      "text": "家自配",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "家自配",
+        "canonical": "家自配",
+        "components": {
+          "full": "家自配",
+          "family": "家",
+          "given": "自配"
+        },
+        "match_terms": [
+          "家自配",
+          "家",
+          "自配"
+        ],
+        "identity": {
+          "family": "家",
+          "given": "自配"
+        }
+      },
+      "canonical_source_text": "家自配",
+      "normalized_text": "家自配",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 970,
+        "y": 1024,
+        "width": 141,
+        "height": 43
+      },
+      "block_id": "ocr-13-13-970-1024-141-43",
+      "span_start": 1,
+      "span_end": 4,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-13-13-970-1024-141-43"
+        ]
+      }
+    },
+    {
+      "entity_id": "44a645ce3cffe16aac43ae606ce46e7b",
+      "text": "万单",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "万单",
+        "canonical": "万单",
+        "components": {
+          "full": "万单",
+          "family": "万",
+          "given": "单"
+        },
+        "match_terms": [
+          "万单",
+          "万",
+          "单"
+        ],
+        "identity": {
+          "family": "万",
+          "given": "单"
+        }
+      },
+      "canonical_source_text": "万单",
+      "normalized_text": "万单",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 263,
+        "y": 1119,
+        "width": 821,
+        "height": 46
+      },
+      "block_id": "ocr-15-15-263-1119-821-46",
+      "span_start": 4,
+      "span_end": 6,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-15-15-263-1119-821-46"
+        ]
+      }
+    },
+    {
+      "entity_id": "9f42d1320d8aa4c5f9c0939ef83cf7bb",
+      "text": "经典麦辣双",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "经典麦辣双",
+        "canonical": "经典麦辣双",
+        "components": {
+          "full": "经典麦辣双",
+          "family": "经",
+          "given": "典麦辣双"
+        },
+        "match_terms": [
+          "经典麦辣双",
+          "经",
+          "典麦辣双"
+        ],
+        "identity": {
+          "family": "经",
+          "given": "典麦辣双"
+        }
+      },
+      "canonical_source_text": "经典麦辣双",
+      "normalized_text": "经典麦辣双",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 263,
+        "y": 1119,
+        "width": 821,
+        "height": 46
+      },
+      "block_id": "ocr-15-15-263-1119-821-46",
+      "span_start": 7,
+      "span_end": 12,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-15-15-263-1119-821-46"
+        ]
+      }
+    },
+    {
+      "entity_id": "e1c00bda05551a9ed4cf01c4fa73ed79",
+      "text": "单使用",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "单使用",
+        "canonical": "单使用",
+        "components": {
+          "full": "单使用",
+          "family": "单",
+          "given": "使用"
+        },
+        "match_terms": [
+          "单使用",
+          "单",
+          "使用"
+        ],
+        "identity": {
+          "family": "单",
+          "given": "使用"
+        }
+      },
+      "canonical_source_text": "单使用",
+      "normalized_text": "单使用",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 257,
+        "y": 1203,
+        "width": 482,
+        "height": 40
+      },
+      "block_id": "ocr-16-16-257-1203-482-40",
+      "span_start": 1,
+      "span_end": 4,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-16-16-257-1203-482-40"
+        ]
+      }
+    },
+    {
+      "entity_id": "fd5cc4a18b57ddce7c6628604be2483b",
+      "text": "张券",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "张券",
+        "canonical": "张券",
+        "components": {
+          "full": "张券",
+          "family": "张",
+          "given": "券"
+        },
+        "match_terms": [
+          "张券",
+          "张",
+          "券"
+        ],
+        "identity": {
+          "family": "张",
+          "given": "券"
+        }
+      },
+      "canonical_source_text": "张券",
+      "normalized_text": "张券",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 257,
+        "y": 1203,
+        "width": 482,
+        "height": 40
+      },
+      "block_id": "ocr-16-16-257-1203-482-40",
+      "span_start": 5,
+      "span_end": 7,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-16-16-257-1203-482-40"
+        ]
+      }
+    },
+    {
+      "entity_id": "3ce58db52e66909169fcfcfe9b9a8ad2",
+      "text": "经典麦辣双",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "经典麦辣双",
+        "canonical": "经典麦辣双",
+        "components": {
+          "full": "经典麦辣双",
+          "family": "经",
+          "given": "典麦辣双"
+        },
+        "match_terms": [
+          "经典麦辣双",
+          "经",
+          "典麦辣双"
+        ],
+        "identity": {
+          "family": "经",
+          "given": "典麦辣双"
+        }
+      },
+      "canonical_source_text": "经典麦辣双",
+      "normalized_text": "经典麦辣双",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 278,
+        "y": 1282,
+        "width": 577,
+        "height": 37
+      },
+      "block_id": "ocr-17-17-278-1282-577-37",
+      "span_start": 7,
+      "span_end": 12,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-17-17-278-1282-577-37"
+        ]
+      }
+    },
+    {
+      "entity_id": "ecdc7a90da951b0cb0d7649e5c5b2c2f",
+      "text": "经典麦辣双",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "经典麦辣双",
+        "canonical": "经典麦辣双",
+        "components": {
+          "full": "经典麦辣双",
+          "family": "经",
+          "given": "典麦辣双"
+        },
+        "match_terms": [
+          "经典麦辣双",
+          "经",
+          "典麦辣双"
+        ],
+        "identity": {
+          "family": "经",
+          "given": "典麦辣双"
+        }
+      },
+      "canonical_source_text": "经典麦辣双",
+      "normalized_text": "经典麦辣双",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 279,
+        "y": 1345,
+        "width": 611,
+        "height": 34
+      },
+      "block_id": "ocr-19-19-279-1345-611-34",
+      "span_start": 7,
+      "span_end": 12,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-19-19-279-1345-611-34"
+        ]
+      }
+    },
+    {
+      "entity_id": "9f40ac466912af9c98e60be01b187bdb",
+      "text": "用户",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "用户",
+        "canonical": "room=用",
+        "components": {
+          "room": "用"
+        },
+        "match_terms": [],
+        "identity": {
+          "room": "用"
+        }
+      },
+      "canonical_source_text": "room=用",
+      "normalized_text": "room=用",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 69,
+        "y": 1523,
+        "width": 217,
+        "height": 48
+      },
+      "block_id": "ocr-21-21-69-1523-217-48",
+      "span_start": 0,
+      "span_end": 2,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "address_keyword"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "address_keyword"
+        ],
+        "address_component_type": [
+          "room"
+        ],
+        "address_component_trace": [
+          "room:用"
+        ],
+        "address_component_key_trace": [
+          "room:户"
+        ],
+        "address_details_type": [
+          "room"
+        ],
+        "address_details_text": [
+          "用"
+        ],
+        "ocr_block_ids": [
+          "ocr-21-21-69-1523-217-48"
+        ]
+      }
+    },
+    {
+      "entity_id": "25c1c8062b95609ab95333a896509849",
+      "text": "元配送费",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "元配送费",
+        "canonical": "元配送费",
+        "components": {
+          "full": "元配送费",
+          "family": "元",
+          "given": "配送费"
+        },
+        "match_terms": [
+          "元配送费",
+          "元",
+          "配送费"
+        ],
+        "identity": {
+          "family": "元",
+          "given": "配送费"
+        }
+      },
+      "canonical_source_text": "元配送费",
+      "normalized_text": "元配送费",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 287,
+        "y": 1527,
+        "width": 335,
+        "height": 37
+      },
+      "block_id": "ocr-22-22-287-1527-335-37",
+      "span_start": 5,
+      "span_end": 9,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-22-22-287-1527-335-37"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,638 @@
+{
+  "image_name": "xiecheng_650.png",
+  "image_path": "D:\\GitHub\\PrivacyGuard\\data\\test\\xiecheng_650.png",
+  "ocr_elapsed_sec": 0.469254,
+  "block_count": 42,
+  "blocks": [
+    {
+      "text": "12:33",
+      "bbox": {
+        "x": 141,
+        "y": 60,
+        "width": 146,
+        "height": 54
+      },
+      "block_id": "ocr-0-0-141-60-146-54",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9937883615493774,
+      "line_id": 0,
+      "source": "screenshot"
+    },
+    {
+      "text": "52",
+      "bbox": {
+        "x": 1002,
+        "y": 63,
+        "width": 70,
+        "height": 48
+      },
+      "block_id": "ocr-1-1-1002-63-70-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9942934513092041,
+      "line_id": 1,
+      "source": "screenshot"
+    },
+    {
+      "text": "轻奢连锁酒店",
+      "bbox": {
+        "x": 151,
+        "y": 191,
+        "width": 316,
+        "height": 58
+      },
+      "block_id": "ocr-2-2-151-191-316-58",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9993197321891785,
+      "line_id": 2,
+      "source": "screenshot"
+    },
+    {
+      "text": "10月3日今天－10月4日明天",
+      "bbox": {
+        "x": 63,
+        "y": 341,
+        "width": 548,
+        "height": 50
+      },
+      "block_id": "ocr-3-3-63-341-548-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9892175793647766,
+      "line_id": 3,
+      "source": "screenshot"
+    },
+    {
+      "text": "1晚",
+      "bbox": {
+        "x": 628,
+        "y": 341,
+        "width": 70,
+        "height": 53
+      },
+      "block_id": "ocr-4-4-628-341-70-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9961947202682495,
+      "line_id": 4,
+      "source": "screenshot"
+    },
+    {
+      "text": "套餐详情>",
+      "bbox": {
+        "x": 936,
+        "y": 344,
+        "width": 172,
+        "height": 45
+      },
+      "block_id": "ocr-5-5-936-344-172-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9806326031684875,
+      "line_id": 5,
+      "source": "screenshot"
+    },
+    {
+      "text": "简约大床房",
+      "bbox": {
+        "x": 65,
+        "y": 414,
+        "width": 273,
+        "height": 64
+      },
+      "block_id": "ocr-6-6-65-414-273-64",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9989317059516907,
+      "line_id": 6,
+      "source": "screenshot"
+    },
+    {
+      "text": "大床|无早餐装饰性假窗部分禁烟",
+      "bbox": {
+        "x": 66,
+        "y": 506,
+        "width": 578,
+        "height": 38
+      },
+      "block_id": "ocr-7-7-66-506-578-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9766033887863159,
+      "line_id": 7,
+      "source": "screenshot"
+    },
+    {
+      "text": "享1项|免费接送机",
+      "bbox": {
+        "x": 88,
+        "y": 608,
+        "width": 312,
+        "height": 44
+      },
+      "block_id": "ocr-8-8-88-608-312-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9437554478645325,
+      "line_id": 8,
+      "source": "screenshot"
+    },
+    {
+      "text": "10月3日20:00前可免费取消|可立即确认>",
+      "bbox": {
+        "x": 105,
+        "y": 718,
+        "width": 718,
+        "height": 37
+      },
+      "block_id": "ocr-9-9-105-718-718-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9755334258079529,
+      "line_id": 9,
+      "source": "screenshot"
+    },
+    {
+      "text": "订房必读",
+      "bbox": {
+        "x": 935,
+        "y": 813,
+        "width": 150,
+        "height": 43
+      },
+      "block_id": "ocr-10-10-935-813-150-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9978685975074768,
+      "line_id": 10,
+      "source": "screenshot"
+    },
+    {
+      "text": "入住信息",
+      "bbox": {
+        "x": 63,
+        "y": 948,
+        "width": 196,
+        "height": 52
+      },
+      "block_id": "ocr-11-11-63-948-196-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997145533561707,
+      "line_id": 11,
+      "source": "screenshot"
+    },
+    {
+      "text": "房间数量",
+      "bbox": {
+        "x": 64,
+        "y": 1071,
+        "width": 186,
+        "height": 49
+      },
+      "block_id": "ocr-12-12-64-1071-186-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9991487860679626,
+      "line_id": 12,
+      "source": "screenshot"
+    },
+    {
+      "text": "1间 (每间最多住2人)",
+      "bbox": {
+        "x": 270,
+        "y": 1071,
+        "width": 430,
+        "height": 47
+      },
+      "block_id": "ocr-13-13-270-1071-430-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9252264499664307,
+      "line_id": 13,
+      "source": "screenshot"
+    },
+    {
+      "text": "住客姓名",
+      "bbox": {
+        "x": 334,
+        "y": 1202,
+        "width": 134,
+        "height": 35
+      },
+      "block_id": "ocr-14-14-334-1202-134-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996731281280518,
+      "line_id": 14,
+      "source": "screenshot"
+    },
+    {
+      "text": "住客姓名",
+      "bbox": {
+        "x": 64,
+        "y": 1235,
+        "width": 181,
+        "height": 49
+      },
+      "block_id": "ocr-15-15-64-1235-181-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9999242424964905,
+      "line_id": 15,
+      "source": "screenshot"
+    },
+    {
+      "text": "o",
+      "bbox": {
+        "x": 1071,
+        "y": 1235,
+        "width": 28,
+        "height": 28
+      },
+      "block_id": "ocr-16-16-1071-1235-28-28",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8585048317909241,
+      "line_id": 16,
+      "source": "screenshot"
+    },
+    {
+      "text": "?",
+      "bbox": {
+        "x": 269,
+        "y": 1245,
+        "width": 26,
+        "height": 29
+      },
+      "block_id": "ocr-17-17-269-1245-26-29",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.7594360709190369,
+      "line_id": 17,
+      "source": "screenshot"
+    },
+    {
+      "text": "Cm",
+      "bbox": {
+        "x": 1061,
+        "y": 1256,
+        "width": 53,
+        "height": 29
+      },
+      "block_id": "ocr-18-18-1061-1256-53-29",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.42631828784942627,
+      "line_id": 18,
+      "source": "screenshot"
+    },
+    {
+      "text": "STEvEngoodwIN",
+      "bbox": {
+        "x": 332,
+        "y": 1272,
+        "width": 367,
+        "height": 44
+      },
+      "block_id": "ocr-19-19-332-1272-367-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9843632578849792,
+      "line_id": 19,
+      "source": "screenshot"
+    },
+    {
+      "text": "联系手机",
+      "bbox": {
+        "x": 63,
+        "y": 1397,
+        "width": 185,
+        "height": 50
+      },
+      "block_id": "ocr-20-20-63-1397-185-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.999571681022644,
+      "line_id": 20,
+      "source": "screenshot"
+    },
+    {
+      "text": "日",
+      "bbox": {
+        "x": 1059,
+        "y": 1393,
+        "width": 51,
+        "height": 58
+      },
+      "block_id": "ocr-21-21-1059-1393-51-58",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.21746671199798584,
+      "line_id": 21,
+      "source": "screenshot"
+    },
+    {
+      "text": "√",
+      "bbox": {
+        "x": 383,
+        "y": 1409,
+        "width": 22,
+        "height": 21
+      },
+      "block_id": "ocr-22-22-383-1409-22-21",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.44026756286621094,
+      "line_id": 22,
+      "source": "screenshot"
+    },
+    {
+      "text": "018-2756-4896",
+      "bbox": {
+        "x": 449,
+        "y": 1405,
+        "width": 301,
+        "height": 38
+      },
+      "block_id": "ocr-23-23-449-1405-301-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9998234510421753,
+      "line_id": 23,
+      "source": "screenshot"
+    },
+    {
+      "text": "房间将整晚保留",
+      "bbox": {
+        "x": 67,
+        "y": 1549,
+        "width": 294,
+        "height": 45
+      },
+      "block_id": "ocr-24-24-67-1549-294-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9987205862998962,
+      "line_id": 24,
+      "source": "screenshot"
+    },
+    {
+      "text": "黄金会员",
+      "bbox": {
+        "x": 129,
+        "y": 1711,
+        "width": 188,
+        "height": 56
+      },
+      "block_id": "ocr-25-25-129-1711-188-56",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.999049186706543,
+      "line_id": 25,
+      "source": "screenshot"
+    },
+    {
+      "text": "可享优惠",
+      "bbox": {
+        "x": 65,
+        "y": 1823,
+        "width": 170,
+        "height": 46
+      },
+      "block_id": "ocr-26-26-65-1823-170-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994946122169495,
+      "line_id": 26,
+      "source": "screenshot"
+    },
+    {
+      "text": "-￥185",
+      "bbox": {
+        "x": 933,
+        "y": 1817,
+        "width": 125,
+        "height": 49
+      },
+      "block_id": "ocr-27-27-933-1817-125-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.957149863243103,
+      "line_id": 27,
+      "source": "screenshot"
+    },
+    {
+      "text": "神券",
+      "bbox": {
+        "x": 87,
+        "y": 1923,
+        "width": 92,
+        "height": 55
+      },
+      "block_id": "ocr-28-28-87-1923-92-55",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9408048391342163,
+      "line_id": 28,
+      "source": "screenshot"
+    },
+    {
+      "text": "神券",
+      "bbox": {
+        "x": 901,
+        "y": 1926,
+        "width": 77,
+        "height": 47
+      },
+      "block_id": "ocr-29-29-901-1926-77-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9759631752967834,
+      "line_id": 29,
+      "source": "screenshot"
+    },
+    {
+      "text": "-¥15>",
+      "bbox": {
+        "x": 992,
+        "y": 1929,
+        "width": 108,
+        "height": 39
+      },
+      "block_id": "ocr-30-30-992-1929-108-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9295543432235718,
+      "line_id": 30,
+      "source": "screenshot"
+    },
+    {
+      "text": "神券",
+      "bbox": {
+        "x": 111,
+        "y": 2018,
+        "width": 94,
+        "height": 53
+      },
+      "block_id": "ocr-31-31-111-2018-94-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.7363407611846924,
+      "line_id": 31,
+      "source": "screenshot"
+    },
+    {
+      "text": "您有神券可膨胀，每张最高优惠100元",
+      "bbox": {
+        "x": 249,
+        "y": 2023,
+        "width": 600,
+        "height": 41
+      },
+      "block_id": "ocr-32-32-249-2023-600-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9966931939125061,
+      "line_id": 32,
+      "source": "screenshot"
+    },
+    {
+      "text": "去膨胀",
+      "bbox": {
+        "x": 921,
+        "y": 2019,
+        "width": 119,
+        "height": 47
+      },
+      "block_id": "ocr-33-33-921-2019-119-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9988558888435364,
+      "line_id": 33,
+      "source": "screenshot"
+    },
+    {
+      "text": "促销活动",
+      "bbox": {
+        "x": 93,
+        "y": 2115,
+        "width": 148,
+        "height": 43
+      },
+      "block_id": "ocr-34-34-93-2115-148-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997977614402771,
+      "line_id": 34,
+      "source": "screenshot"
+    },
+    {
+      "text": "共3项优惠-￥170>",
+      "bbox": {
+        "x": 815,
+        "y": 2118,
+        "width": 281,
+        "height": 37
+      },
+      "block_id": "ocr-35-35-815-2118-281-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9405845999717712,
+      "line_id": 35,
+      "source": "screenshot"
+    },
+    {
+      "text": "抵用券",
+      "bbox": {
+        "x": 90,
+        "y": 2209,
+        "width": 117,
+        "height": 46
+      },
+      "block_id": "ocr-36-36-90-2209-117-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9977056980133057,
+      "line_id": 36,
+      "source": "screenshot"
+    },
+    {
+      "text": "暂无可用>",
+      "bbox": {
+        "x": 925,
+        "y": 2212,
+        "width": 173,
+        "height": 41
+      },
+      "block_id": "ocr-37-37-925-2212-173-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9726765751838684,
+      "line_id": 37,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥166.76",
+      "bbox": {
+        "x": 33,
+        "y": 2326,
+        "width": 220,
+        "height": 56
+      },
+      "block_id": "ocr-38-38-33-2326-220-56",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9638804197311401,
+      "line_id": 38,
+      "source": "screenshot"
+    },
+    {
+      "text": "已优惠￥185へ",
+      "bbox": {
+        "x": 266,
+        "y": 2333,
+        "width": 190,
+        "height": 34
+      },
+      "block_id": "ocr-39-39-266-2333-190-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.89000403881073,
+      "line_id": 39,
+      "source": "screenshot"
+    },
+    {
+      "text": "提交订单",
+      "bbox": {
+        "x": 772,
+        "y": 2343,
+        "width": 199,
+        "height": 57
+      },
+      "block_id": "ocr-40-40-772-2343-199-57",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9983638525009155,
+      "line_id": 40,
+      "source": "screenshot"
+    },
+    {
+      "text": "下单后订门票返现5元",
+      "bbox": {
+        "x": 38,
+        "y": 2403,
+        "width": 313,
+        "height": 31
+      },
+      "block_id": "ocr-41-41-38-2403-313-31",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.996924877166748,
+      "line_id": 41,
+      "source": "screenshot"
+    }
+  ]
+}

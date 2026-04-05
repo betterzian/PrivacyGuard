@@ -1,0 +1,1283 @@
+{
+  "image_name": "ac01bbac18d2aab9d85aa07ed4b8fac0.jpg",
+  "image_path": "D:\\GitHub\\PrivacyGuard\\data\\test\\ac01bbac18d2aab9d85aa07ed4b8fac0.jpg",
+  "ocr_elapsed_sec": 0.568991,
+  "block_count": 85,
+  "blocks": [
+    {
+      "text": "01:19",
+      "bbox": {
+        "x": 64,
+        "y": 62,
+        "width": 205,
+        "height": 52
+      },
+      "block_id": "ocr-0-0-64-62-205-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9869523048400879,
+      "line_id": 0,
+      "source": "screenshot"
+    },
+    {
+      "text": "90",
+      "bbox": {
+        "x": 996,
+        "y": 72,
+        "width": 54,
+        "height": 35
+      },
+      "block_id": "ocr-1-1-996-72-54-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995677471160889,
+      "line_id": 1,
+      "source": "screenshot"
+    },
+    {
+      "text": "百亿补贴",
+      "bbox": {
+        "x": 942,
+        "y": 158,
+        "width": 156,
+        "height": 43
+      },
+      "block_id": "ocr-2-2-942-158-156-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9979805946350098,
+      "line_id": 2,
+      "source": "screenshot"
+    },
+    {
+      "text": "特价",
+      "bbox": {
+        "x": 38,
+        "y": 183,
+        "width": 118,
+        "height": 65
+      },
+      "block_id": "ocr-3-3-38-183-118-65",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9998131394386292,
+      "line_id": 3,
+      "source": "screenshot"
+    },
+    {
+      "text": "首页",
+      "bbox": {
+        "x": 191,
+        "y": 181,
+        "width": 129,
+        "height": 72
+      },
+      "block_id": "ocr-4-4-191-181-129-72",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996798634529114,
+      "line_id": 4,
+      "source": "screenshot"
+    },
+    {
+      "text": "秒送",
+      "bbox": {
+        "x": 352,
+        "y": 185,
+        "width": 114,
+        "height": 61
+      },
+      "block_id": "ocr-5-5-352-185-114-61",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995661377906799,
+      "line_id": 5,
+      "source": "screenshot"
+    },
+    {
+      "text": "外卖",
+      "bbox": {
+        "x": 475,
+        "y": 192,
+        "width": 81,
+        "height": 46
+      },
+      "block_id": "ocr-6-6-475-192-81-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996848106384277,
+      "line_id": 6,
+      "source": "screenshot"
+    },
+    {
+      "text": "新品",
+      "bbox": {
+        "x": 604,
+        "y": 186,
+        "width": 114,
+        "height": 61
+      },
+      "block_id": "ocr-7-7-604-186-114-61",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9998664259910583,
+      "line_id": 7,
+      "source": "screenshot"
+    },
+    {
+      "text": "0",
+      "bbox": {
+        "x": 826,
+        "y": 190,
+        "width": 31,
+        "height": 24
+      },
+      "block_id": "ocr-8-8-826-190-31-24",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.3238544166088104,
+      "line_id": 8,
+      "source": "screenshot"
+    },
+    {
+      "text": "抢外卖券",
+      "bbox": {
+        "x": 957,
+        "y": 208,
+        "width": 125,
+        "height": 36
+      },
+      "block_id": "ocr-9-9-957-208-125-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9822445511817932,
+      "line_id": 9,
+      "source": "screenshot"
+    },
+    {
+      "text": "荣耀magicv6",
+      "bbox": {
+        "x": 136,
+        "y": 319,
+        "width": 275,
+        "height": 59
+      },
+      "block_id": "ocr-10-10-136-319-275-59",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9973841905593872,
+      "line_id": 10,
+      "source": "screenshot"
+    },
+    {
+      "text": "AI",
+      "bbox": {
+        "x": 896,
+        "y": 319,
+        "width": 27,
+        "height": 22
+      },
+      "block_id": "ocr-11-11-896-319-27-22",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8925155997276306,
+      "line_id": 11,
+      "source": "screenshot"
+    },
+    {
+      "text": "搜索",
+      "bbox": {
+        "x": 969,
+        "y": 324,
+        "width": 97,
+        "height": 53
+      },
+      "block_id": "ocr-12-12-969-324-97-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995809197425842,
+      "line_id": 12,
+      "source": "screenshot"
+    },
+    {
+      "text": "关注",
+      "bbox": {
+        "x": 32,
+        "y": 436,
+        "width": 98,
+        "height": 54
+      },
+      "block_id": "ocr-13-13-32-436-98-54",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996412992477417,
+      "line_id": 13,
+      "source": "screenshot"
+    },
+    {
+      "text": "推荐",
+      "bbox": {
+        "x": 159,
+        "y": 432,
+        "width": 104,
+        "height": 63
+      },
+      "block_id": "ocr-14-14-159-432-104-63",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996153116226196,
+      "line_id": 14,
+      "source": "screenshot"
+    },
+    {
+      "text": "国家补贴",
+      "bbox": {
+        "x": 304,
+        "y": 436,
+        "width": 184,
+        "height": 52
+      },
+      "block_id": "ocr-15-15-304-436-184-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9989160299301147,
+      "line_id": 15,
+      "source": "screenshot"
+    },
+    {
+      "text": "电脑办公",
+      "bbox": {
+        "x": 527,
+        "y": 439,
+        "width": 183,
+        "height": 50
+      },
+      "block_id": "ocr-16-16-527-439-183-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9993448257446289,
+      "line_id": 16,
+      "source": "screenshot"
+    },
+    {
+      "text": "数码",
+      "bbox": {
+        "x": 743,
+        "y": 437,
+        "width": 100,
+        "height": 53
+      },
+      "block_id": "ocr-17-17-743-437-100-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9999163150787354,
+      "line_id": 17,
+      "source": "screenshot"
+    },
+    {
+      "text": "食品",
+      "bbox": {
+        "x": 878,
+        "y": 437,
+        "width": 95,
+        "height": 53
+      },
+      "block_id": "ocr-18-18-878-437-95-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9992408752441406,
+      "line_id": 18,
+      "source": "screenshot"
+    },
+    {
+      "text": "分类",
+      "bbox": {
+        "x": 993,
+        "y": 436,
+        "width": 99,
+        "height": 53
+      },
+      "block_id": "ocr-19-19-993-436-99-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9999510645866394,
+      "line_id": 19,
+      "source": "screenshot"
+    },
+    {
+      "text": "领京豆",
+      "bbox": {
+        "x": 108,
+        "y": 527,
+        "width": 85,
+        "height": 33
+      },
+      "block_id": "ocr-20-20-108-527-85-33",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9940213561058044,
+      "line_id": 20,
+      "source": "screenshot"
+    },
+    {
+      "text": "便宜",
+      "bbox": {
+        "x": 336,
+        "y": 527,
+        "width": 60,
+        "height": 34
+      },
+      "block_id": "ocr-21-21-336-527-60-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9970495700836182,
+      "line_id": 21,
+      "source": "screenshot"
+    },
+    {
+      "text": "国补",
+      "bbox": {
+        "x": 465,
+        "y": 540,
+        "width": 75,
+        "height": 43
+      },
+      "block_id": "ocr-22-22-465-540-75-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9957970380783081,
+      "line_id": 22,
+      "source": "screenshot"
+    },
+    {
+      "text": "省",
+      "bbox": {
+        "x": 281,
+        "y": 556,
+        "width": 49,
+        "height": 49
+      },
+      "block_id": "ocr-23-23-281-556-49-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9998118281364441,
+      "line_id": 23,
+      "source": "screenshot"
+    },
+    {
+      "text": "秒杀",
+      "bbox": {
+        "x": 61,
+        "y": 638,
+        "width": 79,
+        "height": 43
+      },
+      "block_id": "ocr-24-24-61-638-79-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9988992810249329,
+      "line_id": 24,
+      "source": "screenshot"
+    },
+    {
+      "text": "拍拍二手",
+      "bbox": {
+        "x": 230,
+        "y": 641,
+        "width": 145,
+        "height": 39
+      },
+      "block_id": "ocr-25-25-230-641-145-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9853493571281433,
+      "line_id": 25,
+      "source": "screenshot"
+    },
+    {
+      "text": "手机数码",
+      "bbox": {
+        "x": 432,
+        "y": 641,
+        "width": 146,
+        "height": 39
+      },
+      "block_id": "ocr-26-26-432-641-146-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9960909485816956,
+      "line_id": 26,
+      "source": "screenshot"
+    },
+    {
+      "text": "手机馆",
+      "bbox": {
+        "x": 651,
+        "y": 641,
+        "width": 110,
+        "height": 40
+      },
+      "block_id": "ocr-27-27-651-641-110-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9960165023803711,
+      "line_id": 27,
+      "source": "screenshot"
+    },
+    {
+      "text": "机票",
+      "bbox": {
+        "x": 869,
+        "y": 639,
+        "width": 77,
+        "height": 42
+      },
+      "block_id": "ocr-28-28-869-639-77-42",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997719526290894,
+      "line_id": 28,
+      "source": "screenshot"
+    },
+    {
+      "text": "京东",
+      "bbox": {
+        "x": 1039,
+        "y": 640,
+        "width": 86,
+        "height": 41
+      },
+      "block_id": "ocr-29-29-1039-640-86-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9988024830818176,
+      "line_id": 29,
+      "source": "screenshot"
+    },
+    {
+      "text": "国家补贴×百亿补贴",
+      "bbox": {
+        "x": 48,
+        "y": 746,
+        "width": 374,
+        "height": 44
+      },
+      "block_id": "ocr-30-30-48-746-374-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9818106889724731,
+      "line_id": 30,
+      "source": "screenshot"
+    },
+    {
+      "text": "品质生活",
+      "bbox": {
+        "x": 596,
+        "y": 746,
+        "width": 169,
+        "height": 45
+      },
+      "block_id": "ocr-31-31-596-746-169-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9992333054542542,
+      "line_id": 31,
+      "source": "screenshot"
+    },
+    {
+      "text": "999",
+      "bbox": {
+        "x": 971,
+        "y": 769,
+        "width": 12,
+        "height": 8
+      },
+      "block_id": "ocr-32-32-971-769-12-8",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8966799378395081,
+      "line_id": 32,
+      "source": "screenshot"
+    },
+    {
+      "text": "感冒灵",
+      "bbox": {
+        "x": 982,
+        "y": 770,
+        "width": 58,
+        "height": 22
+      },
+      "block_id": "ocr-33-33-982-770-58-22",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9957842826843262,
+      "line_id": 33,
+      "source": "screenshot"
+    },
+    {
+      "text": "泰州",
+      "bbox": {
+        "x": 636,
+        "y": 808,
+        "width": 69,
+        "height": 39
+      },
+      "block_id": "ocr-34-34-636-808-69-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995388984680176,
+      "line_id": 34,
+      "source": "screenshot"
+    },
+    {
+      "text": "24h",
+      "bbox": {
+        "x": 813,
+        "y": 811,
+        "width": 50,
+        "height": 26
+      },
+      "block_id": "ocr-35-35-813-811-50-26",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9973176121711731,
+      "line_id": 35,
+      "source": "screenshot"
+    },
+    {
+      "text": "超市秒送",
+      "bbox": {
+        "x": 770,
+        "y": 851,
+        "width": 134,
+        "height": 37
+      },
+      "block_id": "ocr-36-36-770-851-134-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996522665023804,
+      "line_id": 36,
+      "source": "screenshot"
+    },
+    {
+      "text": "买药秒送",
+      "bbox": {
+        "x": 941,
+        "y": 851,
+        "width": 134,
+        "height": 37
+      },
+      "block_id": "ocr-37-37-941-851-134-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.999379575252533,
+      "line_id": 37,
+      "source": "screenshot"
+    },
+    {
+      "text": "百亿补贴",
+      "bbox": {
+        "x": 633,
+        "y": 907,
+        "width": 109,
+        "height": 33
+      },
+      "block_id": "ocr-38-38-633-907-109-33",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9982328414916992,
+      "line_id": 38,
+      "source": "screenshot"
+    },
+    {
+      "text": "外卖",
+      "bbox": {
+        "x": 637,
+        "y": 960,
+        "width": 50,
+        "height": 29
+      },
+      "block_id": "ocr-39-39-637-960-50-29",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994818568229675,
+      "line_id": 39,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥599",
+      "bbox": {
+        "x": 55,
+        "y": 1010,
+        "width": 92,
+        "height": 36
+      },
+      "block_id": "ocr-40-40-55-1010-92-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9401091933250427,
+      "line_id": 40,
+      "source": "screenshot"
+    },
+    {
+      "text": "补贴价",
+      "bbox": {
+        "x": 151,
+        "y": 1011,
+        "width": 103,
+        "height": 36
+      },
+      "block_id": "ocr-41-41-151-1011-103-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996826648712158,
+      "line_id": 41,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥900.2补贴价",
+      "bbox": {
+        "x": 303,
+        "y": 1011,
+        "width": 228,
+        "height": 35
+      },
+      "block_id": "ocr-42-42-303-1011-228-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9815863370895386,
+      "line_id": 42,
+      "source": "screenshot"
+    },
+    {
+      "text": "外卖",
+      "bbox": {
+        "x": 629,
+        "y": 1012,
+        "width": 71,
+        "height": 39
+      },
+      "block_id": "ocr-43-43-629-1012-71-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9999638199806213,
+      "line_id": 43,
+      "source": "screenshot"
+    },
+    {
+      "text": "京东旅行",
+      "bbox": {
+        "x": 769,
+        "y": 1013,
+        "width": 136,
+        "height": 38
+      },
+      "block_id": "ocr-44-44-769-1013-136-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997369647026062,
+      "line_id": 44,
+      "source": "screenshot"
+    },
+    {
+      "text": "京东点评",
+      "bbox": {
+        "x": 941,
+        "y": 1015,
+        "width": 134,
+        "height": 35
+      },
+      "block_id": "ocr-45-45-941-1015-134-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9988191723823547,
+      "line_id": 45,
+      "source": "screenshot"
+    },
+    {
+      "text": "9.9包邮",
+      "bbox": {
+        "x": 45,
+        "y": 1115,
+        "width": 152,
+        "height": 43
+      },
+      "block_id": "ocr-46-46-45-1115-152-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995746612548828,
+      "line_id": 46,
+      "source": "screenshot"
+    },
+    {
+      "text": "抽3000京",
+      "bbox": {
+        "x": 356,
+        "y": 1119,
+        "width": 171,
+        "height": 34
+      },
+      "block_id": "ocr-47-47-356-1119-171-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9975369572639465,
+      "line_id": 47,
+      "source": "screenshot"
+    },
+    {
+      "text": "直播低价",
+      "bbox": {
+        "x": 635,
+        "y": 1113,
+        "width": 133,
+        "height": 37
+      },
+      "block_id": "ocr-48-48-635-1113-133-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9991443753242493,
+      "line_id": 48,
+      "source": "screenshot"
+    },
+    {
+      "text": "MAKE",
+      "bbox": {
+        "x": 390,
+        "y": 1243,
+        "width": 25,
+        "height": 9
+      },
+      "block_id": "ocr-49-49-390-1243-25-9",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9871975183486938,
+      "line_id": 49,
+      "source": "screenshot"
+    },
+    {
+      "text": "关注主播超值修",
+      "bbox": {
+        "x": 869,
+        "y": 1297,
+        "width": 13,
+        "height": 84
+      },
+      "block_id": "ocr-50-50-869-1297-13-84",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.6864598989486694,
+      "line_id": 50,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥14.88",
+      "bbox": {
+        "x": 93,
+        "y": 1379,
+        "width": 123,
+        "height": 36
+      },
+      "block_id": "ocr-51-51-93-1379-123-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9583053588867188,
+      "line_id": 51,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥26.99",
+      "bbox": {
+        "x": 354,
+        "y": 1375,
+        "width": 127,
+        "height": 44
+      },
+      "block_id": "ocr-52-52-354-1375-127-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9481906890869141,
+      "line_id": 52,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥446",
+      "bbox": {
+        "x": 651,
+        "y": 1382,
+        "width": 93,
+        "height": 37
+      },
+      "block_id": "ocr-53-53-651-1382-93-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9466488361358643,
+      "line_id": 53,
+      "source": "screenshot"
+    },
+    {
+      "text": "100",
+      "bbox": {
+        "x": 969,
+        "y": 1375,
+        "width": 70,
+        "height": 39
+      },
+      "block_id": "ocr-54-54-969-1375-70-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9990172982215881,
+      "line_id": 54,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥",
+      "bbox": {
+        "x": 956,
+        "y": 1387,
+        "width": 19,
+        "height": 18
+      },
+      "block_id": "ocr-55-55-956-1387-19-18",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8093545436859131,
+      "line_id": 55,
+      "source": "screenshot"
+    },
+    {
+      "text": "学生专区",
+      "bbox": {
+        "x": 46,
+        "y": 1482,
+        "width": 170,
+        "height": 49
+      },
+      "block_id": "ocr-56-56-46-1482-170-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9998204708099365,
+      "line_id": 56,
+      "source": "screenshot"
+    },
+    {
+      "text": "1元包邮",
+      "bbox": {
+        "x": 414,
+        "y": 1489,
+        "width": 114,
+        "height": 37
+      },
+      "block_id": "ocr-57-57-414-1489-114-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.998851478099823,
+      "line_id": 57,
+      "source": "screenshot"
+    },
+    {
+      "text": "春日好物",
+      "bbox": {
+        "x": 749,
+        "y": 1482,
+        "width": 174,
+        "height": 50
+      },
+      "block_id": "ocr-58-58-749-1482-174-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9992780089378357,
+      "line_id": 58,
+      "source": "screenshot"
+    },
+    {
+      "text": "百亿补贴",
+      "bbox": {
+        "x": 354,
+        "y": 1551,
+        "width": 132,
+        "height": 31
+      },
+      "block_id": "ocr-59-59-354-1551-132-31",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8276180028915405,
+      "line_id": 59,
+      "source": "screenshot"
+    },
+    {
+      "text": "省",
+      "bbox": {
+        "x": 177,
+        "y": 1570,
+        "width": 34,
+        "height": 30
+      },
+      "block_id": "ocr-60-60-177-1570-34-30",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9875112771987915,
+      "line_id": 60,
+      "source": "screenshot"
+    },
+    {
+      "text": "JELLYCAT",
+      "bbox": {
+        "x": 625,
+        "y": 1591,
+        "width": 36,
+        "height": 11
+      },
+      "block_id": "ocr-61-61-625-1591-36-11",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.7107846736907959,
+      "line_id": 61,
+      "source": "screenshot"
+    },
+    {
+      "text": "国补直降",
+      "bbox": {
+        "x": 85,
+        "y": 1610,
+        "width": 140,
+        "height": 35
+      },
+      "block_id": "ocr-62-62-85-1610-140-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9942328929901123,
+      "line_id": 62,
+      "source": "screenshot"
+    },
+    {
+      "text": "17",
+      "bbox": {
+        "x": 382,
+        "y": 1601,
+        "width": 72,
+        "height": 70
+      },
+      "block_id": "ocr-63-63-382-1601-72-70",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.999756395816803,
+      "line_id": 63,
+      "source": "screenshot"
+    },
+    {
+      "text": "最高",
+      "bbox": {
+        "x": 354,
+        "y": 1627,
+        "width": 22,
+        "height": 41
+      },
+      "block_id": "ocr-64-64-354-1627-22-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9981430768966675,
+      "line_id": 64,
+      "source": "screenshot"
+    },
+    {
+      "text": "20%",
+      "bbox": {
+        "x": 73,
+        "y": 1646,
+        "width": 166,
+        "height": 82
+      },
+      "block_id": "ocr-65-65-73-1646-166-82",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9971548914909363,
+      "line_id": 65,
+      "source": "screenshot"
+    },
+    {
+      "text": "元",
+      "bbox": {
+        "x": 457,
+        "y": 1637,
+        "width": 32,
+        "height": 31
+      },
+      "block_id": "ocr-66-66-457-1637-32-31",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994218349456787,
+      "line_id": 66,
+      "source": "screenshot"
+    },
+    {
+      "text": "领60元优惠",
+      "bbox": {
+        "x": 621,
+        "y": 1713,
+        "width": 172,
+        "height": 35
+      },
+      "block_id": "ocr-67-67-621-1713-172-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9948408007621765,
+      "line_id": 67,
+      "source": "screenshot"
+    },
+    {
+      "text": "直降88折起",
+      "bbox": {
+        "x": 876,
+        "y": 1710,
+        "width": 176,
+        "height": 40
+      },
+      "block_id": "ocr-68-68-876-1710-176-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9980906844139099,
+      "line_id": 68,
+      "source": "screenshot"
+    },
+    {
+      "text": "教育优惠礼金",
+      "bbox": {
+        "x": 56,
+        "y": 1749,
+        "width": 198,
+        "height": 35
+      },
+      "block_id": "ocr-69-69-56-1749-198-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9903397560119629,
+      "line_id": 69,
+      "source": "screenshot"
+    },
+    {
+      "text": "17元外卖餐补",
+      "bbox": {
+        "x": 319,
+        "y": 1750,
+        "width": 197,
+        "height": 35
+      },
+      "block_id": "ocr-70-70-319-1750-197-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9992830157279968,
+      "line_id": 70,
+      "source": "screenshot"
+    },
+    {
+      "text": "出游季",
+      "bbox": {
+        "x": 644,
+        "y": 1787,
+        "width": 110,
+        "height": 40
+      },
+      "block_id": "ocr-71-71-644-1787-110-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9955019950866699,
+      "line_id": 71,
+      "source": "screenshot"
+    },
+    {
+      "text": "国补5折起>",
+      "bbox": {
+        "x": 762,
+        "y": 1787,
+        "width": 190,
+        "height": 41
+      },
+      "block_id": "ocr-72-72-762-1787-190-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9437437057495117,
+      "line_id": 72,
+      "source": "screenshot"
+    },
+    {
+      "text": "超市黑五",
+      "bbox": {
+        "x": 464,
+        "y": 1843,
+        "width": 85,
+        "height": 24
+      },
+      "block_id": "ocr-73-73-464-1843-85-24",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9970441460609436,
+      "line_id": 73,
+      "source": "screenshot"
+    },
+    {
+      "text": "AM",
+      "bbox": {
+        "x": 128,
+        "y": 1854,
+        "width": 109,
+        "height": 56
+      },
+      "block_id": "ocr-74-74-128-1854-109-56",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9834412336349487,
+      "line_id": 74,
+      "source": "screenshot"
+    },
+    {
+      "text": "SLANT",
+      "bbox": {
+        "x": 225,
+        "y": 1849,
+        "width": 219,
+        "height": 66
+      },
+      "block_id": "ocr-75-75-225-1849-219-66",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.990943431854248,
+      "line_id": 75,
+      "source": "screenshot"
+    },
+    {
+      "text": "资质与规则",
+      "bbox": {
+        "x": 1086,
+        "y": 1855,
+        "width": 34,
+        "height": 143
+      },
+      "block_id": "ocr-76-76-1086-1855-34-143",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9883979558944702,
+      "line_id": 76,
+      "source": "screenshot"
+    },
+    {
+      "text": "怒喵歪歪线",
+      "bbox": {
+        "x": 198,
+        "y": 1927,
+        "width": 171,
+        "height": 31
+      },
+      "block_id": "ocr-77-77-198-1927-171-31",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9957568049430847,
+      "line_id": 77,
+      "source": "screenshot"
+    },
+    {
+      "text": "AngrvMiao",
+      "bbox": {
+        "x": 243,
+        "y": 1988,
+        "width": 69,
+        "height": 16
+      },
+      "block_id": "ocr-78-78-243-1988-69-16",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8361366987228394,
+      "line_id": 78,
+      "source": "screenshot"
+    },
+    {
+      "text": "SNANT",
+      "bbox": {
+        "x": 42,
+        "y": 2081,
+        "width": 369,
+        "height": 116
+      },
+      "block_id": "ocr-79-79-42-2081-369-116",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.842677116394043,
+      "line_id": 79,
+      "source": "screenshot"
+    },
+    {
+      "text": "ikbc",
+      "bbox": {
+        "x": 338,
+        "y": 2196,
+        "width": 62,
+        "height": 29
+      },
+      "block_id": "ocr-80-80-338-2196-62-29",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9778356552124023,
+      "line_id": 80,
+      "source": "screenshot"
+    },
+    {
+      "text": "5+",
+      "bbox": {
+        "x": 575,
+        "y": 2196,
+        "width": 40,
+        "height": 28
+      },
+      "block_id": "ocr-81-81-575-2196-40-28",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.99533611536026,
+      "line_id": 81,
+      "source": "screenshot"
+    },
+    {
+      "text": "消息",
+      "bbox": {
+        "x": 525,
+        "y": 2281,
+        "width": 73,
+        "height": 38
+      },
+      "block_id": "ocr-82-82-525-2281-73-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997832775115967,
+      "line_id": 82,
+      "source": "screenshot"
+    },
+    {
+      "text": "购物车",
+      "bbox": {
+        "x": 735,
+        "y": 2282,
+        "width": 102,
+        "height": 36
+      },
+      "block_id": "ocr-83-83-735-2282-102-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9981234669685364,
+      "line_id": 83,
+      "source": "screenshot"
+    },
+    {
+      "text": "我的",
+      "bbox": {
+        "x": 976,
+        "y": 2280,
+        "width": 72,
+        "height": 38
+      },
+      "block_id": "ocr-84-84-976-2280-72-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9998742341995239,
+      "line_id": 84,
+      "source": "screenshot"
+    }
+  ]
+}

@@ -1,0 +1,813 @@
+{
+  "image_name": "55b69a3f4e97be3ced0c0ff8ed2f82e8.jpg",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\55b69a3f4e97be3ced0c0ff8ed2f82e8.ocr.json",
+  "protection_level": "strong",
+  "detect_elapsed_sec": 0.005221,
+  "candidate_count": 15,
+  "by_attr_type": {
+    "address": 6,
+    "name": 6,
+    "organization": 2,
+    "phone": 1
+  },
+  "by_source": {
+    "ocr": 15
+  },
+  "candidates": [
+    {
+      "entity_id": "4154d1a4b5a7967879d07e6dd2d6d4cc",
+      "text": "福满生活超市",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "福满生活超市",
+        "canonical": "city=福满生活超",
+        "components": {
+          "city": "福满生活超"
+        },
+        "match_terms": [
+          "福满生活超"
+        ],
+        "identity": {
+          "city": "福满生活超",
+          "address_part": "福满生活超"
+        }
+      },
+      "canonical_source_text": "city=福满生活超",
+      "normalized_text": "city=福满生活超",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 90,
+        "y": 445,
+        "width": 225,
+        "height": 38
+      },
+      "block_id": "ocr-8-8-90-445-225-38",
+      "span_start": 0,
+      "span_end": 6,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "address_keyword",
+          "ocr_label_address_field"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "address_keyword"
+        ],
+        "address_component_type": [
+          "city"
+        ],
+        "address_component_trace": [
+          "city:福满生活超"
+        ],
+        "address_component_key_trace": [
+          "city:市"
+        ],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-8-8-90-445-225-38"
+        ],
+        "bound_label_clue_ids": [
+          "clue-8"
+        ]
+      }
+    },
+    {
+      "entity_id": "ea22a12c90970c2e9ed0bc8b89331bf1",
+      "text": "文盛印刷",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "文盛印刷",
+        "canonical": "文盛印刷",
+        "components": {
+          "full": "文盛印刷",
+          "family": "文",
+          "given": "盛印刷"
+        },
+        "match_terms": [
+          "文盛印刷",
+          "文",
+          "盛印刷"
+        ],
+        "identity": {
+          "family": "文",
+          "given": "盛印刷"
+        }
+      },
+      "canonical_source_text": "文盛印刷",
+      "normalized_text": "文盛印刷",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 529,
+        "y": 500,
+        "width": 236,
+        "height": 59
+      },
+      "block_id": "ocr-10-10-529-500-236-59",
+      "span_start": 1,
+      "span_end": 5,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-10-10-529-500-236-59"
+        ]
+      }
+    },
+    {
+      "entity_id": "df432ce7dfd8e4bc8303808a2930d661",
+      "text": "材料有限公司",
+      "normalized_source": {
+        "attr_type": "organization",
+        "raw_text": "材料有限公司",
+        "canonical": "材料",
+        "components": {},
+        "match_terms": [
+          "材料"
+        ],
+        "identity": {
+          "canonical": "材料"
+        }
+      },
+      "canonical_source_text": "材料",
+      "normalized_text": "材料",
+      "attr_type": "organization",
+      "source": "ocr",
+      "bbox": {
+        "x": 532,
+        "y": 553,
+        "width": 225,
+        "height": 38
+      },
+      "block_id": "ocr-11-11-532-553-225-38",
+      "span_start": 0,
+      "span_end": 6,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "company_suffix"
+        ],
+        "ocr_block_ids": [
+          "ocr-11-11-532-553-225-38"
+        ]
+      }
+    },
+    {
+      "entity_id": "a25273b833d2fd83dedfc94d8d614819",
+      "text": "北京市昌平区百善镇下东廓村2号库 77 北京",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "北京市昌平区百善镇下东廓村2号库 77 北京",
+        "canonical": "city=北京|district=昌平|town=百善|village=廓",
+        "components": {
+          "city": "北京",
+          "district": "昌平",
+          "town": "百善",
+          "village": "廓"
+        },
+        "match_terms": [
+          "北京",
+          "昌平",
+          "百善",
+          "廓"
+        ],
+        "identity": {
+          "city": "北京",
+          "district": "昌平",
+          "town": "百善",
+          "village": "廓",
+          "address_part": "北京|昌平|百善|廓"
+        }
+      },
+      "canonical_source_text": "city=北京|district=昌平|town=百善|village=廓",
+      "normalized_text": "city=北京|district=昌平|town=百善|village=廓",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 49,
+        "y": 635,
+        "width": 686,
+        "height": 80
+      },
+      "block_id": "ocr-12-12-130-635-605-33",
+      "span_start": 4,
+      "span_end": null,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "geo_db"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "geo_db"
+        ],
+        "address_component_type": [
+          "city",
+          "district",
+          "town",
+          "village"
+        ],
+        "address_component_trace": [
+          "city:北京",
+          "district:昌平",
+          "town:百善",
+          "village:廓"
+        ],
+        "address_component_key_trace": [
+          "city:市",
+          "district:区",
+          "town:镇",
+          "village:村"
+        ],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-12-12-130-635-605-33",
+          "ocr-15-15-49-683-46-32",
+          "ocr-16-16-132-674-500-34"
+        ]
+      }
+    },
+    {
+      "entity_id": "67f1ab947e6ce669603cc20faf614597",
+      "text": "文化传播",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "文化传播",
+        "canonical": "文化传播",
+        "components": {
+          "full": "文化传播",
+          "family": "文",
+          "given": "化传播"
+        },
+        "match_terms": [
+          "文化传播",
+          "文",
+          "化传播"
+        ],
+        "identity": {
+          "family": "文",
+          "given": "化传播"
+        }
+      },
+      "canonical_source_text": "文化传播",
+      "normalized_text": "文化传播",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 132,
+        "y": 674,
+        "width": 500,
+        "height": 34
+      },
+      "block_id": "ocr-16-16-132-674-500-34",
+      "span_start": 4,
+      "span_end": 8,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-16-16-132-674-500-34"
+        ]
+      }
+    },
+    {
+      "entity_id": "4ed5e3e18eb8340abf2813e196b0945a",
+      "text": "司库房",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "司库房",
+        "canonical": "司库房",
+        "components": {
+          "full": "司库房",
+          "family": "司",
+          "given": "库房"
+        },
+        "match_terms": [
+          "司库房",
+          "司",
+          "库房"
+        ],
+        "identity": {
+          "family": "司",
+          "given": "库房"
+        }
+      },
+      "canonical_source_text": "司库房",
+      "normalized_text": "司库房",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 132,
+        "y": 674,
+        "width": 500,
+        "height": 34
+      },
+      "block_id": "ocr-16-16-132-674-500-34",
+      "span_start": 11,
+      "span_end": 14,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-16-16-132-674-500-34"
+        ]
+      }
+    },
+    {
+      "entity_id": "1e5a95a497daf4a3e2b9eca88da9c109",
+      "text": "作室",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "作室",
+        "canonical": "room=作",
+        "components": {
+          "room": "作"
+        },
+        "match_terms": [],
+        "identity": {
+          "room": "作"
+        }
+      },
+      "canonical_source_text": "room=作",
+      "normalized_text": "room=作",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 1036,
+        "y": 630,
+        "width": 81,
+        "height": 42
+      },
+      "block_id": "ocr-13-13-1036-630-81-42",
+      "span_start": 0,
+      "span_end": 2,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "address_keyword"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "address_keyword"
+        ],
+        "address_component_type": [
+          "room"
+        ],
+        "address_component_trace": [
+          "room:作"
+        ],
+        "address_component_key_trace": [
+          "room:室"
+        ],
+        "address_details_type": [
+          "room"
+        ],
+        "address_details_text": [
+          "作"
+        ],
+        "ocr_block_ids": [
+          "ocr-13-13-1036-630-81-42"
+        ]
+      }
+    },
+    {
+      "entity_id": "1c23790fa80611bd65d43dc1a8952482",
+      "text": "北京市昌平区昌平区",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "北京市昌平区昌平区",
+        "canonical": "city=北京|district=昌平",
+        "components": {
+          "city": "北京",
+          "district": "昌平"
+        },
+        "match_terms": [
+          "北京",
+          "昌平"
+        ],
+        "identity": {
+          "city": "北京",
+          "district": "昌平",
+          "address_part": "北京|昌平"
+        }
+      },
+      "canonical_source_text": "city=北京|district=昌平",
+      "normalized_text": "city=北京|district=昌平",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 131,
+        "y": 743,
+        "width": 395,
+        "height": 24
+      },
+      "block_id": "ocr-17-17-131-743-395-24",
+      "span_start": 4,
+      "span_end": 13,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "geo_db"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "geo_db"
+        ],
+        "address_component_type": [
+          "city",
+          "district"
+        ],
+        "address_component_trace": [
+          "city:北京",
+          "district:昌平"
+        ],
+        "address_component_key_trace": [
+          "city:市",
+          "district:区"
+        ],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-17-17-131-743-395-24"
+        ]
+      }
+    },
+    {
+      "entity_id": "7156a478368854003fb92fac38fa4e47",
+      "text": "高德地图",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "高德地图",
+        "canonical": "高德地图",
+        "components": {
+          "full": "高德地图",
+          "family": "高",
+          "given": "德地图"
+        },
+        "match_terms": [
+          "高德地图",
+          "高",
+          "德地图"
+        ],
+        "identity": {
+          "family": "高",
+          "given": "德地图"
+        }
+      },
+      "canonical_source_text": "高德地图",
+      "normalized_text": "高德地图",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 86,
+        "y": 793,
+        "width": 130,
+        "height": 38
+      },
+      "block_id": "ocr-18-18-86-793-130-38",
+      "span_start": 0,
+      "span_end": 4,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-18-18-86-793-130-38"
+        ]
+      }
+    },
+    {
+      "entity_id": "1c6943aba20d0cd0864424fef733304f",
+      "text": "家属院",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "家属院",
+        "canonical": "家属院",
+        "components": {
+          "full": "家属院",
+          "family": "家",
+          "given": "属院"
+        },
+        "match_terms": [
+          "家属院",
+          "家",
+          "属院"
+        ],
+        "identity": {
+          "family": "家",
+          "given": "属院"
+        }
+      },
+      "canonical_source_text": "家属院",
+      "normalized_text": "家属院",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 770,
+        "y": 805,
+        "width": 265,
+        "height": 55
+      },
+      "block_id": "ocr-19-19-770-805-265-55",
+      "span_start": 2,
+      "span_end": 5,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-19-19-770-805-265-55"
+        ]
+      }
+    },
+    {
+      "entity_id": "08cc6e79c7edc5fc84409a690a5f76ad",
+      "text": "北京",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "北京",
+        "canonical": "city=北京",
+        "components": {
+          "city": "北京"
+        },
+        "match_terms": [
+          "北京"
+        ],
+        "identity": {
+          "city": "北京",
+          "address_part": "北京"
+        }
+      },
+      "canonical_source_text": "city=北京",
+      "normalized_text": "city=北京",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 45,
+        "y": 1086,
+        "width": 463,
+        "height": 37
+      },
+      "block_id": "ocr-24-24-45-1086-463-37",
+      "span_start": 1,
+      "span_end": 3,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "geo_db"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "geo_db"
+        ],
+        "address_component_type": [
+          "city"
+        ],
+        "address_component_trace": [
+          "city:北京"
+        ],
+        "address_component_key_trace": [],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-24-24-45-1086-463-37"
+        ]
+      }
+    },
+    {
+      "entity_id": "bb5b0bfa836357c5ec599795542df205",
+      "text": "北京市昌平区百善镇",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "北京市昌平区百善镇",
+        "canonical": "city=北京|district=昌平|town=百善",
+        "components": {
+          "city": "北京",
+          "district": "昌平",
+          "town": "百善"
+        },
+        "match_terms": [
+          "北京",
+          "昌平",
+          "百善"
+        ],
+        "identity": {
+          "city": "北京",
+          "district": "昌平",
+          "town": "百善",
+          "address_part": "北京|昌平|百善"
+        }
+      },
+      "canonical_source_text": "city=北京|district=昌平|town=百善",
+      "normalized_text": "city=北京|district=昌平|town=百善",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 45,
+        "y": 1086,
+        "width": 463,
+        "height": 37
+      },
+      "block_id": "ocr-24-24-45-1086-463-37",
+      "span_start": 3,
+      "span_end": 12,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "address_keyword"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "address_keyword"
+        ],
+        "address_component_type": [
+          "city",
+          "district",
+          "town"
+        ],
+        "address_component_trace": [
+          "city:北京",
+          "district:昌平",
+          "town:百善"
+        ],
+        "address_component_key_trace": [
+          "city:市",
+          "district:区",
+          "town:镇"
+        ],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-24-24-45-1086-463-37"
+        ]
+      }
+    },
+    {
+      "entity_id": "0e057e5c8eaf2d4abe9ba0b9cbe8a67c",
+      "text": "+86 18244520251",
+      "normalized_source": {
+        "attr_type": "phone",
+        "raw_text": "+86 18244520251",
+        "canonical": "18244520251",
+        "components": {},
+        "match_terms": [
+          "18244520251"
+        ],
+        "identity": {
+          "canonical": "18244520251"
+        }
+      },
+      "canonical_source_text": "18244520251",
+      "normalized_text": "18244520251",
+      "attr_type": "phone",
+      "source": "ocr",
+      "bbox": {
+        "x": 44,
+        "y": 1602,
+        "width": 443,
+        "height": 43
+      },
+      "block_id": "ocr-31-31-44-1602-144-43",
+      "span_start": 0,
+      "span_end": null,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "regex_phone_cn"
+        ],
+        "hard_source": [
+          "regex"
+        ],
+        "bound_label_clue_ids": [
+          "clue-60"
+        ],
+        "ocr_block_ids": [
+          "ocr-31-31-44-1602-144-43",
+          "ocr-32-32-196-1605-291-38"
+        ]
+      }
+    },
+    {
+      "entity_id": "a8a4de1c31049c853971247711005389",
+      "text": "家 公司",
+      "normalized_source": {
+        "attr_type": "organization",
+        "raw_text": "家 公司",
+        "canonical": "家",
+        "components": {},
+        "match_terms": [
+          "家"
+        ],
+        "identity": {
+          "canonical": "家"
+        }
+      },
+      "canonical_source_text": "家",
+      "normalized_text": "家",
+      "attr_type": "organization",
+      "source": "ocr",
+      "bbox": {
+        "x": 96,
+        "y": 1860,
+        "width": 236,
+        "height": 52
+      },
+      "block_id": "ocr-34-34-96-1861-54-51",
+      "span_start": 0,
+      "span_end": null,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "company_suffix"
+        ],
+        "ocr_block_ids": [
+          "ocr-34-34-96-1861-54-51",
+          "ocr-35-35-244-1860-88-51"
+        ]
+      }
+    },
+    {
+      "entity_id": "992245ad8ea94a02b7b9f72b04a97efc",
+      "text": "VVV",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "VVV",
+        "canonical": "vvv",
+        "components": {
+          "full": "VVV",
+          "given": "VVV"
+        },
+        "match_terms": [
+          "VVV"
+        ],
+        "identity": {
+          "given": "vvv"
+        }
+      },
+      "canonical_source_text": "vvv",
+      "normalized_text": "vvv",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 38,
+        "y": 1416,
+        "width": 104,
+        "height": 52
+      },
+      "block_id": "ocr-29-29-38-1416-104-52",
+      "span_start": 0,
+      "span_end": 3,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "ocr_label_name_given_field"
+        ],
+        "name_component": [
+          "given"
+        ],
+        "ocr_block_ids": [
+          "ocr-29-29-38-1416-104-52"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,1793 @@
+{
+  "image_name": "072416f5dcba877aff78edb5440cd2aa.jpg",
+  "image_path": "D:\\GitHub\\PrivacyGuard\\data\\test\\072416f5dcba877aff78edb5440cd2aa.jpg",
+  "ocr_elapsed_sec": 1.107152,
+  "block_count": 119,
+  "blocks": [
+    {
+      "text": "01:19",
+      "bbox": {
+        "x": 62,
+        "y": 60,
+        "width": 207,
+        "height": 53
+      },
+      "block_id": "ocr-0-0-62-60-207-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.978915810585022,
+      "line_id": 0,
+      "source": "screenshot"
+    },
+    {
+      "text": ".",
+      "bbox": {
+        "x": 836,
+        "y": 67,
+        "width": 69,
+        "height": 43
+      },
+      "block_id": "ocr-1-1-836-67-69-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.13427495956420898,
+      "line_id": 1,
+      "source": "screenshot"
+    },
+    {
+      "text": "89",
+      "bbox": {
+        "x": 992,
+        "y": 65,
+        "width": 65,
+        "height": 45
+      },
+      "block_id": "ocr-2-2-992-65-65-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995339512825012,
+      "line_id": 2,
+      "source": "screenshot"
+    },
+    {
+      "text": "AI",
+      "bbox": {
+        "x": 909,
+        "y": 186,
+        "width": 32,
+        "height": 24
+      },
+      "block_id": "ocr-3-3-909-186-32-24",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.7979751825332642,
+      "line_id": 3,
+      "source": "screenshot"
+    },
+    {
+      "text": "o0",
+      "bbox": {
+        "x": 1010,
+        "y": 178,
+        "width": 73,
+        "height": 43
+      },
+      "block_id": "ocr-4-4-1010-178-73-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.4282824397087097,
+      "line_id": 4,
+      "source": "screenshot"
+    },
+    {
+      "text": "vivo xfold5手机",
+      "bbox": {
+        "x": 178,
+        "y": 189,
+        "width": 261,
+        "height": 49
+      },
+      "block_id": "ocr-5-5-178-189-261-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9853340983390808,
+      "line_id": 5,
+      "source": "screenshot"
+    },
+    {
+      "text": "X",
+      "bbox": {
+        "x": 451,
+        "y": 201,
+        "width": 22,
+        "height": 24
+      },
+      "block_id": "ocr-6-6-451-201-22-24",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.6624664068222046,
+      "line_id": 6,
+      "source": "screenshot"
+    },
+    {
+      "text": "00",
+      "bbox": {
+        "x": 1011,
+        "y": 207,
+        "width": 72,
+        "height": 43
+      },
+      "block_id": "ocr-7-7-1011-207-72-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.4826890230178833,
+      "line_id": 7,
+      "source": "screenshot"
+    },
+    {
+      "text": "全部",
+      "bbox": {
+        "x": 84,
+        "y": 301,
+        "width": 120,
+        "height": 67
+      },
+      "block_id": "ocr-8-8-84-301-120-67",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995315074920654,
+      "line_id": 8,
+      "source": "screenshot"
+    },
+    {
+      "text": "秒送",
+      "bbox": {
+        "x": 367,
+        "y": 303,
+        "width": 122,
+        "height": 62
+      },
+      "block_id": "ocr-9-9-367-303-122-62",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9998389482498169,
+      "line_id": 9,
+      "source": "screenshot"
+    },
+    {
+      "text": "店铺",
+      "bbox": {
+        "x": 654,
+        "y": 306,
+        "width": 106,
+        "height": 58
+      },
+      "block_id": "ocr-10-10-654-306-106-58",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9992303848266602,
+      "line_id": 10,
+      "source": "screenshot"
+    },
+    {
+      "text": "口碑",
+      "bbox": {
+        "x": 931,
+        "y": 302,
+        "width": 109,
+        "height": 64
+      },
+      "block_id": "ocr-11-11-931-302-109-64",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9935155510902405,
+      "line_id": 11,
+      "source": "screenshot"
+    },
+    {
+      "text": "华润国际社区.",
+      "bbox": {
+        "x": 81,
+        "y": 422,
+        "width": 333,
+        "height": 50
+      },
+      "block_id": "ocr-12-12-81-422-333-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9329603314399719,
+      "line_id": 12,
+      "source": "screenshot"
+    },
+    {
+      "text": "综合推荐",
+      "bbox": {
+        "x": 487,
+        "y": 423,
+        "width": 180,
+        "height": 49
+      },
+      "block_id": "ocr-13-13-487-423-180-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9989219903945923,
+      "line_id": 13,
+      "source": "screenshot"
+    },
+    {
+      "text": "销量",
+      "bbox": {
+        "x": 764,
+        "y": 421,
+        "width": 97,
+        "height": 53
+      },
+      "block_id": "ocr-14-14-764-421-97-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997401237487793,
+      "line_id": 14,
+      "source": "screenshot"
+    },
+    {
+      "text": "筛选了",
+      "bbox": {
+        "x": 934,
+        "y": 420,
+        "width": 148,
+        "height": 54
+      },
+      "block_id": "ocr-15-15-934-420-148-54",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9947354197502136,
+      "line_id": 15,
+      "source": "screenshot"
+    },
+    {
+      "text": "黑色星期五",
+      "bbox": {
+        "x": 58,
+        "y": 549,
+        "width": 135,
+        "height": 32
+      },
+      "block_id": "ocr-16-16-58-549-135-32",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9972942471504211,
+      "line_id": 16,
+      "source": "screenshot"
+    },
+    {
+      "text": "京东物流/时效",
+      "bbox": {
+        "x": 290,
+        "y": 547,
+        "width": 236,
+        "height": 38
+      },
+      "block_id": "ocr-17-17-290-547-236-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9946846961975098,
+      "line_id": 17,
+      "source": "screenshot"
+    },
+    {
+      "text": "机身内存",
+      "bbox": {
+        "x": 654,
+        "y": 545,
+        "width": 151,
+        "height": 42
+      },
+      "block_id": "ocr-18-18-654-545-151-42",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.999811589717865,
+      "line_id": 18,
+      "source": "screenshot"
+    },
+    {
+      "text": "成色",
+      "bbox": {
+        "x": 927,
+        "y": 543,
+        "width": 88,
+        "height": 46
+      },
+      "block_id": "ocr-19-19-927-543-88-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9997241497039795,
+      "line_id": 19,
+      "source": "screenshot"
+    },
+    {
+      "text": "<",
+      "bbox": {
+        "x": 1008,
+        "y": 554,
+        "width": 26,
+        "height": 23
+      },
+      "block_id": "ocr-20-20-1008-554-26-23",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.6578420996665955,
+      "line_id": 20,
+      "source": "screenshot"
+    },
+    {
+      "text": "国家补贴|vivo授权体验店",
+      "bbox": {
+        "x": 125,
+        "y": 640,
+        "width": 204,
+        "height": 20
+      },
+      "block_id": "ocr-21-21-125-640-204-20",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.966600239276886,
+      "line_id": 21,
+      "source": "screenshot"
+    },
+    {
+      "text": "自营秒送",
+      "bbox": {
+        "x": 465,
+        "y": 645,
+        "width": 156,
+        "height": 44
+      },
+      "block_id": "ocr-22-22-465-645-156-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9959096908569336,
+      "line_id": 22,
+      "source": "screenshot"
+    },
+    {
+      "text": "vivoXFold5等效6000",
+      "bbox": {
+        "x": 630,
+        "y": 647,
+        "width": 454,
+        "height": 41
+      },
+      "block_id": "ocr-23-23-630-647-454-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9881232976913452,
+      "line_id": 23,
+      "source": "screenshot"
+    },
+    {
+      "text": "HOT",
+      "bbox": {
+        "x": 21,
+        "y": 637,
+        "width": 45,
+        "height": 45
+      },
+      "block_id": "ocr-24-24-21-637-45-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.995164692401886,
+      "line_id": 24,
+      "source": "screenshot"
+    },
+    {
+      "text": "100+人已买",
+      "bbox": {
+        "x": 462,
+        "y": 711,
+        "width": 197,
+        "height": 35
+      },
+      "block_id": "ocr-25-25-462-711-197-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.987001895904541,
+      "line_id": 25,
+      "source": "screenshot"
+    },
+    {
+      "text": "1千+人加购",
+      "bbox": {
+        "x": 689,
+        "y": 710,
+        "width": 197,
+        "height": 38
+      },
+      "block_id": "ocr-26-26-689-710-197-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9655861258506775,
+      "line_id": 26,
+      "source": "screenshot"
+    },
+    {
+      "text": "vivo X Fold5",
+      "bbox": {
+        "x": 251,
+        "y": 725,
+        "width": 152,
+        "height": 20
+      },
+      "block_id": "ocr-27-27-251-725-152-20",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9159462451934814,
+      "line_id": 27,
+      "source": "screenshot"
+    },
+    {
+      "text": "联合研发",
+      "bbox": {
+        "x": 351,
+        "y": 746,
+        "width": 51,
+        "height": 10
+      },
+      "block_id": "ocr-28-28-351-746-51-10",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.7482484579086304,
+      "line_id": 28,
+      "source": "screenshot"
+    },
+    {
+      "text": "6000mAh蓝海电池蔡司超级长",
+      "bbox": {
+        "x": 259,
+        "y": 759,
+        "width": 143,
+        "height": 14
+      },
+      "block_id": "ocr-29-29-259-759-143-14",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9010316133499146,
+      "line_id": 29,
+      "source": "screenshot"
+    },
+    {
+      "text": "第三代骁龙8",
+      "bbox": {
+        "x": 461,
+        "y": 761,
+        "width": 208,
+        "height": 38
+      },
+      "block_id": "ocr-30-30-461-761-208-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9525290131568909,
+      "line_id": 30,
+      "source": "screenshot"
+    },
+    {
+      "text": "NFC",
+      "bbox": {
+        "x": 710,
+        "y": 760,
+        "width": 85,
+        "height": 41
+      },
+      "block_id": "ocr-31-31-710-760-85-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9928956627845764,
+      "line_id": 31,
+      "source": "screenshot"
+    },
+    {
+      "text": "支持5G",
+      "bbox": {
+        "x": 905,
+        "y": 759,
+        "width": 133,
+        "height": 43
+      },
+      "block_id": "ocr-32-32-905-759-133-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996001720428467,
+      "line_id": 32,
+      "source": "screenshot"
+    },
+    {
+      "text": "至高12期免息",
+      "bbox": {
+        "x": 284,
+        "y": 783,
+        "width": 92,
+        "height": 18
+      },
+      "block_id": "ocr-33-33-284-783-92-18",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9957853555679321,
+      "line_id": 33,
+      "source": "screenshot"
+    },
+    {
+      "text": "免费贴膜免费保养",
+      "bbox": {
+        "x": 283,
+        "y": 816,
+        "width": 93,
+        "height": 14
+      },
+      "block_id": "ocr-34-34-283-816-93-14",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9946610927581787,
+      "line_id": 34,
+      "source": "screenshot"
+    },
+    {
+      "text": "CPU型号",
+      "bbox": {
+        "x": 461,
+        "y": 809,
+        "width": 153,
+        "height": 39
+      },
+      "block_id": "ocr-35-35-461-809-153-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9951989054679871,
+      "line_id": 35,
+      "source": "screenshot"
+    },
+    {
+      "text": "特征特质",
+      "bbox": {
+        "x": 712,
+        "y": 807,
+        "width": 149,
+        "height": 42
+      },
+      "block_id": "ocr-36-36-712-807-149-42",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9998257160186768,
+      "line_id": 36,
+      "source": "screenshot"
+    },
+    {
+      "text": "5G网络",
+      "bbox": {
+        "x": 905,
+        "y": 807,
+        "width": 132,
+        "height": 43
+      },
+      "block_id": "ocr-37-37-905-807-132-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9936928749084473,
+      "line_id": 37,
+      "source": "screenshot"
+    },
+    {
+      "text": "快至",
+      "bbox": {
+        "x": 106,
+        "y": 813,
+        "width": 53,
+        "height": 32
+      },
+      "block_id": "ocr-38-38-106-813-53-32",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.99383145570755,
+      "line_id": 38,
+      "source": "screenshot"
+    },
+    {
+      "text": "30分钟送达",
+      "bbox": {
+        "x": 73,
+        "y": 833,
+        "width": 116,
+        "height": 37
+      },
+      "block_id": "ocr-39-39-73-833-116-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9980182647705078,
+      "line_id": 39,
+      "source": "screenshot"
+    },
+    {
+      "text": "购机送积分官网兑好礼",
+      "bbox": {
+        "x": 272,
+        "y": 845,
+        "width": 115,
+        "height": 14
+      },
+      "block_id": "ocr-40-40-272-845-115-14",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9850963354110718,
+      "line_id": 40,
+      "source": "screenshot"
+    },
+    {
+      "text": "晒单有礼联系门店领取",
+      "bbox": {
+        "x": 256,
+        "y": 887,
+        "width": 132,
+        "height": 17
+      },
+      "block_id": "ocr-41-41-256-887-132-17",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9758715629577637,
+      "line_id": 41,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥7999政府补贴价",
+      "bbox": {
+        "x": 456,
+        "y": 879,
+        "width": 341,
+        "height": 56
+      },
+      "block_id": "ocr-42-42-456-879-341-56",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9904623031616211,
+      "line_id": 42,
+      "source": "screenshot"
+    },
+    {
+      "text": "+",
+      "bbox": {
+        "x": 1045,
+        "y": 882,
+        "width": 51,
+        "height": 54
+      },
+      "block_id": "ocr-43-43-1045-882-51-54",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8348813652992249,
+      "line_id": 43,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥8499",
+      "bbox": {
+        "x": 811,
+        "y": 892,
+        "width": 109,
+        "height": 37
+      },
+      "block_id": "ocr-44-44-811-892-109-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9705116152763367,
+      "line_id": 44,
+      "source": "screenshot"
+    },
+    {
+      "text": "20分钟达",
+      "bbox": {
+        "x": 468,
+        "y": 956,
+        "width": 156,
+        "height": 34
+      },
+      "block_id": "ocr-45-45-468-956-156-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9990850687026978,
+      "line_id": 45,
+      "source": "screenshot"
+    },
+    {
+      "text": "政府补贴",
+      "bbox": {
+        "x": 651,
+        "y": 955,
+        "width": 127,
+        "height": 35
+      },
+      "block_id": "ocr-46-46-651-955-127-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9990242719650269,
+      "line_id": 46,
+      "source": "screenshot"
+    },
+    {
+      "text": "3期免息",
+      "bbox": {
+        "x": 799,
+        "y": 955,
+        "width": 118,
+        "height": 36
+      },
+      "block_id": "ocr-47-47-799-955-118-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9990557432174683,
+      "line_id": 47,
+      "source": "screenshot"
+    },
+    {
+      "text": "补贴估到手价",
+      "bbox": {
+        "x": 309,
+        "y": 974,
+        "width": 82,
+        "height": 14
+      },
+      "block_id": "ocr-48-48-309-974-82-14",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9004995822906494,
+      "line_id": 48,
+      "source": "screenshot"
+    },
+    {
+      "text": "国家补贴至",
+      "bbox": {
+        "x": 40,
+        "y": 990,
+        "width": 130,
+        "height": 28
+      },
+      "block_id": "ocr-49-49-40-990-130-28",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9927785992622375,
+      "line_id": 49,
+      "source": "screenshot"
+    },
+    {
+      "text": "仅剩1件799弄",
+      "bbox": {
+        "x": 164,
+        "y": 990,
+        "width": 254,
+        "height": 44
+      },
+      "block_id": "ocr-50-50-164-990-254-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9089191555976868,
+      "line_id": 50,
+      "source": "screenshot"
+    },
+    {
+      "text": "今10:15起送好评率99%",
+      "bbox": {
+        "x": 463,
+        "y": 1009,
+        "width": 444,
+        "height": 40
+      },
+      "block_id": "ocr-51-51-463-1009-444-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9966574907302856,
+      "line_id": 51,
+      "source": "screenshot"
+    },
+    {
+      "text": "9限部分地区部分机型与",
+      "bbox": {
+        "x": 37,
+        "y": 1022,
+        "width": 128,
+        "height": 13
+      },
+      "block_id": "ocr-52-52-37-1022-128-13",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9403356313705444,
+      "line_id": 52,
+      "source": "screenshot"
+    },
+    {
+      "text": "本周上新vivo体验店-泰州万象..",
+      "bbox": {
+        "x": 472,
+        "y": 1075,
+        "width": 531,
+        "height": 41
+      },
+      "block_id": "ocr-53-53-472-1075-531-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9726020097732544,
+      "line_id": 53,
+      "source": "screenshot"
+    },
+    {
+      "text": "vivo",
+      "bbox": {
+        "x": 46,
+        "y": 1175,
+        "width": 120,
+        "height": 37
+      },
+      "block_id": "ocr-54-54-46-1175-120-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9920685291290283,
+      "line_id": 54,
+      "source": "screenshot"
+    },
+    {
+      "text": "出游季",
+      "bbox": {
+        "x": 334,
+        "y": 1173,
+        "width": 99,
+        "height": 40
+      },
+      "block_id": "ocr-55-55-334-1173-99-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9982921481132507,
+      "line_id": 55,
+      "source": "screenshot"
+    },
+    {
+      "text": "自营",
+      "bbox": {
+        "x": 471,
+        "y": 1176,
+        "width": 82,
+        "height": 45
+      },
+      "block_id": "ocr-56-56-471-1176-82-45",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9980802536010742,
+      "line_id": 56,
+      "source": "screenshot"
+    },
+    {
+      "text": "vivoXFold5专业折叠旗舰",
+      "bbox": {
+        "x": 547,
+        "y": 1176,
+        "width": 519,
+        "height": 44
+      },
+      "block_id": "ocr-57-57-547-1176-519-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.991477370262146,
+      "line_id": 57,
+      "source": "screenshot"
+    },
+    {
+      "text": "NFC功能|IPX8防护|轻薄机身",
+      "bbox": {
+        "x": 467,
+        "y": 1250,
+        "width": 518,
+        "height": 37
+      },
+      "block_id": "ocr-58-58-467-1250-518-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9958819150924683,
+      "line_id": 58,
+      "source": "screenshot"
+    },
+    {
+      "text": "XFold5",
+      "bbox": {
+        "x": 45,
+        "y": 1267,
+        "width": 97,
+        "height": 21
+      },
+      "block_id": "ocr-59-59-45-1267-97-21",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9855122566223145,
+      "line_id": 59,
+      "source": "screenshot"
+    },
+    {
+      "text": "票司联合研发",
+      "bbox": {
+        "x": 83,
+        "y": 1289,
+        "width": 59,
+        "height": 11
+      },
+      "block_id": "ocr-60-60-83-1289-59-11",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.8522858619689941,
+      "line_id": 60,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥6464.01政府补贴价",
+      "bbox": {
+        "x": 463,
+        "y": 1305,
+        "width": 389,
+        "height": 51
+      },
+      "block_id": "ocr-61-61-463-1305-389-51",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9882162809371948,
+      "line_id": 61,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥6999",
+      "bbox": {
+        "x": 836,
+        "y": 1314,
+        "width": 141,
+        "height": 38
+      },
+      "block_id": "ocr-62-62-836-1314-141-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9645107984542847,
+      "line_id": 62,
+      "source": "screenshot"
+    },
+    {
+      "text": "+",
+      "bbox": {
+        "x": 1041,
+        "y": 1308,
+        "width": 48,
+        "height": 47
+      },
+      "block_id": "ocr-63-63-1041-1308-48-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.7313080430030823,
+      "line_id": 63,
+      "source": "screenshot"
+    },
+    {
+      "text": "到手价",
+      "bbox": {
+        "x": 43,
+        "y": 1326,
+        "width": 14,
+        "height": 35
+      },
+      "block_id": "ocr-64-64-43-1326-14-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9466996192932129,
+      "line_id": 64,
+      "source": "screenshot"
+    },
+    {
+      "text": "6999",
+      "bbox": {
+        "x": 51,
+        "y": 1322,
+        "width": 106,
+        "height": 43
+      },
+      "block_id": "ocr-65-65-51-1322-106-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9916638135910034,
+      "line_id": 65,
+      "source": "screenshot"
+    },
+    {
+      "text": "人",
+      "bbox": {
+        "x": 152,
+        "y": 1350,
+        "width": 10,
+        "height": 10
+      },
+      "block_id": "ocr-66-66-152-1350-10-10",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.22580783069133759,
+      "line_id": 66,
+      "source": "screenshot"
+    },
+    {
+      "text": "明日达",
+      "bbox": {
+        "x": 473,
+        "y": 1376,
+        "width": 121,
+        "height": 36
+      },
+      "block_id": "ocr-67-67-473-1376-121-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9991146922111511,
+      "line_id": 67,
+      "source": "screenshot"
+    },
+    {
+      "text": "政府补贴",
+      "bbox": {
+        "x": 615,
+        "y": 1374,
+        "width": 129,
+        "height": 39
+      },
+      "block_id": "ocr-68-68-615-1374-129-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994402527809143,
+      "line_id": 68,
+      "source": "screenshot"
+    },
+    {
+      "text": "京补合约",
+      "bbox": {
+        "x": 764,
+        "y": 1376,
+        "width": 129,
+        "height": 36
+      },
+      "block_id": "ocr-69-69-764-1376-129-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9973258376121521,
+      "line_id": 69,
+      "source": "screenshot"
+    },
+    {
+      "text": "只换不修",
+      "bbox": {
+        "x": 915,
+        "y": 1376,
+        "width": 127,
+        "height": 36
+      },
+      "block_id": "ocr-70-70-915-1376-127-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994974136352539,
+      "line_id": 70,
+      "source": "screenshot"
+    },
+    {
+      "text": "等效6000mAh蓝海电池",
+      "bbox": {
+        "x": 41,
+        "y": 1398,
+        "width": 123,
+        "height": 14
+      },
+      "block_id": "ocr-71-71-41-1398-123-14",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9897969961166382,
+      "line_id": 71,
+      "source": "screenshot"
+    },
+    {
+      "text": "超可靠三防折叠屏",
+      "bbox": {
+        "x": 55,
+        "y": 1426,
+        "width": 96,
+        "height": 14
+      },
+      "block_id": "ocr-72-72-55-1426-96-14",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.994708776473999,
+      "line_id": 72,
+      "source": "screenshot"
+    },
+    {
+      "text": "蔡司超级长焦",
+      "bbox": {
+        "x": 66,
+        "y": 1451,
+        "width": 74,
+        "height": 17
+      },
+      "block_id": "ocr-73-73-66-1451-74-17",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9919878840446472,
+      "line_id": 73,
+      "source": "screenshot"
+    },
+    {
+      "text": "vivo京东自营旗舰店>",
+      "bbox": {
+        "x": 478,
+        "y": 1447,
+        "width": 353,
+        "height": 38
+      },
+      "block_id": "ocr-74-74-478-1447-353-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9748597145080566,
+      "line_id": 74,
+      "source": "screenshot"
+    },
+    {
+      "text": "155件同款在售",
+      "bbox": {
+        "x": 477,
+        "y": 1527,
+        "width": 247,
+        "height": 41
+      },
+      "block_id": "ocr-75-75-477-1527-247-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9993089437484741,
+      "line_id": 75,
+      "source": "screenshot"
+    },
+    {
+      "text": "低至￥5965.44",
+      "bbox": {
+        "x": 806,
+        "y": 1527,
+        "width": 279,
+        "height": 41
+      },
+      "block_id": "ocr-76-76-806-1527-279-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9317666888237,
+      "line_id": 76,
+      "source": "screenshot"
+    },
+    {
+      "text": "vivo",
+      "bbox": {
+        "x": 46,
+        "y": 1628,
+        "width": 90,
+        "height": 28
+      },
+      "block_id": "ocr-77-77-46-1628-90-28",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9741760492324829,
+      "line_id": 77,
+      "source": "screenshot"
+    },
+    {
+      "text": "出游季",
+      "bbox": {
+        "x": 334,
+        "y": 1630,
+        "width": 100,
+        "height": 41
+      },
+      "block_id": "ocr-78-78-334-1630-100-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9982893466949463,
+      "line_id": 78,
+      "source": "screenshot"
+    },
+    {
+      "text": "vivoXFold5新品5G手机折叠屏",
+      "bbox": {
+        "x": 461,
+        "y": 1631,
+        "width": 629,
+        "height": 50
+      },
+      "block_id": "ocr-79-79-461-1631-629-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9763559103012085,
+      "line_id": 79,
+      "source": "screenshot"
+    },
+    {
+      "text": "XFold5",
+      "bbox": {
+        "x": 49,
+        "y": 1690,
+        "width": 110,
+        "height": 28
+      },
+      "block_id": "ocr-80-80-49-1690-110-28",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9940736293792725,
+      "line_id": 80,
+      "source": "screenshot"
+    },
+    {
+      "text": "频PWM|2K师彩|原作台",
+      "bbox": {
+        "x": 466,
+        "y": 1707,
+        "width": 617,
+        "height": 40
+      },
+      "block_id": "ocr-81-81-466-1707-617-40",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9976379871368408,
+      "line_id": 81,
+      "source": "screenshot"
+    },
+    {
+      "text": "更轻了更强了",
+      "bbox": {
+        "x": 99,
+        "y": 1726,
+        "width": 83,
+        "height": 14
+      },
+      "block_id": "ocr-82-82-99-1726-83-14",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.995933473110199,
+      "line_id": 82,
+      "source": "screenshot"
+    },
+    {
+      "text": "12+256GB到手价",
+      "bbox": {
+        "x": 72,
+        "y": 1746,
+        "width": 75,
+        "height": 11
+      },
+      "block_id": "ocr-83-83-72-1746-75-11",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9760817885398865,
+      "line_id": 83,
+      "source": "screenshot"
+    },
+    {
+      "text": "6499",
+      "bbox": {
+        "x": 48,
+        "y": 1757,
+        "width": 113,
+        "height": 43
+      },
+      "block_id": "ocr-84-84-48-1757-113-43",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9974466562271118,
+      "line_id": 84,
+      "source": "screenshot"
+    },
+    {
+      "text": "12GB",
+      "bbox": {
+        "x": 513,
+        "y": 1763,
+        "width": 92,
+        "height": 36
+      },
+      "block_id": "ocr-85-85-513-1763-92-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994126558303833,
+      "line_id": 85,
+      "source": "screenshot"
+    },
+    {
+      "text": "8.03英寸",
+      "bbox": {
+        "x": 671,
+        "y": 1762,
+        "width": 147,
+        "height": 38
+      },
+      "block_id": "ocr-86-86-671-1762-147-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995008111000061,
+      "line_id": 86,
+      "source": "screenshot"
+    },
+    {
+      "text": "5000万像素",
+      "bbox": {
+        "x": 865,
+        "y": 1762,
+        "width": 191,
+        "height": 38
+      },
+      "block_id": "ocr-87-87-865-1762-191-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996424913406372,
+      "line_id": 87,
+      "source": "screenshot"
+    },
+    {
+      "text": "元",
+      "bbox": {
+        "x": 157,
+        "y": 1782,
+        "width": 13,
+        "height": 13
+      },
+      "block_id": "ocr-88-88-157-1782-13-13",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995372295379639,
+      "line_id": 88,
+      "source": "screenshot"
+    },
+    {
+      "text": "运行内存",
+      "bbox": {
+        "x": 489,
+        "y": 1809,
+        "width": 139,
+        "height": 39
+      },
+      "block_id": "ocr-89-89-489-1809-139-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9934508800506592,
+      "line_id": 89,
+      "source": "screenshot"
+    },
+    {
+      "text": "屏幕尺寸",
+      "bbox": {
+        "x": 677,
+        "y": 1809,
+        "width": 138,
+        "height": 38
+      },
+      "block_id": "ocr-90-90-677-1809-138-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9992030262947083,
+      "line_id": 90,
+      "source": "screenshot"
+    },
+    {
+      "text": "后摄主像素",
+      "bbox": {
+        "x": 876,
+        "y": 1809,
+        "width": 169,
+        "height": 39
+      },
+      "block_id": "ocr-91-91-876-1809-169-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995955228805542,
+      "line_id": 91,
+      "source": "screenshot"
+    },
+    {
+      "text": "IOS生态破壁",
+      "bbox": {
+        "x": 56,
+        "y": 1823,
+        "width": 102,
+        "height": 17
+      },
+      "block_id": "ocr-92-92-56-1823-102-17",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9709120988845825,
+      "line_id": 92,
+      "source": "screenshot"
+    },
+    {
+      "text": "2K蔡司大师色彩",
+      "bbox": {
+        "x": 50,
+        "y": 1850,
+        "width": 118,
+        "height": 17
+      },
+      "block_id": "ocr-93-93-50-1850-118-17",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9978883266448975,
+      "line_id": 93,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥6499.05到手价",
+      "bbox": {
+        "x": 462,
+        "y": 1863,
+        "width": 323,
+        "height": 55
+      },
+      "block_id": "ocr-94-94-462-1863-323-55",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9522402286529541,
+      "line_id": 94,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥6999",
+      "bbox": {
+        "x": 766,
+        "y": 1873,
+        "width": 136,
+        "height": 38
+      },
+      "block_id": "ocr-95-95-766-1873-136-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9652973413467407,
+      "line_id": 95,
+      "source": "screenshot"
+    },
+    {
+      "text": "+",
+      "bbox": {
+        "x": 1040,
+        "y": 1866,
+        "width": 51,
+        "height": 51
+      },
+      "block_id": "ocr-96-96-1040-1866-51-51",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.774496853351593,
+      "line_id": 96,
+      "source": "screenshot"
+    },
+    {
+      "text": "专属原子工作台",
+      "bbox": {
+        "x": 53,
+        "y": 1877,
+        "width": 115,
+        "height": 17
+      },
+      "block_id": "ocr-97-97-53-1877-115-17",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9991211891174316,
+      "line_id": 97,
+      "source": "screenshot"
+    },
+    {
+      "text": "现货速发快至次日达",
+      "bbox": {
+        "x": 41,
+        "y": 1910,
+        "width": 131,
+        "height": 17
+      },
+      "block_id": "ocr-98-98-41-1910-131-17",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.99854576587677,
+      "line_id": 98,
+      "source": "screenshot"
+    },
+    {
+      "text": "超可靠三防折叠屏",
+      "bbox": {
+        "x": 47,
+        "y": 1937,
+        "width": 121,
+        "height": 17
+      },
+      "block_id": "ocr-99-99-47-1937-121-17",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9950584769248962,
+      "line_id": 99,
+      "source": "screenshot"
+    },
+    {
+      "text": "购礼150元",
+      "bbox": {
+        "x": 477,
+        "y": 1936,
+        "width": 210,
+        "height": 34
+      },
+      "block_id": "ocr-100-100-477-1936-210-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995157122612,
+      "line_id": 100,
+      "source": "screenshot"
+    },
+    {
+      "text": "免费上门退换",
+      "bbox": {
+        "x": 714,
+        "y": 1936,
+        "width": 185,
+        "height": 34
+      },
+      "block_id": "ocr-101-101-714-1936-185-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9986679553985596,
+      "line_id": 101,
+      "source": "screenshot"
+    },
+    {
+      "text": "7天价保",
+      "bbox": {
+        "x": 922,
+        "y": 1936,
+        "width": 118,
+        "height": 35
+      },
+      "block_id": "ocr-102-102-922-1936-118-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9983494281768799,
+      "line_id": 102,
+      "source": "screenshot"
+    },
+    {
+      "text": "晒单享10元红包",
+      "bbox": {
+        "x": 49,
+        "y": 1965,
+        "width": 103,
+        "height": 17
+      },
+      "block_id": "ocr-103-103-49-1965-103-17",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9932444095611572,
+      "line_id": 103,
+      "source": "screenshot"
+    },
+    {
+      "text": "已售1000+2万+人种草",
+      "bbox": {
+        "x": 469,
+        "y": 1990,
+        "width": 402,
+        "height": 37
+      },
+      "block_id": "ocr-104-104-469-1990-402-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9792647957801819,
+      "line_id": 104,
+      "source": "screenshot"
+    },
+    {
+      "text": "□",
+      "bbox": {
+        "x": 1006,
+        "y": 2018,
+        "width": 69,
+        "height": 73
+      },
+      "block_id": "ocr-105-105-1006-2018-69-73",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.40803417563438416,
+      "line_id": 105,
+      "source": "screenshot"
+    },
+    {
+      "text": "年度五星店铺炜东电商旗舰店",
+      "bbox": {
+        "x": 480,
+        "y": 2060,
+        "width": 481,
+        "height": 37
+      },
+      "block_id": "ocr-106-106-480-2060-481-37",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9886986613273621,
+      "line_id": 106,
+      "source": "screenshot"
+    },
+    {
+      "text": "京东指数",
+      "bbox": {
+        "x": 43,
+        "y": 2160,
+        "width": 124,
+        "height": 31
+      },
+      "block_id": "ocr-107-107-43-2160-124-31",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9985427856445312,
+      "line_id": 107,
+      "source": "screenshot"
+    },
+    {
+      "text": "vivoXFold512+256G明",
+      "bbox": {
+        "x": 466,
+        "y": 2163,
+        "width": 521,
+        "height": 44
+      },
+      "block_id": "ocr-108-108-466-2163-521-44",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9885761737823486,
+      "line_id": 108,
+      "source": "screenshot"
+    },
+    {
+      "text": "AI模型|频PWM|2K师屏",
+      "bbox": {
+        "x": 466,
+        "y": 2236,
+        "width": 545,
+        "height": 38
+      },
+      "block_id": "ocr-109-109-466-2236-545-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9939528107643127,
+      "line_id": 109,
+      "source": "screenshot"
+    },
+    {
+      "text": "￥6758",
+      "bbox": {
+        "x": 462,
+        "y": 2292,
+        "width": 149,
+        "height": 53
+      },
+      "block_id": "ocr-110-110-462-2292-149-53",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9397069811820984,
+      "line_id": 110,
+      "source": "screenshot"
+    },
+    {
+      "text": "全网低价",
+      "bbox": {
+        "x": 612,
+        "y": 2300,
+        "width": 152,
+        "height": 42
+      },
+      "block_id": "ocr-111-111-612-2300-152-42",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9991888999938965,
+      "line_id": 111,
+      "source": "screenshot"
+    },
+    {
+      "text": "+",
+      "bbox": {
+        "x": 1039,
+        "y": 2293,
+        "width": 52,
+        "height": 51
+      },
+      "block_id": "ocr-112-112-1039-2293-52-51",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.7113483548164368,
+      "line_id": 112,
+      "source": "screenshot"
+    },
+    {
+      "text": "明日达",
+      "bbox": {
+        "x": 494,
+        "y": 2366,
+        "width": 99,
+        "height": 33
+      },
+      "block_id": "ocr-113-113-494-2366-99-33",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9991666674613953,
+      "line_id": 113,
+      "source": "screenshot"
+    },
+    {
+      "text": "京东指数",
+      "bbox": {
+        "x": 616,
+        "y": 2363,
+        "width": 127,
+        "height": 38
+      },
+      "block_id": "ocr-114-114-616-2363-127-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9995360970497131,
+      "line_id": 114,
+      "source": "screenshot"
+    },
+    {
+      "text": "指数验真",
+      "bbox": {
+        "x": 763,
+        "y": 2361,
+        "width": 130,
+        "height": 41
+      },
+      "block_id": "ocr-115-115-763-2361-130-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9990981817245483,
+      "line_id": 115,
+      "source": "screenshot"
+    },
+    {
+      "text": "包邮",
+      "bbox": {
+        "x": 914,
+        "y": 2362,
+        "width": 70,
+        "height": 39
+      },
+      "block_id": "ocr-116-116-914-2362-70-39",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9999954104423523,
+      "line_id": 116,
+      "source": "screenshot"
+    },
+    {
+      "text": "□佳10工",
+      "bbox": {
+        "x": 474,
+        "y": 2421,
+        "width": 143,
+        "height": 13
+      },
+      "block_id": "ocr-117-117-474-2421-143-13",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.6306923627853394,
+      "line_id": 117,
+      "source": "screenshot"
+    },
+    {
+      "text": "0：评",
+      "bbox": {
+        "x": 707,
+        "y": 2419,
+        "width": 163,
+        "height": 17
+      },
+      "block_id": "ocr-118-118-707-2419-163-17",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.35778573155403137,
+      "line_id": 118,
+      "source": "screenshot"
+    }
+  ]
+}

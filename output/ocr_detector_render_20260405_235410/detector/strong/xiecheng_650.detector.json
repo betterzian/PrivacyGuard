@@ -1,0 +1,448 @@
+{
+  "image_name": "xiecheng_650.png",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\xiecheng_650.ocr.json",
+  "protection_level": "strong",
+  "detect_elapsed_sec": 0.004321,
+  "candidate_count": 9,
+  "by_attr_type": {
+    "name": 9
+  },
+  "by_source": {
+    "ocr": 9
+  },
+  "candidates": [
+    {
+      "entity_id": "18ba586e262c79fdfddbc32b3ba5cf4c",
+      "text": "连锁",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "连锁",
+        "canonical": "连锁",
+        "components": {
+          "full": "连锁",
+          "family": "连",
+          "given": "锁"
+        },
+        "match_terms": [
+          "连锁",
+          "连",
+          "锁"
+        ],
+        "identity": {
+          "family": "连",
+          "given": "锁"
+        }
+      },
+      "canonical_source_text": "连锁",
+      "normalized_text": "连锁",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 151,
+        "y": 191,
+        "width": 316,
+        "height": 58
+      },
+      "block_id": "ocr-2-2-151-191-316-58",
+      "span_start": 2,
+      "span_end": 4,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-2-2-151-191-316-58"
+        ]
+      }
+    },
+    {
+      "entity_id": "5d2a1dcb3939b74cfc0eb01b4f91597d",
+      "text": "房 大床",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "房 大床",
+        "canonical": "房大床",
+        "components": {
+          "full": "房大床",
+          "family": "房",
+          "given": "大床"
+        },
+        "match_terms": [
+          "房大床",
+          "房",
+          "大床"
+        ],
+        "identity": {
+          "family": "房",
+          "given": "大床"
+        }
+      },
+      "canonical_source_text": "房大床",
+      "normalized_text": "房大床",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 65,
+        "y": 414,
+        "width": 579,
+        "height": 130
+      },
+      "block_id": "ocr-6-6-65-414-273-64",
+      "span_start": 4,
+      "span_end": null,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-6-6-65-414-273-64",
+          "ocr-7-7-66-506-578-38"
+        ]
+      }
+    },
+    {
+      "entity_id": "61d95da7c52cac3b02a9380e8c54515b",
+      "text": "费接送机",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "费接送机",
+        "canonical": "费接送机",
+        "components": {
+          "full": "费接送机",
+          "family": "费",
+          "given": "接送机"
+        },
+        "match_terms": [
+          "费接送机",
+          "费",
+          "接送机"
+        ],
+        "identity": {
+          "family": "费",
+          "given": "接送机"
+        }
+      },
+      "canonical_source_text": "费接送机",
+      "normalized_text": "费接送机",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 88,
+        "y": 608,
+        "width": 312,
+        "height": 44
+      },
+      "block_id": "ocr-8-8-88-608-312-44",
+      "span_start": 5,
+      "span_end": 9,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-8-8-88-608-312-44"
+        ]
+      }
+    },
+    {
+      "entity_id": "eee6a5bad1bd30dce389289c0f44c505",
+      "text": "房必读",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "房必读",
+        "canonical": "房必读",
+        "components": {
+          "full": "房必读",
+          "family": "房",
+          "given": "必读"
+        },
+        "match_terms": [
+          "房必读",
+          "房",
+          "必读"
+        ],
+        "identity": {
+          "family": "房",
+          "given": "必读"
+        }
+      },
+      "canonical_source_text": "房必读",
+      "normalized_text": "房必读",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 935,
+        "y": 813,
+        "width": 150,
+        "height": 43
+      },
+      "block_id": "ocr-10-10-935-813-150-43",
+      "span_start": 1,
+      "span_end": 4,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-10-10-935-813-150-43"
+        ]
+      }
+    },
+    {
+      "entity_id": "9beb98d09d1b844e5bea8f67c958c11c",
+      "text": "房间数量",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "房间数量",
+        "canonical": "房间数量",
+        "components": {
+          "full": "房间数量",
+          "family": "房",
+          "given": "间数量"
+        },
+        "match_terms": [
+          "房间数量",
+          "房",
+          "间数量"
+        ],
+        "identity": {
+          "family": "房",
+          "given": "间数量"
+        }
+      },
+      "canonical_source_text": "房间数量",
+      "normalized_text": "房间数量",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 64,
+        "y": 1071,
+        "width": 186,
+        "height": 49
+      },
+      "block_id": "ocr-12-12-64-1071-186-49",
+      "span_start": 0,
+      "span_end": 4,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-12-12-64-1071-186-49"
+        ]
+      }
+    },
+    {
+      "entity_id": "f5096b136b2a67c423dcc9e1c171782d",
+      "text": "房间将整",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "房间将整",
+        "canonical": "房间将整",
+        "components": {
+          "full": "房间将整",
+          "family": "房",
+          "given": "间将整"
+        },
+        "match_terms": [
+          "房间将整",
+          "房",
+          "间将整"
+        ],
+        "identity": {
+          "family": "房",
+          "given": "间将整"
+        }
+      },
+      "canonical_source_text": "房间将整",
+      "normalized_text": "房间将整",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 67,
+        "y": 1549,
+        "width": 294,
+        "height": 45
+      },
+      "block_id": "ocr-24-24-67-1549-294-45",
+      "span_start": 0,
+      "span_end": 4,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-24-24-67-1549-294-45"
+        ]
+      }
+    },
+    {
+      "entity_id": "10f46579b064b52fb8b017b19a1f583e",
+      "text": "黄金会员",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "黄金会员",
+        "canonical": "黄金会员",
+        "components": {
+          "full": "黄金会员",
+          "family": "黄",
+          "given": "金会员"
+        },
+        "match_terms": [
+          "黄金会员",
+          "黄",
+          "金会员"
+        ],
+        "identity": {
+          "family": "黄",
+          "given": "金会员"
+        }
+      },
+      "canonical_source_text": "黄金会员",
+      "normalized_text": "黄金会员",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 129,
+        "y": 1711,
+        "width": 188,
+        "height": 56
+      },
+      "block_id": "ocr-25-25-129-1711-188-56",
+      "span_start": 0,
+      "span_end": 4,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-25-25-129-1711-188-56"
+        ]
+      }
+    },
+    {
+      "entity_id": "4028885891a9e0652db7950bcfe2c20a",
+      "text": "张最高优惠",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "张最高优惠",
+        "canonical": "张最高优惠",
+        "components": {
+          "full": "张最高优惠",
+          "family": "张",
+          "given": "最高优惠"
+        },
+        "match_terms": [
+          "张最高优惠",
+          "张",
+          "最高优惠"
+        ],
+        "identity": {
+          "family": "张",
+          "given": "最高优惠"
+        }
+      },
+      "canonical_source_text": "张最高优惠",
+      "normalized_text": "张最高优惠",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 249,
+        "y": 2023,
+        "width": 600,
+        "height": 41
+      },
+      "block_id": "ocr-32-32-249-2023-600-41",
+      "span_start": 9,
+      "span_end": 14,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-32-32-249-2023-600-41"
+        ]
+      }
+    },
+    {
+      "entity_id": "f4630395618ba2dde906652b53a53887",
+      "text": "项优惠",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "项优惠",
+        "canonical": "项优惠",
+        "components": {
+          "full": "项优惠",
+          "family": "项",
+          "given": "优惠"
+        },
+        "match_terms": [
+          "项优惠",
+          "项",
+          "优惠"
+        ],
+        "identity": {
+          "family": "项",
+          "given": "优惠"
+        }
+      },
+      "canonical_source_text": "项优惠",
+      "normalized_text": "项优惠",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 815,
+        "y": 2118,
+        "width": 281,
+        "height": 37
+      },
+      "block_id": "ocr-35-35-815-2118-281-37",
+      "span_start": 2,
+      "span_end": 5,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "family_name"
+        ],
+        "name_component": [
+          "full"
+        ],
+        "ocr_block_ids": [
+          "ocr-35-35-815-2118-281-37"
+        ]
+      }
+    }
+  ]
+}

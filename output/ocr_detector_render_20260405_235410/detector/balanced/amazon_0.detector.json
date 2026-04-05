@@ -1,0 +1,169 @@
+{
+  "image_name": "amazon_0.png",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\amazon_0.ocr.json",
+  "protection_level": "balanced",
+  "detect_elapsed_sec": 0.003369,
+  "candidate_count": 3,
+  "by_attr_type": {
+    "address": 2,
+    "email": 1
+  },
+  "by_source": {
+    "ocr": 3
+  },
+  "candidates": [
+    {
+      "entity_id": "59278749c1c143bc84f7d71d243efb49",
+      "text": "co",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "co",
+        "canonical": "province=co",
+        "components": {
+          "province": "CO"
+        },
+        "match_terms": [
+          "CO"
+        ],
+        "identity": {
+          "province": "co",
+          "address_part": "co"
+        }
+      },
+      "canonical_source_text": "province=co",
+      "normalized_text": "province=co",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 33,
+        "y": 213,
+        "width": 342,
+        "height": 51
+      },
+      "block_id": "ocr-2-2-33-213-342-51",
+      "span_start": 7,
+      "span_end": 9,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "geo_db"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "geo_db"
+        ],
+        "address_component_type": [
+          "state"
+        ],
+        "address_component_trace": [
+          "state:CO"
+        ],
+        "address_component_key_trace": [],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-2-2-33-213-342-51"
+        ]
+      }
+    },
+    {
+      "entity_id": "211bb8d303a66debf66bb05bd3090d65",
+      "text": "in",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "in",
+        "canonical": "province=in",
+        "components": {
+          "province": "IN"
+        },
+        "match_terms": [
+          "IN"
+        ],
+        "identity": {
+          "province": "in",
+          "address_part": "in"
+        }
+      },
+      "canonical_source_text": "province=in",
+      "normalized_text": "province=in",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 58,
+        "y": 2169,
+        "width": 836,
+        "height": 37
+      },
+      "block_id": "ocr-23-23-58-2169-836-37",
+      "span_start": 7,
+      "span_end": 9,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "geo_db"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "geo_db"
+        ],
+        "address_component_type": [
+          "state"
+        ],
+        "address_component_trace": [
+          "state:IN"
+        ],
+        "address_component_key_trace": [],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-23-23-58-2169-836-37"
+        ]
+      }
+    },
+    {
+      "entity_id": "6d38d7da60a2ac5492f57843b4eec157",
+      "text": "santos4318@outlook.gov",
+      "normalized_source": {
+        "attr_type": "email",
+        "raw_text": "santos4318@outlook.gov",
+        "canonical": "santos4318@outlook.gov",
+        "components": {},
+        "match_terms": [
+          "santos4318@outlook.gov"
+        ],
+        "identity": {
+          "canonical": "santos4318@outlook.gov"
+        }
+      },
+      "canonical_source_text": "santos4318@outlook.gov",
+      "normalized_text": "santos4318@outlook.gov",
+      "attr_type": "email",
+      "source": "ocr",
+      "bbox": {
+        "x": 58,
+        "y": 2169,
+        "width": 836,
+        "height": 37
+      },
+      "block_id": "ocr-23-23-58-2169-836-37",
+      "span_start": 23,
+      "span_end": 45,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "regex_email"
+        ],
+        "hard_source": [
+          "regex"
+        ],
+        "ocr_block_ids": [
+          "ocr-23-23-58-2169-836-37"
+        ]
+      }
+    }
+  ]
+}

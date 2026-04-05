@@ -1,0 +1,10 @@
+{
+  "image_name": "tiktok_500.png",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\tiktok_500.ocr.json",
+  "protection_level": "balanced",
+  "detect_elapsed_sec": 0.001944,
+  "candidate_count": 0,
+  "by_attr_type": {},
+  "by_source": {},
+  "candidates": []
+}

@@ -1,0 +1,398 @@
+{
+  "image_name": "tiktok_500.png",
+  "image_path": "D:\\GitHub\\PrivacyGuard\\data\\test\\tiktok_500.png",
+  "ocr_elapsed_sec": 0.399108,
+  "block_count": 26,
+  "blocks": [
+    {
+      "text": "15:23",
+      "bbox": {
+        "x": 138,
+        "y": 57,
+        "width": 150,
+        "height": 58
+      },
+      "block_id": "ocr-0-0-138-57-150-58",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9959198236465454,
+      "line_id": 0,
+      "source": "screenshot"
+    },
+    {
+      "text": "26",
+      "bbox": {
+        "x": 1009,
+        "y": 63,
+        "width": 56,
+        "height": 47
+      },
+      "block_id": "ocr-1-1-1009-63-56-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9999366998672485,
+      "line_id": 1,
+      "source": "screenshot"
+    },
+    {
+      "text": "88",
+      "bbox": {
+        "x": 921,
+        "y": 201,
+        "width": 83,
+        "height": 84
+      },
+      "block_id": "ocr-2-2-921-201-83-84",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.5035363435745239,
+      "line_id": 2,
+      "source": "screenshot"
+    },
+    {
+      "text": "bRENda fULleR",
+      "bbox": {
+        "x": 388,
+        "y": 655,
+        "width": 404,
+        "height": 51
+      },
+      "block_id": "ocr-3-3-388-655-404-51",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9551898241043091,
+      "line_id": 3,
+      "source": "screenshot"
+    },
+    {
+      "text": "0",
+      "bbox": {
+        "x": 294,
+        "y": 755,
+        "width": 38,
+        "height": 47
+      },
+      "block_id": "ocr-4-4-294-755-38-47",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9950762391090393,
+      "line_id": 4,
+      "source": "screenshot"
+    },
+    {
+      "text": "0",
+      "bbox": {
+        "x": 570,
+        "y": 755,
+        "width": 37,
+        "height": 46
+      },
+      "block_id": "ocr-5-5-570-755-37-46",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9962711334228516,
+      "line_id": 5,
+      "source": "screenshot"
+    },
+    {
+      "text": "0",
+      "bbox": {
+        "x": 845,
+        "y": 755,
+        "width": 39,
+        "height": 48
+      },
+      "block_id": "ocr-6-6-845-755-39-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9695183038711548,
+      "line_id": 6,
+      "source": "screenshot"
+    },
+    {
+      "text": "Following",
+      "bbox": {
+        "x": 222,
+        "y": 812,
+        "width": 180,
+        "height": 49
+      },
+      "block_id": "ocr-7-7-222-812-180-49",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.999506413936615,
+      "line_id": 7,
+      "source": "screenshot"
+    },
+    {
+      "text": "Followers",
+      "bbox": {
+        "x": 502,
+        "y": 815,
+        "width": 175,
+        "height": 42
+      },
+      "block_id": "ocr-8-8-502-815-175-42",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994097948074341,
+      "line_id": 8,
+      "source": "screenshot"
+    },
+    {
+      "text": "Likes",
+      "bbox": {
+        "x": 811,
+        "y": 810,
+        "width": 106,
+        "height": 50
+      },
+      "block_id": "ocr-9-9-811-810-106-50",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9981892704963684,
+      "line_id": 9,
+      "source": "screenshot"
+    },
+    {
+      "text": "0",
+      "bbox": {
+        "x": 927,
+        "y": 901,
+        "width": 94,
+        "height": 91
+      },
+      "block_id": "ocr-10-10-927-901-94-91",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.41906967759132385,
+      "line_id": 10,
+      "source": "screenshot"
+    },
+    {
+      "text": "Edit profile",
+      "bbox": {
+        "x": 196,
+        "y": 923,
+        "width": 238,
+        "height": 48
+      },
+      "block_id": "ocr-11-11-196-923-238-48",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9960417747497559,
+      "line_id": 11,
+      "source": "screenshot"
+    },
+    {
+      "text": "Share profile",
+      "bbox": {
+        "x": 559,
+        "y": 921,
+        "width": 279,
+        "height": 52
+      },
+      "block_id": "ocr-12-12-559-921-279-52",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9982243776321411,
+      "line_id": 12,
+      "source": "screenshot"
+    },
+    {
+      "text": "+ Add bio",
+      "bbox": {
+        "x": 502,
+        "y": 1061,
+        "width": 175,
+        "height": 38
+      },
+      "block_id": "ocr-13-13-502-1061-175-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9934948682785034,
+      "line_id": 13,
+      "source": "screenshot"
+    },
+    {
+      "text": "111",
+      "bbox": {
+        "x": 132,
+        "y": 1152,
+        "width": 68,
+        "height": 38
+      },
+      "block_id": "ocr-14-14-132-1152-68-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.49902045726776123,
+      "line_id": 14,
+      "source": "screenshot"
+    },
+    {
+      "text": "D",
+      "bbox": {
+        "x": 437,
+        "y": 1160,
+        "width": 31,
+        "height": 21
+      },
+      "block_id": "ocr-15-15-437-1160-31-21",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9923986792564392,
+      "line_id": 15,
+      "source": "screenshot"
+    },
+    {
+      "text": "心",
+      "bbox": {
+        "x": 702,
+        "y": 1163,
+        "width": 64,
+        "height": 56
+      },
+      "block_id": "ocr-16-16-702-1163-64-56",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.22476057708263397,
+      "line_id": 16,
+      "source": "screenshot"
+    },
+    {
+      "text": "iii",
+      "bbox": {
+        "x": 131,
+        "y": 1178,
+        "width": 70,
+        "height": 41
+      },
+      "block_id": "ocr-17-17-131-1178-70-41",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.7949464321136475,
+      "line_id": 17,
+      "source": "screenshot"
+    },
+    {
+      "text": "What are some good photos",
+      "bbox": {
+        "x": 244,
+        "y": 1566,
+        "width": 690,
+        "height": 59
+      },
+      "block_id": "ocr-18-18-244-1566-690-59",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9988632202148438,
+      "line_id": 18,
+      "source": "screenshot"
+    },
+    {
+      "text": "you've taken recently?",
+      "bbox": {
+        "x": 312,
+        "y": 1623,
+        "width": 552,
+        "height": 61
+      },
+      "block_id": "ocr-19-19-312-1623-552-61",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9973577260971069,
+      "line_id": 19,
+      "source": "screenshot"
+    },
+    {
+      "text": "Upload",
+      "bbox": {
+        "x": 510,
+        "y": 1731,
+        "width": 157,
+        "height": 58
+      },
+      "block_id": "ocr-20-20-510-1731-157-58",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9984381198883057,
+      "line_id": 20,
+      "source": "screenshot"
+    },
+    {
+      "text": "Oo",
+      "bbox": {
+        "x": 315,
+        "y": 2318,
+        "width": 82,
+        "height": 57
+      },
+      "block_id": "ocr-21-21-315-2318-82-57",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.917595386505127,
+      "line_id": 21,
+      "source": "screenshot"
+    },
+    {
+      "text": "Home",
+      "bbox": {
+        "x": 70,
+        "y": 2403,
+        "width": 95,
+        "height": 34
+      },
+      "block_id": "ocr-22-22-70-2403-95-34",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.998476505279541,
+      "line_id": 22,
+      "source": "screenshot"
+    },
+    {
+      "text": "Friends",
+      "bbox": {
+        "x": 297,
+        "y": 2402,
+        "width": 112,
+        "height": 35
+      },
+      "block_id": "ocr-23-23-297-2402-112-35",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9994141459465027,
+      "line_id": 23,
+      "source": "screenshot"
+    },
+    {
+      "text": "Inbox",
+      "bbox": {
+        "x": 779,
+        "y": 2400,
+        "width": 92,
+        "height": 38
+      },
+      "block_id": "ocr-24-24-779-2400-92-38",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9507485628128052,
+      "line_id": 24,
+      "source": "screenshot"
+    },
+    {
+      "text": "Profile",
+      "bbox": {
+        "x": 1010,
+        "y": 2402,
+        "width": 101,
+        "height": 36
+      },
+      "block_id": "ocr-25-25-1010-2402-101-36",
+      "polygon": null,
+      "rotation_degrees": 0.0,
+      "score": 0.9996343851089478,
+      "line_id": 25,
+      "source": "screenshot"
+    }
+  ]
+}

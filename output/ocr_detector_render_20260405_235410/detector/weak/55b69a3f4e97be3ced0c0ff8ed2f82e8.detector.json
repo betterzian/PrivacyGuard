@@ -1,0 +1,150 @@
+{
+  "image_name": "55b69a3f4e97be3ced0c0ff8ed2f82e8.jpg",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\55b69a3f4e97be3ced0c0ff8ed2f82e8.ocr.json",
+  "protection_level": "weak",
+  "detect_elapsed_sec": 0.004512,
+  "candidate_count": 3,
+  "by_attr_type": {
+    "address": 1,
+    "name": 1,
+    "phone": 1
+  },
+  "by_source": {
+    "ocr": 3
+  },
+  "candidates": [
+    {
+      "entity_id": "0e057e5c8eaf2d4abe9ba0b9cbe8a67c",
+      "text": "+86 18244520251",
+      "normalized_source": {
+        "attr_type": "phone",
+        "raw_text": "+86 18244520251",
+        "canonical": "18244520251",
+        "components": {},
+        "match_terms": [
+          "18244520251"
+        ],
+        "identity": {
+          "canonical": "18244520251"
+        }
+      },
+      "canonical_source_text": "18244520251",
+      "normalized_text": "18244520251",
+      "attr_type": "phone",
+      "source": "ocr",
+      "bbox": {
+        "x": 44,
+        "y": 1602,
+        "width": 443,
+        "height": 43
+      },
+      "block_id": "ocr-31-31-44-1602-144-43",
+      "span_start": 0,
+      "span_end": null,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "regex_phone_cn"
+        ],
+        "hard_source": [
+          "regex"
+        ],
+        "bound_label_clue_ids": [
+          "clue-60"
+        ],
+        "ocr_block_ids": [
+          "ocr-31-31-44-1602-144-43",
+          "ocr-32-32-196-1605-291-38"
+        ]
+      }
+    },
+    {
+      "entity_id": "4154d1a4b5a7967879d07e6dd2d6d4cc",
+      "text": "福满生活超市",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "福满生活超市",
+        "canonical": "city=福满生活超",
+        "components": {
+          "city": "福满生活超"
+        },
+        "match_terms": [
+          "福满生活超"
+        ],
+        "identity": {
+          "city": "福满生活超",
+          "address_part": "福满生活超"
+        }
+      },
+      "canonical_source_text": "city=福满生活超",
+      "normalized_text": "city=福满生活超",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 90,
+        "y": 445,
+        "width": 225,
+        "height": 38
+      },
+      "block_id": "ocr-8-8-90-445-225-38",
+      "span_start": 0,
+      "span_end": 6,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "ocr_label_address_field"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "ocr_block_ids": [
+          "ocr-8-8-90-445-225-38"
+        ]
+      }
+    },
+    {
+      "entity_id": "992245ad8ea94a02b7b9f72b04a97efc",
+      "text": "VVV",
+      "normalized_source": {
+        "attr_type": "name",
+        "raw_text": "VVV",
+        "canonical": "vvv",
+        "components": {
+          "full": "VVV",
+          "given": "VVV"
+        },
+        "match_terms": [
+          "VVV"
+        ],
+        "identity": {
+          "given": "vvv"
+        }
+      },
+      "canonical_source_text": "vvv",
+      "normalized_text": "vvv",
+      "attr_type": "name",
+      "source": "ocr",
+      "bbox": {
+        "x": 38,
+        "y": 1416,
+        "width": 104,
+        "height": 52
+      },
+      "block_id": "ocr-29-29-38-1416-104-52",
+      "span_start": 0,
+      "span_end": 3,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "ocr_label_name_given_field"
+        ],
+        "name_component": [
+          "given"
+        ],
+        "ocr_block_ids": [
+          "ocr-29-29-38-1416-104-52"
+        ]
+      }
+    }
+  ]
+}

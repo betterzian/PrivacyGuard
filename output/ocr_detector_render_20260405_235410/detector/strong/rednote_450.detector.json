@@ -1,0 +1,127 @@
+{
+  "image_name": "rednote_450.png",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\rednote_450.ocr.json",
+  "protection_level": "strong",
+  "detect_elapsed_sec": 0.002732,
+  "candidate_count": 2,
+  "by_attr_type": {
+    "address": 2
+  },
+  "by_source": {
+    "ocr": 2
+  },
+  "candidates": [
+    {
+      "entity_id": "41894a23d5408dbade57a1db60298148",
+      "text": "ID",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "ID",
+        "canonical": "province=id",
+        "components": {
+          "province": "ID"
+        },
+        "match_terms": [
+          "ID"
+        ],
+        "identity": {
+          "province": "id",
+          "address_part": "id"
+        }
+      },
+      "canonical_source_text": "province=id",
+      "normalized_text": "province=id",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 382,
+        "y": 500,
+        "width": 522,
+        "height": 40
+      },
+      "block_id": "ocr-5-5-382-500-522-40",
+      "span_start": 12,
+      "span_end": 14,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "geo_db"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "geo_db"
+        ],
+        "address_component_type": [
+          "state"
+        ],
+        "address_component_trace": [
+          "state:ID"
+        ],
+        "address_component_key_trace": [],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-5-5-382-500-522-40"
+        ]
+      }
+    },
+    {
+      "entity_id": "94deca4f3818850789f78630eff91c81",
+      "text": "in",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "in",
+        "canonical": "province=in",
+        "components": {
+          "province": "IN"
+        },
+        "match_terms": [
+          "IN"
+        ],
+        "identity": {
+          "province": "in",
+          "address_part": "in"
+        }
+      },
+      "canonical_source_text": "province=in",
+      "normalized_text": "province=in",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 363,
+        "y": 1773,
+        "width": 450,
+        "height": 51
+      },
+      "block_id": "ocr-24-24-363-1773-450-51",
+      "span_start": 14,
+      "span_end": 16,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "geo_db"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "geo_db"
+        ],
+        "address_component_type": [
+          "state"
+        ],
+        "address_component_trace": [
+          "state:IN"
+        ],
+        "address_component_key_trace": [],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-24-24-363-1773-450-51"
+        ]
+      }
+    }
+  ]
+}

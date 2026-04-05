@@ -1,0 +1,71 @@
+{
+  "image_name": "ac01bbac18d2aab9d85aa07ed4b8fac0.jpg",
+  "ocr_json_path": "D:\\GitHub\\PrivacyGuard\\artifacts\\ocr_detector_eval_20260405_234201\\ocr\\ac01bbac18d2aab9d85aa07ed4b8fac0.ocr.json",
+  "protection_level": "balanced",
+  "detect_elapsed_sec": 0.006289,
+  "candidate_count": 1,
+  "by_attr_type": {
+    "address": 1
+  },
+  "by_source": {
+    "ocr": 1
+  },
+  "candidates": [
+    {
+      "entity_id": "34e8e91f5e7ed6d734f434d9a2a652f0",
+      "text": "泰州",
+      "normalized_source": {
+        "attr_type": "address",
+        "raw_text": "泰州",
+        "canonical": "city=泰州",
+        "components": {
+          "city": "泰州"
+        },
+        "match_terms": [
+          "泰州"
+        ],
+        "identity": {
+          "city": "泰州",
+          "address_part": "泰州"
+        }
+      },
+      "canonical_source_text": "city=泰州",
+      "normalized_text": "city=泰州",
+      "attr_type": "address",
+      "source": "ocr",
+      "bbox": {
+        "x": 636,
+        "y": 808,
+        "width": 69,
+        "height": 39
+      },
+      "block_id": "ocr-34-34-636-808-69-39",
+      "span_start": 0,
+      "span_end": 2,
+      "confidence": 1.0,
+      "metadata": {
+        "matched_by": [
+          "geo_db"
+        ],
+        "address_kind": [
+          "private_address"
+        ],
+        "address_match_origin": [
+          "geo_db"
+        ],
+        "address_component_type": [
+          "city"
+        ],
+        "address_component_trace": [
+          "city:泰州"
+        ],
+        "address_component_key_trace": [],
+        "address_details_type": [],
+        "address_details_text": [],
+        "ocr_block_ids": [
+          "ocr-34-34-636-808-69-39"
+        ]
+      }
+    }
+  ]
+}
