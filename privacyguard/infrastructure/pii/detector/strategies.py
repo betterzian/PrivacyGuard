@@ -38,14 +38,17 @@ def _build_level_strategies(level: ProtectionLevel) -> dict[PIIAttributeType, St
         attr_type: _allow_roles(ClueRole.LABEL, ClueRole.HARD)
         for attr_type in _STRUCTURED_ATTRS
     }
+    name_roles = (
+        ClueRole.LABEL,
+        ClueRole.START,
+        ClueRole.FAMILY_NAME,
+        ClueRole.GIVEN_NAME,
+        ClueRole.FULL_NAME,
+        ClueRole.ALIAS,
+        ClueRole.HARD,
+    )
     if level == ProtectionLevel.STRONG:
-        strategies[PIIAttributeType.NAME] = _allow_roles(
-            ClueRole.LABEL,
-            ClueRole.START,
-            ClueRole.SURNAME,
-            ClueRole.GIVEN_NAME,
-            ClueRole.HARD,
-        )
+        strategies[PIIAttributeType.NAME] = _allow_roles(*name_roles)
         strategies[PIIAttributeType.ORGANIZATION] = _allow_roles(
             ClueRole.LABEL,
             ClueRole.SUFFIX,
@@ -59,11 +62,7 @@ def _build_level_strategies(level: ProtectionLevel) -> dict[PIIAttributeType, St
         )
         return strategies
     if level == ProtectionLevel.BALANCED:
-        strategies[PIIAttributeType.NAME] = _allow_roles(
-            ClueRole.LABEL,
-            ClueRole.START,
-            ClueRole.HARD,
-        )
+        strategies[PIIAttributeType.NAME] = _allow_roles(*name_roles)
         strategies[PIIAttributeType.ORGANIZATION] = _allow_roles(
             ClueRole.LABEL,
             ClueRole.SUFFIX,
@@ -75,7 +74,7 @@ def _build_level_strategies(level: ProtectionLevel) -> dict[PIIAttributeType, St
             ClueRole.HARD,
         )
         return strategies
-    strategies[PIIAttributeType.NAME] = _allow_roles(ClueRole.LABEL, ClueRole.HARD)
+    strategies[PIIAttributeType.NAME] = _allow_roles(*name_roles)
     strategies[PIIAttributeType.ORGANIZATION] = _allow_roles(ClueRole.LABEL, ClueRole.HARD)
     strategies[PIIAttributeType.ADDRESS] = _allow_roles(ClueRole.LABEL, ClueRole.HARD)
     return strategies

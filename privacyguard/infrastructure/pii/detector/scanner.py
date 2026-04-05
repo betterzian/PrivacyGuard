@@ -89,7 +89,18 @@ _SOFT_CONTENT_ROLES = frozenset(
         ClueRole.SUFFIX,
         ClueRole.KEY,
         ClueRole.VALUE,
-        ClueRole.SURNAME,
+        ClueRole.FAMILY_NAME,
+        ClueRole.GIVEN_NAME,
+        ClueRole.FULL_NAME,
+        ClueRole.ALIAS,
+    }
+)
+_START_MASKED_SOFT_ROLES = frozenset(
+    {
+        ClueRole.SUFFIX,
+        ClueRole.KEY,
+        ClueRole.VALUE,
+        ClueRole.FAMILY_NAME,
         ClueRole.GIVEN_NAME,
     }
 )
@@ -168,6 +179,10 @@ def build_clue_bundle(
     Pass 2 — segment-major soft clue 扫描，事件扫描线裁决。
     """
     ocr_break_spans = _find_ocr_break_spans(stream)
+    session_name_entries = tuple(entry for entry in session_entries if entry.attr_type == PIIAttributeType.NAME)
+    local_name_entries = tuple(entry for entry in local_entries if entry.attr_type == PIIAttributeType.NAME)
+    session_hard_entries = tuple(entry for entry in session_entries if entry.attr_type != PIIAttributeType.NAME)
+    local_hard_entries = tuple(entry for entry in local_entries if entry.attr_type != PIIAttributeType.NAME)
 
     # ── Pass 1: hard clue 扫描与裁决 ──
     hard_clues = _resolve_hard_conflicts(
@@ -176,14 +191,14 @@ def build_clue_bundle(
             *_scan_dictionary_hard_clues(
                 ctx,
                 stream,
-                session_entries,
+                session_hard_entries,
                 source_kind="session",
                 ignored_spans=ocr_break_spans,
             ),
             *_scan_dictionary_hard_clues(
                 ctx,
                 stream,
-                local_entries,
+                local_hard_entries,
                 source_kind="local",
                 ignored_spans=ocr_break_spans,
             ),
@@ -194,6 +209,8 @@ def build_clue_bundle(
     scan_segments = _build_soft_scan_segments(stream, hard_clues, extra_blocked_spans=ocr_break_spans)
     soft_clues: list[Clue] = []
     for segment in scan_segments:
+        soft_clues.extend(_scan_name_dictionary_clues(ctx, segment, session_name_entries, source_kind="session"))
+        soft_clues.extend(_scan_name_dictionary_clues(ctx, segment, local_name_entries, source_kind="local"))
         soft_clues.extend(_scan_label_clues(ctx, segment))
         soft_clues.extend(_scan_break_clues(ctx, segment))
         soft_clues.extend(_scan_name_start_clues(ctx, segment))
@@ -336,6 +353,7 @@ def _scan_dictionary_hard_clues(
 ) -> list[Clue]:
     if isinstance(stream, str):
         stream = build_prompt_stream(stream)
+    entries = tuple(entry for entry in entries if entry.attr_type != PIIAttributeType.NAME)
     if not entries:
         return []
     clues: list[Clue] = []
@@ -369,6 +387,101 @@ def _scan_dictionary_hard_clues(
             )
         )
     return clues
+
+
+def _scan_name_dictionary_clues(
+    ctx: DetectContext,
+    stream: StreamInput | _ScanSegment | str,
+    entries: tuple[DictionaryEntry, ...],
+    *,
+    source_kind: str,
+    ignored_spans: tuple[tuple[int, int], ...] = (),
+) -> list[Clue]:
+    if not entries:
+        return []
+    if isinstance(stream, str):
+        normalized_stream = build_prompt_stream(stream)
+        segment: _ScanSegment | None = None
+    elif isinstance(stream, _ScanSegment):
+        normalized_stream = stream.stream
+        segment = stream
+    else:
+        normalized_stream = stream
+        segment = None
+    name_entries = tuple(entry for entry in entries if entry.attr_type == PIIAttributeType.NAME)
+    if not name_entries:
+        return []
+
+    clues: list[Clue] = []
+    priority = 300 if source_kind == "session" else 290
+    signature = _dictionary_matcher_signature(name_entries)
+    matcher = _session_dictionary_matcher(signature) if source_kind == "session" else _local_dictionary_matcher(signature)
+    matches = matcher.find_matches(normalized_stream.text, folded_text=normalized_stream.text.lower())
+    matches.sort(key=lambda item: (item.payload.emission_order, item.start, item.end))
+    for match in matches:
+        if segment is not None:
+            normalized = _normalize_segment_ascii_match(
+                segment,
+                match.start,
+                match.end,
+                match.matched_text,
+                match.pattern_text,
+                match.ascii_boundary,
+            )
+            if normalized is None:
+                continue
+            start, end, matched_text = normalized
+        else:
+            normalized = _normalize_ascii_match(
+                normalized_stream,
+                match.start,
+                match.end,
+                match.matched_text,
+                match.pattern_text,
+                match.ascii_boundary,
+            )
+            if normalized is None:
+                continue
+            start, end, matched_text = normalized
+        if _overlaps_any(start, end, ignored_spans):
+            continue
+        payload = match.payload
+        metadata = {key: list(values) for key, values in payload.metadata_items}
+        component = _dictionary_name_component(metadata)
+        role, component_hint = _dictionary_name_role(component)
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                role=role,
+                attr_type=PIIAttributeType.NAME,
+                start=start,
+                end=end,
+                text=matched_text,
+                priority=priority,
+                source_kind=payload.matched_by,
+                component_hint=component_hint,
+                hard_source=source_kind,
+                source_metadata=metadata,
+            )
+        )
+    return clues
+
+
+def _dictionary_name_component(metadata: dict[str, list[str]]) -> str:
+    values = metadata.get("name_component", [])
+    return str(values[0]).strip().lower() if values else "full"
+
+
+def _dictionary_name_role(component: str) -> tuple[ClueRole, NameComponentHint]:
+    if component == "family":
+        return (ClueRole.FAMILY_NAME, NameComponentHint.FAMILY)
+    if component == "given":
+        return (ClueRole.GIVEN_NAME, NameComponentHint.GIVEN)
+    if component == "alias":
+        return (ClueRole.ALIAS, NameComponentHint.ALIAS)
+    if component == "middle":
+        return (ClueRole.GIVEN_NAME, NameComponentHint.MIDDLE)
+    return (ClueRole.FULL_NAME, NameComponentHint.FULL)
 
 
 def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, ...]:
@@ -491,7 +604,7 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                role=ClueRole.SURNAME,
+                role=ClueRole.FAMILY_NAME,
                 attr_type=PIIAttributeType.NAME,
                 start=raw_start,
                 end=raw_end,
@@ -504,7 +617,7 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
 
 
 def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
-    """扫描英文姓氏，产出 SURNAME clue。"""
+    """扫描英文姓氏，产出 FAMILY_NAME clue。"""
     clues: list[Clue] = []
     for match in _en_surname_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
@@ -514,7 +627,7 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                role=ClueRole.SURNAME,
+                role=ClueRole.FAMILY_NAME,
                 attr_type=PIIAttributeType.NAME,
                 start=raw_start,
                 end=raw_end,
@@ -1261,6 +1374,9 @@ def _sweep_resolve(raw_text: str, clues: list[Clue]) -> list[Clue]:
     # ── 轮 2：seed 依赖规则 ──
     survivors = _sweep_pass2(survivors, text_len)
 
+    # ── 姓名组件覆盖 ──
+    survivors = _apply_name_component_coverage(survivors)
+
     # ── Label vs soft content ──
     return _label_vs_soft_filter(raw_text, survivors)
 
@@ -1384,13 +1500,67 @@ def _sweep_pass2(clues: list[Clue], text_len: int) -> list[Clue]:
             # SOFT_CONTROL（NEGATIVE / CONNECTOR）被 seed 遮蔽。
             if role in _SOFT_CONTROL_ROLES and active_seed > 0:
                 continue
-            # SOFT_CONTENT（SURNAME / GIVEN_NAME / VALUE 等）被 START 遮蔽。
-            if role in _SOFT_CONTENT_ROLES and active_start > 0:
+            # START 只遮蔽需要按原始值区域推断的软 clue，不遮蔽词典 full/alias。
+            if role in _START_MASKED_SOFT_ROLES and active_start > 0:
                 continue
 
             survivors.append(clue)
 
     return survivors
+
+
+def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
+    full_name_winners = _resolve_name_component_overlap_winners(
+        [clue for clue in clues if clue.role == ClueRole.FULL_NAME]
+    )
+    full_name_ids = {clue.clue_id for clue in full_name_winners}
+
+    alias_candidates = [
+        clue
+        for clue in clues
+        if clue.role == ClueRole.ALIAS
+        and not any(_clues_overlap(clue, full_name) for full_name in full_name_winners)
+    ]
+    alias_winners = _resolve_name_component_overlap_winners(alias_candidates)
+    alias_ids = {clue.clue_id for clue in alias_winners}
+
+    blocked_name_clues = [*full_name_winners, *alias_winners]
+    survivors: list[Clue] = []
+    for clue in clues:
+        if clue.role == ClueRole.FULL_NAME:
+            if clue.clue_id in full_name_ids:
+                survivors.append(clue)
+            continue
+        if clue.role == ClueRole.ALIAS:
+            if clue.clue_id in alias_ids:
+                survivors.append(clue)
+            continue
+        if clue.role in {ClueRole.FAMILY_NAME, ClueRole.GIVEN_NAME}:
+            if any(_clues_overlap(clue, blocker) for blocker in blocked_name_clues):
+                continue
+        survivors.append(clue)
+    return survivors
+
+
+def _resolve_name_component_overlap_winners(clues: list[Clue]) -> list[Clue]:
+    if not clues:
+        return []
+    ordered = sorted(clues, key=lambda clue: (clue.start, clue.end, -clue.priority))
+    groups: list[list[Clue]] = []
+    current_group: list[Clue] = []
+    current_end = -1
+    for clue in ordered:
+        if current_group and clue.start < current_end:
+            current_group.append(clue)
+        else:
+            if current_group:
+                groups.append(current_group)
+            current_group = [clue]
+        current_end = max(current_end, clue.end)
+    if current_group:
+        groups.append(current_group)
+    winners = [max(group, key=_seed_winner_key) for group in groups]
+    return sorted(winners, key=lambda clue: (clue.start, clue.end, -clue.priority))
 
 
 def _label_vs_soft_filter(raw_text: str, clues: list[Clue]) -> list[Clue]:

@@ -54,9 +54,10 @@ def _ocr_block(text: str, *, block_id: str, line_id: int, x: int = 0, y: int = 0
 
 def test_local_dictionary_hard_clue_fields_match_legacy_contract():
     entry = _entry(
+        attr_type=PIIAttributeType.EMAIL,
         text="Jordan Demo",
         matched_by="dictionary_local",
-        metadata={"local_entity_ids": ["persona-1"], "name_component": ["full"]},
+        metadata={"local_entity_ids": ["persona-1"]},
     )
 
     clues = scanner_module._scan_dictionary_hard_clues(
@@ -69,48 +70,50 @@ def test_local_dictionary_hard_clue_fields_match_legacy_contract():
     assert len(clues) == 1
     clue = clues[0]
     assert clue.role == ClueRole.HARD
-    assert clue.attr_type == PIIAttributeType.NAME
+    assert clue.attr_type == PIIAttributeType.EMAIL
     assert clue.text == "Jordan Demo"
     assert clue.priority == 290
     assert clue.source_kind == "dictionary_local"
     assert clue.hard_source == "local"
-    assert clue.source_metadata == {"local_entity_ids": ["persona-1"], "name_component": ["full"]}
+    assert clue.source_metadata == {"local_entity_ids": ["persona-1"]}
 
 
 def test_session_dictionary_hard_clue_fields_match_legacy_contract():
     entry = _entry(
-        text="会话用户0001",
+        attr_type=PIIAttributeType.EMAIL,
+        text="demo@example.com",
         matched_by="dictionary_session",
         metadata={"session_turn_ids": ["3"], "local_entity_ids": ["persona-7"]},
     )
 
     clues = scanner_module._scan_dictionary_hard_clues(
         DetectContext(protection_level=ProtectionLevel.STRONG),
-        "上一轮已经记录会话用户0001，请直接沿用。",
+        "上一轮已经记录 demo@example.com，请直接沿用。",
         (entry,),
         source_kind="session",
     )
 
     assert len(clues) == 1
     clue = clues[0]
-    assert clue.attr_type == PIIAttributeType.NAME
-    assert clue.text == "会话用户0001"
+    assert clue.attr_type == PIIAttributeType.EMAIL
+    assert clue.text == "demo@example.com"
     assert clue.priority == 300
     assert clue.source_kind == "dictionary_session"
     assert clue.hard_source == "session"
     assert clue.source_metadata == {"session_turn_ids": ["3"], "local_entity_ids": ["persona-7"]}
 
 
-def test_ascii_literal_keeps_word_boundary_behavior():
-    entry = _entry(text="Ann", matched_by="dictionary_local")
+def test_ascii_literal_keeps_word_boundary_behavior_for_name_dictionary_clues():
+    entry = _entry(text="Ann", matched_by="dictionary_local", metadata={"name_component": ["full"]})
 
-    clues = scanner_module._scan_dictionary_hard_clues(
+    clues = scanner_module._scan_name_dictionary_clues(
         DetectContext(protection_level=ProtectionLevel.STRONG),
         "Annie met Ann and ann yesterday.",
         (entry,),
         source_kind="local",
     )
 
+    assert all(clue.role == ClueRole.FULL_NAME for clue in clues)
     assert [clue.text for clue in clues] == ["Ann", "ann"]
 
 
@@ -131,9 +134,9 @@ def test_prompt_stream_builds_single_layer_units_for_ascii_digit_cjk_and_tokens(
 
 
 def test_non_ascii_literal_still_matches_substring():
-    entry = _entry(text="张三", matched_by="dictionary_local")
+    entry = _entry(text="张三", matched_by="dictionary_local", metadata={"name_component": ["full"]})
 
-    clues = scanner_module._scan_dictionary_hard_clues(
+    clues = scanner_module._scan_name_dictionary_clues(
         DetectContext(protection_level=ProtectionLevel.STRONG),
         "王张三李",
         (entry,),
@@ -163,9 +166,9 @@ def test_build_ocr_stream_rewrites_cjk_whitespace(raw_text: str, expected_text: 
 
 
 def test_ignored_spans_still_filter_dictionary_matches():
-    entry = _entry(text="Jordan", matched_by="dictionary_local")
+    entry = _entry(text="Jordan", matched_by="dictionary_local", metadata={"name_component": ["full"]})
 
-    clues = scanner_module._scan_dictionary_hard_clues(
+    clues = scanner_module._scan_name_dictionary_clues(
         DetectContext(protection_level=ProtectionLevel.STRONG),
         "Jordan Jordan",
         (entry,),
@@ -180,7 +183,7 @@ def test_ignored_spans_still_filter_dictionary_matches():
 
 
 def test_ascii_dictionary_match_only_accepts_exact_s_and_es_word_units():
-    entry = _entry(text="apple", matched_by="dictionary_local")
+    entry = _entry(attr_type=PIIAttributeType.ORGANIZATION, text="apple", matched_by="dictionary_local")
     stream = build_prompt_stream("apple apples applees pineapple applex appel applies")
 
     bundle = build_clue_bundle(
@@ -226,6 +229,7 @@ def test_build_clue_bundle_still_resolves_multi_variant_overlap_to_longer_match(
         text="Jordan Demo",
         match_terms=("Jordan Demo", "Jordan"),
         matched_by="dictionary_local",
+        metadata={"name_component": ["full"]},
     )
     stream = build_prompt_stream("Jordan Demo")
 
@@ -239,10 +243,11 @@ def test_build_clue_bundle_still_resolves_multi_variant_overlap_to_longer_match(
 
     dictionary_clues = [
         clue for clue in bundle.all_clues
-        if clue.role == ClueRole.HARD and clue.source_kind == "dictionary_local"
+        if clue.source_kind == "dictionary_local"
     ]
     assert len(dictionary_clues) == 1
     assert dictionary_clues[0].text == "Jordan Demo"
+    assert dictionary_clues[0].role == ClueRole.FULL_NAME
 
 
 def test_name_full_match_still_wins_over_family_and_given_overlap():
@@ -275,11 +280,49 @@ def test_name_full_match_still_wins_over_family_and_given_overlap():
 
     dictionary_clues = [
         clue for clue in bundle.all_clues
-        if clue.role == ClueRole.HARD and clue.source_kind == "dictionary_local"
+        if clue.source_kind == "dictionary_local"
     ]
     assert len(dictionary_clues) == 1
     assert dictionary_clues[0].text == "Jordan Demo"
     assert dictionary_clues[0].source_metadata["name_component"] == ["full"]
+    assert dictionary_clues[0].role == ClueRole.FULL_NAME
+
+
+def test_name_full_match_still_wins_over_alias_overlap():
+    entries = (
+        _entry(
+            text="Jordan Demo",
+            matched_by="dictionary_local",
+            metadata={"local_entity_ids": ["persona-1"], "name_component": ["full"]},
+        ),
+        _entry(
+            text="Jordan",
+            matched_by="dictionary_local",
+            metadata={"local_entity_ids": ["persona-1"], "name_component": ["alias"]},
+        ),
+        _entry(
+            text="Jordan",
+            matched_by="dictionary_local",
+            metadata={"local_entity_ids": ["persona-1"], "name_component": ["given"]},
+        ),
+    )
+    stream = build_prompt_stream("Jordan Demo")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=entries,
+        locale_profile="mixed",
+    )
+
+    dictionary_clues = [
+        clue for clue in bundle.all_clues
+        if clue.source_kind == "dictionary_local"
+    ]
+    assert len(dictionary_clues) == 1
+    assert dictionary_clues[0].text == "Jordan Demo"
+    assert dictionary_clues[0].role == ClueRole.FULL_NAME
 
 
 def test_name_alias_entry_is_exposed_as_independent_component():
@@ -289,7 +332,7 @@ def test_name_alias_entry_is_exposed_as_independent_component():
         metadata={"local_entity_ids": ["persona-1"], "name_component": ["alias"]},
     )
 
-    clues = scanner_module._scan_dictionary_hard_clues(
+    clues = scanner_module._scan_name_dictionary_clues(
         DetectContext(protection_level=ProtectionLevel.STRONG),
         "联系人阿宝今天会到。",
         (entry,),
@@ -299,11 +342,32 @@ def test_name_alias_entry_is_exposed_as_independent_component():
     assert len(clues) == 1
     assert clues[0].text == "阿宝"
     assert clues[0].source_metadata["name_component"] == ["alias"]
+    assert clues[0].role == ClueRole.ALIAS
 
 
-def test_parser_keeps_char_span_and_unit_span_for_hard_dictionary_candidate():
+def test_name_middle_entry_is_mapped_to_given_name_role():
+    entry = _entry(
+        text="Marie",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"], "name_component": ["middle"]},
+    )
+
+    clues = scanner_module._scan_name_dictionary_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        "Ann Marie Demo",
+        (entry,),
+        source_kind="local",
+    )
+
+    assert len(clues) == 1
+    assert clues[0].text == "Marie"
+    assert clues[0].source_metadata["name_component"] == ["middle"]
+    assert clues[0].role == ClueRole.GIVEN_NAME
+
+
+def test_parser_keeps_char_span_and_unit_span_for_dictionary_name_candidate():
     ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
-    entry = _entry(text="Jordan Demo", matched_by="dictionary_local")
+    entry = _entry(text="Jordan Demo", matched_by="dictionary_local", metadata={"name_component": ["full"]})
     stream = build_prompt_stream("Please contact Jordan Demo today.")
     bundle = build_clue_bundle(
         stream,

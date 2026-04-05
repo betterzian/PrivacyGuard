@@ -148,7 +148,7 @@ class BaseStack:
         """以栈即将处理的第一个字符判断语言。
 
         - LABEL / START / KEY 等引导型 seed → 跳过分隔符后看第一个字符。
-        - SURNAME / GIVEN_NAME / VALUE / SUFFIX 等值型 seed → 看 seed 自身文本首字符。
+        - FAMILY_NAME / GIVEN_NAME / VALUE / SUFFIX 等值型 seed → 看 seed 自身文本首字符。
         返回 "zh" 或 "en"。
         """
         raw_text = self.context.stream.text
@@ -192,6 +192,16 @@ def is_control_clue(clue: Clue) -> bool:
 
 def _is_stop_control_clue(clue: Clue) -> bool:
     return clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.CONNECTOR}
+
+
+_NAME_COMPONENT_ROLES = frozenset(
+    {
+        ClueRole.FAMILY_NAME,
+        ClueRole.GIVEN_NAME,
+        ClueRole.FULL_NAME,
+        ClueRole.ALIAS,
+    }
+)
 
 
 @dataclass(slots=True)
@@ -268,53 +278,42 @@ class NumericStack(StructuredBaseStack):
 
 @dataclass(slots=True)
 class NameStack(BaseStack):
-    """姓名检测 stack，根据即将处理的第一个字符判断中英文，分方向构建候选。
+    """姓名检测 stack。
 
-    语言判断规则：以栈将要处理的第一个字/词为准。
-    - LABEL / START → 跳过分隔符后的第一个字符。
-    - SURNAME / GIVEN_NAME → seed 自身文本的第一个字符。
-
-    方向分派：
-    - LABEL / START → L→R。
-    - SURNAME：中文姓在前 L→R；英文姓在末 R→L。
-    - GIVEN_NAME：中文名在后 R→L；英文名在前 L→R。
+    起栈规则统一为：
+    - LABEL / START：从跳过分隔符后的第一个字开始，只向右扩张。
+    - FAMILY_NAME / FULL_NAME / ALIAS：从 clue 自身起栈，只向右扩张。
+    - GIVEN_NAME：从 clue 自身起栈，先向左再向右扩张。
     """
 
     def run(self) -> StackRun | None:
         if self.clue.role == ClueRole.HARD:
             return self._build_hard_run()
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            return self._run_ltr()
-        if self.clue.role == ClueRole.SURNAME:
-            if self._value_locale() == "zh":
-                return self._run_ltr()
-            return self._run_rtl()
+            start = _skip_separators(self.context.stream.text, self.clue.end)
+            return self._build_name_run(start=start, end=start, next_index=self.clue_index + 1)
+        if self.clue.role in {ClueRole.FAMILY_NAME, ClueRole.FULL_NAME, ClueRole.ALIAS}:
+            end, next_index, _consumed = self._resolve_right_boundary()
+            return self._build_name_run(start=self.clue.start, end=end, next_index=next_index)
         if self.clue.role == ClueRole.GIVEN_NAME:
-            if self._value_locale() == "zh":
-                return self._run_rtl()
-            return self._run_ltr()
+            start = _extend_name_boundary_left(
+                self.context.stream,
+                self.clue.start,
+                self.clue.end,
+                self.context.clues,
+                self.clue_index,
+            )
+            end, next_index, _consumed = self._resolve_right_boundary()
+            return self._build_name_run(start=start, end=end, next_index=next_index)
         return None
 
-    # ------------------------------------------------------------------
-    # L→R：label / start / 中文 surname / 英文 given name
-    # ------------------------------------------------------------------
-
-    def _run_ltr(self) -> StackRun | None:
+    def _build_name_run(self, *, start: int, end: int, next_index: int) -> StackRun | None:
         is_label_seed = self.clue.role == ClueRole.LABEL
-        # 左边界。
-        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            start = _skip_separators(self.context.stream.text, self.clue.end)
-        else:
-            start = self.clue.start
-        # 向右消费相邻 NAME clue 并扩展字符边界。
-        # label / start 驱动时，end 的初始值应为值区域起点，而非 seed 末尾。
-        end, next_index, consumed_ids = self._resolve_right_boundary(
-            value_start=start if self.clue.role in {ClueRole.LABEL, ClueRole.START} else None,
-        )
+        label_driven = self.clue.role == ClueRole.LABEL
         end = _extend_name_boundary(self.context.stream, start, end, self.context.clues, next_index)
         if end <= start:
             return None
-        # 候选构建。
+
         component_hint = self._effective_hint(start, end)
         candidate = build_name_candidate_from_value(
             source=self.context.stream.source,
@@ -326,70 +325,52 @@ class NameStack(BaseStack):
             unit_start=_char_span_to_unit_span(self.context.stream, start, end)[0],
             unit_end=_char_span_to_unit_span(self.context.stream, start, end)[1],
             label_clue_id=self.clue.clue_id if is_label_seed else None,
-            label_driven=is_label_seed,
+            label_driven=label_driven,
         )
         if candidate is None:
             return None
+
+        name_clues = self._name_clues_in_span(start, end)
+        clue_count = 1 + sum(1 for _index, clue in name_clues if clue.clue_id != self.clue.clue_id)
+        negative_ids = self._negative_clue_ids_in_span(start, end)
+        negative_count = len(negative_ids)
+        if self.clue.role not in {ClueRole.FULL_NAME, ClueRole.ALIAS} and not self._meets_commit_threshold(
+            candidate_text=candidate.text,
+            clue_count=clue_count,
+            negative_count=negative_count,
+            name_clues=name_clues,
+        ):
+            return None
+
+        consumed_ids = {self.clue.clue_id}
+        consumed_ids.update(clue.clue_id for _index, clue in name_clues)
+        last_name_index = max((index for index, _clue in name_clues), default=self.clue_index)
         return StackRun(
             attr_type=PIIAttributeType.NAME,
             candidate=candidate,
             consumed_ids=consumed_ids,
             handled_label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
-            next_index=next_index,
+            next_index=max(next_index, last_name_index + 1),
         )
-
-    # ------------------------------------------------------------------
-    # R→L：英文 surname / 中文 given name
-    # ------------------------------------------------------------------
-
-    def _run_rtl(self) -> StackRun | None:
-        end = self.clue.end
-        # 向左扩展字符边界。
-        start = _extend_name_boundary_left(
-            self.context.stream, self.clue.start, end,
-            self.context.clues, self.clue_index,
-        )
-        if end <= start:
-            return None
-        component_hint = self._effective_hint(start, end)
-        candidate = build_name_candidate_from_value(
-            source=self.context.stream.source,
-            value_text=self.context.stream.text[start:end],
-            value_start=start,
-            value_end=end,
-            source_kind=self.clue.source_kind,
-            component_hint=component_hint,
-            unit_start=_char_span_to_unit_span(self.context.stream, start, end)[0],
-            unit_end=_char_span_to_unit_span(self.context.stream, start, end)[1],
-            label_driven=False,
-        )
-        if candidate is None:
-            return None
-        return StackRun(
-            attr_type=PIIAttributeType.NAME,
-            candidate=candidate,
-            consumed_ids={self.clue.clue_id},
-            next_index=self.clue_index + 1,
-        )
-
-    # ------------------------------------------------------------------
-    # 共用工具方法
-    # ------------------------------------------------------------------
 
     def _effective_hint(self, start: int, end: int) -> NameComponentHint:
         """若扩展后文本比 seed 更长，提升为 FULL；否则保留原始 hint。"""
         base = self._component_hint()
-        if base in {NameComponentHint.FAMILY, NameComponentHint.GIVEN}:
+        if base in {NameComponentHint.FAMILY, NameComponentHint.GIVEN, NameComponentHint.MIDDLE}:
             candidate_text = self.context.stream.text[start:end].strip()
             if len(candidate_text) > len(self.clue.text):
                 return NameComponentHint.FULL
         return base
 
     def _component_hint(self) -> NameComponentHint:
-        if self.clue.role == ClueRole.SURNAME:
+        if self.clue.role == ClueRole.FAMILY_NAME:
             return NameComponentHint.FAMILY
         if self.clue.role == ClueRole.GIVEN_NAME:
-            return NameComponentHint.GIVEN
+            return self.clue.component_hint or NameComponentHint.GIVEN
+        if self.clue.role == ClueRole.ALIAS:
+            return NameComponentHint.ALIAS
+        if self.clue.role == ClueRole.FULL_NAME:
+            return NameComponentHint.FULL
         return self.clue.component_hint or NameComponentHint.FULL
 
     def _resolve_right_boundary(self, *, value_start: int | None = None) -> tuple[int, int, set[str]]:
@@ -421,6 +402,43 @@ class NameStack(BaseStack):
             consumed.add(clue.clue_id)
             index += 1
         return (end, index, consumed)
+
+    def _name_clues_in_span(self, start: int, end: int) -> list[tuple[int, Clue]]:
+        matches: list[tuple[int, Clue]] = []
+        for index, clue in enumerate(self.context.clues):
+            if clue.attr_type != PIIAttributeType.NAME or clue.role not in _NAME_COMPONENT_ROLES:
+                continue
+            if clue.start < end and clue.end > start:
+                matches.append((index, clue))
+        return matches
+
+    def _negative_clue_ids_in_span(self, start: int, end: int) -> set[str]:
+        negative_ids: set[str] = set()
+        for clue in self.context.clues:
+            if clue.role != ClueRole.NEGATIVE:
+                continue
+            if clue.start < end and clue.end > start:
+                negative_ids.add(clue.clue_id)
+        return negative_ids
+
+    def _meets_commit_threshold(
+        self,
+        *,
+        candidate_text: str,
+        clue_count: int,
+        negative_count: int,
+        name_clues: list[tuple[int, Clue]],
+    ) -> bool:
+        if negative_count > 0:
+            return False
+        if self.context.protection_level == ProtectionLevel.STRONG:
+            return clue_count >= 2 or len(candidate_text) > 1
+        if self.context.protection_level == ProtectionLevel.BALANCED:
+            if clue_count != 1 or len(candidate_text) <= 1 or len(name_clues) != 1:
+                return False
+            only_clue = name_clues[0][1]
+            return only_clue.role == ClueRole.GIVEN_NAME and only_clue.source_kind.startswith("dictionary_")
+        return clue_count >= 2
 
 
 @dataclass(slots=True)
@@ -1461,8 +1479,8 @@ def _extend_name_boundary_left(
 ) -> int:
     """从 start 向左扩展，基于 stream units 逐步推进捕获姓名字符。
 
-    用于 R→L 方向：英文 surname 向左找 given/middle name，
-    中文 given name 向左找姓氏。
+    用于 given seed 的左扩阶段：向左找 family/given 片段，
+    同时允许姓名内部连接符继续保留。
     """
     raw_text = stream.text
     units = stream.units
@@ -1590,5 +1608,3 @@ def _peek_unit_last_char(units: tuple[StreamUnit, ...], ui: int) -> str | None:
     if ui < 0 or ui >= len(units):
         return None
     return units[ui].text[-1] if units[ui].text else None
-
-

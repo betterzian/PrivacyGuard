@@ -21,9 +21,9 @@ class PIISourceType(str, Enum):
 class ProtectionLevel(str, Enum):
     """规则检测保护度（三档）。
 
-    - STRONG: 最高灵敏度，单 surname 即可触发姓名检测。
-    - BALANCED: 需 label 或上下文确认才启动 soft 检测。
-    - WEAK: 仅 label-driven 和 hard clue（正则/词典）生效。
+    - STRONG: 起栈最宽松，姓名提交门槛最低。
+    - BALANCED: 起栈与其他档一致，但姓名提交更严格。
+    - WEAK: 起栈与其他档一致，但姓名提交要求最多线索。
     """
 
     STRONG = "strong"
