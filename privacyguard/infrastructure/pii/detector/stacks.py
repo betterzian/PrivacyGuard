@@ -280,41 +280,61 @@ class NumericStack(StructuredBaseStack):
 class NameStack(BaseStack):
     """姓名检测 stack。
 
-    起栈规则统一为：
-    - LABEL / START：从跳过分隔符后的第一个字开始，只向右扩张。
-    - FAMILY_NAME / FULL_NAME / ALIAS：从 clue 自身起栈，只向右扩张。
-    - GIVEN_NAME：从 clue 自身起栈，先向左再向右扩张。
+    所有 seed 都先受通用边界约束，再按 seed 类型决定扩张方式。
+    规则摘要：
+    1. FULL_NAME / ALIAS 直接取 clue 自身值并结束。
+    2. 中文 GIVEN_NAME 直接取 clue 自身值并结束。
+    3. 英文 GIVEN_NAME 可向左补 1 个未被 clue 覆盖的普通单词，
+       并按 given 链规则向右吸收后续 GIVEN_NAME。
+    4. FAMILY_NAME / LABEL / START 从起点向右扫描；
+       英文吞到 GIVEN_NAME 后，会切换到 GIVEN_NAME 的右扩逻辑。
     """
 
     def run(self) -> StackRun | None:
         if self.clue.role == ClueRole.HARD:
             return self._build_hard_run()
+        locale = self._value_locale()
+        if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
+            return self._build_name_run(start=self.clue.start, end=self.clue.end)
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
             start = _skip_separators(self.context.stream.text, self.clue.end)
-            return self._build_name_run(start=start, end=start, next_index=self.clue_index + 1)
-        if self.clue.role in {ClueRole.FAMILY_NAME, ClueRole.FULL_NAME, ClueRole.ALIAS}:
-            end, next_index, _consumed = self._resolve_right_boundary()
-            return self._build_name_run(start=self.clue.start, end=end, next_index=next_index)
-        if self.clue.role == ClueRole.GIVEN_NAME:
-            start = _extend_name_boundary_left(
-                self.context.stream,
-                self.clue.start,
-                self.clue.end,
-                self.context.clues,
-                self.clue_index,
+            if start >= len(self.context.stream.text):
+                return None
+            end = self._expand_seed_right(
+                start=start,
+                end=start,
+                search_index=self.clue_index + 1,
+                locale=locale,
             )
-            end, next_index, _consumed = self._resolve_right_boundary()
-            return self._build_name_run(start=start, end=end, next_index=next_index)
+            return self._build_name_run(start=start, end=end)
+        if self.clue.role == ClueRole.FAMILY_NAME:
+            end = self._expand_seed_right(
+                start=self.clue.start,
+                end=self.clue.end,
+                search_index=self.clue_index + 1,
+                locale=locale,
+            )
+            return self._build_name_run(start=self.clue.start, end=end)
+        if self.clue.role == ClueRole.GIVEN_NAME:
+            if locale == "zh":
+                return self._build_name_run(start=self.clue.start, end=self.clue.end)
+            start = self._extend_given_left_en(self.clue.start)
+            end = self._extend_given_chain_right_en(
+                start=start,
+                end=self.clue.end,
+                search_index=self.clue_index + 1,
+            )
+            return self._build_name_run(start=start, end=end)
         return None
 
-    def _build_name_run(self, *, start: int, end: int, next_index: int) -> StackRun | None:
+    def _build_name_run(self, *, start: int, end: int) -> StackRun | None:
         is_label_seed = self.clue.role == ClueRole.LABEL
-        label_driven = self.clue.role == ClueRole.LABEL
-        end = _extend_name_boundary(self.context.stream, start, end, self.context.clues, next_index)
+        label_driven = is_label_seed
         if end <= start:
             return None
 
         component_hint = self._effective_hint(start, end)
+        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
         candidate = build_name_candidate_from_value(
             source=self.context.stream.source,
             value_text=self.context.stream.text[start:end],
@@ -322,8 +342,8 @@ class NameStack(BaseStack):
             value_end=end,
             source_kind=self.clue.source_kind,
             component_hint=component_hint,
-            unit_start=_char_span_to_unit_span(self.context.stream, start, end)[0],
-            unit_end=_char_span_to_unit_span(self.context.stream, start, end)[1],
+            unit_start=unit_start,
+            unit_end=unit_end,
             label_clue_id=self.clue.clue_id if is_label_seed else None,
             label_driven=label_driven,
         )
@@ -331,9 +351,12 @@ class NameStack(BaseStack):
             return None
 
         name_clues = self._name_clues_in_span(start, end)
-        clue_count = 1 + sum(1 for _index, clue in name_clues if clue.clue_id != self.clue.clue_id)
-        negative_ids = self._negative_clue_ids_in_span(start, end)
-        negative_count = len(negative_ids)
+        unique_roles = {clue.role for _index, clue in name_clues}
+        if self.clue.role in _NAME_COMPONENT_ROLES:
+            unique_roles.discard(self.clue.role)
+        clue_count = 1 + len(unique_roles)
+        negative_count = len(self._negative_clue_ids_in_span(start, end))
+
         if self.clue.role not in {ClueRole.FULL_NAME, ClueRole.ALIAS} and not self._meets_commit_threshold(
             candidate_text=candidate.text,
             clue_count=clue_count,
@@ -350,8 +373,96 @@ class NameStack(BaseStack):
             candidate=candidate,
             consumed_ids=consumed_ids,
             handled_label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
-            next_index=max(next_index, last_name_index + 1),
+            next_index=max(self.clue_index + 1, last_name_index + 1),
         )
+
+    def _extend_given_left_en(self, start: int) -> int:
+        """英文 given seed 最多向左补 1 个未命中 clue 的普通单词。"""
+        word_span = self._previous_plain_ascii_word(start)
+        if word_span is None:
+            return start
+        word_start, word_end = word_span
+        if self._span_has_any_clue_overlap(word_start, word_end):
+            return start
+        if self._span_has_blocker(word_end, start):
+            return start
+        return word_start
+
+    def _expand_seed_right(
+        self,
+        *,
+        start: int,
+        end: int,
+        search_index: int,
+        locale: str,
+    ) -> int:
+        """从 LABEL / START / FAMILY_NAME seed 向右推进。
+
+        规则：
+        1. 先吞普通姓名文本。
+        2. 遇到 FULL_NAME / ALIAS 时整段纳入并结束。
+        3. 遇到 GIVEN_NAME 时，中文结束；英文切换到 given 链逻辑。
+        4. FAMILY_NAME 可继续串联，但同属性计数仍只算 1 次。
+        """
+        cursor = end
+        next_index = search_index
+        while True:
+            if self._has_active_stop_overlap(cursor):
+                return cursor
+
+            next_component = self._find_next_component_clue(cursor, next_index)
+            next_blocker = self._find_next_right_blocker(cursor, next_index)
+
+            plain_limit = len(self.context.stream.text)
+            if next_component is not None:
+                plain_limit = next_component[1].start
+            if next_blocker is not None and next_blocker[1].start < plain_limit:
+                plain_limit = next_blocker[1].start
+
+            scanned = self._scan_plain_right(start=start, cursor=cursor, upper=plain_limit, locale=locale)
+            cursor = scanned
+            if cursor < plain_limit:
+                return cursor
+
+            if next_component is None or next_component[1].start != cursor:
+                return cursor
+
+            component_index, component = next_component
+            cursor = component.end
+            next_index = component_index + 1
+
+            if component.role == ClueRole.FAMILY_NAME:
+                continue
+            if component.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
+                return cursor
+            if locale == "zh":
+                return cursor
+            return self._extend_given_chain_right_en(
+                start=start,
+                end=cursor,
+                search_index=next_index,
+            )
+
+    def _extend_given_chain_right_en(self, start: int, end: int, search_index: int) -> int:
+        """英文 given 可继续吸收间隔最多 1 个普通单词的后续 GIVEN_NAME。"""
+        cursor = end
+        next_index = search_index
+        while True:
+            if self._has_active_stop_overlap(cursor):
+                return cursor
+            next_component = self._find_next_component_clue(cursor, next_index)
+            next_blocker = self._find_next_right_blocker(cursor, next_index)
+            if next_component is None:
+                return cursor
+            component_index, component = next_component
+            if component.role != ClueRole.GIVEN_NAME:
+                return cursor
+            if next_blocker is not None and next_blocker[1].start < component.start:
+                return cursor
+            if not self._gap_allows_single_plain_word(cursor, component.start):
+                return cursor
+            cursor = component.end
+            next_index = component_index + 1
 
     def _effective_hint(self, start: int, end: int) -> NameComponentHint:
         """若扩展后文本比 seed 更长，提升为 FULL；否则保留原始 hint。"""
@@ -373,35 +484,172 @@ class NameStack(BaseStack):
             return NameComponentHint.FULL
         return self.clue.component_hint or NameComponentHint.FULL
 
-    def _resolve_right_boundary(self, *, value_start: int | None = None) -> tuple[int, int, set[str]]:
-        """向右消费相邻 NAME clue，返回 (end, next_index, consumed_ids)。
-
-        value_start: label / start 驱动时传入跳过分隔符后的值起点，
-        作为 end 的初始值，避免 end 停在 seed 末尾的分隔符上。
-        """
+    def _scan_plain_right(self, *, start: int, cursor: int, upper: int, locale: str) -> int:
+        """在下一个 clue 或 blocker 之前吞普通姓名文本。"""
+        if upper <= cursor:
+            return cursor
         raw_text = self.context.stream.text
-        end = value_start if value_start is not None else self.clue.end
-        consumed = {self.clue.clue_id}
-        index = self.clue_index + 1
-        while index < len(self.context.clues):
+        units = self.context.stream.units
+        if not units or cursor >= len(raw_text):
+            return cursor
+
+        if locale == "zh":
+            cjk_count = sum(1 for i in range(start, cursor) if _shared_is_cjk(raw_text[i]))
+            max_cjk = 4
+            cursor_end = cursor
+            ui = self._unit_index_at_or_after(cursor)
+            while ui < len(units) and cjk_count < max_cjk:
+                unit = units[ui]
+                if unit.char_start >= upper:
+                    break
+                if unit.kind == "cjk_char":
+                    cjk_count += 1
+                    cursor_end = unit.char_end
+                    ui += 1
+                    continue
+                if unit.kind == "punct":
+                    left_char = raw_text[unit.char_start - 1] if unit.char_start > 0 else None
+                    right_char = _peek_unit_first_char(units, ui + 1)
+                    if is_name_joiner(unit.text, left_char, right_char):
+                        cursor_end = unit.char_end
+                        ui += 1
+                        continue
+                break
+            return max(cursor, cursor_end)
+
+        cursor_end = cursor
+        ui = self._unit_index_at_or_after(cursor)
+        max_len = 80
+        while ui < len(units):
+            unit = units[ui]
+            if unit.char_start >= upper:
+                break
+            if unit.char_end - start > max_len:
+                break
+            if unit.kind == "ascii_word":
+                cursor_end = unit.char_end
+                ui += 1
+                continue
+            if unit.kind == "space":
+                next_ui = ui + 1
+                while next_ui < len(units) and units[next_ui].kind == "space":
+                    next_ui += 1
+                if next_ui < len(units) and units[next_ui].kind == "ascii_word" and units[next_ui].char_start <= upper:
+                    cursor_end = unit.char_end
+                    ui += 1
+                    continue
+                break
+            if unit.kind == "punct":
+                left_char = raw_text[unit.char_start - 1] if unit.char_start > 0 else None
+                right_char = _peek_unit_first_char(units, ui + 1)
+                if is_name_joiner(unit.text, left_char, right_char):
+                    cursor_end = unit.char_end
+                    ui += 1
+                    continue
+            break
+        return max(cursor, cursor_end)
+
+    def _find_next_component_clue(self, cursor: int, search_index: int) -> tuple[int, Clue] | None:
+        for index in range(search_index, len(self.context.clues)):
             clue = self.context.clues[index]
-            if _is_stop_control_clue(clue):
+            if clue.start < cursor:
+                continue
+            if clue.attr_type == PIIAttributeType.NAME and clue.role in _NAME_COMPONENT_ROLES:
+                return (index, clue)
+        return None
+
+    def _find_next_right_blocker(self, cursor: int, search_index: int) -> tuple[int, Clue] | None:
+        for index in range(search_index, len(self.context.clues)):
+            clue = self.context.clues[index]
+            if clue.start < cursor:
+                continue
+            if self._is_name_blocker(clue):
+                return (index, clue)
+        return None
+
+    def _has_active_stop_overlap(self, cursor: int) -> bool:
+        for clue in self.context.clues:
+            if clue.start < cursor < clue.end and self._is_name_blocker(clue):
+                return True
+        return False
+
+    def _is_name_blocker(self, clue: Clue) -> bool:
+        if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.CONNECTOR}:
+            return True
+        if clue.attr_type is None:
+            return False
+        return clue.attr_type != PIIAttributeType.NAME or clue.role not in _NAME_COMPONENT_ROLES
+
+    def _gap_allows_single_plain_word(self, start: int, end: int) -> bool:
+        """英文 given 链之间只允许空白，或 1 个未命中 clue 的普通单词。"""
+        if end <= start:
+            return True
+        if self._span_has_any_clue_overlap(start, end):
+            return False
+        units = self.context.stream.units
+        word_count = 0
+        ui = self._unit_index_at_or_after(start)
+        while ui < len(units):
+            unit = units[ui]
+            if unit.char_start >= end:
                 break
-            gap_text = raw_text[end:clue.start]
-            if gap_text and (
-                any(is_hard_break(ch) for ch in gap_text)
-                or _OCR_SEMANTIC_BREAK_TOKEN in gap_text
-                or _OCR_INLINE_GAP_TOKEN in gap_text
-            ):
+            if unit.kind == "space":
+                ui += 1
+                continue
+            if unit.kind == "ascii_word":
+                word_count += 1
+                if word_count > 1:
+                    return False
+                ui += 1
+                continue
+            return False
+        return True
+
+    def _previous_plain_ascii_word(self, start: int) -> tuple[int, int] | None:
+        if start <= 0 or not self.context.stream.units:
+            return None
+        units = self.context.stream.units
+        ui = self._unit_index_left_of(start)
+        while ui >= 0 and units[ui].kind == "space":
+            ui -= 1
+        if ui < 0 or units[ui].kind != "ascii_word":
+            return None
+        word = units[ui]
+        for gap_index in range(ui + 1, len(units)):
+            gap_unit = units[gap_index]
+            if gap_unit.char_start >= start:
                 break
-            if gap_text.strip():
-                break
-            if clue.attr_type != PIIAttributeType.NAME:
-                break
-            end = max(end, clue.end)
-            consumed.add(clue.clue_id)
-            index += 1
-        return (end, index, consumed)
+            if gap_unit.kind != "space":
+                return None
+        return (word.char_start, word.char_end)
+
+    def _span_has_any_clue_overlap(self, start: int, end: int) -> bool:
+        for clue in self.context.clues:
+            if clue.start < end and clue.end > start:
+                return True
+        return False
+
+    def _span_has_blocker(self, start: int, end: int) -> bool:
+        for clue in self.context.clues:
+            if clue.start < end and clue.end > start and self._is_name_blocker(clue):
+                return True
+        return False
+
+    def _unit_index_at_or_after(self, char_index: int) -> int:
+        if char_index >= len(self.context.stream.char_to_unit):
+            return len(self.context.stream.units)
+        ui = self.context.stream.char_to_unit[char_index]
+        while ui < len(self.context.stream.units) and self.context.stream.units[ui].char_end <= char_index:
+            ui += 1
+        return ui
+
+    def _unit_index_left_of(self, char_index: int) -> int:
+        if char_index <= 0 or not self.context.stream.char_to_unit:
+            return -1
+        ui = self.context.stream.char_to_unit[char_index - 1]
+        while ui >= 0 and self.context.stream.units[ui].char_start >= char_index:
+            ui -= 1
+        return ui
 
     def _name_clues_in_span(self, start: int, end: int) -> list[tuple[int, Clue]]:
         matches: list[tuple[int, Clue]] = []
@@ -464,8 +712,7 @@ class OrganizationStack(BaseStack):
         )
         if trimmed is None:
             return None
-        # 组织名没有后缀 且 非 label 驱动 → 无效。
-        if not has_organization_suffix(trimmed.text) and not trimmed.label_driven:
+        if not _is_organization_candidate_usable(trimmed.text, label_driven=trimmed.label_driven):
             return None
         return StackRun(
             attr_type=run.attr_type,
@@ -479,20 +726,20 @@ class OrganizationStack(BaseStack):
         if self.clue.role == ClueRole.HARD:
             return self._build_hard_run()
         is_label_seed = self.clue.role == ClueRole.LABEL
+        locale = self._value_locale()
         if is_label_seed:
             start = _skip_separators(self.context.stream.text, self.clue.end)
-            end, next_index, consumed_ids = self._resolve_right_boundary()
+            if start >= len(self.context.stream.text):
+                return None
+            end = self._resolve_label_end(start=start, locale=locale)
             handled = {self.clue.clue_id}
         elif self.clue.role == ClueRole.SUFFIX:
-            start = _left_expand_text_boundary(self.context.stream.text, self.context.clues, self.clue.start)
+            start = self._resolve_suffix_start(locale=locale)
             end = self.clue.end
-            next_index = self.clue_index + 1
-            consumed_ids = {self.clue.clue_id}
             handled = set()
         else:
             return None
-        if end <= start:
-            return None
+        matches = self._organization_clues_in_span(start, end)
         candidate = build_organization_candidate_from_value(
             source=self.context.stream.source,
             value_text=self.context.stream.text[start:end],
@@ -506,38 +753,113 @@ class OrganizationStack(BaseStack):
         )
         if candidate is None:
             return None
+        if not _organization_has_body_before_suffix(candidate.text):
+            return None
+        consumed_ids = {clue.clue_id for _index, clue in matches}
+        consumed_ids.add(self.clue.clue_id)
+        last_index = max((index for index, _clue in matches), default=self.clue_index)
         return StackRun(
             attr_type=PIIAttributeType.ORGANIZATION,
             candidate=candidate,
             consumed_ids=consumed_ids,
             handled_label_clue_ids=handled,
-            next_index=next_index,
+            next_index=last_index + 1,
         )
 
-    def _resolve_right_boundary(self) -> tuple[int, int, set[str]]:
-        raw_text = self.context.stream.text
-        end = self.clue.end
-        consumed = {self.clue.clue_id}
-        index = self.clue_index + 1
-        while index < len(self.context.clues):
+    def _resolve_label_end(self, *, start: int, locale: str) -> int:
+        """label 起栈：先找近距离 suffix，否则按中英文配额截断。"""
+        upper = self._resolve_label_upper_boundary(start)
+        if upper <= start:
+            return start
+        suffix_end = self._find_suffix_end_within_window(start=start, upper=upper)
+        if suffix_end is not None:
+            return suffix_end
+        return _extend_organization_right_with_limit(
+            self.context.stream,
+            start=start,
+            upper=upper,
+            locale=locale,
+        )
+
+    def _resolve_suffix_start(self, *, locale: str) -> int:
+        """suffix 起栈：先取通用左边界，再按主体长度上限左扩。"""
+        floor = _left_expand_text_boundary(self.context.stream.text, self.context.clues, self.clue.start)
+        return _extend_organization_left_with_limit(
+            self.context.stream,
+            floor=floor,
+            start=self.clue.start,
+            locale=locale,
+        )
+
+    def _resolve_label_upper_boundary(self, start: int) -> int:
+        """组织名右扩的通用停止边界。"""
+        blocker_start = self._next_label_blocker_start(start)
+        upper = blocker_start if blocker_start is not None else len(self.context.stream.text)
+        ui = _unit_index_at_or_after(self.context.stream, start)
+        while ui < len(self.context.stream.units):
+            unit = self.context.stream.units[ui]
+            if unit.char_start >= upper:
+                break
+            if unit.kind in {"inline_gap", "semantic_break"}:
+                return unit.char_start
+            if unit.kind == "punct" and is_hard_break(unit.text):
+                return unit.char_start
+            ui += 1
+        return upper
+
+    def _next_label_blocker_start(self, start: int) -> int | None:
+        for clue in self.context.clues:
+            if clue.clue_id == self.clue.clue_id:
+                continue
+            if clue.start < start < clue.end and self._is_label_right_blocker(clue):
+                return start
+        for index in range(self.clue_index + 1, len(self.context.clues)):
             clue = self.context.clues[index]
-            if _is_stop_control_clue(clue):
+            if clue.end <= start:
+                continue
+            if self._is_label_right_blocker(clue):
+                return max(start, clue.start)
+        return None
+
+    def _is_label_right_blocker(self, clue: Clue) -> bool:
+        if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.CONNECTOR, ClueRole.LABEL}:
+            return True
+        if clue.role == ClueRole.HARD:
+            return True
+        if clue.attr_type is None:
+            return False
+        return clue.attr_type != PIIAttributeType.ORGANIZATION
+
+    def _find_suffix_end_within_window(self, *, start: int, upper: int) -> int | None:
+        if start >= upper or not self.context.stream.char_to_unit:
+            return None
+        start_ui = _unit_index_at_or_after(self.context.stream, start)
+        for index in range(self.clue_index + 1, len(self.context.clues)):
+            clue = self.context.clues[index]
+            if clue.start >= upper:
                 break
-            gap_text = raw_text[end:clue.start]
-            if gap_text and (
-                any(is_hard_break(ch) for ch in gap_text)
-                or _OCR_SEMANTIC_BREAK_TOKEN in gap_text
-                or _OCR_INLINE_GAP_TOKEN in gap_text
-            ):
-                break
-            if gap_text.strip():
+            if clue.end <= start:
+                continue
+            if clue.attr_type != PIIAttributeType.ORGANIZATION or clue.role != ClueRole.SUFFIX:
+                continue
+            suffix_ui = self.context.stream.char_to_unit[clue.start]
+            if _count_non_space_units(self.context.stream.units, start_ui, suffix_ui + 1) <= 10:
+                return clue.end
+        return None
+
+    def _organization_clues_in_span(self, start: int, end: int) -> list[tuple[int, Clue]]:
+        matches: list[tuple[int, Clue]] = []
+        for index, clue in enumerate(self.context.clues):
+            if clue.end <= start:
+                continue
+            if clue.start >= end:
                 break
             if clue.attr_type != PIIAttributeType.ORGANIZATION:
-                break
-            end = max(end, clue.end)
-            consumed.add(clue.clue_id)
-            index += 1
-        return (end, index, consumed)
+                continue
+            if clue.role == ClueRole.HARD:
+                continue
+            matches.append((index, clue))
+        return matches
 
 
 @dataclass(slots=True)
@@ -1334,6 +1656,129 @@ def _left_expand_text_boundary(raw_text: str, clues: tuple[Clue, ...], start: in
             break
         index -= 1
     return index
+
+
+def _unit_index_at_or_after(stream: StreamInput, char_index: int) -> int:
+    if not stream.char_to_unit or char_index >= len(stream.char_to_unit):
+        return len(stream.units)
+    ui = stream.char_to_unit[char_index]
+    while ui < len(stream.units) and stream.units[ui].char_end <= char_index:
+        ui += 1
+    return ui
+
+
+def _unit_index_left_of(stream: StreamInput, char_index: int) -> int:
+    if char_index <= 0 or not stream.char_to_unit:
+        return -1
+    ui = stream.char_to_unit[char_index - 1]
+    while ui >= 0 and stream.units[ui].char_start >= char_index:
+        ui -= 1
+    return ui
+
+
+def _count_non_space_units(units, start_ui: int, end_ui: int) -> int:
+    count = 0
+    for ui in range(max(0, start_ui), min(len(units), end_ui)):
+        if units[ui].kind != "space":
+            count += 1
+    return count
+
+
+def _organization_body_limit(locale: str) -> int:
+    return 6 if locale == "zh" else 4
+
+
+def _is_organization_count_unit(kind: str, locale: str) -> bool:
+    if locale == "zh":
+        return kind == "cjk_char"
+    return kind == "ascii_word"
+
+
+def _extend_organization_right_with_limit(
+    stream: StreamInput,
+    *,
+    start: int,
+    upper: int,
+    locale: str,
+) -> int:
+    """组织名右扩：优先保留主体，空格和标点可带出但不计配额。"""
+    if upper <= start:
+        return start
+    ui = _unit_index_at_or_after(stream, start)
+    if ui >= len(stream.units):
+        return start
+    limit = _organization_body_limit(locale)
+    count = 0
+    end = start
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.char_start >= upper:
+            break
+        if unit.kind in {"space", "punct"}:
+            if end > start:
+                end = min(unit.char_end, upper)
+                ui += 1
+                continue
+            break
+        if _is_organization_count_unit(unit.kind, locale):
+            if count >= limit:
+                break
+            count += 1
+            end = min(unit.char_end, upper)
+            ui += 1
+            continue
+        break
+    return end
+
+
+def _extend_organization_left_with_limit(
+    stream: StreamInput,
+    *,
+    floor: int,
+    start: int,
+    locale: str,
+) -> int:
+    """组织名左扩：只限制主体长度，空格和标点可一起带出。"""
+    if start <= floor:
+        return start
+    ui = _unit_index_left_of(stream, start)
+    if ui < 0:
+        return start
+    limit = _organization_body_limit(locale)
+    count = 0
+    next_start = start
+    while ui >= 0:
+        unit = stream.units[ui]
+        if unit.char_end <= floor:
+            break
+        if unit.kind in {"space", "punct"}:
+            next_start = max(floor, unit.char_start)
+            ui -= 1
+            continue
+        if _is_organization_count_unit(unit.kind, locale):
+            if count >= limit:
+                break
+            count += 1
+            next_start = max(floor, unit.char_start)
+            ui -= 1
+            continue
+        break
+    return next_start
+
+
+def _organization_has_body_before_suffix(text: str) -> bool:
+    suffix_start = organization_suffix_start(text)
+    if suffix_start < 0:
+        return bool(clean_value(text))
+    return bool(clean_value(text[:suffix_start]))
+
+
+def _is_organization_candidate_usable(text: str, *, label_driven: bool) -> bool:
+    if not text:
+        return False
+    if not has_organization_suffix(text) and not label_driven:
+        return False
+    return _organization_has_body_before_suffix(text)
 
 
 def _extend_name_boundary(

@@ -90,8 +90,50 @@ def test_start_seed_uses_first_character_after_separator():
     assert run.candidate.text == "张三"
 
 
-def test_given_name_seed_expands_left_then_right():
-    text = "Ann Demo"
+def test_zh_given_name_seed_stops_at_self():
+    text = "杨汉文"
+    clues = (
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
+            1,
+            3,
+            "汉文",
+            source_kind="zh_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "汉文"
+
+
+def test_en_given_name_seed_can_expand_left_one_plain_word():
+    text = "John Marie"
+    clues = (
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
+            5,
+            10,
+            "Marie",
+            source_kind="en_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "John Marie"
+
+
+def test_en_given_name_seed_can_chain_right_given_names():
+    text = "Ann de Marie Claire"
     clues = (
         _clue(
             "given-1",
@@ -104,21 +146,144 @@ def test_given_name_seed_expands_left_then_right():
             component_hint=NameComponentHint.GIVEN,
         ),
         _clue(
+            "given-2",
+            ClueRole.GIVEN_NAME,
+            7,
+            12,
+            "Marie",
+            source_kind="en_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
+        ),
+        _clue(
+            "given-3",
+            ClueRole.GIVEN_NAME,
+            13,
+            19,
+            "Claire",
+            source_kind="en_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "Ann de Marie Claire"
+
+
+def test_en_given_name_seed_stops_when_gap_has_two_words():
+    text = "Ann de la Marie"
+    clues = (
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
+            0,
+            3,
+            "Ann",
+            source_kind="en_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
+        ),
+        _clue(
+            "given-2",
+            ClueRole.GIVEN_NAME,
+            10,
+            15,
+            "Marie",
+            source_kind="en_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "Ann"
+
+
+def test_en_family_name_seed_switches_to_given_chain():
+    text = "Doe John Paul"
+    clues = (
+        _clue(
             "family-1",
             ClueRole.FAMILY_NAME,
+            0,
+            3,
+            "Doe",
+            source_kind="en_family_name",
+            priority=220,
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
             4,
             8,
-            "Demo",
-            source_kind="en_surname",
-            priority=218,
-            component_hint=NameComponentHint.FAMILY,
+            "John",
+            source_kind="en_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
+        ),
+        _clue(
+            "given-2",
+            ClueRole.GIVEN_NAME,
+            9,
+            13,
+            "Paul",
+            source_kind="en_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
         ),
     )
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.WEAK).run()
 
     assert run is not None
-    assert run.candidate.text == "Ann Demo"
+    assert run.candidate.text == "Doe John Paul"
+
+
+def test_label_seed_switches_to_given_chain_in_english():
+    text = "name: John Paul"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            4,
+            "name",
+            source_kind="context_name_field",
+            priority=247,
+            component_hint=NameComponentHint.FULL,
+        ),
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
+            6,
+            10,
+            "John",
+            source_kind="en_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
+        ),
+        _clue(
+            "given-2",
+            ClueRole.GIVEN_NAME,
+            11,
+            15,
+            "Paul",
+            source_kind="en_given_name",
+            priority=215,
+            component_hint=NameComponentHint.GIVEN,
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.WEAK).run()
+
+    assert run is not None
+    assert run.candidate.text == "John Paul"
 
 
 def test_full_name_and_alias_submit_directly_under_weak():
@@ -197,6 +362,36 @@ def test_weak_rejects_single_non_privileged_name_clue():
     )
 
     run = _run_name_stack("Ann", 0, clues, protection_level=ProtectionLevel.WEAK).run()
+
+    assert run is None
+
+
+def test_same_role_clues_only_count_once_under_weak():
+    text = "van Helsing"
+    clues = (
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            0,
+            3,
+            "van",
+            source_kind="en_family_name",
+            priority=220,
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue(
+            "family-2",
+            ClueRole.FAMILY_NAME,
+            4,
+            11,
+            "Helsing",
+            source_kind="en_family_name",
+            priority=220,
+            component_hint=NameComponentHint.FAMILY,
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.WEAK).run()
 
     assert run is None
 
