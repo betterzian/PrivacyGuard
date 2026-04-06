@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
-from privacyguard.infrastructure.pii.detector.models import AddressComponentType, Clue, ClueRole
-from privacyguard.infrastructure.pii.detector.parser import StackContext
+from privacyguard.infrastructure.pii.detector.context import DetectContext
+from privacyguard.infrastructure.pii.detector.models import AddressComponentType, Clue, ClueBundle, ClueRole
+from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks import AddressStack
 
@@ -49,6 +50,21 @@ def _run_address_stack(
         clues=clues,
     )
     return AddressStack(clue=clues[clue_index], clue_index=clue_index, context=context)
+
+
+def _parse_address_texts(
+    text: str,
+    clues: tuple[Clue, ...],
+    *,
+    protection_level: ProtectionLevel,
+) -> list[str]:
+    stream = build_prompt_stream(text)
+    parser = StreamParser(
+        locale_profile="mixed",
+        ctx=DetectContext(protection_level=protection_level),
+    )
+    result = parser.parse(stream, ClueBundle(all_clues=clues))
+    return [candidate.text for candidate in result.candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
 
 
 def test_label_seed_finds_first_address_clue():
@@ -196,3 +212,55 @@ def test_shrink_returns_none_when_trimmed_text_loses_address_signal():
 
     assert run is not None
     assert stack.shrink(run, run.candidate.unit_end - 1, run.candidate.unit_end) is None
+
+
+def test_parser_value_path_matches_between_balanced_and_strong():
+    text = "Main St"
+    clues = (
+        _clue(
+            "value-1",
+            ClueRole.VALUE,
+            0,
+            4,
+            "Main",
+            source_kind="en_address_road",
+            component_type=AddressComponentType.ROAD,
+        ),
+        _clue(
+            "key-1",
+            ClueRole.KEY,
+            5,
+            7,
+            "St",
+            source_kind="en_address_road_keyword",
+            component_type=AddressComponentType.ROAD,
+        ),
+    )
+
+    balanced = _parse_address_texts(text, clues, protection_level=ProtectionLevel.BALANCED)
+    strong = _parse_address_texts(text, clues, protection_level=ProtectionLevel.STRONG)
+
+    assert balanced == [text]
+    assert strong == balanced
+
+
+def test_parser_key_path_matches_between_weak_and_strong():
+    text = "人民路"
+    start = text.index("路")
+    clues = (
+        _clue(
+            "key-1",
+            ClueRole.KEY,
+            start,
+            start + 1,
+            "路",
+            source_kind="zh_address_road_keyword",
+            component_type=AddressComponentType.ROAD,
+        ),
+    )
+
+    weak = _parse_address_texts(text, clues, protection_level=ProtectionLevel.WEAK)
+    strong = _parse_address_texts(text, clues, protection_level=ProtectionLevel.STRONG)
+
+    assert weak == [text]
+    assert strong == weak

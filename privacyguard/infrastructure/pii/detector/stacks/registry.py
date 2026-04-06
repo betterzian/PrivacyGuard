@@ -46,6 +46,8 @@ _NAME_ROLES = _all_levels(
     ClueRole.ALIAS,
     ClueRole.HARD,
 )
+_ORGANIZATION_ROLES = _all_levels(ClueRole.LABEL, ClueRole.SUFFIX, ClueRole.HARD)
+_ADDRESS_ROLES = _all_levels(ClueRole.LABEL, ClueRole.VALUE, ClueRole.KEY, ClueRole.HARD)
 
 _STACK_SPECS: dict[PIIAttributeType, StackSpec] = {
     PIIAttributeType.EMAIL: StackSpec("email", PIIAttributeType.EMAIL, EmailStack, _STRUCTURED_ROLES),
@@ -61,22 +63,14 @@ _STACK_SPECS: dict[PIIAttributeType, StackSpec] = {
         "organization",
         PIIAttributeType.ORGANIZATION,
         OrganizationStack,
-        {
-            ProtectionLevel.STRONG: frozenset({ClueRole.LABEL, ClueRole.SUFFIX, ClueRole.HARD}),
-            ProtectionLevel.BALANCED: frozenset({ClueRole.LABEL, ClueRole.SUFFIX, ClueRole.HARD}),
-            ProtectionLevel.WEAK: frozenset({ClueRole.LABEL, ClueRole.HARD}),
-        },
+        _ORGANIZATION_ROLES,
         soft_priority=10,
     ),
     PIIAttributeType.ADDRESS: StackSpec(
         "address",
         PIIAttributeType.ADDRESS,
         AddressStack,
-        {
-            ProtectionLevel.STRONG: frozenset({ClueRole.LABEL, ClueRole.VALUE, ClueRole.KEY, ClueRole.HARD}),
-            ProtectionLevel.BALANCED: frozenset({ClueRole.LABEL, ClueRole.VALUE, ClueRole.HARD}),
-            ProtectionLevel.WEAK: frozenset({ClueRole.LABEL, ClueRole.HARD}),
-        },
+        _ADDRESS_ROLES,
         soft_priority=30,
     ),
 }

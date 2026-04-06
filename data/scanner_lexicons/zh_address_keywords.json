@@ -9,31 +9,35 @@
   },
   {
     "component_type": "district",
-    "keywords": ["新区", "区", "县", "旗"]
+    "keywords": ["新区", "开发区", "高新区", "经济区", "保税区", "区", "县", "旗"]
   },
   {
     "component_type": "street_admin",
-    "keywords": ["街道"]
+    "keywords": ["街道办", "街道"]
   },
   {
     "component_type": "town",
-    "keywords": ["镇", "乡"]
+    "keywords": ["镇", "乡", "屯"]
   },
   {
     "component_type": "village",
-    "keywords": ["社区", "村"]
+    "keywords": ["社区", "居委会", "村委会", "村"]
   },
   {
     "component_type": "road",
-    "keywords": ["大道", "胡同", "路", "街", "道", "巷", "弄"]
+    "keywords": ["大道", "胡同", "公路", "国道", "大街", "中路", "南路", "北路", "东路", "西路", "路", "街", "道", "巷", "弄", "里", "坊", "桥"]
   },
   {
     "component_type": "compound",
-    "keywords": ["小区", "公寓", "大厦", "园区", "花园", "家园", "苑", "庭", "府", "湾", "宿舍"]
+    "keywords": ["小区", "公寓", "大厦", "园区", "花园", "家园", "苑", "庭", "府", "湾", "宿舍", "新村", "别墅", "广场", "中心", "城", "商场", "写字楼", "工业园", "科技园", "产业园", "住宅", "楼盘", "新城", "雅苑", "嘉园", "豪庭", "名邸", "华庭", "御园"]
   },
   {
     "component_type": "building",
     "keywords": ["号楼", "栋", "幢", "座", "楼"]
+  },
+  {
+    "component_type": "number",
+    "keywords": ["号", "门牌", "门牌号"]
   },
   {
     "component_type": "unit",
@@ -41,7 +45,7 @@
   },
   {
     "component_type": "floor",
-    "keywords": ["层"]
+    "keywords": ["层", "楼"]
   },
   {
     "component_type": "room",

@@ -54,7 +54,7 @@ def test_organization_roles_follow_protection_level():
         {ClueRole.LABEL, ClueRole.SUFFIX, ClueRole.HARD}
     )
     assert spec.start_roles_by_level[ProtectionLevel.WEAK] == frozenset(
-        {ClueRole.LABEL, ClueRole.HARD}
+        {ClueRole.LABEL, ClueRole.SUFFIX, ClueRole.HARD}
     )
 
 
@@ -66,8 +66,8 @@ def test_address_roles_follow_protection_level():
         {ClueRole.LABEL, ClueRole.VALUE, ClueRole.KEY, ClueRole.HARD}
     )
     assert spec.start_roles_by_level[ProtectionLevel.BALANCED] == frozenset(
-        {ClueRole.LABEL, ClueRole.VALUE, ClueRole.HARD}
+        {ClueRole.LABEL, ClueRole.VALUE, ClueRole.KEY, ClueRole.HARD}
     )
     assert spec.start_roles_by_level[ProtectionLevel.WEAK] == frozenset(
-        {ClueRole.LABEL, ClueRole.HARD}
+        {ClueRole.LABEL, ClueRole.VALUE, ClueRole.KEY, ClueRole.HARD}
     )
