@@ -825,7 +825,25 @@ def _build_stream_units(text: str) -> tuple[tuple[StreamUnit, ...], tuple[int, .
             )
             continue
         if _is_ascii_digit(char):
-            cursor = _append_unit(units, char_to_unit, kind="digit_char", text=char, start=cursor, end=cursor + 1)
+            # 连续数字合并为一个 digit_run unit；允许夹杂单个空格（如银行卡号 "6222 0000"）。
+            end = cursor + 1
+            while end < len(text):
+                next_char = text[end]
+                if _is_ascii_digit(next_char):
+                    end += 1
+                elif next_char == " " and end + 1 < len(text) and _is_ascii_digit(text[end + 1]):
+                    # 单个空格后紧跟数字，视为同一 digit_run 的内部间隔。
+                    end += 2
+                else:
+                    break
+            cursor = _append_unit(
+                units,
+                char_to_unit,
+                kind="digit_run",
+                text=text[cursor:end],
+                start=cursor,
+                end=end,
+            )
             continue
         if _is_punctuation(char):
             cursor = _append_unit(units, char_to_unit, kind="punct", text=char, start=cursor, end=cursor + 1)

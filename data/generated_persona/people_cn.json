@@ -1,0 +1,2262 @@
+[
+    {
+      "identity": {
+        "name_zh": "李晓明",
+        "name_pinyin": "Li Xiaoming",
+        "gender": "男",
+        "age_band": "20-30",
+        "birth_year": 2000,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "李晓明" },
+          { "alias_type": "social_nickname", "value": "小明" },
+          { "alias_type": "shopping_display_name", "value": "李晓明" },
+          { "alias_type": "contact_remark", "value": "晓明" }
+        ]
+      },
+      "contact": {
+        "phone_main": "18038637940",
+        "phone_secondary": "19326542351",
+        "email_personal": "lixiaoming@qq.com",
+        "email_work": "xiaoming.li@tencent.com",
+        "wechat_nickname": "李晓明",
+        "qq_nickname": "李晓明",
+        "xiaohongshu_nickname": "晓明深圳",
+        "taobao_nickname": "晓明购物",
+        "jd_nickname": "李晓明",
+        "meituan_nickname": "晓明外卖",
+        "contact_remark_name": "晓明"
+      },
+      "employment": {
+        "company_name_zh": "腾讯",
+        "company_name_en": "Tencent",
+        "department": "产品研发部",
+        "job_title": "高级产品经理",
+        "work_phone": "0755-86013388",
+        "work_email_signature_name": "李晓明",
+        "office_building_short_name": "腾讯滨海大厦"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "南海大道",
+          "street_number": "1001",
+          "building_unit_room": "深南花园A栋801",
+          "postal_code": "518052",
+          "address_label": "家",
+          "map_search_short": "深南花园",
+          "ecommerce_full": "中国广东省深圳市南山区南海大道1001号深南花园A栋801"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "海天二路",
+          "street_number": "33",
+          "building_unit_room": "腾讯滨海大厦",
+          "postal_code": "518054",
+          "address_label": "公司",
+          "map_search_short": "腾讯滨海大厦",
+          "ecommerce_full": "中国广东省深圳市南山区海天二路33号腾讯滨海大厦"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "粤海街道",
+          "street_number": "高新南一道",
+          "building_unit_room": "科兴科学园B座1203",
+          "postal_code": "518057",
+          "address_label": "备用收货地址",
+          "map_search_short": "科兴科学园",
+          "ecommerce_full": "中国广东省深圳市南山区粤海街道高新南一道科兴科学园B座1203"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "深圳湾",
+          "street_number": "1号",
+          "building_unit_room": "",
+          "postal_code": "518054",
+          "address_label": "常去地点",
+          "map_search_short": "深圳湾公园",
+          "ecommerce_full": "中国广东省深圳市南山区深圳湾1号深圳湾公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "李晓明",
+        "default_recipient_phone": "18038637940",
+        "backup_recipient_name": "李伟",
+        "backup_recipient_phone": "19326542351",
+        "food_delivery_contact_name": "李晓明",
+        "food_delivery_contact_phone": "18038637940",
+        "emergency_contact_name": "母亲",
+        "emergency_contact_phone": "19326542351"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["腾讯产品", "深圳科技园", "产品经理招聘"],
+        "common_short_messages": ["好的，收到", "在路上", "明天见面"],
+        "common_delivery_notes": ["请放门口", "晚上7点后"],
+        "common_email_subjects": ["项目周报", "会议通知", "需求确认"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300200004177714",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6273602606474687234", "bank_name": "中国银行" },
+        { "card_type": "Visa", "card_number": "4824493534874016", "bank_name": "招商银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "王丽娜",
+        "name_pinyin": "Wang Lina",
+        "gender": "女",
+        "age_band": "40-50",
+        "birth_year": 1983,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "王丽娜" },
+          { "alias_type": "social_nickname", "value": "娜娜" },
+          { "alias_type": "shopping_display_name", "value": "王丽娜" },
+          { "alias_type": "contact_remark", "value": "丽娜" }
+        ]
+      },
+      "contact": {
+        "phone_main": "19524278680",
+        "phone_secondary": "13712805982",
+        "email_personal": "wanglina@163.com",
+        "email_work": "lina.wang@tencent.com",
+        "wechat_nickname": "王丽娜",
+        "qq_nickname": "王丽娜",
+        "xiaohongshu_nickname": "娜娜生活",
+        "taobao_nickname": "娜娜购物",
+        "jd_nickname": "王丽娜",
+        "meituan_nickname": "娜娜外卖",
+        "contact_remark_name": "丽娜"
+      },
+      "employment": {
+        "company_name_zh": "腾讯",
+        "company_name_en": "Tencent",
+        "department": "市场营销部",
+        "job_title": "市场总监",
+        "work_phone": "0755-86013388",
+        "work_email_signature_name": "王丽娜",
+        "office_building_short_name": "腾讯滨海大厦"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "深南大道",
+          "street_number": "10000",
+          "building_unit_room": "腾讯大厦旁住宅楼B栋902",
+          "postal_code": "518054",
+          "address_label": "家",
+          "map_search_short": "深南花园",
+          "ecommerce_full": "中国广东省深圳市南山区深南大道10000号腾讯大厦旁住宅楼B栋902"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "海天二路",
+          "street_number": "33",
+          "building_unit_room": "腾讯滨海大厦",
+          "postal_code": "518054",
+          "address_label": "公司",
+          "map_search_short": "腾讯滨海大厦",
+          "ecommerce_full": "中国广东省深圳市南山区海天二路33号腾讯滨海大厦"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "科技园路",
+          "street_number": "10",
+          "building_unit_room": "科苑花园C栋1503",
+          "postal_code": "518057",
+          "address_label": "备用收货地址",
+          "map_search_short": "科苑花园",
+          "ecommerce_full": "中国广东省深圳市南山区科技园路10号科苑花园C栋1503"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "海岸城",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518054",
+          "address_label": "常去地点",
+          "map_search_short": "海岸城购物中心",
+          "ecommerce_full": "中国广东省深圳市南山区海岸城购物中心"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "王丽娜",
+        "default_recipient_phone": "19524278680",
+        "backup_recipient_name": "张先生",
+        "backup_recipient_phone": "13712805982",
+        "food_delivery_contact_name": "王丽娜",
+        "food_delivery_contact_phone": "19524278680",
+        "emergency_contact_name": "丈夫",
+        "emergency_contact_phone": "13712805982"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["时尚穿搭", "深圳美食", "营销策略"],
+        "common_short_messages": ["嗯，好的", "已付款", "谢谢"],
+        "common_delivery_notes": ["轻放", "打电话"],
+        "common_email_subjects": ["活动方案", "客户反馈", "季度总结"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300198305020040",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6205310033092327193", "bank_name": "中国建设银行" },
+        { "card_type": "Mastercard", "card_number": "5352991241904966", "bank_name": "工商银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "张伟华",
+        "name_pinyin": "Zhang Weihua",
+        "gender": "男",
+        "age_band": "40-50",
+        "birth_year": 1980,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "张伟华" },
+          { "alias_type": "social_nickname", "value": "华哥" },
+          { "alias_type": "shopping_display_name", "value": "张伟华" },
+          { "alias_type": "contact_remark", "value": "伟华" }
+        ]
+      },
+      "contact": {
+        "phone_main": "18931491905",
+        "phone_secondary": "17965185067",
+        "email_personal": "zhangweihua@hotmail.com",
+        "email_work": "weihua.zhang@tencent.com",
+        "wechat_nickname": "张伟华",
+        "qq_nickname": "张伟华",
+        "xiaohongshu_nickname": "伟华科技",
+        "taobao_nickname": "伟华",
+        "jd_nickname": "张伟华",
+        "meituan_nickname": "伟华",
+        "contact_remark_name": "伟华"
+      },
+      "employment": {
+        "company_name_zh": "腾讯",
+        "company_name_en": "Tencent",
+        "department": "技术架构部",
+        "job_title": "高级架构师",
+        "work_phone": "0755-86013388",
+        "work_email_signature_name": "张伟华",
+        "office_building_short_name": "腾讯滨海大厦"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "粤海街道",
+          "street_number": "高新南一道",
+          "building_unit_room": "科兴科学园住宅楼D栋1102",
+          "postal_code": "518057",
+          "address_label": "家",
+          "map_search_short": "科兴科学园",
+          "ecommerce_full": "中国广东省深圳市南山区粤海街道高新南一道科兴科学园住宅楼D栋1102"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "海天二路",
+          "street_number": "33",
+          "building_unit_room": "腾讯滨海大厦",
+          "postal_code": "518054",
+          "address_label": "公司",
+          "map_search_short": "腾讯滨海大厦",
+          "ecommerce_full": "中国广东省深圳市南山区海天二路33号腾讯滨海大厦"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "深南大道",
+          "street_number": "10000",
+          "building_unit_room": "腾讯大厦旁住宅楼A栋703",
+          "postal_code": "518054",
+          "address_label": "备用收货地址",
+          "map_search_short": "深南花园",
+          "ecommerce_full": "中国广东省深圳市南山区深南大道10000号腾讯大厦旁住宅楼A栋703"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "深圳湾",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518054",
+          "address_label": "常去地点",
+          "map_search_short": "深圳湾公园",
+          "ecommerce_full": "中国广东省深圳市南山区深圳湾公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "张伟华",
+        "default_recipient_phone": "18931491905",
+        "backup_recipient_name": "王芳",
+        "backup_recipient_phone": "17965185067",
+        "food_delivery_contact_name": "张伟华",
+        "food_delivery_contact_phone": "18931491905",
+        "emergency_contact_name": "妻子",
+        "emergency_contact_phone": "17965185067"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["云计算", "架构设计", "腾讯内部"],
+        "common_short_messages": ["确认", "已处理", "下班"],
+        "common_delivery_notes": ["请敲门", "放保安处"],
+        "common_email_subjects": ["技术方案", "代码审查", "团队会议"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300198012070992",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6271349361832421024", "bank_name": "中国农业银行" },
+        { "card_type": "Amex", "card_number": "375451680876038", "bank_name": "广发银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "刘淑珍",
+        "name_pinyin": "Liu Shuzhen",
+        "gender": "女",
+        "age_band": "20-30",
+        "birth_year": 2003,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "刘淑珍" },
+          { "alias_type": "social_nickname", "value": "珍珍" },
+          { "alias_type": "shopping_display_name", "value": "刘淑珍" },
+          { "alias_type": "contact_remark", "value": "淑珍" }
+        ]
+      },
+      "contact": {
+        "phone_main": "18570348247",
+        "phone_secondary": "18971093248",
+        "email_personal": "liushuzhen@163.com",
+        "email_work": "shuzhen.liu@tencent.com",
+        "wechat_nickname": "刘淑珍",
+        "qq_nickname": "刘淑珍",
+        "xiaohongshu_nickname": "珍珍日常",
+        "taobao_nickname": "淑珍",
+        "jd_nickname": "刘淑珍",
+        "meituan_nickname": "珍珍",
+        "contact_remark_name": "淑珍"
+      },
+      "employment": {
+        "company_name_zh": "腾讯",
+        "company_name_en": "Tencent",
+        "department": "用户体验部",
+        "job_title": "UI设计师",
+        "work_phone": "0755-86013388",
+        "work_email_signature_name": "刘淑珍",
+        "office_building_short_name": "腾讯滨海大厦"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "科苑路",
+          "street_number": "3",
+          "building_unit_room": "深圳湾社区住宅楼E栋602",
+          "postal_code": "518054",
+          "address_label": "家",
+          "map_search_short": "深圳湾社区",
+          "ecommerce_full": "中国广东省深圳市南山区科苑路3号深圳湾社区住宅楼E栋602"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "海天二路",
+          "street_number": "33",
+          "building_unit_room": "腾讯滨海大厦",
+          "postal_code": "518054",
+          "address_label": "公司",
+          "map_search_short": "腾讯滨海大厦",
+          "ecommerce_full": "中国广东省深圳市南山区海天二路33号腾讯滨海大厦"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "南海大道",
+          "street_number": "1001",
+          "building_unit_room": "深南花园B栋903",
+          "postal_code": "518052",
+          "address_label": "备用收货地址",
+          "map_search_short": "深南花园",
+          "ecommerce_full": "中国广东省深圳市南山区南海大道1001号深南花园B栋903"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "海岸城",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518054",
+          "address_label": "常去地点",
+          "map_search_short": "海岸城购物中心",
+          "ecommerce_full": "中国广东省深圳市南山区海岸城购物中心"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "刘淑珍",
+        "default_recipient_phone": "18570348247",
+        "backup_recipient_name": "父母",
+        "backup_recipient_phone": "18971093248",
+        "food_delivery_contact_name": "刘淑珍",
+        "food_delivery_contact_phone": "18570348247",
+        "emergency_contact_name": "父亲",
+        "emergency_contact_phone": "18971093248"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["设计素材", "UI趋势", "深圳生活"],
+        "common_short_messages": ["好的", "已收", "谢谢"],
+        "common_delivery_notes": ["请轻放", "晚上送"],
+        "common_email_subjects": ["设计稿", "反馈", "周报"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300200306209662",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6218702621745961586", "bank_name": "中国邮政储蓄银行" },
+        { "card_type": "Mastercard", "card_number": "5440748217594647", "bank_name": "交通银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "陈浩然",
+        "name_pinyin": "Chen Haoran",
+        "gender": "男",
+        "age_band": "30-40",
+        "birth_year": 1988,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "陈浩然" },
+          { "alias_type": "social_nickname", "value": "浩然" },
+          { "alias_type": "shopping_display_name", "value": "陈浩然" },
+          { "alias_type": "contact_remark", "value": "浩然" }
+        ]
+      },
+      "contact": {
+        "phone_main": "13636959440",
+        "phone_secondary": "18764090974",
+        "email_personal": "chenhaoran@outlook.com",
+        "email_work": "haoran.chen@huawei.com",
+        "wechat_nickname": "陈浩然",
+        "qq_nickname": "陈浩然",
+        "xiaohongshu_nickname": "浩然科技",
+        "taobao_nickname": "浩然",
+        "jd_nickname": "陈浩然",
+        "meituan_nickname": "浩然",
+        "contact_remark_name": "浩然"
+      },
+      "employment": {
+        "company_name_zh": "华为",
+        "company_name_en": "Huawei",
+        "department": "5G研发部",
+        "job_title": "高级工程师",
+        "work_phone": "0755-28780808",
+        "work_email_signature_name": "陈浩然",
+        "office_building_short_name": "华为坂田基地"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "龙岗区",
+          "street": "坂田街道",
+          "street_number": "五和大道",
+          "building_unit_room": "华为小区住宅楼F栋1004",
+          "postal_code": "518129",
+          "address_label": "家",
+          "map_search_short": "华为小区",
+          "ecommerce_full": "中国广东省深圳市龙岗区坂田街道五和大道华为小区住宅楼F栋1004"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "龙岗区",
+          "street": "坂田街道",
+          "street_number": "",
+          "building_unit_room": "华为坂田基地",
+          "postal_code": "518129",
+          "address_label": "公司",
+          "map_search_short": "华为坂田基地",
+          "ecommerce_full": "中国广东省深圳市龙岗区坂田街道华为工业基地"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "龙岗区",
+          "street": "坂雪岗大道",
+          "street_number": "",
+          "building_unit_room": "坂田花园B栋903",
+          "postal_code": "518129",
+          "address_label": "备用收货地址",
+          "map_search_short": "坂田花园",
+          "ecommerce_full": "中国广东省深圳市龙岗区坂雪岗大道坂田花园B栋903"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "龙岗区",
+          "street": "坂田",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518129",
+          "address_label": "常去地点",
+          "map_search_short": "华为公园",
+          "ecommerce_full": "中国广东省深圳市龙岗区坂田华为公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "陈浩然",
+        "default_recipient_phone": "13636959440",
+        "backup_recipient_name": "陈太太",
+        "backup_recipient_phone": "18764090974",
+        "food_delivery_contact_name": "陈浩然",
+        "food_delivery_contact_phone": "13636959440",
+        "emergency_contact_name": "妻子",
+        "emergency_contact_phone": "18764090974"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["5G技术", "华为招聘", "龙岗生活"],
+        "common_short_messages": ["收到", "确认", "明天"],
+        "common_delivery_notes": ["放门口", "请致电"],
+        "common_email_subjects": ["研发进度", "测试报告", "团队同步"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300198805074977",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6239533942104709521", "bank_name": "中国银行" },
+        { "card_type": "Mastercard", "card_number": "5301836675254599", "bank_name": "招商银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "孙美玲",
+        "name_pinyin": "Sun Meiling",
+        "gender": "女",
+        "age_band": "30-40",
+        "birth_year": 1987,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "孙美玲" },
+          { "alias_type": "social_nickname", "value": "美玲" },
+          { "alias_type": "shopping_display_name", "value": "孙美玲" },
+          { "alias_type": "contact_remark", "value": "美玲" }
+        ]
+      },
+      "contact": {
+        "phone_main": "19390147679",
+        "phone_secondary": "17364381561",
+        "email_personal": "sunmeiling@qq.com",
+        "email_work": "meiling.sun@huawei.com",
+        "wechat_nickname": "孙美玲",
+        "qq_nickname": "孙美玲",
+        "xiaohongshu_nickname": "美玲生活",
+        "taobao_nickname": "美玲",
+        "jd_nickname": "孙美玲",
+        "meituan_nickname": "美玲",
+        "contact_remark_name": "美玲"
+      },
+      "employment": {
+        "company_name_zh": "华为",
+        "company_name_en": "Huawei",
+        "department": "人力资源部",
+        "job_title": "HR经理",
+        "work_phone": "0755-28780808",
+        "work_email_signature_name": "孙美玲",
+        "office_building_short_name": "华为坂田基地"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "龙岗区",
+          "street": "坂田街道",
+          "street_number": "",
+          "building_unit_room": "坂田华为小区G栋804",
+          "postal_code": "518129",
+          "address_label": "家",
+          "map_search_short": "华为小区",
+          "ecommerce_full": "中国广东省深圳市龙岗区坂田街道华为小区G栋804"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "龙岗区",
+          "street": "坂田街道",
+          "street_number": "",
+          "building_unit_room": "华为坂田基地",
+          "postal_code": "518129",
+          "address_label": "公司",
+          "map_search_short": "华为坂田基地",
+          "ecommerce_full": "中国广东省深圳市龙岗区坂田街道华为工业基地"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "龙岗区",
+          "street": "五和大道",
+          "street_number": "",
+          "building_unit_room": "华为花园H栋1201",
+          "postal_code": "518129",
+          "address_label": "备用收货地址",
+          "map_search_short": "华为花园",
+          "ecommerce_full": "中国广东省深圳市龙岗区五和大道华为花园H栋1201"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "龙岗区",
+          "street": "坂田",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518129",
+          "address_label": "常去地点",
+          "map_search_short": "坂田公园",
+          "ecommerce_full": "中国广东省深圳市龙岗区坂田公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "孙美玲",
+        "default_recipient_phone": "19390147679",
+        "backup_recipient_name": "孙先生",
+        "backup_recipient_phone": "17364381561",
+        "food_delivery_contact_name": "孙美玲",
+        "food_delivery_contact_phone": "19390147679",
+        "emergency_contact_name": "丈夫",
+        "emergency_contact_phone": "17364381561"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["HR政策", "招聘信息", "龙岗生活"],
+        "common_short_messages": ["好的", "已安排", "谢谢"],
+        "common_delivery_notes": ["放门口", "轻放"],
+        "common_email_subjects": ["招聘通知", "员工福利", "培训计划"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300198702021928",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6232898614341036971", "bank_name": "中国建设银行" },
+        { "card_type": "Visa", "card_number": "4727155188442258", "bank_name": "中信银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "吴建国",
+        "name_pinyin": "Wu Jianguo",
+        "gender": "男",
+        "age_band": "30-40",
+        "birth_year": 1987,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "吴建国" },
+          { "alias_type": "social_nickname", "value": "建国" },
+          { "alias_type": "shopping_display_name", "value": "吴建国" },
+          { "alias_type": "contact_remark", "value": "建国" }
+        ]
+      },
+      "contact": {
+        "phone_main": "15370589578",
+        "phone_secondary": "13891146786",
+        "email_personal": "wujianguo@163.com",
+        "email_work": "jianguo.wu@byd.com",
+        "wechat_nickname": "吴建国",
+        "qq_nickname": "吴建国",
+        "xiaohongshu_nickname": "建国汽车",
+        "taobao_nickname": "建国",
+        "jd_nickname": "吴建国",
+        "meituan_nickname": "建国",
+        "contact_remark_name": "建国"
+      },
+      "employment": {
+        "company_name_zh": "比亚迪",
+        "company_name_en": "BYD",
+        "department": "汽车工程部",
+        "job_title": "新能源汽车工程师",
+        "work_phone": "0755-89888888",
+        "work_email_signature_name": "吴建国",
+        "office_building_short_name": "比亚迪总部"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "坪山区",
+          "street": "比亚迪路",
+          "street_number": "3009",
+          "building_unit_room": "比亚迪小区住宅楼I栋905",
+          "postal_code": "518118",
+          "address_label": "家",
+          "map_search_short": "比亚迪小区",
+          "ecommerce_full": "中国广东省深圳市坪山区比亚迪路3009号比亚迪小区住宅楼I栋905"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "坪山区",
+          "street": "比亚迪路",
+          "street_number": "3009",
+          "building_unit_room": "比亚迪总部",
+          "postal_code": "518118",
+          "address_label": "公司",
+          "map_search_short": "比亚迪总部",
+          "ecommerce_full": "中国广东省深圳市坪山区比亚迪路3009号"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "坪山区",
+          "street": "坪山大道",
+          "street_number": "100",
+          "building_unit_room": "坪山花园J栋1003",
+          "postal_code": "518118",
+          "address_label": "备用收货地址",
+          "map_search_short": "坪山花园",
+          "ecommerce_full": "中国广东省深圳市坪山区坪山大道100号坪山花园J栋1003"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "坪山区",
+          "street": "比亚迪路",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518118",
+          "address_label": "常去地点",
+          "map_search_short": "比亚迪公园",
+          "ecommerce_full": "中国广东省深圳市坪山区比亚迪公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "吴建国",
+        "default_recipient_phone": "15370589578",
+        "backup_recipient_name": "吴太太",
+        "backup_recipient_phone": "13891146786",
+        "food_delivery_contact_name": "吴建国",
+        "food_delivery_contact_phone": "15370589578",
+        "emergency_contact_name": "妻子",
+        "emergency_contact_phone": "13891146786"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["新能源汽车", "比亚迪刀片电池", "坪山生活"],
+        "common_short_messages": ["好的", "已到", "确认"],
+        "common_delivery_notes": ["放门口", "请致电"],
+        "common_email_subjects": ["工程报告", "测试数据", "项目更新"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300198704042538",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6224981829922995900", "bank_name": "中国工商银行" },
+        { "card_type": "Visa", "card_number": "4471027677359255", "bank_name": "招商银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "徐晓燕",
+        "name_pinyin": "Xu Xiaoyan",
+        "gender": "女",
+        "age_band": "40-50",
+        "birth_year": 1984,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "徐晓燕" },
+          { "alias_type": "social_nickname", "value": "晓燕" },
+          { "alias_type": "shopping_display_name", "value": "徐晓燕" },
+          { "alias_type": "contact_remark", "value": "晓燕" }
+        ]
+      },
+      "contact": {
+        "phone_main": "13858815371",
+        "phone_secondary": "15673210469",
+        "email_personal": "xuxiaoyan@163.com",
+        "email_work": "xiaoyan.xu@byd.com",
+        "wechat_nickname": "徐晓燕",
+        "qq_nickname": "徐晓燕",
+        "xiaohongshu_nickname": "燕子生活",
+        "taobao_nickname": "晓燕",
+        "jd_nickname": "徐晓燕",
+        "meituan_nickname": "晓燕",
+        "contact_remark_name": "晓燕"
+      },
+      "employment": {
+        "company_name_zh": "比亚迪",
+        "company_name_en": "BYD",
+        "department": "财务部",
+        "job_title": "财务主管",
+        "work_phone": "0755-89888888",
+        "work_email_signature_name": "徐晓燕",
+        "office_building_short_name": "比亚迪总部"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "坪山区",
+          "street": "比亚迪路",
+          "street_number": "3009",
+          "building_unit_room": "比亚迪小区住宅楼K栋1104",
+          "postal_code": "518118",
+          "address_label": "家",
+          "map_search_short": "比亚迪小区",
+          "ecommerce_full": "中国广东省深圳市坪山区比亚迪路3009号比亚迪小区住宅楼K栋1104"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "坪山区",
+          "street": "比亚迪路",
+          "street_number": "3009",
+          "building_unit_room": "比亚迪总部",
+          "postal_code": "518118",
+          "address_label": "公司",
+          "map_search_short": "比亚迪总部",
+          "ecommerce_full": "中国广东省深圳市坪山区比亚迪路3009号"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "坪山区",
+          "street": "坪山大道",
+          "street_number": "200",
+          "building_unit_room": "坪山花园L栋803",
+          "postal_code": "518118",
+          "address_label": "备用收货地址",
+          "map_search_short": "坪山花园",
+          "ecommerce_full": "中国广东省深圳市坪山区坪山大道200号坪山花园L栋803"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "坪山区",
+          "street": "",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518118",
+          "address_label": "常去地点",
+          "map_search_short": "坪山公园",
+          "ecommerce_full": "中国广东省深圳市坪山区坪山公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "徐晓燕",
+        "default_recipient_phone": "13858815371",
+        "backup_recipient_name": "徐先生",
+        "backup_recipient_phone": "15673210469",
+        "food_delivery_contact_name": "徐晓燕",
+        "food_delivery_contact_phone": "13858815371",
+        "emergency_contact_name": "丈夫",
+        "emergency_contact_phone": "15673210469"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["财务报表", "比亚迪财报", "坪山购物"],
+        "common_short_messages": ["已核对", "收到", "OK"],
+        "common_delivery_notes": ["请签收", "放门口"],
+        "common_email_subjects": ["财务审核", "报销单", "月度总结"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300198412284463",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6215478872874315274", "bank_name": "中国农业银行" },
+        { "card_type": "Amex", "card_number": "345687833918785", "bank_name": "广发银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "胡志强",
+        "name_pinyin": "Hu Zhiqiang",
+        "gender": "男",
+        "age_band": "20-30",
+        "birth_year": 2003,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "胡志强" },
+          { "alias_type": "social_nickname", "value": "志强" },
+          { "alias_type": "shopping_display_name", "value": "胡志强" },
+          { "alias_type": "contact_remark", "value": "志强" }
+        ]
+      },
+      "contact": {
+        "phone_main": "18083982258",
+        "phone_secondary": "17313971870",
+        "email_personal": "huzhiqiang@qq.com",
+        "email_work": "zhiqiang.hu@zte.com.cn",
+        "wechat_nickname": "胡志强",
+        "qq_nickname": "胡志强",
+        "xiaohongshu_nickname": "志强通讯",
+        "taobao_nickname": "志强",
+        "jd_nickname": "胡志强",
+        "meituan_nickname": "志强",
+        "contact_remark_name": "志强"
+      },
+      "employment": {
+        "company_name_zh": "中兴通讯",
+        "company_name_en": "ZTE",
+        "department": "网络设备部",
+        "job_title": "网络工程师",
+        "work_phone": "0755-26770000",
+        "work_email_signature_name": "胡志强",
+        "office_building_short_name": "中兴通讯大厦"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "科技南路",
+          "street_number": "55",
+          "building_unit_room": "中兴旁住宅楼M栋702",
+          "postal_code": "518057",
+          "address_label": "家",
+          "map_search_short": "中兴小区",
+          "ecommerce_full": "中国广东省深圳市南山区科技南路55号中兴旁住宅楼M栋702"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "科技南路",
+          "street_number": "55",
+          "building_unit_room": "中兴通讯大厦",
+          "postal_code": "518057",
+          "address_label": "公司",
+          "map_search_short": "中兴通讯大厦",
+          "ecommerce_full": "中国广东省深圳市南山区科技南路55号中兴通讯大厦"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "高新南一道",
+          "street_number": "",
+          "building_unit_room": "科兴科学园住宅楼N栋904",
+          "postal_code": "518057",
+          "address_label": "备用收货地址",
+          "map_search_short": "科兴科学园",
+          "ecommerce_full": "中国广东省深圳市南山区高新南一道科兴科学园住宅楼N栋904"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "科技园",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518057",
+          "address_label": "常去地点",
+          "map_search_short": "科技园公园",
+          "ecommerce_full": "中国广东省深圳市南山区科技园公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "胡志强",
+        "default_recipient_phone": "18083982258",
+        "backup_recipient_name": "胡先生",
+        "backup_recipient_phone": "17313971870",
+        "food_delivery_contact_name": "胡志强",
+        "food_delivery_contact_phone": "18083982258",
+        "emergency_contact_name": "父母",
+        "emergency_contact_phone": "17313971870"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["通信设备", "5G网络", "南山生活"],
+        "common_short_messages": ["确认", "收到", "已处理"],
+        "common_delivery_notes": ["放门口", "请敲门"],
+        "common_email_subjects": ["设备测试", "网络优化", "项目进度"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300200302191418",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6206518017046226567", "bank_name": "中国邮政储蓄银行" },
+        { "card_type": "Mastercard", "card_number": "5478686337524310", "bank_name": "交通银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "郭丽萍",
+        "name_pinyin": "Guo Liping",
+        "gender": "女",
+        "age_band": "40-50",
+        "birth_year": 1983,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "郭丽萍" },
+          { "alias_type": "social_nickname", "value": "丽萍" },
+          { "alias_type": "shopping_display_name", "value": "郭丽萍" },
+          { "alias_type": "contact_remark", "value": "丽萍" }
+        ]
+      },
+      "contact": {
+        "phone_main": "15331190790",
+        "phone_secondary": "15306738302",
+        "email_personal": "guoliping@163.com",
+        "email_work": "liping.guo@zte.com.cn",
+        "wechat_nickname": "郭丽萍",
+        "qq_nickname": "郭丽萍",
+        "xiaohongshu_nickname": "萍萍日常",
+        "taobao_nickname": "丽萍",
+        "jd_nickname": "郭丽萍",
+        "meituan_nickname": "丽萍",
+        "contact_remark_name": "丽萍"
+      },
+      "employment": {
+        "company_name_zh": "中兴通讯",
+        "company_name_en": "ZTE",
+        "department": "销售支持部",
+        "job_title": "销售支持专员",
+        "work_phone": "0755-26770000",
+        "work_email_signature_name": "郭丽萍",
+        "office_building_short_name": "中兴通讯大厦"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "科技南路",
+          "street_number": "55",
+          "building_unit_room": "中兴小区住宅楼O栋803",
+          "postal_code": "518057",
+          "address_label": "家",
+          "map_search_short": "中兴小区",
+          "ecommerce_full": "中国广东省深圳市南山区科技南路55号中兴小区住宅楼O栋803"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "科技南路",
+          "street_number": "55",
+          "building_unit_room": "中兴通讯大厦",
+          "postal_code": "518057",
+          "address_label": "公司",
+          "map_search_short": "中兴通讯大厦",
+          "ecommerce_full": "中国广东省深圳市南山区科技南路55号中兴通讯大厦"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "深南大道",
+          "street_number": "10000",
+          "building_unit_room": "深南花园P栋1002",
+          "postal_code": "518054",
+          "address_label": "备用收货地址",
+          "map_search_short": "深南花园",
+          "ecommerce_full": "中国广东省深圳市南山区深南大道10000号深南花园P栋1002"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "南山区",
+          "street": "科技园",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518057",
+          "address_label": "常去地点",
+          "map_search_short": "科技园公园",
+          "ecommerce_full": "中国广东省深圳市南山区科技园公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "郭丽萍",
+        "default_recipient_phone": "15331190790",
+        "backup_recipient_name": "郭先生",
+        "backup_recipient_phone": "15306738302",
+        "food_delivery_contact_name": "郭丽萍",
+        "food_delivery_contact_phone": "15331190790",
+        "emergency_contact_name": "丈夫",
+        "emergency_contact_phone": "15306738302"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["销售支持", "通讯设备", "南山购物"],
+        "common_short_messages": ["已确认", "好的", "谢谢"],
+        "common_delivery_notes": ["轻放", "晚上送"],
+        "common_email_subjects": ["客户跟进", "订单确认", "支持报告"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300198311147806",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6287334270866882634", "bank_name": "中国银行" },
+        { "card_type": "Visa", "card_number": "4662961943114262", "bank_name": "浦发银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "罗伟明",
+        "name_pinyin": "Luo Weiming",
+        "gender": "男",
+        "age_band": "20-30",
+        "birth_year": 2001,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "罗伟明" },
+          { "alias_type": "social_nickname", "value": "伟明" },
+          { "alias_type": "shopping_display_name", "value": "罗伟明" },
+          { "alias_type": "contact_remark", "value": "伟明" }
+        ]
+      },
+      "contact": {
+        "phone_main": "13610475412",
+        "phone_secondary": "13526788861",
+        "email_personal": "luoweiming@qq.com",
+        "email_work": "weiming.luo@pingan.com",
+        "wechat_nickname": "罗伟明",
+        "qq_nickname": "罗伟明",
+        "xiaohongshu_nickname": "明哥金融",
+        "taobao_nickname": "伟明",
+        "jd_nickname": "罗伟明",
+        "meituan_nickname": "伟明",
+        "contact_remark_name": "伟明"
+      },
+      "employment": {
+        "company_name_zh": "平安集团",
+        "company_name_en": "Ping An",
+        "department": "保险业务部",
+        "job_title": "保险顾问",
+        "work_phone": "4008866338",
+        "work_email_signature_name": "罗伟明",
+        "office_building_short_name": "平安金融中心"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "福田区",
+          "street": "益田路",
+          "street_number": "5033",
+          "building_unit_room": "平安金融中心旁住宅楼Q栋905",
+          "postal_code": "518038",
+          "address_label": "家",
+          "map_search_short": "平安小区",
+          "ecommerce_full": "中国广东省深圳市福田区益田路5033号平安金融中心旁住宅楼Q栋905"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "福田区",
+          "street": "益田路",
+          "street_number": "5033",
+          "building_unit_room": "平安金融中心",
+          "postal_code": "518038",
+          "address_label": "公司",
+          "map_search_short": "平安金融中心",
+          "ecommerce_full": "中国广东省深圳市福田区益田路5033号平安金融中心"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "福田区",
+          "street": "福华三路",
+          "street_number": "",
+          "building_unit_room": "星河发展中心住宅楼R栋1001",
+          "postal_code": "518038",
+          "address_label": "备用收货地址",
+          "map_search_short": "星河发展中心",
+          "ecommerce_full": "中国广东省深圳市福田区福华三路星河发展中心住宅楼R栋1001"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "福田区",
+          "street": "益田路",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518038",
+          "address_label": "常去地点",
+          "map_search_short": "福田CBD公园",
+          "ecommerce_full": "中国广东省深圳市福田区福田CBD公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "罗伟明",
+        "default_recipient_phone": "13610475412",
+        "backup_recipient_name": "罗先生",
+        "backup_recipient_phone": "13526788861",
+        "food_delivery_contact_name": "罗伟明",
+        "food_delivery_contact_phone": "13610475412",
+        "emergency_contact_name": "父母",
+        "emergency_contact_phone": "13526788861"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["保险产品", "平安金融", "福田生活"],
+        "common_short_messages": ["已投保", "确认", "谢谢"],
+        "common_delivery_notes": ["请签收", "放门口"],
+        "common_email_subjects": ["保单审核", "客户回访", "业务报告"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "44030020011213405X",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6201581995604661839", "bank_name": "中国建设银行" },
+        { "card_type": "Amex", "card_number": "349481260422325", "bank_name": "广发银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "郑淑华",
+        "name_pinyin": "Zheng Shuhua",
+        "gender": "女",
+        "age_band": "20-30",
+        "birth_year": 2003,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "郑淑华" },
+          { "alias_type": "social_nickname", "value": "淑华" },
+          { "alias_type": "shopping_display_name", "value": "郑淑华" },
+          { "alias_type": "contact_remark", "value": "淑华" }
+        ]
+      },
+      "contact": {
+        "phone_main": "17629466711",
+        "phone_secondary": "17084577590",
+        "email_personal": "zhengshuhua@163.com",
+        "email_work": "shuhua.zheng@pingan.com",
+        "wechat_nickname": "郑淑华",
+        "qq_nickname": "郑淑华",
+        "xiaohongshu_nickname": "华华生活",
+        "taobao_nickname": "淑华",
+        "jd_nickname": "郑淑华",
+        "meituan_nickname": "淑华",
+        "contact_remark_name": "淑华"
+      },
+      "employment": {
+        "company_name_zh": "平安集团",
+        "company_name_en": "Ping An",
+        "department": "客服中心",
+        "job_title": "高级客服专员",
+        "work_phone": "4008866338",
+        "work_email_signature_name": "郑淑华",
+        "office_building_short_name": "平安金融中心"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "福田区",
+          "street": "益田路",
+          "street_number": "5033",
+          "building_unit_room": "平安金融中心旁住宅楼S栋702",
+          "postal_code": "518038",
+          "address_label": "家",
+          "map_search_short": "平安小区",
+          "ecommerce_full": "中国广东省深圳市福田区益田路5033号平安金融中心旁住宅楼S栋702"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "福田区",
+          "street": "益田路",
+          "street_number": "5033",
+          "building_unit_room": "平安金融中心",
+          "postal_code": "518038",
+          "address_label": "公司",
+          "map_search_short": "平安金融中心",
+          "ecommerce_full": "中国广东省深圳市福田区益田路5033号平安金融中心"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "福田区",
+          "street": "福华路",
+          "street_number": "",
+          "building_unit_room": "星河中心住宅楼T栋1103",
+          "postal_code": "518038",
+          "address_label": "备用收货地址",
+          "map_search_short": "星河中心",
+          "ecommerce_full": "中国广东省深圳市福田区福华路星河中心住宅楼T栋1103"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "深圳市",
+          "district": "福田区",
+          "street": "益田路",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "518038",
+          "address_label": "常去地点",
+          "map_search_short": "福田CBD",
+          "ecommerce_full": "中国广东省深圳市福田区福田CBD"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "郑淑华",
+        "default_recipient_phone": "17629466711",
+        "backup_recipient_name": "郑女士",
+        "backup_recipient_phone": "17084577590",
+        "food_delivery_contact_name": "郑淑华",
+        "food_delivery_contact_phone": "17629466711",
+        "emergency_contact_name": "母亲",
+        "emergency_contact_phone": "17084577590"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["保险客服", "平安服务", "福田购物"],
+        "common_short_messages": ["已处理", "确认", "谢谢"],
+        "common_delivery_notes": ["请签收", "放门口"],
+        "common_email_subjects": ["客服记录", "客户咨询", "服务反馈"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440300200304258663",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6217518636374545892", "bank_name": "中国工商银行" },
+        { "card_type": "Amex", "card_number": "371329121277561", "bank_name": "中信银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "韩建平",
+        "name_pinyin": "Han Jianping",
+        "gender": "男",
+        "age_band": "25-35",
+        "birth_year": 1997,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "韩建平" },
+          { "alias_type": "social_nickname", "value": "建平" },
+          { "alias_type": "shopping_display_name", "value": "韩建平" },
+          { "alias_type": "contact_remark", "value": "建平" }
+        ]
+      },
+      "contact": {
+        "phone_main": "17347411249",
+        "phone_secondary": "13235213568",
+        "email_personal": "hanjianping@qq.com",
+        "email_work": "jianping.han@gac.com.cn",
+        "wechat_nickname": "韩建平",
+        "qq_nickname": "韩建平",
+        "xiaohongshu_nickname": "平平汽车",
+        "taobao_nickname": "建平",
+        "jd_nickname": "韩建平",
+        "meituan_nickname": "建平",
+        "contact_remark_name": "建平"
+      },
+      "employment": {
+        "company_name_zh": "广汽集团",
+        "company_name_en": "GAC Group",
+        "department": "汽车研发部",
+        "job_title": "研发工程师",
+        "work_phone": "020-22932293",
+        "work_email_signature_name": "韩建平",
+        "office_building_short_name": "广汽中心"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "广州市",
+          "district": "番禺区",
+          "street": "金山大道",
+          "street_number": "668",
+          "building_unit_room": "广汽小区住宅楼U栋1002",
+          "postal_code": "511400",
+          "address_label": "家",
+          "map_search_short": "广汽小区",
+          "ecommerce_full": "中国广东省广州市番禺区金山大道668号广汽小区住宅楼U栋1002"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "广州市",
+          "district": "番禺区",
+          "street": "金山大道",
+          "street_number": "668",
+          "building_unit_room": "广汽中心",
+          "postal_code": "511400",
+          "address_label": "公司",
+          "map_search_short": "广汽总部",
+          "ecommerce_full": "中国广东省广州市番禺区金山大道668号广汽中心"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "广州市",
+          "district": "番禺区",
+          "street": "化龙镇",
+          "street_number": "",
+          "building_unit_room": "广汽旁住宅楼V栋803",
+          "postal_code": "511400",
+          "address_label": "备用收货地址",
+          "map_search_short": "化龙镇",
+          "ecommerce_full": "中国广东省广州市番禺区化龙镇广汽旁住宅楼V栋803"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "广州市",
+          "district": "番禺区",
+          "street": "金山大道",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "511400",
+          "address_label": "常去地点",
+          "map_search_short": "番禺公园",
+          "ecommerce_full": "中国广东省广州市番禺区番禺公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "韩建平",
+        "default_recipient_phone": "17347411249",
+        "backup_recipient_name": "韩先生",
+        "backup_recipient_phone": "13235213568",
+        "food_delivery_contact_name": "韩建平",
+        "food_delivery_contact_phone": "17347411249",
+        "emergency_contact_name": "父母",
+        "emergency_contact_phone": "13235213568"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["汽车研发", "广汽车型", "番禺生活"],
+        "common_short_messages": ["好的", "已到", "确认"],
+        "common_delivery_notes": ["放门口", "请致电"],
+        "common_email_subjects": ["研发进度", "测试报告", "项目会议"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440100199709129839",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6293917251355215704", "bank_name": "中国银行" },
+        { "card_type": "Visa", "card_number": "4152621815997062", "bank_name": "招商银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "杨晓红",
+        "name_pinyin": "Yang Xiaohong",
+        "gender": "女",
+        "age_band": "40-50",
+        "birth_year": 1982,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "杨晓红" },
+          { "alias_type": "social_nickname", "value": "晓红" },
+          { "alias_type": "shopping_display_name", "value": "杨晓红" },
+          { "alias_type": "contact_remark", "value": "晓红" }
+        ]
+      },
+      "contact": {
+        "phone_main": "13653368844",
+        "phone_secondary": "15831069872",
+        "email_personal": "yangxiaohong@163.com",
+        "email_work": "xiaohong.yang@gac.com.cn",
+        "wechat_nickname": "杨晓红",
+        "qq_nickname": "杨晓红",
+        "xiaohongshu_nickname": "红红生活",
+        "taobao_nickname": "晓红",
+        "jd_nickname": "杨晓红",
+        "meituan_nickname": "晓红",
+        "contact_remark_name": "晓红"
+      },
+      "employment": {
+        "company_name_zh": "广汽集团",
+        "company_name_en": "GAC Group",
+        "department": "市场部",
+        "job_title": "市场专员",
+        "work_phone": "020-22932293",
+        "work_email_signature_name": "杨晓红",
+        "office_building_short_name": "广汽中心"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "广州市",
+          "district": "番禺区",
+          "street": "金山大道",
+          "street_number": "668",
+          "building_unit_room": "广汽小区住宅楼W栋904",
+          "postal_code": "511400",
+          "address_label": "家",
+          "map_search_short": "广汽小区",
+          "ecommerce_full": "中国广东省广州市番禺区金山大道668号广汽小区住宅楼W栋904"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "广州市",
+          "district": "番禺区",
+          "street": "金山大道",
+          "street_number": "668",
+          "building_unit_room": "广汽中心",
+          "postal_code": "511400",
+          "address_label": "公司",
+          "map_search_short": "广汽总部",
+          "ecommerce_full": "中国广东省广州市番禺区金山大道668号广汽中心"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "广州市",
+          "district": "番禺区",
+          "street": "化龙镇",
+          "street_number": "",
+          "building_unit_room": "广汽旁住宅楼X栋1003",
+          "postal_code": "511400",
+          "address_label": "备用收货地址",
+          "map_search_short": "化龙镇",
+          "ecommerce_full": "中国广东省广州市番禺区化龙镇广汽旁住宅楼X栋1003"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "广州市",
+          "district": "番禺区",
+          "street": "金山大道",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "511400",
+          "address_label": "常去地点",
+          "map_search_short": "番禺汽车城",
+          "ecommerce_full": "中国广东省广州市番禺区番禺汽车城"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "杨晓红",
+        "default_recipient_phone": "13653368844",
+        "backup_recipient_name": "杨先生",
+        "backup_recipient_phone": "15831069872",
+        "food_delivery_contact_name": "杨晓红",
+        "food_delivery_contact_phone": "13653368844",
+        "emergency_contact_name": "丈夫",
+        "emergency_contact_phone": "15831069872"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["汽车市场", "广汽车型", "番禺美食"],
+        "common_short_messages": ["好的", "已确认", "谢谢"],
+        "common_delivery_notes": ["轻放", "放门口"],
+        "common_email_subjects": ["市场活动", "客户反馈", "推广方案"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "440100198210142001",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6246774186256527047", "bank_name": "中国建设银行" },
+        { "card_type": "Mastercard", "card_number": "5368687937416089", "bank_name": "工商银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "李伟",
+        "name_pinyin": "Li Wei",
+        "gender": "男",
+        "age_band": "25-35",
+        "birth_year": 1998,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "李伟" },
+          { "alias_type": "social_nickname", "value": "小伟" },
+          { "alias_type": "shopping_display_name", "value": "李伟" },
+          { "alias_type": "contact_remark", "value": "伟哥" }
+        ]
+      },
+      "contact": {
+        "phone_main": "13917223320",
+        "phone_secondary": "17216329451",
+        "email_personal": "liweidd@163.com",
+        "email_work": "wei.li@oppo.com",
+        "wechat_nickname": "李伟",
+        "qq_nickname": "李伟",
+        "xiaohongshu_nickname": "伟伟手机",
+        "taobao_nickname": "李伟",
+        "jd_nickname": "李伟",
+        "meituan_nickname": "李伟",
+        "contact_remark_name": "李伟"
+      },
+      "employment": {
+        "company_name_zh": "OPPO",
+        "company_name_en": "OPPO",
+        "department": "手机研发部",
+        "job_title": "硬件工程师",
+        "work_phone": "0769-XXXXXXX",
+        "work_email_signature_name": "李伟",
+        "office_building_short_name": "OPPO总部"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "东莞市",
+          "district": "长安镇",
+          "street": "兴业路",
+          "street_number": "",
+          "building_unit_room": "OPPO工业园住宅楼Y栋802",
+          "postal_code": "523860",
+          "address_label": "家",
+          "map_search_short": "OPPO工业园",
+          "ecommerce_full": "中国广东省东莞市长安镇兴业路OPPO工业园住宅楼Y栋802"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "东莞市",
+          "district": "长安镇",
+          "street": "",
+          "street_number": "",
+          "building_unit_room": "OPPO工业园",
+          "postal_code": "523860",
+          "address_label": "公司",
+          "map_search_short": "OPPO总部",
+          "ecommerce_full": "中国广东省东莞市长安镇OPPO工业园"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "东莞市",
+          "district": "长安镇",
+          "street": "乌沙社区",
+          "street_number": "",
+          "building_unit_room": "OPPO旁住宅楼Z栋903",
+          "postal_code": "523860",
+          "address_label": "备用收货地址",
+          "map_search_short": "乌沙社区",
+          "ecommerce_full": "中国广东省东莞市长安镇乌沙社区OPPO旁住宅楼Z栋903"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "东莞市",
+          "district": "长安镇",
+          "street": "",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "523860",
+          "address_label": "常去地点",
+          "map_search_short": "长安公园",
+          "ecommerce_full": "中国广东省东莞市长安镇长安公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "李伟",
+        "default_recipient_phone": "13917223320",
+        "backup_recipient_name": "李先生",
+        "backup_recipient_phone": "17216329451",
+        "food_delivery_contact_name": "李伟",
+        "food_delivery_contact_phone": "13917223320",
+        "emergency_contact_name": "父母",
+        "emergency_contact_phone": "17216329451"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["手机硬件", "OPPO研发", "东莞生活"],
+        "common_short_messages": ["好的", "确认", "收到"],
+        "common_delivery_notes": ["放门口", "请致电"],
+        "common_email_subjects": ["硬件测试", "研发报告", "项目同步"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "441900199809267395",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6205444713247546913", "bank_name": "中国农业银行" },
+        { "card_type": "Mastercard", "card_number": "5246657437489691", "bank_name": "交通银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "王芳",
+        "name_pinyin": "Wang Fang",
+        "gender": "女",
+        "age_band": "30-40",
+        "birth_year": 1993,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "王芳" },
+          { "alias_type": "social_nickname", "value": "芳芳" },
+          { "alias_type": "shopping_display_name", "value": "王芳" },
+          { "alias_type": "contact_remark", "value": "芳芳" }
+        ]
+      },
+      "contact": {
+        "phone_main": "18099441715",
+        "phone_secondary": "15654443283",
+        "email_personal": "wangfang@163.com",
+        "email_work": "fang.wang@midea.com",
+        "wechat_nickname": "王芳",
+        "qq_nickname": "王芳",
+        "xiaohongshu_nickname": "芳芳家电",
+        "taobao_nickname": "芳芳",
+        "jd_nickname": "王芳",
+        "meituan_nickname": "芳芳",
+        "contact_remark_name": "芳芳"
+      },
+      "employment": {
+        "company_name_zh": "美的集团",
+        "company_name_en": "Midea",
+        "department": "家电研发部",
+        "job_title": "产品设计师",
+        "work_phone": "0757-26338888",
+        "work_email_signature_name": "王芳",
+        "office_building_short_name": "美的总部"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "佛山市",
+          "district": "顺德区",
+          "street": "美的大道",
+          "street_number": "6",
+          "building_unit_room": "美的总部旁住宅楼AA栋802",
+          "postal_code": "528311",
+          "address_label": "家",
+          "map_search_short": "美的小区",
+          "ecommerce_full": "中国广东省佛山市顺德区北滘镇美的大道6号美的总部旁住宅楼AA栋802"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "佛山市",
+          "district": "顺德区",
+          "street": "美的大道",
+          "street_number": "6",
+          "building_unit_room": "美的总部大楼",
+          "postal_code": "528311",
+          "address_label": "公司",
+          "map_search_short": "美的总部",
+          "ecommerce_full": "中国广东省佛山市顺德区北滘镇美的大道6号美的总部大楼"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "佛山市",
+          "district": "顺德区",
+          "street": "北滘镇",
+          "street_number": "",
+          "building_unit_room": "美的花园BB栋903",
+          "postal_code": "528311",
+          "address_label": "备用收货地址",
+          "map_search_short": "美的花园",
+          "ecommerce_full": "中国广东省佛山市顺德区北滘镇美的花园BB栋903"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "佛山市",
+          "district": "顺德区",
+          "street": "北滘镇",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "528311",
+          "address_label": "常去地点",
+          "map_search_short": "顺德公园",
+          "ecommerce_full": "中国广东省佛山市顺德区顺德公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "王芳",
+        "default_recipient_phone": "18099441715",
+        "backup_recipient_name": "王先生",
+        "backup_recipient_phone": "15654443283",
+        "food_delivery_contact_name": "王芳",
+        "food_delivery_contact_phone": "18099441715",
+        "emergency_contact_name": "丈夫",
+        "emergency_contact_phone": "15654443283"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["家电设计", "美的产品", "顺德生活"],
+        "common_short_messages": ["好的", "已收", "谢谢"],
+        "common_delivery_notes": ["轻放", "放门口"],
+        "common_email_subjects": ["设计方案", "产品反馈", "研发会议"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "44060019930117844X",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6209652074466609935", "bank_name": "中国邮政储蓄银行" },
+        { "card_type": "Amex", "card_number": "340917798270808", "bank_name": "广发银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "张强",
+        "name_pinyin": "Zhang Qiang",
+        "gender": "男",
+        "age_band": "40-50",
+        "birth_year": 1981,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "张强" },
+          { "alias_type": "social_nickname", "value": "强哥" },
+          { "alias_type": "shopping_display_name", "value": "张强" },
+          { "alias_type": "contact_remark", "value": "张强" }
+        ]
+      },
+      "contact": {
+        "phone_main": "17729221699",
+        "phone_secondary": "15986693465",
+        "email_personal": "zhangqiang@163.com",
+        "email_work": "qiang.zhang@galanz.com",
+        "wechat_nickname": "张强",
+        "qq_nickname": "张强",
+        "xiaohongshu_nickname": "强哥家电",
+        "taobao_nickname": "张强",
+        "jd_nickname": "张强",
+        "meituan_nickname": "张强",
+        "contact_remark_name": "张强"
+      },
+      "employment": {
+        "company_name_zh": "格兰仕",
+        "company_name_en": "Galanz",
+        "department": "空调研发部",
+        "job_title": "研发主管",
+        "work_phone": "0760-3306389",
+        "work_email_signature_name": "张强",
+        "office_building_short_name": "格兰仕总部"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "中山市",
+          "district": "黄圃镇",
+          "street": "兴圃大道东",
+          "street_number": "3",
+          "building_unit_room": "格兰仕小区住宅楼CC栋1004",
+          "postal_code": "528429",
+          "address_label": "家",
+          "map_search_short": "格兰仕小区",
+          "ecommerce_full": "中国广东省中山市黄圃镇兴圃大道东3号格兰仕小区住宅楼CC栋1004"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "中山市",
+          "district": "黄圃镇",
+          "street": "兴圃大道东",
+          "street_number": "3",
+          "building_unit_room": "格兰仕总部",
+          "postal_code": "528429",
+          "address_label": "公司",
+          "map_search_short": "格兰仕总部",
+          "ecommerce_full": "中国广东省中山市黄圃镇兴圃大道东3号"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "中山市",
+          "district": "黄圃镇",
+          "street": "",
+          "street_number": "",
+          "building_unit_room": "格兰仕旁住宅楼DD栋903",
+          "postal_code": "528429",
+          "address_label": "备用收货地址",
+          "map_search_short": "黄圃镇",
+          "ecommerce_full": "中国广东省中山市黄圃镇格兰仕旁住宅楼DD栋903"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "广东省",
+          "city": "中山市",
+          "district": "黄圃镇",
+          "street": "",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "528429",
+          "address_label": "常去地点",
+          "map_search_short": "黄圃公园",
+          "ecommerce_full": "中国广东省中山市黄圃公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "张强",
+        "default_recipient_phone": "17729221699",
+        "backup_recipient_name": "张先生",
+        "backup_recipient_phone": "15986693465",
+        "food_delivery_contact_name": "张强",
+        "food_delivery_contact_phone": "17729221699",
+        "emergency_contact_name": "妻子",
+        "emergency_contact_phone": "15986693465"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["空调研发", "格兰仕产品", "中山生活"],
+        "common_short_messages": ["确认", "收到", "好的"],
+        "common_delivery_notes": ["请轻放", "放门口"],
+        "common_email_subjects": ["研发进度", "产品测试", "团队会议"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "442000198107277473",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6201102481934667665", "bank_name": "中国银行" },
+        { "card_type": "Visa", "card_number": "4618091901581449", "bank_name": "浦发银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "刘敏",
+        "name_pinyin": "Liu Min",
+        "gender": "女",
+        "age_band": "40-50",
+        "birth_year": 1980,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "刘敏" },
+          { "alias_type": "social_nickname", "value": "敏敏" },
+          { "alias_type": "shopping_display_name", "value": "刘敏" },
+          { "alias_type": "contact_remark", "value": "敏姐" }
+        ]
+      },
+      "contact": {
+        "phone_main": "16760728326",
+        "phone_secondary": "19684245088",
+        "email_personal": "liumin@outlook.com",
+        "email_work": "min.liu@baidu.com",
+        "wechat_nickname": "刘敏",
+        "qq_nickname": "刘敏",
+        "xiaohongshu_nickname": "敏敏搜索",
+        "taobao_nickname": "刘敏",
+        "jd_nickname": "刘敏",
+        "meituan_nickname": "刘敏",
+        "contact_remark_name": "刘敏"
+      },
+      "employment": {
+        "company_name_zh": "百度",
+        "company_name_en": "Baidu",
+        "department": "AI研发部",
+        "job_title": "AI算法工程师",
+        "work_phone": "010-XXXXXXX",
+        "work_email_signature_name": "刘敏",
+        "office_building_short_name": "百度大厦"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "北京市",
+          "city": "北京市",
+          "district": "海淀区",
+          "street": "上地十街",
+          "street_number": "10",
+          "building_unit_room": "百度大厦旁住宅楼EE栋1003",
+          "postal_code": "100085",
+          "address_label": "家",
+          "map_search_short": "上地住宅",
+          "ecommerce_full": "中国北京市海淀区上地十街10号百度大厦旁住宅楼EE栋1003"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "北京市",
+          "city": "北京市",
+          "district": "海淀区",
+          "street": "上地十街",
+          "street_number": "10",
+          "building_unit_room": "百度大厦",
+          "postal_code": "100085",
+          "address_label": "公司",
+          "map_search_short": "百度大厦",
+          "ecommerce_full": "中国北京市海淀区上地十街10号百度大厦"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "北京市",
+          "city": "北京市",
+          "district": "海淀区",
+          "street": "西北旺东路",
+          "street_number": "10",
+          "building_unit_room": "百度科技园住宅楼FF栋902",
+          "postal_code": "100085",
+          "address_label": "备用收货地址",
+          "map_search_short": "百度科技园",
+          "ecommerce_full": "中国北京市海淀区西北旺东路10号百度科技园住宅楼FF栋902"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "北京市",
+          "city": "北京市",
+          "district": "海淀区",
+          "street": "上地",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "100085",
+          "address_label": "常去地点",
+          "map_search_short": "上地公园",
+          "ecommerce_full": "中国北京市海淀区上地公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "刘敏",
+        "default_recipient_phone": "16760728326",
+        "backup_recipient_name": "刘先生",
+        "backup_recipient_phone": "19684245088",
+        "food_delivery_contact_name": "刘敏",
+        "food_delivery_contact_phone": "16760728326",
+        "emergency_contact_name": "丈夫",
+        "emergency_contact_phone": "19684245088"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["AI算法", "百度搜索", "海淀生活"],
+        "common_short_messages": ["确认", "好的", "收到"],
+        "common_delivery_notes": ["请敲门", "放门口"],
+        "common_email_subjects": ["算法优化", "项目进展", "团队会议"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "110000198002109766",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6294929955620533645", "bank_name": "中国工商银行" },
+        { "card_type": "Visa", "card_number": "4503731453038567", "bank_name": "招商银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "陈静",
+        "name_pinyin": "Chen Jing",
+        "gender": "女",
+        "age_band": "40-50",
+        "birth_year": 1982,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "陈静" },
+          { "alias_type": "social_nickname", "value": "静静" },
+          { "alias_type": "shopping_display_name", "value": "陈静" },
+          { "alias_type": "contact_remark", "value": "静静" }
+        ]
+      },
+      "contact": {
+        "phone_main": "13684498926",
+        "phone_secondary": "18665918463",
+        "email_personal": "chenjing@hotmail.com",
+        "email_work": "jing.chen@ctrip.com",
+        "wechat_nickname": "陈静",
+        "qq_nickname": "陈静",
+        "xiaohongshu_nickname": "静静旅行",
+        "taobao_nickname": "陈静",
+        "jd_nickname": "陈静",
+        "meituan_nickname": "陈静",
+        "contact_remark_name": "陈静"
+      },
+      "employment": {
+        "company_name_zh": "携程",
+        "company_name_en": "Ctrip",
+        "department": "旅游产品部",
+        "job_title": "产品经理",
+        "work_phone": "021-XXXXXXX",
+        "work_email_signature_name": "陈静",
+        "office_building_short_name": "携程总部"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "上海市",
+          "city": "上海市",
+          "district": "长宁区",
+          "street": "金钟路",
+          "street_number": "968",
+          "building_unit_room": "携程总部旁住宅楼GG栋1102",
+          "postal_code": "200335",
+          "address_label": "家",
+          "map_search_short": "携程小区",
+          "ecommerce_full": "中国上海市长宁区金钟路968号携程总部旁住宅楼GG栋1102"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "上海市",
+          "city": "上海市",
+          "district": "长宁区",
+          "street": "金钟路",
+          "street_number": "968",
+          "building_unit_room": "携程总部",
+          "postal_code": "200335",
+          "address_label": "公司",
+          "map_search_short": "携程总部",
+          "ecommerce_full": "中国上海市长宁区金钟路968号"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "上海市",
+          "city": "上海市",
+          "district": "长宁区",
+          "street": "福泉路",
+          "street_number": "99",
+          "building_unit_room": "携程网络大厦旁住宅楼HH栋903",
+          "postal_code": "200335",
+          "address_label": "备用收货地址",
+          "map_search_short": "福泉路",
+          "ecommerce_full": "中国上海市长宁区福泉路99号携程网络大厦旁住宅楼HH栋903"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "上海市",
+          "city": "上海市",
+          "district": "长宁区",
+          "street": "金钟路",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "200335",
+          "address_label": "常去地点",
+          "map_search_short": "长宁公园",
+          "ecommerce_full": "中国上海市长宁区长宁公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "陈静",
+        "default_recipient_phone": "13684498926",
+        "backup_recipient_name": "陈先生",
+        "backup_recipient_phone": "18665918463",
+        "food_delivery_contact_name": "陈静",
+        "food_delivery_contact_phone": "13684498926",
+        "emergency_contact_name": "丈夫",
+        "emergency_contact_phone": "18665918463"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["旅游产品", "携程机票", "上海生活"],
+        "common_short_messages": ["好的", "已订", "确认"],
+        "common_delivery_notes": ["放门口", "请签收"],
+        "common_email_subjects": ["产品方案", "用户反馈", "项目更新"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "310000198208020553",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6294636887258874495", "bank_name": "中国建设银行" },
+        { "card_type": "Amex", "card_number": "370118489554393", "bank_name": "中信银行" }
+      ]
+    },
+    {
+      "identity": {
+        "name_zh": "赵刚",
+        "name_pinyin": "Zhao Gang",
+        "gender": "男",
+        "age_band": "35-45",
+        "birth_year": 1986,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "赵刚" },
+          { "alias_type": "social_nickname", "value": "刚哥" },
+          { "alias_type": "shopping_display_name", "value": "赵刚" },
+          { "alias_type": "contact_remark", "value": "赵刚" }
+        ]
+      },
+      "contact": {
+        "phone_main": "15526818184",
+        "phone_secondary": "16218489476",
+        "email_personal": "zhaogang@163.com",
+        "email_work": "gang.zhao@alibaba-inc.com",
+        "wechat_nickname": "赵刚",
+        "qq_nickname": "赵刚",
+        "xiaohongshu_nickname": "刚哥电商",
+        "taobao_nickname": "赵刚",
+        "jd_nickname": "赵刚",
+        "meituan_nickname": "赵刚",
+        "contact_remark_name": "赵刚"
+      },
+      "employment": {
+        "company_name_zh": "阿里巴巴",
+        "company_name_en": "Alibaba",
+        "department": "电商平台部",
+        "job_title": "高级产品经理",
+        "work_phone": "0571-88943332",
+        "work_email_signature_name": "赵刚",
+        "office_building_short_name": "阿里巴巴总部"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "中国",
+          "province": "浙江省",
+          "city": "杭州市",
+          "district": "余杭区",
+          "street": "文一西路",
+          "street_number": "960-1",
+          "building_unit_room": "阿里总部旁住宅楼II栋1004",
+          "postal_code": "311121",
+          "address_label": "家",
+          "map_search_short": "阿里小区",
+          "ecommerce_full": "中国浙江省杭州市余杭区文一西路960-1号阿里总部旁住宅楼II栋1004"
+        },
+        "work_address": {
+          "country": "中国",
+          "province": "浙江省",
+          "city": "杭州市",
+          "district": "余杭区",
+          "street": "文一西路",
+          "street_number": "960-1",
+          "building_unit_room": "阿里巴巴总部",
+          "postal_code": "311121",
+          "address_label": "公司",
+          "map_search_short": "阿里巴巴总部",
+          "ecommerce_full": "中国浙江省杭州市余杭区文一西路960-1号"
+        },
+        "backup_shipping_address": {
+          "country": "中国",
+          "province": "浙江省",
+          "city": "杭州市",
+          "district": "余杭区",
+          "street": "高教路",
+          "street_number": "",
+          "building_unit_room": "未来科技城住宅楼JJ栋903",
+          "postal_code": "311121",
+          "address_label": "备用收货地址",
+          "map_search_short": "未来科技城",
+          "ecommerce_full": "中国浙江省杭州市余杭区高教路未来科技城住宅楼JJ栋903"
+        },
+        "favorite_place": {
+          "country": "中国",
+          "province": "浙江省",
+          "city": "杭州市",
+          "district": "余杭区",
+          "street": "文一西路",
+          "street_number": "",
+          "building_unit_room": "",
+          "postal_code": "311121",
+          "address_label": "常去地点",
+          "map_search_short": "余杭公园",
+          "ecommerce_full": "中国浙江省杭州市余杭区余杭公园"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "赵刚",
+        "default_recipient_phone": "15526818184",
+        "backup_recipient_name": "赵先生",
+        "backup_recipient_phone": "16218489476",
+        "food_delivery_contact_name": "赵刚",
+        "food_delivery_contact_phone": "15526818184",
+        "emergency_contact_name": "妻子",
+        "emergency_contact_phone": "16218489476"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["电商平台", "阿里巴巴产品", "杭州生活"],
+        "common_short_messages": ["好的", "确认", "收到"],
+        "common_delivery_notes": ["放门口", "请致电"],
+        "common_email_subjects": ["产品迭代", "用户数据", "项目会议"],
+        "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "id_card": "330100198608137303",
+      "bank_cards": [
+        { "card_type": "银联", "card_number": "6298245587716947225", "bank_name": "中国银行" },
+        { "card_type": "Mastercard", "card_number": "5526111780068114", "bank_name": "招商银行" }
+      ]
+    }
+  ]

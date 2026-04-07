@@ -65,9 +65,36 @@ def render_generic_replacement_text(
     *,
     source_text: str | None = None,
     index: int | None = None,
+    fragment_type: str | None = None,
+    fragment_length: int | None = None,
 ) -> str:
-    """渲染 GENERICIZE 使用的标准占位字符串，格式为 ``<姓名1>``、``<name2>`` 等。"""
+    """渲染 GENERICIZE 使用的标准占位字符串。
+
+    - 有 fragment_type 时使用语义格式：``<1@NUM.LEN=17>``、``<2@ALNUM.LEN=9>``。
+    - 否则使用常规格式：``<姓名1>``、``<name2>``。
+    """
+    if fragment_type is not None and fragment_length is not None:
+        return render_numeric_semantic_placeholder(
+            index=index or 1,
+            fragment_type=fragment_type,
+            length=fragment_length,
+        )
     label = generic_placeholder_label(attr_type, source_text=source_text)
     if index is not None:
         label = f"{label}{index}"
     return f"<{label}>"
+
+
+def render_numeric_semantic_placeholder(
+    *,
+    index: int,
+    fragment_type: str,
+    length: int,
+) -> str:
+    """渲染数字/混合片段的语义占位符，格式为 ``<N@TYPE.LEN=X>``。
+
+    - index: 同类型+同长度组合在文本中的出现序号。
+    - fragment_type: ``NUM``（纯数字）或 ``ALNUM``（数字字母混合）。
+    - length: 原始文本长度。
+    """
+    return f"<{index}@{fragment_type}.LEN={length}>"

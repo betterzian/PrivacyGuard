@@ -10,6 +10,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address import AddressStack
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack
 from privacyguard.infrastructure.pii.detector.stacks.name import NameStack
 from privacyguard.infrastructure.pii.detector.stacks.organization import OrganizationStack
+from privacyguard.infrastructure.pii.detector.stacks.numeric_fragment import NumericFragmentStack
 from privacyguard.infrastructure.pii.detector.stacks.structured import (
     BankAccountStack,
     CardNumberStack,
@@ -57,7 +58,8 @@ _STACK_SPECS: dict[PIIAttributeType, StackSpec] = {
     PIIAttributeType.BANK_ACCOUNT: StackSpec("bank_account", PIIAttributeType.BANK_ACCOUNT, BankAccountStack, _STRUCTURED_ROLES),
     PIIAttributeType.PASSPORT_NUMBER: StackSpec("passport_number", PIIAttributeType.PASSPORT_NUMBER, PassportStack, _STRUCTURED_ROLES),
     PIIAttributeType.DRIVER_LICENSE: StackSpec("driver_license", PIIAttributeType.DRIVER_LICENSE, DriverLicenseStack, _STRUCTURED_ROLES),
-    PIIAttributeType.NUMERIC: StackSpec("numeric", PIIAttributeType.NUMERIC, NumericStack, _STRUCTURED_ROLES),
+    PIIAttributeType.NUMERIC: StackSpec("numeric", PIIAttributeType.NUMERIC, NumericFragmentStack, _STRUCTURED_ROLES),
+    PIIAttributeType.OTHER: StackSpec("other", PIIAttributeType.OTHER, NumericFragmentStack, _STRUCTURED_ROLES),
     PIIAttributeType.NAME: StackSpec("name", PIIAttributeType.NAME, NameStack, _NAME_ROLES, soft_priority=20),
     PIIAttributeType.ORGANIZATION: StackSpec(
         "organization",

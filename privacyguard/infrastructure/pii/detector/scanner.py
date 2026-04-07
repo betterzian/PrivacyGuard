@@ -56,23 +56,24 @@ _PLACEHOLDER_BY_ATTR = {
     PIIAttributeType.DRIVER_LICENSE: "<driver_license>",
 }
 
-_HARD_PATTERNS: tuple[tuple[PIIAttributeType, str, re.Pattern[str], int], ...] = (
-    (PIIAttributeType.EMAIL, "regex_email", re.compile(r"(?<![\w.+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w.-])"), 120),
-    (PIIAttributeType.PHONE, "regex_phone_cn", re.compile(r"(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)"), 118),
-    (PIIAttributeType.PHONE, "regex_phone_us", re.compile(r"(?<!\w)(?:\(\d{3}\)\s*|\d{3}[-. ]?)\d{3}[-. ]\d{4}(?!\w)"), 117),
-    (PIIAttributeType.ID_NUMBER, "regex_id_cn", re.compile(r"(?<![\w\d])\d{17}[\dXx](?![\w\d])"), 115),
-    # passport: 仅白名单前缀（中国 E/G/D/P/H/M、美国 C 等）视为 hard clue。
-    (PIIAttributeType.PASSPORT_NUMBER, "regex_passport_cn", re.compile(r"(?<![A-Za-z0-9])[EGDPHM]\d{8}(?![A-Za-z0-9])"), 108),
-    (PIIAttributeType.PASSPORT_NUMBER, "regex_passport_us", re.compile(r"(?<![A-Za-z0-9])C\d{8}(?![A-Za-z0-9])"), 107),
-    # driver_license: 中国驾照为 12 位纯数字。
-    (PIIAttributeType.DRIVER_LICENSE, "regex_driver_license_cn", re.compile(r"(?<!\d)\d{12}(?!\d)"), 106),
+_EMAIL_PATTERN = re.compile(r"(?<![\w.+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w.-])")
+
+# 时间/日期模式——先行匹配并排除，防止其中的数字被当作候选片段。
+_TIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("time_datetime", re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?")),
+    ("time_date_mdy", re.compile(r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}")),
+    ("time_clock", re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")),
+    ("time_zh_date", re.compile(r"\d{4}年\d{1,2}月\d{1,2}日")),
 )
 
-# bank_account 通用正则——命中后额外做 Luhn 校验，通过归 bank_account，否则归 NUMERIC。
-_BANK_ACCOUNT_CANDIDATE_PATTERN = re.compile(r"(?<!\d)\d(?:[ -]?\d){11,22}(?!\d)")
+# 电话候选模式——带国际区号/括号格式，优先于通用数字提取。
+_PHONE_CANDIDATE_PATTERN = re.compile(r"\+?\d[\d ()\-]{6,}\d")
 
-# 通用长数字兜底：12+ 位连续数字（可含空格/连字符），未被其他规则归类时归入 NUMERIC。
-_GENERIC_NUMBER_PATTERN = re.compile(r"(?<!\d)\d(?:[ \t\-]?\d){11,30}(?!\d)")
+# 通用数字片段：连续数字（允许内部单空格）。
+_DIGIT_FRAGMENT_PATTERN = re.compile(r"\d(?:[ ]?\d)*")
+
+# 混合片段：字母数字混合（至少包含一个数字和一个字母）。
+_ALNUM_FRAGMENT_PATTERN = re.compile(r"(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]+")
 
 _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
     (BreakType.PUNCT, "break_punct", re.compile(r"[;；。！？!?]")),
@@ -115,10 +116,6 @@ _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
 _ASCII_KEYWORD_CHARS_RE = re.compile(r"[A-Za-z0-9 #.'-]+")
 _ASCII_LITERAL_CHARS_RE = re.compile(r"[A-Za-z0-9 .,'@_+\-#/&()]+")
 _POSTAL_CODE_PATTERN = re.compile(r"(?<!\d)\d{5}(?:-\d{4})?(?!\d)")
-
-# 银行卡 PAN：13–19 位数字，中间可含空格/制表/连字符；须通过 Luhn 校验。
-# 优先级高于 regex_bank_account，硬冲突时同长度下先收录的卡号线索优先保留。
-_CARD_PAN_PATTERN = re.compile(r"(?<!\d)\d(?:[ \t\-]?\d){12,18}(?!\d)")
 
 
 def _luhn_valid(digits: str) -> bool:
@@ -228,101 +225,71 @@ def build_clue_bundle(
 
 
 def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_spans: tuple[tuple[int, int], ...] = ()) -> list[Clue]:
+    """提取-验证流程：先排除 email/time，再提取数字/混合候选片段。
+
+    scanner 只负责提取，不做 Luhn/手机/身份证等验证；验证由 stack 完成。
+    """
     text = stream.text
     clues: list[Clue] = []
-    hard_spans: list[tuple[int, int]] = []
-    for attr_type, matched_by, pattern, priority in _HARD_PATTERNS:
-        for match in pattern.finditer(text):
-            value = match.group(0).strip()
-            if not value:
-                continue
-            if _overlaps_any(match.start(), match.end(), ignored_spans):
-                continue
-            clues.append(
-                Clue(
-                    clue_id=ctx.next_clue_id(),
-                    role=ClueRole.HARD,
-                    attr_type=attr_type,
-                    start=match.start(),
-                    end=match.end(),
-                    text=value,
-                    priority=priority,
-                    source_kind=matched_by,
-                    hard_source="regex",
-                    placeholder=_PLACEHOLDER_BY_ATTR.get(attr_type, f"<{attr_type.value}>"),
-                )
-            )
-            hard_spans.append((match.start(), match.end()))
-    # 银行卡 PAN（Luhn 校验）。
-    for match in _CARD_PAN_PATTERN.finditer(text):
-        if _overlaps_any(match.start(), match.end(), ignored_spans):
-            continue
+    excluded_spans: list[tuple[int, int]] = list(ignored_spans)
+
+    # ── 2a: 先行匹配 email ──
+    for match in _EMAIL_PATTERN.finditer(text):
         value = match.group(0).strip()
-        digits = re.sub(r"\D", "", value)
-        if not _luhn_valid(digits):
+        if not value:
+            continue
+        if _overlaps_any(match.start(), match.end(), excluded_spans):
             continue
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
                 role=ClueRole.HARD,
-                attr_type=PIIAttributeType.CARD_NUMBER,
+                attr_type=PIIAttributeType.EMAIL,
                 start=match.start(),
                 end=match.end(),
                 text=value,
-                priority=114,
-                source_kind="regex_card_pan",
+                priority=120,
+                source_kind="regex_email",
                 hard_source="regex",
-                placeholder=_PLACEHOLDER_BY_ATTR[PIIAttributeType.CARD_NUMBER],
+                placeholder=_PLACEHOLDER_BY_ATTR[PIIAttributeType.EMAIL],
             )
         )
-        hard_spans.append((match.start(), match.end()))
-    # bank_account 候选：Luhn 通过→bank_account，否则→NUMERIC 兜底。
-    for match in _BANK_ACCOUNT_CANDIDATE_PATTERN.finditer(text):
-        if _overlaps_any(match.start(), match.end(), ignored_spans):
-            continue
-        if _overlaps_any(match.start(), match.end(), hard_spans):
-            continue
+        excluded_spans.append((match.start(), match.end()))
+
+    # ── 2a: 先行匹配 time/date ──
+    for source_kind, pattern in _TIME_PATTERNS:
+        for match in pattern.finditer(text):
+            value = match.group(0).strip()
+            if not value:
+                continue
+            if _overlaps_any(match.start(), match.end(), excluded_spans):
+                continue
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    role=ClueRole.HARD,
+                    attr_type=PIIAttributeType.TIME,
+                    start=match.start(),
+                    end=match.end(),
+                    text=value,
+                    priority=100,
+                    source_kind=source_kind,
+                    hard_source="regex",
+                    placeholder="<time>",
+                )
+            )
+            excluded_spans.append((match.start(), match.end()))
+
+    # ── 2b: 提取电话候选片段 ──
+    for match in _PHONE_CANDIDATE_PATTERN.finditer(text):
         value = match.group(0).strip()
+        if not value:
+            continue
+        if _overlaps_any(match.start(), match.end(), excluded_spans):
+            continue
         digits = re.sub(r"\D", "", value)
-        if _luhn_valid(digits):
-            clues.append(
-                Clue(
-                    clue_id=ctx.next_clue_id(),
-                    role=ClueRole.HARD,
-                    attr_type=PIIAttributeType.BANK_ACCOUNT,
-                    start=match.start(),
-                    end=match.end(),
-                    text=value,
-                    priority=110,
-                    source_kind="regex_bank_account",
-                    hard_source="regex",
-                    placeholder=_PLACEHOLDER_BY_ATTR[PIIAttributeType.BANK_ACCOUNT],
-                )
-            )
-        else:
-            # 不符合 Luhn 的长数字归入 NUMERIC 兜底。
-            clues.append(
-                Clue(
-                    clue_id=ctx.next_clue_id(),
-                    role=ClueRole.HARD,
-                    attr_type=PIIAttributeType.NUMERIC,
-                    start=match.start(),
-                    end=match.end(),
-                    text=value,
-                    priority=90,
-                    source_kind="regex_generic_number",
-                    hard_source="regex",
-                    placeholder="<numeric>",
-                )
-            )
-        hard_spans.append((match.start(), match.end()))
-    # 通用长数字兜底：未被以上规则覆盖的长数字串归入 NUMERIC。
-    for match in _GENERIC_NUMBER_PATTERN.finditer(text):
-        if _overlaps_any(match.start(), match.end(), ignored_spans):
+        if len(digits) < 7:
             continue
-        if _overlaps_any(match.start(), match.end(), hard_spans):
-            continue
-        value = match.group(0).strip()
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -331,13 +298,95 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 start=match.start(),
                 end=match.end(),
                 text=value,
-                priority=85,
-                source_kind="regex_generic_number",
+                priority=90,
+                source_kind="extract_phone_candidate",
                 hard_source="regex",
                 placeholder="<numeric>",
+                source_metadata={
+                    "fragment_type": ["NUM"],
+                    "pure_digits": [digits],
+                    "fragment_hint": ["phone_candidate"],
+                },
             )
         )
+        excluded_spans.append((match.start(), match.end()))
+
+    # ── 2c: 提取纯数字片段 ──
+    for match in _DIGIT_FRAGMENT_PATTERN.finditer(text):
+        value = match.group(0)
+        if _overlaps_any(match.start(), match.end(), excluded_spans):
+            continue
+        digits = re.sub(r"\D", "", value)
+        if len(digits) < 2:
+            continue
+        # 跳过被 _NEGATIVE_NUMERIC_PATTERNS 命中的片段。
+        if _is_negative_numeric(text, match.start(), match.end()):
+            continue
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                role=ClueRole.HARD,
+                attr_type=PIIAttributeType.NUMERIC,
+                start=match.start(),
+                end=match.end(),
+                text=value,
+                priority=90,
+                source_kind="extract_digit_fragment",
+                hard_source="regex",
+                placeholder="<numeric>",
+                source_metadata={
+                    "fragment_type": ["NUM"],
+                    "pure_digits": [digits],
+                },
+            )
+        )
+        excluded_spans.append((match.start(), match.end()))
+
+    # ── 2c: 提取字母数字混合片段 ──
+    for match in _ALNUM_FRAGMENT_PATTERN.finditer(text):
+        value = match.group(0)
+        if _overlaps_any(match.start(), match.end(), excluded_spans):
+            continue
+        digits = re.sub(r"[^0-9]", "", value)
+        if not digits:
+            continue
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                role=ClueRole.HARD,
+                attr_type=PIIAttributeType.OTHER,
+                start=match.start(),
+                end=match.end(),
+                text=value,
+                priority=85,
+                source_kind="extract_alnum_fragment",
+                hard_source="regex",
+                placeholder="<other>",
+                source_metadata={
+                    "fragment_type": ["ALNUM"],
+                    "pure_digits": [digits],
+                },
+            )
+        )
+        excluded_spans.append((match.start(), match.end()))
+
     return clues
+
+
+def _is_negative_numeric(text: str, start: int, end: int) -> bool:
+    """检查数字片段是否处于非隐私上下文（年份、百分比、序号、计量单位等）。"""
+    # 取片段前后一定范围的文本做上下文匹配。
+    context_start = max(0, start - 5)
+    context_end = min(len(text), end + 10)
+    context = text[context_start:context_end]
+    for pattern in _NEGATIVE_NUMERIC_PATTERNS:
+        for m in pattern.finditer(context):
+            # 检查 negative pattern 的匹配是否覆盖了原始片段。
+            abs_start = context_start + m.start()
+            abs_end = context_start + m.end()
+            if abs_start <= start and abs_end >= end:
+                return True
+    return False
 
 
 def _scan_dictionary_hard_clues(
