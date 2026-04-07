@@ -1,0 +1,1535 @@
+[
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 1,
+      "identity": {
+        "full_name": "Michael Chen",
+        "preferred_name": "Mike",
+        "gender": "Male",
+        "age_band": "35-44",
+        "birth_year": 1989,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Michael Chen" },
+          { "alias_type": "social_nickname", "value": "Mike Chen" },
+          { "alias_type": "shopping_display_name", "value": "Mike Chen" },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(206) 987-6543",
+        "phone_secondary": "(425) 321-9876",
+        "email_personal": "michael.chen@gmail.com",
+        "email_work": "mchen@amazon.com",
+        "social_display_name": "Mike Chen",
+        "shopping_display_name": "Mike Chen",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Amazon",
+        "department": "AWS Cloud",
+        "job_title": "Senior Software Engineer",
+        "work_phone": "(206) 987-6543",
+        "work_email_signature_name": "Michael Chen",
+        "office_building_short_name": "Day 1 Tower"
+      },
+      "addresses": {
+        "home_address": {
+          "country": "United States",
+          "state": "WA",
+          "city": "Seattle",
+          "district_or_neighborhood": "Capitol Hill",
+          "street": "Pine Street",
+          "street_number": "1425",
+          "apartment_suite_unit": "Apt 301",
+          "zip_code": "98122",
+          "address_label": "Home",
+          "map_search_short": "1425 Pine St, Seattle, WA 98122",
+          "ecommerce_full": "1425 Pine St Apt 301, Seattle, WA 98122"
+        },
+        "work_address": {
+          "country": "United States",
+          "state": "WA",
+          "city": "Seattle",
+          "district_or_neighborhood": "South Lake Union",
+          "street": "Terry Avenue North",
+          "street_number": "410",
+          "apartment_suite_unit": "",
+          "zip_code": "98109",
+          "address_label": "Work",
+          "map_search_short": "410 Terry Ave N, Seattle, WA 98109",
+          "ecommerce_full": "410 Terry Ave N, Seattle, WA 98109"
+        },
+        "backup_shipping_address": {
+          "country": "United States",
+          "state": "WA",
+          "city": "Seattle",
+          "district_or_neighborhood": "Ballard",
+          "street": "NW Market Street",
+          "street_number": "2200",
+          "apartment_suite_unit": "",
+          "zip_code": "98107",
+          "address_label": "Backup Shipping",
+          "map_search_short": "2200 NW Market St, Seattle, WA 98107",
+          "ecommerce_full": "2200 NW Market St, Seattle, WA 98107"
+        },
+        "favorite_place": {
+          "country": "United States",
+          "state": "WA",
+          "city": "Seattle",
+          "district_or_neighborhood": "Pike Place Market",
+          "street": "Pike Street",
+          "street_number": "85",
+          "apartment_suite_unit": "",
+          "zip_code": "98101",
+          "address_label": "Favorite Place",
+          "map_search_short": "85 Pike St, Seattle, WA 98101",
+          "ecommerce_full": "85 Pike St, Seattle, WA 98101"
+        }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Michael Chen",
+        "default_recipient_phone": "(206) 987-6543",
+        "backup_recipient_name": "Sarah Chen",
+        "backup_recipient_phone": "(206) 555-1122",
+        "food_delivery_contact_name": "Michael Chen",
+        "food_delivery_contact_phone": "(206) 987-6543",
+        "emergency_contact_name": "Sarah Chen",
+        "emergency_contact_phone": "(206) 555-1122"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["best coffee near me", "hiking trails seattle", "amazon stock price"],
+        "common_short_messages": ["On my way", "See you at 7", "Can you grab milk?"],
+        "common_delivery_notes": ["Leave at door", "Call upon arrival"],
+        "common_email_subjects": ["Project update", "Meeting notes", "Invoice attached"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4104332181960018", "expiry": "09/29", "cvv": "968" },
+        { "type": "Visa", "number": "4338908386379407", "expiry": "02/31", "cvv": "236" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "120134567890",
+        "issue_date": "2022-04-15",
+        "expiry_date": "2030-04-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 2,
+      "identity": {
+        "full_name": "Emily Rodriguez",
+        "preferred_name": "Em",
+        "gender": "Female",
+        "age_band": "25-34",
+        "birth_year": 1998,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Emily Rodriguez" },
+          { "alias_type": "social_nickname", "value": "Em Rodriguez" },
+          { "alias_type": "shopping_display_name", "value": "Emily R." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(206) 654-3210",
+        "phone_secondary": "(425) 789-0123",
+        "email_personal": "emily.rodriguez@outlook.com",
+        "email_work": "erodriguez@microsoft.com",
+        "social_display_name": "Emily Rodriguez",
+        "shopping_display_name": "Emily Rodriguez",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Microsoft",
+        "department": "Azure Marketing",
+        "job_title": "Marketing Specialist",
+        "work_phone": "(425) 789-0123",
+        "work_email_signature_name": "Emily Rodriguez",
+        "office_building_short_name": "Microsoft Redmond Campus"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Fremont", "street": "N 36th Street", "street_number": "3601", "apartment_suite_unit": "Unit B", "zip_code": "98103", "address_label": "Home", "map_search_short": "3601 N 36th St, Seattle, WA 98103", "ecommerce_full": "3601 N 36th St Unit B, Seattle, WA 98103" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Redmond", "district_or_neighborhood": "Downtown Redmond", "street": "156th Avenue NE", "street_number": "1", "apartment_suite_unit": "", "zip_code": "98052", "address_label": "Work", "map_search_short": "1 156th Ave NE, Redmond, WA 98052", "ecommerce_full": "1 156th Ave NE, Redmond, WA 98052" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Green Lake", "street": "Green Lake Drive N", "street_number": "7200", "apartment_suite_unit": "", "zip_code": "98115", "address_label": "Backup Shipping", "map_search_short": "7200 Green Lake Dr N, Seattle, WA 98115", "ecommerce_full": "7200 Green Lake Dr N, Seattle, WA 98115" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Green Lake Park", "street": "Green Lake Drive E", "street_number": "7201", "apartment_suite_unit": "", "zip_code": "98115", "address_label": "Favorite Place", "map_search_short": "7201 Green Lake Dr E, Seattle, WA 98115", "ecommerce_full": "7201 Green Lake Dr E, Seattle, WA 98115" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Emily Rodriguez",
+        "default_recipient_phone": "(206) 654-3210",
+        "backup_recipient_name": "Maria Rodriguez",
+        "backup_recipient_phone": "(206) 555-3344",
+        "food_delivery_contact_name": "Emily Rodriguez",
+        "food_delivery_contact_phone": "(206) 654-3210",
+        "emergency_contact_name": "Maria Rodriguez",
+        "emergency_contact_phone": "(206) 555-3344"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["best tacos seattle", "yoga classes near me", "microsoft career"],
+        "common_short_messages": ["Running late", "Pick up the kids?", "Love the new place!"],
+        "common_delivery_notes": ["Hand to me please", "Ring doorbell"],
+        "common_email_subjects": ["Campaign brief", "Team sync", "Budget approval"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "colleague",
+        "colleagues_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4265423511615599", "expiry": "08/30", "cvv": "873" },
+        { "type": "Visa", "number": "4407816184959310", "expiry": "08/31", "cvv": "950" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "120234567890",
+        "issue_date": "2022-05-15",
+        "expiry_date": "2030-05-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 3,
+      "identity": {
+        "full_name": "James Thompson",
+        "preferred_name": "Jim",
+        "gender": "Male",
+        "age_band": "45-54",
+        "birth_year": 1978,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "James Thompson" },
+          { "alias_type": "social_nickname", "value": "Jim Thompson" },
+          { "alias_type": "shopping_display_name", "value": "J. Thompson" },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(206) 321-0987",
+        "phone_secondary": "(206) 555-7788",
+        "email_personal": "james.thompson@icloud.com",
+        "email_work": "jthompson@boeing.com",
+        "social_display_name": "James Thompson",
+        "shopping_display_name": "James Thompson",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Boeing",
+        "department": "Commercial Airplanes",
+        "job_title": "Project Manager",
+        "work_phone": "(206) 321-0987",
+        "work_email_signature_name": "James Thompson",
+        "office_building_short_name": "Boeing Everett"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Queen Anne", "street": "Queen Anne Avenue N", "street_number": "1800", "apartment_suite_unit": "", "zip_code": "98109", "address_label": "Home", "map_search_short": "1800 Queen Anne Ave N, Seattle, WA 98109", "ecommerce_full": "1800 Queen Anne Ave N, Seattle, WA 98109" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Everett", "district_or_neighborhood": "Boeing Campus", "street": "2727", "street_number": "2727", "apartment_suite_unit": "", "zip_code": "98203", "address_label": "Work", "map_search_short": "2727 W Casino Rd, Everett, WA 98203", "ecommerce_full": "2727 W Casino Rd, Everett, WA 98203" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Magnolia", "street": "34th Avenue W", "street_number": "3200", "apartment_suite_unit": "", "zip_code": "98199", "address_label": "Backup Shipping", "map_search_short": "3200 34th Ave W, Seattle, WA 98199", "ecommerce_full": "3200 34th Ave W, Seattle, WA 98199" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Space Needle", "street": "400 Broad Street", "street_number": "400", "apartment_suite_unit": "", "zip_code": "98109", "address_label": "Favorite Place", "map_search_short": "400 Broad St, Seattle, WA 98109", "ecommerce_full": "400 Broad St, Seattle, WA 98109" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "James Thompson",
+        "default_recipient_phone": "(206) 321-0987",
+        "backup_recipient_name": "Linda Thompson",
+        "backup_recipient_phone": "(206) 555-9900",
+        "food_delivery_contact_name": "James Thompson",
+        "food_delivery_contact_phone": "(206) 321-0987",
+        "emergency_contact_name": "Linda Thompson",
+        "emergency_contact_phone": "(206) 555-9900"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["boeing news", "fishing spots near seattle", "best bbq"],
+        "common_short_messages": ["Heading home", "Dinner at 6?", "Call me"],
+        "common_delivery_notes": ["Leave in garage", "Signature required"],
+        "common_email_subjects": ["Project status", "Supplier quote", "Safety update"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4034131647525539", "expiry": "09/31", "cvv": "262" },
+        { "type": "Visa", "number": "4419283276483509", "expiry": "12/31", "cvv": "560" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "120334567890",
+        "issue_date": "2022-06-15",
+        "expiry_date": "2030-06-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 4,
+      "identity": {
+        "full_name": "Sophia Patel",
+        "preferred_name": "Sophie",
+        "gender": "Female",
+        "age_band": "25-34",
+        "birth_year": 1997,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Sophia Patel" },
+          { "alias_type": "social_nickname", "value": "Sophie Patel" },
+          { "alias_type": "shopping_display_name", "value": "Sophie P." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(425) 456-7890",
+        "phone_secondary": "(206) 111-2222",
+        "email_personal": "sophia.patel@gmail.com",
+        "email_work": "spatel@google.com",
+        "social_display_name": "Sophia Patel",
+        "shopping_display_name": "Sophia Patel",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Google",
+        "department": "YouTube",
+        "job_title": "Product Designer",
+        "work_phone": "(425) 456-7890",
+        "work_email_signature_name": "Sophia Patel",
+        "office_building_short_name": "Google Kirkland"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Downtown Bellevue", "street": "108th Avenue NE", "street_number": "400", "apartment_suite_unit": "Apt 1205", "zip_code": "98004", "address_label": "Home", "map_search_short": "400 108th Ave NE, Bellevue, WA 98004", "ecommerce_full": "400 108th Ave NE Apt 1205, Bellevue, WA 98004" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Kirkland", "district_or_neighborhood": "Google Campus", "street": "NE 40th Street", "street_number": "777", "apartment_suite_unit": "", "zip_code": "98033", "address_label": "Work", "map_search_short": "777 NE 40th St, Kirkland, WA 98033", "ecommerce_full": "777 NE 40th St, Kirkland, WA 98033" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Crossroads", "street": "156th Avenue SE", "street_number": "14600", "apartment_suite_unit": "", "zip_code": "98007", "address_label": "Backup Shipping", "map_search_short": "14600 156th Ave SE, Bellevue, WA 98007", "ecommerce_full": "14600 156th Ave SE, Bellevue, WA 98007" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Bellevue Square", "street": "100th Avenue NE", "street_number": "575", "apartment_suite_unit": "", "zip_code": "98004", "address_label": "Favorite Place", "map_search_short": "575 100th Ave NE, Bellevue, WA 98004", "ecommerce_full": "575 100th Ave NE, Bellevue, WA 98004" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Sophia Patel",
+        "default_recipient_phone": "(425) 456-7890",
+        "backup_recipient_name": "Raj Patel",
+        "backup_recipient_phone": "(425) 555-6677",
+        "food_delivery_contact_name": "Sophia Patel",
+        "food_delivery_contact_phone": "(425) 456-7890",
+        "emergency_contact_name": "Raj Patel",
+        "emergency_contact_phone": "(425) 555-6677"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["design inspiration", "indian grocery bellevue", "youtube trends"],
+        "common_short_messages": ["Meeting in 10", "Lunch?", "Done with work"],
+        "common_delivery_notes": ["Leave at porch", "No contact"],
+        "common_email_subjects": ["Design feedback", "Sprint planning", "UI review"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "colleague",
+        "colleagues_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4305641395376721", "expiry": "05/29", "cvv": "960" },
+        { "type": "Visa", "number": "4423884969653284", "expiry": "11/30", "cvv": "884" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "120434567890",
+        "issue_date": "2022-07-15",
+        "expiry_date": "2030-07-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 5,
+      "identity": {
+        "full_name": "David Kim",
+        "preferred_name": "Dave",
+        "gender": "Male",
+        "age_band": "30-39",
+        "birth_year": 1992,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "David Kim" },
+          { "alias_type": "social_nickname", "value": "Dave Kim" },
+          { "alias_type": "shopping_display_name", "value": "David K." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(206) 222-3333",
+        "phone_secondary": "(425) 444-5555",
+        "email_personal": "david.kim@gmail.com",
+        "email_work": "dkim@starbucks.com",
+        "social_display_name": "David Kim",
+        "shopping_display_name": "David Kim",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Starbucks",
+        "department": "Global Technology",
+        "job_title": "IT Analyst",
+        "work_phone": "(206) 222-3333",
+        "work_email_signature_name": "David Kim",
+        "office_building_short_name": "Starbucks Center"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Wallingford", "street": "Northlake Way NE", "street_number": "4000", "apartment_suite_unit": "Apt 12", "zip_code": "98105", "address_label": "Home", "map_search_short": "4000 Northlake Way NE, Seattle, WA 98105", "ecommerce_full": "4000 Northlake Way NE Apt 12, Seattle, WA 98105" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "SODO", "street": "1st Avenue South", "street_number": "2401", "apartment_suite_unit": "", "zip_code": "98134", "address_label": "Work", "map_search_short": "2401 1st Ave S, Seattle, WA 98134", "ecommerce_full": "2401 1st Ave S, Seattle, WA 98134" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Wallingford", "street": "Northlake Way NE", "street_number": "4000", "apartment_suite_unit": "", "zip_code": "98105", "address_label": "Backup Shipping", "map_search_short": "4000 Northlake Way NE, Seattle, WA 98105", "ecommerce_full": "4000 Northlake Way NE, Seattle, WA 98105" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "University District", "street": "University Way NE", "street_number": "4500", "apartment_suite_unit": "", "zip_code": "98105", "address_label": "Favorite Place", "map_search_short": "4500 University Way NE, Seattle, WA 98105", "ecommerce_full": "4500 University Way NE, Seattle, WA 98105" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "David Kim",
+        "default_recipient_phone": "(206) 222-3333",
+        "backup_recipient_name": "Jennifer Kim",
+        "backup_recipient_phone": "(206) 555-7788",
+        "food_delivery_contact_name": "David Kim",
+        "food_delivery_contact_phone": "(206) 222-3333",
+        "emergency_contact_name": "Jennifer Kim",
+        "emergency_contact_phone": "(206) 555-7788"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["coffee recipes", "tech gadgets", "korean bbq seattle"],
+        "common_short_messages": ["Grabbing coffee", "See you soon", "Call when here"],
+        "common_delivery_notes": ["Leave at front door", "Text on arrival"],
+        "common_email_subjects": ["System update", "Ticket resolved", "Weekly report"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4710122691669787", "expiry": "09/31", "cvv": "741" },
+        { "type": "Visa", "number": "4480184514627044", "expiry": "04/30", "cvv": "550" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "120534567890",
+        "issue_date": "2022-08-15",
+        "expiry_date": "2030-08-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 6,
+      "identity": {
+        "full_name": "Olivia Martinez",
+        "preferred_name": "Liv",
+        "gender": "Female",
+        "age_band": "18-24",
+        "birth_year": 2002,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Olivia Martinez" },
+          { "alias_type": "social_nickname", "value": "Liv Martinez" },
+          { "alias_type": "shopping_display_name", "value": "Olivia M." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(425) 777-8888",
+        "phone_secondary": "(206) 999-0000",
+        "email_personal": "olivia.martinez@outlook.com",
+        "email_work": "omartinez@uw.edu",
+        "social_display_name": "Olivia Martinez",
+        "shopping_display_name": "Olivia Martinez",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "University of Washington",
+        "department": "Student Services",
+        "job_title": "Student Assistant",
+        "work_phone": "(206) 999-0000",
+        "work_email_signature_name": "Olivia Martinez",
+        "office_building_short_name": "Husky Union Building"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Newport Hills", "street": "SE 30th Street", "street_number": "2000", "apartment_suite_unit": "", "zip_code": "98007", "address_label": "Home", "map_search_short": "2000 SE 30th St, Bellevue, WA 98007", "ecommerce_full": "2000 SE 30th St, Bellevue, WA 98007" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "University District", "street": "15th Avenue NE", "street_number": "4000", "apartment_suite_unit": "", "zip_code": "98195", "address_label": "Work", "map_search_short": "4000 15th Ave NE, Seattle, WA 98195", "ecommerce_full": "4000 15th Ave NE, Seattle, WA 98195" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Factoria", "street": "Factoria Blvd SE", "street_number": "4000", "apartment_suite_unit": "", "zip_code": "98006", "address_label": "Backup Shipping", "map_search_short": "4000 Factoria Blvd SE, Bellevue, WA 98006", "ecommerce_full": "4000 Factoria Blvd SE, Bellevue, WA 98006" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "University of Washington", "street": "Montlake Boulevard NE", "street_number": "1700", "apartment_suite_unit": "", "zip_code": "98195", "address_label": "Favorite Place", "map_search_short": "1700 Montlake Blvd NE, Seattle, WA 98195", "ecommerce_full": "1700 Montlake Blvd NE, Seattle, WA 98195" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Olivia Martinez",
+        "default_recipient_phone": "(425) 777-8888",
+        "backup_recipient_name": "Carlos Martinez",
+        "backup_recipient_phone": "(425) 555-1212",
+        "food_delivery_contact_name": "Olivia Martinez",
+        "food_delivery_contact_phone": "(425) 777-8888",
+        "emergency_contact_name": "Carlos Martinez",
+        "emergency_contact_phone": "(425) 555-1212"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["uw course schedule", "cheap eats bellevue", "study spots"],
+        "common_short_messages": ["Class over", "Meet at library?", "Food coming"],
+        "common_delivery_notes": ["Leave at door", "Call me"],
+        "common_email_subjects": ["Assignment submission", "Group project", "Class notes"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4828148932528804", "expiry": "02/30", "cvv": "340" },
+        { "type": "Visa", "number": "4957015430391170", "expiry": "05/30", "cvv": "427" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "120634567890",
+        "issue_date": "2022-09-15",
+        "expiry_date": "2030-09-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 7,
+      "identity": {
+        "full_name": "Robert Johnson",
+        "preferred_name": "Rob",
+        "gender": "Male",
+        "age_band": "40-49",
+        "birth_year": 1983,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Robert Johnson" },
+          { "alias_type": "social_nickname", "value": "Rob Johnson" },
+          { "alias_type": "shopping_display_name", "value": "Robert J." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(206) 444-5555",
+        "phone_secondary": "(253) 666-7777",
+        "email_personal": "robert.johnson@gmail.com",
+        "email_work": "rjohnson@providence.org",
+        "social_display_name": "Robert Johnson",
+        "shopping_display_name": "Robert Johnson",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Providence Health",
+        "department": "Nursing",
+        "job_title": "Registered Nurse",
+        "work_phone": "(206) 444-5555",
+        "work_email_signature_name": "Robert Johnson",
+        "office_building_short_name": "Swedish Medical Center"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Central District", "street": "23rd Avenue", "street_number": "2300", "apartment_suite_unit": "", "zip_code": "98122", "address_label": "Home", "map_search_short": "2300 23rd Ave, Seattle, WA 98122", "ecommerce_full": "2300 23rd Ave, Seattle, WA 98122" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "First Hill", "street": "Broadway", "street_number": "747", "apartment_suite_unit": "", "zip_code": "98122", "address_label": "Work", "map_search_short": "747 Broadway, Seattle, WA 98122", "ecommerce_full": "747 Broadway, Seattle, WA 98122" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Rainier Valley", "street": "Rainier Avenue S", "street_number": "3800", "apartment_suite_unit": "", "zip_code": "98118", "address_label": "Backup Shipping", "map_search_short": "3800 Rainier Ave S, Seattle, WA 98118", "ecommerce_full": "3800 Rainier Ave S, Seattle, WA 98118" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Cal Anderson Park", "street": "11th Avenue", "street_number": "1400", "apartment_suite_unit": "", "zip_code": "98122", "address_label": "Favorite Place", "map_search_short": "1400 11th Ave, Seattle, WA 98122", "ecommerce_full": "1400 11th Ave, Seattle, WA 98122" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Robert Johnson",
+        "default_recipient_phone": "(206) 444-5555",
+        "backup_recipient_name": "Michelle Johnson",
+        "backup_recipient_phone": "(206) 555-3344",
+        "food_delivery_contact_name": "Robert Johnson",
+        "food_delivery_contact_phone": "(206) 444-5555",
+        "emergency_contact_name": "Michelle Johnson",
+        "emergency_contact_phone": "(206) 555-3344"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["nurse shift schedule", "healthy recipes", "seattle sports"],
+        "common_short_messages": ["Shift starting", "Home soon", "Dinner ready"],
+        "common_delivery_notes": ["Leave at side door", "Ring bell"],
+        "common_email_subjects": ["Patient update", "Schedule change", "Team meeting"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4182278248963831", "expiry": "09/28", "cvv": "241" },
+        { "type": "Visa", "number": "4465787133150989", "expiry": "03/29", "cvv": "492" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "120734567890",
+        "issue_date": "2022-10-15",
+        "expiry_date": "2030-10-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 8,
+      "identity": {
+        "full_name": "Isabella Garcia",
+        "preferred_name": "Bella",
+        "gender": "Female",
+        "age_band": "30-39",
+        "birth_year": 1994,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Isabella Garcia" },
+          { "alias_type": "social_nickname", "value": "Bella Garcia" },
+          { "alias_type": "shopping_display_name", "value": "Bella G." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(206) 888-9999",
+        "phone_secondary": "(425) 000-1111",
+        "email_personal": "isabella.garcia@gmail.com",
+        "email_work": "igarcia@costco.com",
+        "social_display_name": "Isabella Garcia",
+        "shopping_display_name": "Isabella Garcia",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Costco Wholesale",
+        "department": "Membership",
+        "job_title": "Warehouse Supervisor",
+        "work_phone": "(425) 000-1111",
+        "work_email_signature_name": "Isabella Garcia",
+        "office_building_short_name": "Costco Issaquah"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Beacon Hill", "street": "Beacon Avenue S", "street_number": "2800", "apartment_suite_unit": "", "zip_code": "98108", "address_label": "Home", "map_search_short": "2800 Beacon Ave S, Seattle, WA 98108", "ecommerce_full": "2800 Beacon Ave S, Seattle, WA 98108" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Issaquah", "district_or_neighborhood": "Costco Campus", "street": "Issaquah Hobart Road", "street_number": "400", "apartment_suite_unit": "", "zip_code": "98027", "address_label": "Work", "map_search_short": "400 Issaquah Hobart Rd, Issaquah, WA 98027", "ecommerce_full": "400 Issaquah Hobart Rd, Issaquah, WA 98027" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Beacon Hill", "street": "Beacon Avenue S", "street_number": "2800", "apartment_suite_unit": "", "zip_code": "98108", "address_label": "Backup Shipping", "map_search_short": "2800 Beacon Ave S, Seattle, WA 98108", "ecommerce_full": "2800 Beacon Ave S, Seattle, WA 98108" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Seattle Aquarium", "street": "Pier 59", "street_number": "1483", "apartment_suite_unit": "", "zip_code": "98101", "address_label": "Favorite Place", "map_search_short": "1483 Alaskan Way, Seattle, WA 98101", "ecommerce_full": "1483 Alaskan Way, Seattle, WA 98101" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Isabella Garcia",
+        "default_recipient_phone": "(206) 888-9999",
+        "backup_recipient_name": "Juan Garcia",
+        "backup_recipient_phone": "(206) 555-4455",
+        "food_delivery_contact_name": "Isabella Garcia",
+        "food_delivery_contact_phone": "(206) 888-9999",
+        "emergency_contact_name": "Juan Garcia",
+        "emergency_contact_phone": "(206) 555-4455"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["costco deals", "family recipes", "seattle traffic"],
+        "common_short_messages": ["At work", "Kids picked up", "Heading home"],
+        "common_delivery_notes": ["Leave by garage", "No signature needed"],
+        "common_email_subjects": ["Shift schedule", "Inventory report", "Team update"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4393010310518341", "expiry": "12/29", "cvv": "823" },
+        { "type": "Visa", "number": "4738299737631167", "expiry": "04/28", "cvv": "524" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "120834567890",
+        "issue_date": "2022-11-15",
+        "expiry_date": "2030-11-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 9,
+      "identity": {
+        "full_name": "Alexander Lee",
+        "preferred_name": "Alex",
+        "gender": "Male",
+        "age_band": "35-44",
+        "birth_year": 1988,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Alexander Lee" },
+          { "alias_type": "social_nickname", "value": "Alex Lee" },
+          { "alias_type": "shopping_display_name", "value": "Alex Lee" },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(425) 123-4567",
+        "phone_secondary": "(206) 890-1234",
+        "email_personal": "alexander.lee@outlook.com",
+        "email_work": "alee@nordstrom.com",
+        "social_display_name": "Alexander Lee",
+        "shopping_display_name": "Alexander Lee",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Nordstrom",
+        "department": "E-commerce",
+        "job_title": "Data Analyst",
+        "work_phone": "(425) 123-4567",
+        "work_email_signature_name": "Alexander Lee",
+        "office_building_short_name": "Nordstrom HQ"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Eastgate", "street": "148th Avenue SE", "street_number": "15800", "apartment_suite_unit": "", "zip_code": "98007", "address_label": "Home", "map_search_short": "15800 148th Ave SE, Bellevue, WA 98007", "ecommerce_full": "15800 148th Ave SE, Bellevue, WA 98007" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Downtown", "street": "Pine Street", "street_number": "1600", "apartment_suite_unit": "", "zip_code": "98101", "address_label": "Work", "map_search_short": "1600 7th Ave, Seattle, WA 98101", "ecommerce_full": "1600 7th Ave, Seattle, WA 98101" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Eastgate", "street": "148th Avenue SE", "street_number": "15800", "apartment_suite_unit": "", "zip_code": "98007", "address_label": "Backup Shipping", "map_search_short": "15800 148th Ave SE, Bellevue, WA 98007", "ecommerce_full": "15800 148th Ave SE, Bellevue, WA 98007" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Marymoor Park", "street": "Marymoor Park", "street_number": "6046", "apartment_suite_unit": "", "zip_code": "98052", "address_label": "Favorite Place", "map_search_short": "6046 W Lake Sammamish Pkwy NE, Redmond, WA 98052", "ecommerce_full": "6046 W Lake Sammamish Pkwy NE, Redmond, WA 98052" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Alexander Lee",
+        "default_recipient_phone": "(425) 123-4567",
+        "backup_recipient_name": "Grace Lee",
+        "backup_recipient_phone": "(425) 555-8899",
+        "food_delivery_contact_name": "Alexander Lee",
+        "food_delivery_contact_phone": "(425) 123-4567",
+        "emergency_contact_name": "Grace Lee",
+        "emergency_contact_phone": "(425) 555-8899"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["nordstrom sales", "data analytics tools", "bellevue restaurants"],
+        "common_short_messages": ["On the way", "Meeting started", "Pick up groceries"],
+        "common_delivery_notes": ["Leave at mailbox", "Call for code"],
+        "common_email_subjects": ["Sales report", "Data dashboard", "Weekly metrics"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4566701065133382", "expiry": "07/30", "cvv": "655" },
+        { "type": "Visa", "number": "4726247317810804", "expiry": "08/31", "cvv": "163" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "120934567890",
+        "issue_date": "2022-12-15",
+        "expiry_date": "2030-12-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 10,
+      "identity": {
+        "full_name": "Mia Nguyen",
+        "preferred_name": "Mia",
+        "gender": "Female",
+        "age_band": "25-34",
+        "birth_year": 1996,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Mia Nguyen" },
+          { "alias_type": "social_nickname", "value": "Mia Nguyen" },
+          { "alias_type": "shopping_display_name", "value": "Mia N." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(425) 234-5678",
+        "phone_secondary": "(206) 345-6789",
+        "email_personal": "mia.nguyen@gmail.com",
+        "email_work": "mnguyen@expedia.com",
+        "social_display_name": "Mia Nguyen",
+        "shopping_display_name": "Mia Nguyen",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Expedia Group",
+        "department": "Travel Products",
+        "job_title": "Travel Consultant",
+        "work_phone": "(425) 234-5678",
+        "work_email_signature_name": "Mia Nguyen",
+        "office_building_short_name": "Expedia HQ Bellevue"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Wilburton", "street": "120th Avenue NE", "street_number": "3000", "apartment_suite_unit": "Apt 405", "zip_code": "98005", "address_label": "Home", "map_search_short": "3000 120th Ave NE, Bellevue, WA 98005", "ecommerce_full": "3000 120th Ave NE Apt 405, Bellevue, WA 98005" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Downtown Bellevue", "street": "108th Avenue NE", "street_number": "333", "apartment_suite_unit": "", "zip_code": "98004", "address_label": "Work", "map_search_short": "333 108th Ave NE, Bellevue, WA 98004", "ecommerce_full": "333 108th Ave NE, Bellevue, WA 98004" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Wilburton", "street": "120th Avenue NE", "street_number": "3000", "apartment_suite_unit": "", "zip_code": "98005", "address_label": "Backup Shipping", "map_search_short": "3000 120th Ave NE, Bellevue, WA 98005", "ecommerce_full": "3000 120th Ave NE, Bellevue, WA 98005" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Bellevue", "district_or_neighborhood": "Bellevue Botanical Garden", "street": "12001 Main Street", "street_number": "12001", "apartment_suite_unit": "", "zip_code": "98005", "address_label": "Favorite Place", "map_search_short": "12001 Main St, Bellevue, WA 98005", "ecommerce_full": "12001 Main St, Bellevue, WA 98005" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Mia Nguyen",
+        "default_recipient_phone": "(425) 234-5678",
+        "backup_recipient_name": "Anh Nguyen",
+        "backup_recipient_phone": "(425) 555-2233",
+        "food_delivery_contact_name": "Mia Nguyen",
+        "food_delivery_contact_phone": "(425) 234-5678",
+        "emergency_contact_name": "Anh Nguyen",
+        "emergency_contact_phone": "(425) 555-2233"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["cheap flights", "vietnamese food bellevue", "travel deals"],
+        "common_short_messages": ["Flight booked", "See you tomorrow", "Dinner plans?"],
+        "common_delivery_notes": ["Leave at lobby", "Text when delivered"],
+        "common_email_subjects": ["Travel itinerary", "Client booking", "Promotion update"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Visa", "number": "4132677360260648", "expiry": "04/31", "cvv": "498" },
+        { "type": "Visa", "number": "4746872343098052", "expiry": "10/28", "cvv": "977" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "121034567890",
+        "issue_date": "2022-01-15",
+        "expiry_date": "2030-01-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 11,
+      "identity": {
+        "full_name": "William Brown",
+        "preferred_name": "Will",
+        "gender": "Male",
+        "age_band": "50-59",
+        "birth_year": 1972,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "William Brown" },
+          { "alias_type": "social_nickname", "value": "Will Brown" },
+          { "alias_type": "shopping_display_name", "value": "Will Brown" },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(253) 111-2222",
+        "phone_secondary": "(206) 333-4444",
+        "email_personal": "william.brown@outlook.com",
+        "email_work": "wbrown@cityoftacoma.org",
+        "social_display_name": "William Brown",
+        "shopping_display_name": "William Brown",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "City of Tacoma",
+        "department": "Public Works",
+        "job_title": "Civil Engineer",
+        "work_phone": "(253) 111-2222",
+        "work_email_signature_name": "William Brown",
+        "office_building_short_name": "Tacoma Municipal Building"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Tacoma", "district_or_neighborhood": "North End", "street": "North 30th Street", "street_number": "3000", "apartment_suite_unit": "", "zip_code": "98407", "address_label": "Home", "map_search_short": "3000 N 30th St, Tacoma, WA 98407", "ecommerce_full": "3000 N 30th St, Tacoma, WA 98407" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Tacoma", "district_or_neighborhood": "Downtown Tacoma", "street": "Pacific Avenue", "street_number": "747", "apartment_suite_unit": "", "zip_code": "98402", "address_label": "Work", "map_search_short": "747 Pacific Ave, Tacoma, WA 98402", "ecommerce_full": "747 Pacific Ave, Tacoma, WA 98402" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Tacoma", "district_or_neighborhood": "North End", "street": "North 30th Street", "street_number": "3000", "apartment_suite_unit": "", "zip_code": "98407", "address_label": "Backup Shipping", "map_search_short": "3000 N 30th St, Tacoma, WA 98407", "ecommerce_full": "3000 N 30th St, Tacoma, WA 98407" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Tacoma", "district_or_neighborhood": "Point Defiance Zoo", "street": "N 30th Street", "street_number": "5400", "apartment_suite_unit": "", "zip_code": "98407", "address_label": "Favorite Place", "map_search_short": "5400 N 30th St, Tacoma, WA 98407", "ecommerce_full": "5400 N 30th St, Tacoma, WA 98407" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "William Brown",
+        "default_recipient_phone": "(253) 111-2222",
+        "backup_recipient_name": "Patricia Brown",
+        "backup_recipient_phone": "(253) 555-6677",
+        "food_delivery_contact_name": "William Brown",
+        "food_delivery_contact_phone": "(253) 111-2222",
+        "emergency_contact_name": "Patricia Brown",
+        "emergency_contact_phone": "(253) 555-6677"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["tacoma traffic", "public works projects", "fishing spots"],
+        "common_short_messages": ["At site", "Meeting at city hall", "Home by 6"],
+        "common_delivery_notes": ["Leave on porch", "Signature required"],
+        "common_email_subjects": ["Project permit", "Infrastructure update", "Budget review"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "MasterCard", "number": "5009788208121913", "expiry": "10/31", "cvv": "588" },
+        { "type": "MasterCard", "number": "5361939909169980", "expiry": "01/30", "cvv": "405" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "121134567890",
+        "issue_date": "2022-02-15",
+        "expiry_date": "2030-02-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 12,
+      "identity": {
+        "full_name": "Ava Lopez",
+        "preferred_name": "Ava",
+        "gender": "Female",
+        "age_band": "25-34",
+        "birth_year": 1999,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Ava Lopez" },
+          { "alias_type": "social_nickname", "value": "Ava Lopez" },
+          { "alias_type": "shopping_display_name", "value": "Ava L." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(509) 222-3333",
+        "phone_secondary": "(206) 444-5555",
+        "email_personal": "ava.lopez@gmail.com",
+        "email_work": "alopez@spokanepublic.org",
+        "social_display_name": "Ava Lopez",
+        "shopping_display_name": "Ava Lopez",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Spokane Public Schools",
+        "department": "Education",
+        "job_title": "Elementary Teacher",
+        "work_phone": "(509) 222-3333",
+        "work_email_signature_name": "Ava Lopez",
+        "office_building_short_name": "Lincoln Elementary"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Spokane", "district_or_neighborhood": "South Hill", "street": "13th Avenue", "street_number": "2800", "apartment_suite_unit": "", "zip_code": "99203", "address_label": "Home", "map_search_short": "2800 S 13th Ave, Spokane, WA 99203", "ecommerce_full": "2800 S 13th Ave, Spokane, WA 99203" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Spokane", "district_or_neighborhood": "South Hill", "street": "13th Avenue", "street_number": "2900", "apartment_suite_unit": "", "zip_code": "99203", "address_label": "Work", "map_search_short": "2900 S 13th Ave, Spokane, WA 99203", "ecommerce_full": "2900 S 13th Ave, Spokane, WA 99203" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Spokane", "district_or_neighborhood": "North Side", "street": "Division Street", "street_number": "1234", "apartment_suite_unit": "", "zip_code": "99202", "address_label": "Backup Shipping", "map_search_short": "1234 N Division St, Spokane, WA 99202", "ecommerce_full": "1234 N Division St, Spokane, WA 99202" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Spokane", "district_or_neighborhood": "Riverfront Park", "street": "North Spokane Falls Boulevard", "street_number": "507", "apartment_suite_unit": "", "zip_code": "99201", "address_label": "Favorite Place", "map_search_short": "507 N Spokane Falls Blvd, Spokane, WA 99201", "ecommerce_full": "507 N Spokane Falls Blvd, Spokane, WA 99201" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Ava Lopez",
+        "default_recipient_phone": "(509) 222-3333",
+        "backup_recipient_name": "Elena Lopez",
+        "backup_recipient_phone": "(509) 555-1122",
+        "food_delivery_contact_name": "Ava Lopez",
+        "food_delivery_contact_phone": "(509) 222-3333",
+        "emergency_contact_name": "Elena Lopez",
+        "emergency_contact_phone": "(509) 555-1122"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["lesson plans", "kids activities spokane", "classroom supplies"],
+        "common_short_messages": ["Class starting", "Parent meeting", "See you after school"],
+        "common_delivery_notes": ["Leave at school office", "Call teacher"],
+        "common_email_subjects": ["Parent update", "Classroom supply list", "Field trip permission"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "stranger",
+        "weak_contact_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "MasterCard", "number": "5543534624751070", "expiry": "07/31", "cvv": "651" },
+        { "type": "MasterCard", "number": "5991183842513545", "expiry": "12/29", "cvv": "599" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "121234567890",
+        "issue_date": "2022-03-15",
+        "expiry_date": "2030-03-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 13,
+      "identity": {
+        "full_name": "Ethan Wilson",
+        "preferred_name": "Ethan",
+        "gender": "Male",
+        "age_band": "30-39",
+        "birth_year": 1993,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Ethan Wilson" },
+          { "alias_type": "social_nickname", "value": "Ethan Wilson" },
+          { "alias_type": "shopping_display_name", "value": "Ethan W." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(360) 555-1212",
+        "phone_secondary": "(206) 777-8888",
+        "email_personal": "ethan.wilson@gmail.com",
+        "email_work": "ewilson@olympiawa.gov",
+        "social_display_name": "Ethan Wilson",
+        "shopping_display_name": "Ethan Wilson",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "City of Olympia",
+        "department": "Parks & Recreation",
+        "job_title": "Park Ranger",
+        "work_phone": "(360) 555-1212",
+        "work_email_signature_name": "Ethan Wilson",
+        "office_building_short_name": "Olympia City Hall"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Olympia", "district_or_neighborhood": "Downtown Olympia", "street": "Capitol Way", "street_number": "1000", "apartment_suite_unit": "", "zip_code": "98501", "address_label": "Home", "map_search_short": "1000 Capitol Way, Olympia, WA 98501", "ecommerce_full": "1000 Capitol Way, Olympia, WA 98501" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Olympia", "district_or_neighborhood": "Capitol Campus", "street": "15th Avenue SW", "street_number": "416", "apartment_suite_unit": "", "zip_code": "98501", "address_label": "Work", "map_search_short": "416 15th Ave SW, Olympia, WA 98501", "ecommerce_full": "416 15th Ave SW, Olympia, WA 98501" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Olympia", "district_or_neighborhood": "Downtown Olympia", "street": "Capitol Way", "street_number": "1000", "apartment_suite_unit": "", "zip_code": "98501", "address_label": "Backup Shipping", "map_search_short": "1000 Capitol Way, Olympia, WA 98501", "ecommerce_full": "1000 Capitol Way, Olympia, WA 98501" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Olympia", "district_or_neighborhood": "Percival Landing", "street": "Water Street", "street_number": "100", "apartment_suite_unit": "", "zip_code": "98501", "address_label": "Favorite Place", "map_search_short": "100 Water St, Olympia, WA 98501", "ecommerce_full": "100 Water St, Olympia, WA 98501" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Ethan Wilson",
+        "default_recipient_phone": "(360) 555-1212",
+        "backup_recipient_name": "Emma Wilson",
+        "backup_recipient_phone": "(360) 555-3344",
+        "food_delivery_contact_name": "Ethan Wilson",
+        "food_delivery_contact_phone": "(360) 555-1212",
+        "emergency_contact_name": "Emma Wilson",
+        "emergency_contact_phone": "(360) 555-3344"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["olympia parks", "hiking washington", "local events"],
+        "common_short_messages": ["Patrol starting", "See you at the park", "Heading home"],
+        "common_delivery_notes": ["Leave at ranger station", "Call ahead"],
+        "common_email_subjects": ["Park maintenance", "Event schedule", "Safety report"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "MasterCard", "number": "5278498084124114", "expiry": "04/30", "cvv": "546" },
+        { "type": "MasterCard", "number": "5824493534874011", "expiry": "08/28", "cvv": "498" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "121334567890",
+        "issue_date": "2022-04-15",
+        "expiry_date": "2030-04-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 14,
+      "identity": {
+        "full_name": "Harper Clark",
+        "preferred_name": "Harper",
+        "gender": "Female",
+        "age_band": "20-29",
+        "birth_year": 2001,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Harper Clark" },
+          { "alias_type": "social_nickname", "value": "Harper Clark" },
+          { "alias_type": "shopping_display_name", "value": "Harper C." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(360) 777-8888",
+        "phone_secondary": "(509) 999-0000",
+        "email_personal": "harper.clark@icloud.com",
+        "email_work": "hclark@vancouverusa.gov",
+        "social_display_name": "Harper Clark",
+        "shopping_display_name": "Harper Clark",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "City of Vancouver",
+        "department": "Community Development",
+        "job_title": "Planning Assistant",
+        "work_phone": "(360) 777-8888",
+        "work_email_signature_name": "Harper Clark",
+        "office_building_short_name": "Vancouver City Hall"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Vancouver", "district_or_neighborhood": "Downtown Vancouver", "street": "Main Street", "street_number": "1000", "apartment_suite_unit": "Apt 302", "zip_code": "98660", "address_label": "Home", "map_search_short": "1000 Main St, Vancouver, WA 98660", "ecommerce_full": "1000 Main St Apt 302, Vancouver, WA 98660" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Vancouver", "district_or_neighborhood": "Downtown Vancouver", "street": "Evergreen Boulevard", "street_number": "605", "apartment_suite_unit": "", "zip_code": "98660", "address_label": "Work", "map_search_short": "605 Evergreen Blvd, Vancouver, WA 98660", "ecommerce_full": "605 Evergreen Blvd, Vancouver, WA 98660" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Vancouver", "district_or_neighborhood": "Downtown Vancouver", "street": "Main Street", "street_number": "1000", "apartment_suite_unit": "", "zip_code": "98660", "address_label": "Backup Shipping", "map_search_short": "1000 Main St, Vancouver, WA 98660", "ecommerce_full": "1000 Main St, Vancouver, WA 98660" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Vancouver", "district_or_neighborhood": "Esther Short Park", "street": "Esther Street", "street_number": "605", "apartment_suite_unit": "", "zip_code": "98660", "address_label": "Favorite Place", "map_search_short": "605 Esther St, Vancouver, WA 98660", "ecommerce_full": "605 Esther St, Vancouver, WA 98660" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Harper Clark",
+        "default_recipient_phone": "(360) 777-8888",
+        "backup_recipient_name": "Logan Clark",
+        "backup_recipient_phone": "(425) 999-0000",
+        "food_delivery_contact_name": "Harper Clark",
+        "food_delivery_contact_phone": "(360) 777-8888",
+        "emergency_contact_name": "Sarah Clark",
+        "emergency_contact_phone": "(206) 222-3333"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["vancouver wa events", "urban planning", "local coffee"],
+        "common_short_messages": ["At city hall", "Meeting at 2", "See you tonight"],
+        "common_delivery_notes": ["Leave at front desk", "Ring doorbell"],
+        "common_email_subjects": ["Zoning permit", "Community feedback", "Project update"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "owner",
+        "parents": ["Logan Clark", "Sarah Clark"],
+        "colleagues": ["Emily Rodriguez", "Sophia Patel"],
+        "strangers": ["Noah Anderson", "Charlotte White", "Henry Scott", "Ava Lopez"],
+        "friends": ["Michael Chen", "James Thompson", "David Kim", "Olivia Martinez", "Robert Johnson", "Isabella Garcia", "Alexander Lee", "Mia Nguyen", "William Brown", "Ethan Wilson", "Benjamin Taylor"]
+      },
+      "credit_cards": [
+        { "type": "MasterCard", "number": "5640052427868019", "expiry": "06/31", "cvv": "841" },
+        { "type": "MasterCard", "number": "5128059826204507", "expiry": "03/31", "cvv": "230" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "121434567890",
+        "issue_date": "2022-05-15",
+        "expiry_date": "2030-05-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 15,
+      "identity": {
+        "full_name": "Benjamin Taylor",
+        "preferred_name": "Ben",
+        "gender": "Male",
+        "age_band": "40-49",
+        "birth_year": 1981,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Benjamin Taylor" },
+          { "alias_type": "social_nickname", "value": "Ben Taylor" },
+          { "alias_type": "shopping_display_name", "value": "Ben Taylor" },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(509) 888-9999",
+        "phone_secondary": "(206) 000-1111",
+        "email_personal": "benjamin.taylor@gmail.com",
+        "email_work": "btaylor@yakimavalley.org",
+        "social_display_name": "Benjamin Taylor",
+        "shopping_display_name": "Benjamin Taylor",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Yakima Valley Tourism",
+        "department": "Marketing",
+        "job_title": "Tourism Coordinator",
+        "work_phone": "(509) 888-9999",
+        "work_email_signature_name": "Benjamin Taylor",
+        "office_building_short_name": "Yakima Convention Center"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Yakima", "district_or_neighborhood": "Downtown Yakima", "street": "First Street", "street_number": "100", "apartment_suite_unit": "", "zip_code": "98901", "address_label": "Home", "map_search_short": "100 N 1st St, Yakima, WA 98901", "ecommerce_full": "100 N 1st St, Yakima, WA 98901" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Yakima", "district_or_neighborhood": "Downtown Yakima", "street": "North 1st Street", "street_number": "200", "apartment_suite_unit": "", "zip_code": "98901", "address_label": "Work", "map_search_short": "200 N 1st St, Yakima, WA 98901", "ecommerce_full": "200 N 1st St, Yakima, WA 98901" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Yakima", "district_or_neighborhood": "Downtown Yakima", "street": "First Street", "street_number": "100", "apartment_suite_unit": "", "zip_code": "98901", "address_label": "Backup Shipping", "map_search_short": "100 N 1st St, Yakima, WA 98901", "ecommerce_full": "100 N 1st St, Yakima, WA 98901" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Yakima", "district_or_neighborhood": "Yakima River", "street": "River Road", "street_number": "1234", "apartment_suite_unit": "", "zip_code": "98902", "address_label": "Favorite Place", "map_search_short": "1234 River Rd, Yakima, WA 98902", "ecommerce_full": "1234 River Rd, Yakima, WA 98902" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Benjamin Taylor",
+        "default_recipient_phone": "(509) 888-9999",
+        "backup_recipient_name": "Sophie Taylor",
+        "backup_recipient_phone": "(509) 555-6677",
+        "food_delivery_contact_name": "Benjamin Taylor",
+        "food_delivery_contact_phone": "(509) 888-9999",
+        "emergency_contact_name": "Sophie Taylor",
+        "emergency_contact_phone": "(509) 555-6677"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["yakima wine tours", "local festivals", "outdoor activities"],
+        "common_short_messages": ["Tour starting", "Meeting at visitor center", "See you later"],
+        "common_delivery_notes": ["Leave at office", "Call for pickup"],
+        "common_email_subjects": ["Event promotion", "Tourist inquiry", "Marketing campaign"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "MasterCard", "number": "5533158692322606", "expiry": "10/28", "cvv": "503" },
+        { "type": "MasterCard", "number": "5256342160733750", "expiry": "10/28", "cvv": "185" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "121534567890",
+        "issue_date": "2022-06-15",
+        "expiry_date": "2030-06-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 16,
+      "identity": {
+        "full_name": "Noah Anderson",
+        "preferred_name": "Noah",
+        "gender": "Male",
+        "age_band": "25-34",
+        "birth_year": 1995,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Noah Anderson" },
+          { "alias_type": "social_nickname", "value": "Noah Anderson" },
+          { "alias_type": "shopping_display_name", "value": "Noah A." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(213) 555-1212",
+        "phone_secondary": "(310) 777-8888",
+        "email_personal": "noah.anderson@gmail.com",
+        "email_work": "nanderson@disney.com",
+        "social_display_name": "Noah Anderson",
+        "shopping_display_name": "Noah Anderson",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Walt Disney Studios",
+        "department": "Animation",
+        "job_title": "Storyboard Artist",
+        "work_phone": "(213) 555-1212",
+        "work_email_signature_name": "Noah Anderson",
+        "office_building_short_name": "Burbank Studio"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "CA", "city": "Los Angeles", "district_or_neighborhood": "Silver Lake", "street": "Sunset Boulevard", "street_number": "2900", "apartment_suite_unit": "Apt 4B", "zip_code": "90026", "address_label": "Home", "map_search_short": "2900 Sunset Blvd, Los Angeles, CA 90026", "ecommerce_full": "2900 Sunset Blvd Apt 4B, Los Angeles, CA 90026" },
+        "work_address": { "country": "United States", "state": "CA", "city": "Burbank", "district_or_neighborhood": "Disney Campus", "street": "W Alameda Avenue", "street_number": "500", "apartment_suite_unit": "", "zip_code": "91521", "address_label": "Work", "map_search_short": "500 S Buena Vista St, Burbank, CA 91521", "ecommerce_full": "500 S Buena Vista St, Burbank, CA 91521" },
+        "backup_shipping_address": { "country": "United States", "state": "CA", "city": "Los Angeles", "district_or_neighborhood": "Silver Lake", "street": "Sunset Boulevard", "street_number": "2900", "apartment_suite_unit": "", "zip_code": "90026", "address_label": "Backup Shipping", "map_search_short": "2900 Sunset Blvd, Los Angeles, CA 90026", "ecommerce_full": "2900 Sunset Blvd, Los Angeles, CA 90026" },
+        "favorite_place": { "country": "United States", "state": "CA", "city": "Los Angeles", "district_or_neighborhood": "Griffith Observatory", "street": "Griffith Park", "street_number": "2800", "apartment_suite_unit": "", "zip_code": "90027", "address_label": "Favorite Place", "map_search_short": "2800 E Observatory Rd, Los Angeles, CA 90027", "ecommerce_full": "2800 E Observatory Rd, Los Angeles, CA 90027" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Noah Anderson",
+        "default_recipient_phone": "(213) 555-1212",
+        "backup_recipient_name": "Lily Anderson",
+        "backup_recipient_phone": "(310) 555-3344",
+        "food_delivery_contact_name": "Noah Anderson",
+        "food_delivery_contact_phone": "(213) 555-1212",
+        "emergency_contact_name": "Lily Anderson",
+        "emergency_contact_phone": "(310) 555-3344"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["disney animation", "la hiking", "best tacos los angeles"],
+        "common_short_messages": ["Storyboard due", "Meet at studio", "Traffic bad"],
+        "common_delivery_notes": ["Leave at gate", "Call me"],
+        "common_email_subjects": ["Animation notes", "Project deadline", "Creative review"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "stranger",
+        "weak_contact_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Amex", "number": "344330365414586", "expiry": "11/31", "cvv": "3223" },
+        { "type": "Amex", "number": "346850142940197", "expiry": "08/29", "cvv": "1823" }
+      ],
+      "drivers_license": {
+        "state_issued": "CA",
+        "license_number": "A9876543",
+        "issue_date": "2022-07-15",
+        "expiry_date": "2030-07-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 17,
+      "identity": {
+        "full_name": "Charlotte White",
+        "preferred_name": "Charlie",
+        "gender": "Female",
+        "age_band": "30-39",
+        "birth_year": 1990,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Charlotte White" },
+          { "alias_type": "social_nickname", "value": "Charlie White" },
+          { "alias_type": "shopping_display_name", "value": "Charlie White" },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(512) 555-1212",
+        "phone_secondary": "(206) 333-4444",
+        "email_personal": "charlotte.white@gmail.com",
+        "email_work": "cwhite@wholefoods.com",
+        "social_display_name": "Charlotte White",
+        "shopping_display_name": "Charlotte White",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "Whole Foods Market",
+        "department": "Store Operations",
+        "job_title": "Store Manager",
+        "work_phone": "(512) 555-1212",
+        "work_email_signature_name": "Charlotte White",
+        "office_building_short_name": "Whole Foods Austin"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "TX", "city": "Austin", "district_or_neighborhood": "South Congress", "street": "South Congress Avenue", "street_number": "2000", "apartment_suite_unit": "", "zip_code": "78704", "address_label": "Home", "map_search_short": "2000 S Congress Ave, Austin, TX 78704", "ecommerce_full": "2000 S Congress Ave, Austin, TX 78704" },
+        "work_address": { "country": "United States", "state": "TX", "city": "Austin", "district_or_neighborhood": "Downtown Austin", "street": "6th Street", "street_number": "525", "apartment_suite_unit": "", "zip_code": "78701", "address_label": "Work", "map_search_short": "525 N Lamar Blvd, Austin, TX 78701", "ecommerce_full": "525 N Lamar Blvd, Austin, TX 78701" },
+        "backup_shipping_address": { "country": "United States", "state": "TX", "city": "Austin", "district_or_neighborhood": "South Congress", "street": "South Congress Avenue", "street_number": "2000", "apartment_suite_unit": "", "zip_code": "78704", "address_label": "Backup Shipping", "map_search_short": "2000 S Congress Ave, Austin, TX 78704", "ecommerce_full": "2000 S Congress Ave, Austin, TX 78704" },
+        "favorite_place": { "country": "United States", "state": "TX", "city": "Austin", "district_or_neighborhood": "Lady Bird Lake", "street": "South Lakeshore Boulevard", "street_number": "2100", "apartment_suite_unit": "", "zip_code": "78741", "address_label": "Favorite Place", "map_search_short": "2100 S Lakeshore Blvd, Austin, TX 78741", "ecommerce_full": "2100 S Lakeshore Blvd, Austin, TX 78741" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Charlotte White",
+        "default_recipient_phone": "(512) 555-1212",
+        "backup_recipient_name": "Henry White",
+        "backup_recipient_phone": "(512) 555-7788",
+        "food_delivery_contact_name": "Charlotte White",
+        "food_delivery_contact_phone": "(512) 555-1212",
+        "emergency_contact_name": "Henry White",
+        "emergency_contact_phone": "(512) 555-7788"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["austin food trucks", "whole foods deals", "live music austin"],
+        "common_short_messages": ["Store closing", "Team meeting", "See you at home"],
+        "common_delivery_notes": ["Leave at back door", "Call manager"],
+        "common_email_subjects": ["Inventory report", "Shift schedule", "Supplier order"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "stranger",
+        "weak_contact_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Amex", "number": "346556981693405", "expiry": "05/31", "cvv": "6363" },
+        { "type": "Amex", "number": "346088356159515", "expiry": "04/31", "cvv": "6355" }
+      ],
+      "drivers_license": {
+        "state_issued": "TX",
+        "license_number": "76543218",
+        "issue_date": "2022-08-15",
+        "expiry_date": "2030-08-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 18,
+      "identity": {
+        "full_name": "Henry Scott",
+        "preferred_name": "Henry",
+        "gender": "Male",
+        "age_band": "45-54",
+        "birth_year": 1977,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Henry Scott" },
+          { "alias_type": "social_nickname", "value": "Henry Scott" },
+          { "alias_type": "shopping_display_name", "value": "Henry S." },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(212) 555-1212",
+        "phone_secondary": "(646) 777-8888",
+        "email_personal": "henry.scott@outlook.com",
+        "email_work": "hscott@nytimes.com",
+        "social_display_name": "Henry Scott",
+        "shopping_display_name": "Henry Scott",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "The New York Times",
+        "department": "Editorial",
+        "job_title": "Senior Editor",
+        "work_phone": "(212) 555-1212",
+        "work_email_signature_name": "Henry Scott",
+        "office_building_short_name": "NYT Building"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "NY", "city": "New York", "district_or_neighborhood": "Upper West Side", "street": "Broadway", "street_number": "2500", "apartment_suite_unit": "Apt 12C", "zip_code": "10024", "address_label": "Home", "map_search_short": "2500 Broadway, New York, NY 10024", "ecommerce_full": "2500 Broadway Apt 12C, New York, NY 10024" },
+        "work_address": { "country": "United States", "state": "NY", "city": "New York", "district_or_neighborhood": "Midtown", "street": "8th Avenue", "street_number": "620", "apartment_suite_unit": "", "zip_code": "10018", "address_label": "Work", "map_search_short": "620 8th Ave, New York, NY 10018", "ecommerce_full": "620 8th Ave, New York, NY 10018" },
+        "backup_shipping_address": { "country": "United States", "state": "NY", "city": "New York", "district_or_neighborhood": "Upper West Side", "street": "Broadway", "street_number": "2500", "apartment_suite_unit": "", "zip_code": "10024", "address_label": "Backup Shipping", "map_search_short": "2500 Broadway, New York, NY 10024", "ecommerce_full": "2500 Broadway, New York, NY 10024" },
+        "favorite_place": { "country": "United States", "state": "NY", "city": "New York", "district_or_neighborhood": "Central Park", "street": "Central Park West", "street_number": "59th", "apartment_suite_unit": "", "zip_code": "10023", "address_label": "Favorite Place", "map_search_short": "59th St & Central Park W, New York, NY 10023", "ecommerce_full": "59th St & Central Park W, New York, NY 10023" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Henry Scott",
+        "default_recipient_phone": "(212) 555-1212",
+        "backup_recipient_name": "Emma Scott",
+        "backup_recipient_phone": "(212) 555-9900",
+        "food_delivery_contact_name": "Henry Scott",
+        "food_delivery_contact_phone": "(212) 555-1212",
+        "emergency_contact_name": "Emma Scott",
+        "emergency_contact_phone": "(212) 555-9900"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["ny times headlines", "nyc restaurants", "central park events"],
+        "common_short_messages": ["Deadline approaching", "At the office", "See you at home"],
+        "common_delivery_notes": ["Leave at doorman", "Call on arrival"],
+        "common_email_subjects": ["Story edit", "Editorial meeting", "Article draft"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "stranger",
+        "weak_contact_with": ["Harper Clark"]
+      },
+      "credit_cards": [
+        { "type": "Amex", "number": "344846564823665", "expiry": "06/31", "cvv": "5558" },
+        { "type": "Discover", "number": "6011299468044369", "expiry": "07/30", "cvv": "954" }
+      ],
+      "drivers_license": {
+        "state_issued": "NY",
+        "license_number": "NY7654321",
+        "issue_date": "2022-09-15",
+        "expiry_date": "2030-09-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 19,
+      "identity": {
+        "full_name": "Logan Clark",
+        "preferred_name": "Logan",
+        "gender": "Male",
+        "age_band": "35-44",
+        "birth_year": 1987,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Logan Clark" },
+          { "alias_type": "social_nickname", "value": "Logan Clark" },
+          { "alias_type": "shopping_display_name", "value": "Logan Clark" },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(425) 999-0000",
+        "phone_secondary": "(206) 111-2222",
+        "email_personal": "logan.clark@gmail.com",
+        "email_work": "lclark@everettwa.gov",
+        "social_display_name": "Logan Clark",
+        "shopping_display_name": "Logan Clark",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "City of Everett",
+        "department": "Fire Department",
+        "job_title": "Firefighter",
+        "work_phone": "(425) 999-0000",
+        "work_email_signature_name": "Logan Clark",
+        "office_building_short_name": "Everett Fire Station 2"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Everett", "district_or_neighborhood": "Downtown Everett", "street": "Wetmore Avenue", "street_number": "3000", "apartment_suite_unit": "", "zip_code": "98201", "address_label": "Home", "map_search_short": "3000 Wetmore Ave, Everett, WA 98201", "ecommerce_full": "3000 Wetmore Ave, Everett, WA 98201" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Everett", "district_or_neighborhood": "Downtown Everett", "street": "Wetmore Avenue", "street_number": "3002", "apartment_suite_unit": "", "zip_code": "98201", "address_label": "Work", "map_search_short": "3002 Wetmore Ave, Everett, WA 98201", "ecommerce_full": "3002 Wetmore Ave, Everett, WA 98201" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Everett", "district_or_neighborhood": "Downtown Everett", "street": "Wetmore Avenue", "street_number": "3000", "apartment_suite_unit": "", "zip_code": "98201", "address_label": "Backup Shipping", "map_search_short": "3000 Wetmore Ave, Everett, WA 98201", "ecommerce_full": "3000 Wetmore Ave, Everett, WA 98201" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Everett", "district_or_neighborhood": "Harborview Park", "street": "Pacific Avenue", "street_number": "1000", "apartment_suite_unit": "", "zip_code": "98201", "address_label": "Favorite Place", "map_search_short": "1000 Pacific Ave, Everett, WA 98201", "ecommerce_full": "1000 Pacific Ave, Everett, WA 98201" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Logan Clark",
+        "default_recipient_phone": "(425) 999-0000",
+        "backup_recipient_name": "Olivia Hall",
+        "backup_recipient_phone": "(425) 555-1122",
+        "food_delivery_contact_name": "Logan Clark",
+        "food_delivery_contact_phone": "(425) 999-0000",
+        "emergency_contact_name": "Olivia Hall",
+        "emergency_contact_phone": "(425) 555-1122"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["everett wa news", "fire safety tips", "local gyms"],
+        "common_short_messages": ["Shift starting", "On call", "Home soon"],
+        "common_delivery_notes": ["Leave at station", "Call captain"],
+        "common_email_subjects": ["Training schedule", "Incident report", "Team briefing"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "parent",
+        "child": "Harper Clark",
+        "relation_to_child": "father"
+      },
+      "credit_cards": [
+        { "type": "Discover", "number": "6011995777387213", "expiry": "02/31", "cvv": "119" },
+        { "type": "Discover", "number": "6011489513433200", "expiry": "12/28", "cvv": "458" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "121934567890",
+        "issue_date": "2022-10-15",
+        "expiry_date": "2030-10-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    },
+    {
+      "template_name": "US_core_person_template",
+      "version": "1.0",
+      "person_id": 20,
+      "identity": {
+        "full_name": "Sarah Clark",
+        "preferred_name": "Sarah",
+        "gender": "Female",
+        "age_band": "40-49",
+        "birth_year": 1982,
+        "aliases": [
+          { "alias_type": "formal_name", "value": "Sarah Clark" },
+          { "alias_type": "social_nickname", "value": "Sarah Clark" },
+          { "alias_type": "shopping_display_name", "value": "Sarah Clark" },
+          { "alias_type": "contact_label", "value": "Primary Contact" }
+        ]
+      },
+      "contact": {
+        "phone_main": "(206) 222-3333",
+        "phone_secondary": "(425) 444-5555",
+        "email_personal": "sarah.clark@icloud.com",
+        "email_work": "sclark@seattle.gov",
+        "social_display_name": "Sarah Clark",
+        "shopping_display_name": "Sarah Clark",
+        "contact_label": "Primary Contact"
+      },
+      "employment": {
+        "company_name": "City of Seattle",
+        "department": "Transportation",
+        "job_title": "Traffic Engineer",
+        "work_phone": "(206) 222-3333",
+        "work_email_signature_name": "Sarah Clark",
+        "office_building_short_name": "Seattle Municipal Tower"
+      },
+      "addresses": {
+        "home_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Ballard", "street": "NW Market Street", "street_number": "2200", "apartment_suite_unit": "", "zip_code": "98107", "address_label": "Home", "map_search_short": "2200 NW Market St, Seattle, WA 98107", "ecommerce_full": "2200 NW Market St, Seattle, WA 98107" },
+        "work_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Downtown", "street": "4th Avenue", "street_number": "700", "apartment_suite_unit": "", "zip_code": "98104", "address_label": "Work", "map_search_short": "700 4th Ave, Seattle, WA 98104", "ecommerce_full": "700 4th Ave, Seattle, WA 98104" },
+        "backup_shipping_address": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Ballard", "street": "NW Market Street", "street_number": "2200", "apartment_suite_unit": "", "zip_code": "98107", "address_label": "Backup Shipping", "map_search_short": "2200 NW Market St, Seattle, WA 98107", "ecommerce_full": "2200 NW Market St, Seattle, WA 98107" },
+        "favorite_place": { "country": "United States", "state": "WA", "city": "Seattle", "district_or_neighborhood": "Golden Gardens Park", "street": "Seaview Avenue NW", "street_number": "8498", "apartment_suite_unit": "", "zip_code": "98117", "address_label": "Favorite Place", "map_search_short": "8498 Seaview Ave NW, Seattle, WA 98117", "ecommerce_full": "8498 Seaview Ave NW, Seattle, WA 98117" }
+      },
+      "delivery_and_recipient": {
+        "default_recipient_name": "Sarah Clark",
+        "default_recipient_phone": "(206) 222-3333",
+        "backup_recipient_name": "Thomas Walker",
+        "backup_recipient_phone": "(206) 555-6677",
+        "food_delivery_contact_name": "Sarah Clark",
+        "food_delivery_contact_phone": "(206) 222-3333",
+        "emergency_contact_name": "Thomas Walker",
+        "emergency_contact_phone": "(206) 555-6677"
+      },
+      "behavior_like_fields": {
+        "frequent_search_keywords": ["seattle traffic update", "public transit", "city planning"],
+        "common_short_messages": ["On site inspection", "Meeting at tower", "Home by 6"],
+        "common_delivery_notes": ["Leave at front desk", "Signature needed"],
+        "common_email_subjects": ["Traffic study", "Permit review", "Project status"],
+        "saved_location_labels": ["Home", "Work", "Favorite Place"]
+      },
+      "relationships": {
+        "role": "parent",
+        "child": "Harper Clark",
+        "relation_to_child": "mother"
+      },
+      "credit_cards": [
+        { "type": "Discover", "number": "6011037917693679", "expiry": "04/28", "cvv": "899" },
+        { "type": "Discover", "number": "6011632016328704", "expiry": "11/28", "cvv": "872" }
+      ],
+      "drivers_license": {
+        "state_issued": "WA",
+        "license_number": "122034567890",
+        "issue_date": "2022-11-15",
+        "expiry_date": "2030-11-15",
+        "class": "C",
+        "restrictions": "None"
+      }
+    }
+  ]

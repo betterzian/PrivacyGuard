@@ -92,12 +92,12 @@
       "delivery_and_recipient": {
         "default_recipient_name": "李晓明",
         "default_recipient_phone": "18038637940",
-        "backup_recipient_name": "李伟",
-        "backup_recipient_phone": "19326542351",
+        "backup_recipient_name": "李伟华",
+        "backup_recipient_phone": "18931491905",
         "food_delivery_contact_name": "李晓明",
         "food_delivery_contact_phone": "18038637940",
-        "emergency_contact_name": "母亲",
-        "emergency_contact_phone": "19326542351"
+        "emergency_contact_name": "王丽娜",
+        "emergency_contact_phone": "19524278680"
       },
       "behavior_like_fields": {
         "frequent_search_keywords": ["腾讯产品", "深圳科技园", "产品经理招聘"],
@@ -105,6 +105,13 @@
         "common_delivery_notes": ["请放门口", "晚上7点后"],
         "common_email_subjects": ["项目周报", "会议通知", "需求确认"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "owner",
+        "parents": ["王丽娜", "李伟华"],
+        "friends": ["陈浩然", "孙美玲", "吴建国", "徐晓燕", "胡志强", "郭丽萍", "罗伟明", "郑淑华", "杨晓红", "李伟", "王芳", "张强"],
+        "colleagues": ["刘淑珍"],
+        "strangers": ["韩建平", "刘敏", "陈静", "赵刚"]
       },
       "id_card": "440300200004177714",
       "bank_cards": [
@@ -219,6 +226,11 @@
         "common_email_subjects": ["活动方案", "客户反馈", "季度总结"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "parent",
+        "child": "李晓明",
+        "relation_to_child": "母亲"
+      },
       "id_card": "440300198305020040",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6205310033092327193", "bank_name": "中国建设银行" },
@@ -227,28 +239,28 @@
     },
     {
       "identity": {
-        "name_zh": "张伟华",
-        "name_pinyin": "Zhang Weihua",
+        "name_zh": "李伟华",
+        "name_pinyin": "Li Weihua",
         "gender": "男",
         "age_band": "40-50",
         "birth_year": 1980,
         "aliases": [
-          { "alias_type": "formal_name", "value": "张伟华" },
+          { "alias_type": "formal_name", "value": "李伟华" },
           { "alias_type": "social_nickname", "value": "华哥" },
-          { "alias_type": "shopping_display_name", "value": "张伟华" },
+          { "alias_type": "shopping_display_name", "value": "李伟华" },
           { "alias_type": "contact_remark", "value": "伟华" }
         ]
       },
       "contact": {
         "phone_main": "18931491905",
         "phone_secondary": "17965185067",
-        "email_personal": "zhangweihua@hotmail.com",
-        "email_work": "weihua.zhang@tencent.com",
-        "wechat_nickname": "张伟华",
-        "qq_nickname": "张伟华",
+        "email_personal": "liweihua@hotmail.com",
+        "email_work": "weihua.li@tencent.com",
+        "wechat_nickname": "李伟华",
+        "qq_nickname": "李伟华",
         "xiaohongshu_nickname": "伟华科技",
         "taobao_nickname": "伟华",
-        "jd_nickname": "张伟华",
+        "jd_nickname": "李伟华",
         "meituan_nickname": "伟华",
         "contact_remark_name": "伟华"
       },
@@ -258,7 +270,7 @@
         "department": "技术架构部",
         "job_title": "高级架构师",
         "work_phone": "0755-86013388",
-        "work_email_signature_name": "张伟华",
+        "work_email_signature_name": "李伟华",
         "office_building_short_name": "腾讯滨海大厦"
       },
       "addresses": {
@@ -316,14 +328,14 @@
         }
       },
       "delivery_and_recipient": {
-        "default_recipient_name": "张伟华",
+        "default_recipient_name": "李伟华",
         "default_recipient_phone": "18931491905",
         "backup_recipient_name": "王芳",
-        "backup_recipient_phone": "17965185067",
-        "food_delivery_contact_name": "张伟华",
+        "backup_recipient_phone": "18099441715",
+        "food_delivery_contact_name": "李伟华",
         "food_delivery_contact_phone": "18931491905",
-        "emergency_contact_name": "妻子",
-        "emergency_contact_phone": "17965185067"
+        "emergency_contact_name": "李晓明",
+        "emergency_contact_phone": "18038637940"
       },
       "behavior_like_fields": {
         "frequent_search_keywords": ["云计算", "架构设计", "腾讯内部"],
@@ -331,6 +343,11 @@
         "common_delivery_notes": ["请敲门", "放保安处"],
         "common_email_subjects": ["技术方案", "代码审查", "团队会议"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "parent",
+        "child": "李晓明",
+        "relation_to_child": "父亲"
       },
       "id_card": "440300198012070992",
       "bank_cards": [
@@ -445,6 +462,10 @@
         "common_email_subjects": ["设计稿", "反馈", "周报"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "colleague",
+        "colleagues_with": ["李晓明"]
+      },
       "id_card": "440300200306209662",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6218702621745961586", "bank_name": "中国邮政储蓄银行" },
@@ -557,6 +578,10 @@
         "common_delivery_notes": ["放门口", "请致电"],
         "common_email_subjects": ["研发进度", "测试报告", "团队同步"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
       },
       "id_card": "440300198805074977",
       "bank_cards": [
@@ -671,6 +696,10 @@
         "common_email_subjects": ["招聘通知", "员工福利", "培训计划"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
+      },
       "id_card": "440300198702021928",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6232898614341036971", "bank_name": "中国建设银行" },
@@ -783,6 +812,10 @@
         "common_delivery_notes": ["放门口", "请致电"],
         "common_email_subjects": ["工程报告", "测试数据", "项目更新"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
       },
       "id_card": "440300198704042538",
       "bank_cards": [
@@ -897,6 +930,10 @@
         "common_email_subjects": ["财务审核", "报销单", "月度总结"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
+      },
       "id_card": "440300198412284463",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6215478872874315274", "bank_name": "中国农业银行" },
@@ -1009,6 +1046,10 @@
         "common_delivery_notes": ["放门口", "请敲门"],
         "common_email_subjects": ["设备测试", "网络优化", "项目进度"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
       },
       "id_card": "440300200302191418",
       "bank_cards": [
@@ -1123,6 +1164,10 @@
         "common_email_subjects": ["客户跟进", "订单确认", "支持报告"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
+      },
       "id_card": "440300198311147806",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6287334270866882634", "bank_name": "中国银行" },
@@ -1235,6 +1280,10 @@
         "common_delivery_notes": ["请签收", "放门口"],
         "common_email_subjects": ["保单审核", "客户回访", "业务报告"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
       },
       "id_card": "44030020011213405X",
       "bank_cards": [
@@ -1349,6 +1398,10 @@
         "common_email_subjects": ["客服记录", "客户咨询", "服务反馈"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
+      },
       "id_card": "440300200304258663",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6217518636374545892", "bank_name": "中国工商银行" },
@@ -1461,6 +1514,10 @@
         "common_delivery_notes": ["放门口", "请致电"],
         "common_email_subjects": ["研发进度", "测试报告", "项目会议"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "stranger",
+        "weak_contact_with": ["李晓明"]
       },
       "id_card": "440100199709129839",
       "bank_cards": [
@@ -1575,6 +1632,10 @@
         "common_email_subjects": ["市场活动", "客户反馈", "推广方案"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
+      },
       "id_card": "440100198210142001",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6246774186256527047", "bank_name": "中国建设银行" },
@@ -1687,6 +1748,10 @@
         "common_delivery_notes": ["放门口", "请致电"],
         "common_email_subjects": ["硬件测试", "研发报告", "项目同步"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
       },
       "id_card": "441900199809267395",
       "bank_cards": [
@@ -1801,6 +1866,10 @@
         "common_email_subjects": ["设计方案", "产品反馈", "研发会议"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
+      },
       "id_card": "44060019930117844X",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6209652074466609935", "bank_name": "中国邮政储蓄银行" },
@@ -1913,6 +1982,10 @@
         "common_delivery_notes": ["请轻放", "放门口"],
         "common_email_subjects": ["研发进度", "产品测试", "团队会议"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "friend",
+        "friends_with": ["李晓明"]
       },
       "id_card": "442000198107277473",
       "bank_cards": [
@@ -2027,6 +2100,10 @@
         "common_email_subjects": ["算法优化", "项目进展", "团队会议"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "stranger",
+        "weak_contact_with": ["李晓明"]
+      },
       "id_card": "110000198002109766",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6294929955620533645", "bank_name": "中国工商银行" },
@@ -2140,6 +2217,10 @@
         "common_email_subjects": ["产品方案", "用户反馈", "项目更新"],
         "saved_location_labels": ["家", "公司", "常去地点"]
       },
+      "relationships": {
+        "role": "stranger",
+        "weak_contact_with": ["李晓明"]
+      },
       "id_card": "310000198208020553",
       "bank_cards": [
         { "card_type": "银联", "card_number": "6294636887258874495", "bank_name": "中国建设银行" },
@@ -2252,6 +2333,10 @@
         "common_delivery_notes": ["放门口", "请致电"],
         "common_email_subjects": ["产品迭代", "用户数据", "项目会议"],
         "saved_location_labels": ["家", "公司", "常去地点"]
+      },
+      "relationships": {
+        "role": "stranger",
+        "weak_contact_with": ["李晓明"]
       },
       "id_card": "330100198608137303",
       "bank_cards": [
