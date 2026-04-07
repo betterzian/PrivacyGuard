@@ -118,7 +118,7 @@ def test_prompt_stream_builds_single_layer_units_for_ascii_digit_cjk_and_tokens(
     stream = build_prompt_stream(f"12345678 apples 张三 {_OCR_INLINE_GAP_TOKEN} {OCR_BREAK}")
 
     assert len(stream.char_to_unit) == len(stream.text)
-    assert [unit.text for unit in stream.units if unit.kind == "digit_char"] == list("12345678")
+    assert [unit.text for unit in stream.units if unit.kind == "digit_run"] == ["12345678"]
     assert [unit.text for unit in stream.units if unit.kind == "ascii_word"] == ["apples"]
     assert [unit.text for unit in stream.units if unit.kind == "cjk_char"] == ["张", "三"]
     assert [unit.text for unit in stream.units if unit.kind == "inline_gap"] == [_OCR_INLINE_GAP_TOKEN]

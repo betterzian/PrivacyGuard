@@ -39,10 +39,16 @@ class SessionPlaceholderAllocator:
             )
             replacement_text = self._find_existing_replacement(existing_by_source, normalized)
             if replacement_text is None:
+                # 数字/混合片段使用语义占位符格式。
+                frag_type_list = action.metadata.get("fragment_type")
+                frag_type = frag_type_list[0] if frag_type_list else None
+                frag_len = len(action.source_text) if (frag_type and action.source_text) else None
                 replacement_text = render_generic_replacement_text(
                     action.attr_type,
                     source_text=normalized_primary_text(normalized) or action.source_text,
                     index=next_index,
+                    fragment_type=frag_type,
+                    fragment_length=frag_len,
                 )
                 existing_by_source.append((action.attr_type, normalized, replacement_text))
                 next_index += 1
