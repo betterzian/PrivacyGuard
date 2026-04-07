@@ -37,10 +37,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     StreamInput,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-from privacyguard.infrastructure.pii.rule_based_detector_shared import (
-    _OCR_INLINE_GAP_TOKEN,
-    _OCR_SEMANTIC_BREAK_TOKEN,
-)
+from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_INLINE_GAP_TOKEN
 
 _HARD_SOURCE_PRIORITY = {
     "session": 4,
@@ -1042,7 +1039,7 @@ def _find_ocr_break_spans(stream: StreamInput) -> tuple[tuple[int, int], ...]:
     spans = [
         (unit.char_start, unit.char_end)
         for unit in stream.units
-        if unit.kind in {"inline_gap", "semantic_break"}
+        if unit.kind in {"inline_gap", "ocr_break"}
     ]
     return tuple(spans)
 

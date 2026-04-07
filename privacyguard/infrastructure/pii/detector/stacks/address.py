@@ -21,7 +21,7 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import (
     _OCR_INLINE_GAP_TOKEN,
-    _OCR_SEMANTIC_BREAK_TOKEN,
+    OCR_BREAK,
     is_any_break,
     is_hard_break,
     is_soft_break,
@@ -414,7 +414,7 @@ def _has_nearby_address_clue(
 def _address_gap_too_wide(gap_text: str, locale: str) -> bool:
     if not gap_text:
         return False
-    if _OCR_SEMANTIC_BREAK_TOKEN in gap_text or _OCR_INLINE_GAP_TOKEN in gap_text:
+    if OCR_BREAK in gap_text or _OCR_INLINE_GAP_TOKEN in gap_text:
         return True
     if any(is_hard_break(ch) for ch in gap_text):
         return True

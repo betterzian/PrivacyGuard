@@ -190,7 +190,13 @@ data/privacy_repository.json
 # --- PrivacyGuard：本地生成物、训练产物与环境临时（勿提交） ---
 artifacts/
 tests/.artifacts/
+# 本地 OCR/渲染等输出目录（忽略其下全部内容）
+output/
 outputs/
+# 任意路径下名为 test 的目录或文件（如 data/test/）；不含 pytest 用 tests/
+test
+Test
+tests/
 runs/
 logs/
 wandb/

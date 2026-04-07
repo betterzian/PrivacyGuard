@@ -136,7 +136,7 @@ class OrganizationStack(BaseStack):
             unit = self.context.stream.units[ui]
             if unit.char_start >= upper:
                 break
-            if unit.kind in {"inline_gap", "semantic_break"}:
+            if unit.kind in {"inline_gap", "ocr_break"}:
                 return unit.char_start
             if unit.kind == "punct" and is_hard_break(unit.text):
                 return unit.char_start

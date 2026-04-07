@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 
-# 用私有区单字符哨兵保留边界语义，避免长占位符拉长 scanner 的扫描文本。
-_OCR_SEMANTIC_BREAK_TOKEN = "\uE001"
+# OCR 块边界标记（与 scanner 的 ocr_break 单元一致，多字符可辨读）。
+OCR_BREAK = "<OCR_BREAK>"
 _OCR_INLINE_GAP_TOKEN = "\uE000"
 
 
@@ -90,8 +90,8 @@ def is_digit_dash(char: str, left: str | None, right: str | None) -> bool:
 
 
 __all__ = [
+    "OCR_BREAK",
     "_OCR_INLINE_GAP_TOKEN",
-    "_OCR_SEMANTIC_BREAK_TOKEN",
     "_HARD_BREAK_CHARS",
     "_SOFT_BREAK_CHARS",
     "_ZH_NAME_JOINERS",

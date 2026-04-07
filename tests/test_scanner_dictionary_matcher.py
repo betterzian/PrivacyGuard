@@ -12,10 +12,7 @@ from privacyguard.infrastructure.pii.detector.models import ClueRole, Dictionary
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
-from privacyguard.infrastructure.pii.rule_based_detector_shared import (
-    _OCR_INLINE_GAP_TOKEN,
-    _OCR_SEMANTIC_BREAK_TOKEN,
-)
+from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
 
 
 @pytest.fixture(autouse=True)
@@ -118,19 +115,19 @@ def test_ascii_literal_keeps_word_boundary_behavior_for_name_dictionary_clues():
 
 
 def test_prompt_stream_builds_single_layer_units_for_ascii_digit_cjk_and_tokens():
-    stream = build_prompt_stream(f"12345678 apples 张三 {_OCR_INLINE_GAP_TOKEN} {_OCR_SEMANTIC_BREAK_TOKEN}")
+    stream = build_prompt_stream(f"12345678 apples 张三 {_OCR_INLINE_GAP_TOKEN} {OCR_BREAK}")
 
     assert len(stream.char_to_unit) == len(stream.text)
     assert [unit.text for unit in stream.units if unit.kind == "digit_char"] == list("12345678")
     assert [unit.text for unit in stream.units if unit.kind == "ascii_word"] == ["apples"]
     assert [unit.text for unit in stream.units if unit.kind == "cjk_char"] == ["张", "三"]
     assert [unit.text for unit in stream.units if unit.kind == "inline_gap"] == [_OCR_INLINE_GAP_TOKEN]
-    assert [unit.text for unit in stream.units if unit.kind == "semantic_break"] == [_OCR_SEMANTIC_BREAK_TOKEN]
+    assert [unit.text for unit in stream.units if unit.kind == "ocr_break"] == [OCR_BREAK]
 
     inline_start = stream.text.index(_OCR_INLINE_GAP_TOKEN)
-    semantic_start = stream.text.index(_OCR_SEMANTIC_BREAK_TOKEN)
+    ocr_break_start = stream.text.index(OCR_BREAK)
     assert len(set(stream.char_to_unit[inline_start : inline_start + len(_OCR_INLINE_GAP_TOKEN)])) == 1
-    assert len(set(stream.char_to_unit[semantic_start : semantic_start + len(_OCR_SEMANTIC_BREAK_TOKEN)])) == 1
+    assert len(set(stream.char_to_unit[ocr_break_start : ocr_break_start + len(OCR_BREAK)])) == 1
 
 
 def test_non_ascii_literal_still_matches_substring():
@@ -152,11 +149,11 @@ def test_non_ascii_literal_still_matches_substring():
 @pytest.mark.parametrize(
     ("raw_text", "expected_text"),
     [
-        ("张 三 宝", "张三宝"),
-        ("张 三  宝", "张三宝"),
-        ("张 三   宝", f"张三{_OCR_INLINE_GAP_TOKEN}宝"),
-        ("张三 宝，", "张三宝，"),
-        ("张三   宝，", f"张三{_OCR_INLINE_GAP_TOKEN}宝，"),
+        ("张 三 宝", "张 三 宝"),
+        ("张 三  宝", "张 三 宝"),
+        ("张 三   宝", "张 三 宝"),
+        ("张三 宝，", "张三 宝，"),
+        ("张三   宝，", "张三 宝，"),
     ],
 )
 def test_build_ocr_stream_rewrites_cjk_whitespace(raw_text: str, expected_text: str):
@@ -208,20 +205,18 @@ def test_find_ocr_break_spans_reads_from_synthetic_units():
     prepared = build_ocr_stream(
         [
             _ocr_block("张 三   宝", block_id="b1", line_id=0, y=0),
-            _ocr_block("第二行", block_id="b2", line_id=1, y=40),
+            # y=41：垂距 21 > 上行 block 高 20，跨行不拼接，保留段间 semantic break。
+            _ocr_block("第二行", block_id="b2", line_id=1, y=41),
         ]
     )
 
     spans = scanner_module._find_ocr_break_spans(prepared.stream)
 
-    assert [prepared.stream.text[start:end] for start, end in spans] == [
-        _OCR_INLINE_GAP_TOKEN,
-        _OCR_SEMANTIC_BREAK_TOKEN,
-    ]
+    assert [prepared.stream.text[start:end] for start, end in spans] == [OCR_BREAK]
     assert [
         prepared.stream.units[prepared.stream.char_to_unit[start]].kind
         for start, _end in spans
-    ] == ["inline_gap", "semantic_break"]
+    ] == ["ocr_break"]
 
 
 def test_build_clue_bundle_still_resolves_multi_variant_overlap_to_longer_match():
