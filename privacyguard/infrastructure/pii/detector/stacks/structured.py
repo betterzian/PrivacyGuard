@@ -64,6 +64,21 @@ def _validate_us_phone(digits: str) -> bool:
     return len(digits) == 10 and digits[0] in "23456789"
 
 
+def _normalize_structured_digits_for_phone(digits: str) -> str:
+    """结构化片段在进入 validator 前的数字规范化。
+
+    这里假设上游已经用 `re.sub(r"\\D", "", ...)` 去掉了空格、连字符、括号等连接符。
+    额外处理常见国家码/前缀：
+    - +86XXXXXXXXXXX → 86XXXXXXXXXXX（已去掉 +）→ 去掉 86，得到 11 位中国手机号。
+    - +1XXXXXXXXXX → 1XXXXXXXXXX → 若形态像北美 10 位电话的前缀形式，则去掉 1。
+    """
+    if len(digits) == 13 and digits.startswith("86") and re.fullmatch(r"1[3-9]\d{9}", digits[2:]):
+        return digits[2:]
+    if len(digits) == 11 and digits.startswith("1") and re.fullmatch(r"[2-9]\d{9}", digits[1:]):
+        return digits[1:]
+    return digits
+
+
 def _validate_cn_id_18(text: str) -> bool:
     if len(text) != 18:
         return False
@@ -148,6 +163,7 @@ class StructuredStack(BaseStack):
         metadata = dict(clue.source_metadata)
         fragment_type = self._fragment_type(clue)
         pure_digits = (metadata.get("pure_digits") or [re.sub(r"\D", "", clue.text)])[0]
+        pure_digits = _normalize_structured_digits_for_phone(pure_digits)
 
         candidate = _build_value_candidate(clue, self.context.stream.source)
         entry = self._lookup_dictionary_entry(clue.text, fragment_type, pure_digits)

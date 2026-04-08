@@ -9,7 +9,7 @@ from privacyguard.infrastructure.pii.lexicon_store import read_scanner_lexicon_j
 
 
 @dataclass(frozen=True, slots=True)
-class ChinaGeoLexicon:
+class ZhGeoLexicon:
     provinces: tuple[str, ...]
     cities: tuple[str, ...]
     districts: tuple[str, ...]
@@ -23,9 +23,9 @@ class EnGeoLexicon:
 
 
 @lru_cache(maxsize=1)
-def load_china_geo_lexicon() -> ChinaGeoLexicon:
-    payload = read_scanner_lexicon_json("china_geo_lexicon.json")
-    return ChinaGeoLexicon(
+def load_zh_geo_lexicon() -> ZhGeoLexicon:
+    payload = read_scanner_lexicon_json("zh_geo_lexicon.json")
+    return ZhGeoLexicon(
         provinces=tuple(str(item).strip() for item in payload.get("provinces", []) if str(item).strip()),
         cities=tuple(str(item).strip() for item in payload.get("cities", []) if str(item).strip()),
         districts=tuple(str(item).strip() for item in payload.get("districts", []) if str(item).strip()),

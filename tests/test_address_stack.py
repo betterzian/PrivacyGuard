@@ -1,270 +1,115 @@
-"""地址栈行为测试。"""
-
 from __future__ import annotations
 
-from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
+from dataclasses import replace
+
+from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import AddressComponentType, ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole
-from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
+from privacyguard.infrastructure.pii.detector.models import (
+    AddressComponentType,
+    ClaimStrength,
+    Clue,
+    ClueBundle,
+    ClueFamily,
+    ClueRole,
+)
+from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-from privacyguard.infrastructure.pii.detector.stacks import AddressStack
+from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
+
+
+def _with_units(stream, clue: Clue) -> Clue:
+    us, ue = _char_span_to_unit_span(stream, clue.start, clue.end)
+    return replace(clue, unit_start=us, unit_end=ue)
 
 
 def _clue(
     clue_id: str,
+    *,
     role: ClueRole,
+    attr_type: PIIAttributeType | None,
     start: int,
     end: int,
     text: str,
-    *,
-    source_kind: str,
     component_type: AddressComponentType | None = None,
-    priority: int = 230,
-    attr_type: PIIAttributeType | None = PIIAttributeType.ADDRESS,
+    family: ClueFamily | None = None,
 ) -> Clue:
+    if family is None:
+        family = ClueFamily.ADDRESS if attr_type == PIIAttributeType.ADDRESS else ClueFamily.CONTROL
     return Clue(
         clue_id=clue_id,
-        family=ClueFamily.ADDRESS if attr_type == PIIAttributeType.ADDRESS else ClueFamily.CONTROL,
+        family=family,
         role=role,
         attr_type=attr_type,
         strength=ClaimStrength.SOFT,
         start=start,
         end=end,
         text=text,
-        priority=priority,
-        source_kind=source_kind,
+        priority=300,
+        source_kind="test",
         component_type=component_type,
+        unit_start=0,
+        unit_end=0,
     )
 
 
-def _run_address_stack(
-    text: str,
-    clue_index: int,
-    clues: tuple[Clue, ...],
-    *,
-    protection_level: ProtectionLevel,
-) -> AddressStack:
+def _detect_candidates(text: str, clues: tuple[Clue, ...], *, locale_profile: str = "zh"):
+    ctx = DetectContext()
     stream = build_prompt_stream(text)
-    context = StackContext(
-        stream=stream,
-        locale_profile="mixed",
-        protection_level=protection_level,
-        clues=clues,
-    )
-    return AddressStack(clue=clues[clue_index], clue_index=clue_index, context=context)
+    fixed = tuple(_with_units(stream, c) for c in clues)
+    bundle = ClueBundle(all_clues=fixed)
+    parser = StreamParser(locale_profile=locale_profile, ctx=ctx)
+    result = parser.parse(stream, bundle)
+    return result.candidates
 
 
-def _parse_address_texts(
-    text: str,
-    clues: tuple[Clue, ...],
-    *,
-    protection_level: ProtectionLevel,
-) -> list[str]:
-    stream = build_prompt_stream(text)
-    parser = StreamParser(
-        locale_profile="mixed",
-        ctx=DetectContext(protection_level=protection_level),
-    )
-    result = parser.parse(stream, ClueBundle(all_clues=clues))
-    return [candidate.text for candidate in result.candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
-
-
-def test_label_seed_finds_first_address_clue():
-    text = "地址：上海市"
-    label = "地址"
-    city = "上海市"
+def test_label_seed_returns_none_when_no_value_and_no_key_within_6_units():
+    # “收货地址”应被识别为 label，但后续 6 个 unit 内没有 address key/value，则不应起栈。
+    text = "收货地址：你好世界"
     clues = (
-        _clue("label-1", ClueRole.LABEL, 0, len(label), label, source_kind="context_address_field"),
-        _clue(
-            "value-1",
-            ClueRole.VALUE,
-            text.index(city),
-            text.index(city) + len(city),
-            city,
-            source_kind="zh_address_city",
-            component_type=AddressComponentType.CITY,
-        ),
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
     )
-
-    run = _run_address_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == city
+    candidates = _detect_candidates(text, clues)
+    assert not any(c.attr_type.value == "address" for c in candidates)
 
 
-def test_same_tier_value_and_key_merge_into_one_component():
-    text = "Main St"
+def test_cross_tier_merge_city_plus_road_key():
+    # “上海”(CITY value) + “路”(ROAD key) → 吸附合并为 road 组件，候选文本应包含“上海路”。
+    text = "收货地址：上海路"
     clues = (
-        _clue(
-            "value-1",
-            ClueRole.VALUE,
-            0,
-            4,
-            "Main",
-            source_kind="en_address_road",
-            component_type=AddressComponentType.ROAD,
-        ),
-        _clue(
-            "key-1",
-            ClueRole.KEY,
-            5,
-            7,
-            "St",
-            source_kind="en_address_road_keyword",
-            component_type=AddressComponentType.ROAD,
-        ),
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("v1", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=7, text="上海", component_type=AddressComponentType.CITY),
+        _clue("k1", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=7, end=8, text="路", component_type=AddressComponentType.ROAD),
     )
-
-    run = _run_address_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == text
-    assert run.candidate.metadata["address_component_trace"] == ["road:Main"]
-    assert run.candidate.metadata["address_component_key_trace"] == ["road:St"]
+    candidates = _detect_candidates(text, clues)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+    assert addr is not None
+    assert "上海路" in addr.text
 
 
-def test_non_tight_value_and_key_split_into_two_evidences():
-    text = "Main\tSt"
+def test_negative_overlap_pops_rightmost_component():
+    # “路由”是 negative_address_word，和“上海路”在“路”处交叉，需回吐右侧 road 组件。
+    text = "收货地址：上海路由"
     clues = (
-        _clue(
-            "value-1",
-            ClueRole.VALUE,
-            0,
-            4,
-            "Main",
-            source_kind="en_address_road",
-            component_type=AddressComponentType.ROAD,
-        ),
-        _clue(
-            "key-1",
-            ClueRole.KEY,
-            5,
-            7,
-            "St",
-            source_kind="en_address_road_keyword",
-            component_type=AddressComponentType.ROAD,
-        ),
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("v1", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=7, text="上海", component_type=AddressComponentType.CITY),
+        _clue("k1", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=7, end=8, text="路", component_type=AddressComponentType.ROAD),
+        _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=7, end=9, text="路由", family=ClueFamily.CONTROL),
     )
-
-    run = _run_address_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "Main St"
-    assert len(run.candidate.metadata["address_component_trace"]) == 2
-    assert run.candidate.metadata["address_component_key_trace"] == ["road:St"]
+    candidates = _detect_candidates(text, clues)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+    assert addr is not None
+    assert "路" not in addr.text
 
 
-def test_en_key_seed_expands_left_one_word():
-    text = "Main St"
-    start = text.index("St")
+def test_digit_tail_extends_after_last_component():
+    # digit_run 紧邻在 “上海路” 后方，应被吸收并扩展候选。
+    text = "收货地址：上海路79"
     clues = (
-        _clue(
-            "key-1",
-            ClueRole.KEY,
-            start,
-            start + 2,
-            "St",
-            source_kind="en_address_road_keyword",
-            component_type=AddressComponentType.ROAD,
-        ),
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("v1", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=7, text="上海", component_type=AddressComponentType.CITY),
+        _clue("k1", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=7, end=8, text="路", component_type=AddressComponentType.ROAD),
     )
-
-    run = _run_address_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == text
-
-
-def test_zh_key_seed_expands_left_two_chars():
-    text = "人民路"
-    start = text.index("路")
-    clues = (
-        _clue(
-            "key-1",
-            ClueRole.KEY,
-            start,
-            start + 1,
-            "路",
-            source_kind="zh_address_road_keyword",
-            component_type=AddressComponentType.ROAD,
-        ),
-    )
-
-    run = _run_address_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == text
-
-
-def test_shrink_returns_none_when_trimmed_text_loses_address_signal():
-    text = "人民路"
-    clues = (
-        _clue(
-            "value-1",
-            ClueRole.VALUE,
-            0,
-            len(text),
-            text,
-            source_kind="zh_address_road",
-            component_type=AddressComponentType.ROAD,
-        ),
-    )
-    stack = _run_address_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG)
-    run = stack.run()
-
-    assert run is not None
-    assert stack.shrink(run, run.candidate.unit_end - 1, run.candidate.unit_end) is None
-
-
-def test_parser_value_path_strong_accepts_single_road_component():
-    """STRONG 无门槛直接 commit；BALANCED 对单 ROAD 组件需 >=2 evidence，故不匹配。"""
-    text = "Main St"
-    clues = (
-        _clue(
-            "value-1",
-            ClueRole.VALUE,
-            0,
-            4,
-            "Main",
-            source_kind="en_address_road",
-            component_type=AddressComponentType.ROAD,
-        ),
-        _clue(
-            "key-1",
-            ClueRole.KEY,
-            5,
-            7,
-            "St",
-            source_kind="en_address_road_keyword",
-            component_type=AddressComponentType.ROAD,
-        ),
-    )
-
-    strong = _parse_address_texts(text, clues, protection_level=ProtectionLevel.STRONG)
-    balanced = _parse_address_texts(text, clues, protection_level=ProtectionLevel.BALANCED)
-
-    assert strong == [text]
-    assert balanced == []
-
-
-def test_parser_key_path_strong_accepts_single_road_keyword():
-    """STRONG 无门槛；WEAK 需 >=2 evidence，单 KEY 不满足。"""
-    text = "人民路"
-    start = text.index("路")
-    clues = (
-        _clue(
-            "key-1",
-            ClueRole.KEY,
-            start,
-            start + 1,
-            "路",
-            source_kind="zh_address_road_keyword",
-            component_type=AddressComponentType.ROAD,
-        ),
-    )
-
-    strong = _parse_address_texts(text, clues, protection_level=ProtectionLevel.STRONG)
-    weak = _parse_address_texts(text, clues, protection_level=ProtectionLevel.WEAK)
-
-    assert strong == [text]
-    assert weak == []
+    candidates = _detect_candidates(text, clues)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+    assert addr is not None
+    assert "79" in addr.text

@@ -5,291 +5,97 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from privacyguard.domain.enums import PIIAttributeType
+from privacyguard.infrastructure.pii.detector.lexicon_loader import (
+    load_en_address_country_aliases,
+    load_en_address_keyword_groups,
+    load_en_us_states,
+    load_zh_compound_surnames,
+    load_zh_country_prefix_aliases,
+)
 from privacyguard.utils.text import normalize_text
 
 _DIRECT_CONTROLLED = {"北京市", "上海市", "天津市", "重庆市"}
 _ADDRESS_DETAIL_SIGNAL_PATTERN = re.compile(
     r"(?:\d|路|街|大道|道|巷|弄|胡同|社区|小区|公寓|大厦|广场|花园|家园|苑|庭|府|湾|园区|校区|宿舍|号院|号楼|栋|幢|座|单元|室|层|号)"
 )
-_PROVINCE_ALIASES = {
-    "北京市": "北京市",
-    "北京": "北京市",
-    "上海市": "上海市",
-    "上海": "上海市",
-    "天津市": "天津市",
-    "天津": "天津市",
-    "重庆市": "重庆市",
-    "重庆": "重庆市",
-    "河北省": "河北省",
-    "河北": "河北省",
-    "山西省": "山西省",
-    "山西": "山西省",
-    "辽宁省": "辽宁省",
-    "辽宁": "辽宁省",
-    "吉林省": "吉林省",
-    "吉林": "吉林省",
-    "黑龙江省": "黑龙江省",
-    "黑龙江": "黑龙江省",
-    "江苏省": "江苏省",
-    "江苏": "江苏省",
-    "浙江省": "浙江省",
-    "浙江": "浙江省",
-    "安徽省": "安徽省",
-    "安徽": "安徽省",
-    "福建省": "福建省",
-    "福建": "福建省",
-    "江西省": "江西省",
-    "江西": "江西省",
-    "山东省": "山东省",
-    "山东": "山东省",
-    "河南省": "河南省",
-    "河南": "河南省",
-    "湖北省": "湖北省",
-    "湖北": "湖北省",
-    "湖南省": "湖南省",
-    "湖南": "湖南省",
-    "广东省": "广东省",
-    "广东": "广东省",
-    "海南省": "海南省",
-    "海南": "海南省",
-    "四川省": "四川省",
-    "四川": "四川省",
-    "贵州省": "贵州省",
-    "贵州": "贵州省",
-    "云南省": "云南省",
-    "云南": "云南省",
-    "陕西省": "陕西省",
-    "陕西": "陕西省",
-    "甘肃省": "甘肃省",
-    "甘肃": "甘肃省",
-    "青海省": "青海省",
-    "青海": "青海省",
-    "台湾省": "台湾省",
-    "台湾": "台湾省",
-    "内蒙古自治区": "内蒙古自治区",
-    "内蒙古": "内蒙古自治区",
-    "广西壮族自治区": "广西壮族自治区",
-    "广西": "广西壮族自治区",
-    "西藏自治区": "西藏自治区",
-    "西藏": "西藏自治区",
-    "宁夏回族自治区": "宁夏回族自治区",
-    "宁夏": "宁夏回族自治区",
-    "新疆维吾尔自治区": "新疆维吾尔自治区",
-    "新疆": "新疆维吾尔自治区",
-    "香港特别行政区": "香港特别行政区",
-    "香港": "香港特别行政区",
-    "澳门特别行政区": "澳门特别行政区",
-    "澳门": "澳门特别行政区",
-}
-_COUNTRY_PREFIX_ALIASES = {
-    "中国大陆": "中国",
-    "中国": "中国",
-    "中华人民共和国": "中国",
-}
-_EN_ADDRESS_STREET_SUFFIXES = (
-    "street",
-    "st",
-    "road",
-    "rd",
-    "avenue",
-    "ave",
-    "boulevard",
-    "blvd",
-    "drive",
-    "dr",
-    "lane",
-    "ln",
-    "court",
-    "ct",
-    "place",
-    "pl",
-    "parkway",
-    "pkwy",
-    "terrace",
-    "ter",
-    "circle",
-    "cir",
-    "way",
-    "highway",
-    "hwy",
-)
-_EN_ADDRESS_UNIT_PREFIXES = (
-    "apartment",
-    "apt",
-    "suite",
-    "ste",
-    "unit",
-    "floor",
-    "fl",
-    "room",
-    "rm",
-)
-_EN_ADDRESS_COUNTRY_ALIASES = {
-    "united states": "United States",
-    "united states of america": "United States",
-    "usa": "United States",
-    "u.s.a.": "United States",
-    "u.s.a": "United States",
-    "us": "United States",
-    "u.s.": "United States",
-    "u.s": "United States",
-}
-_EN_US_STATE_NAMES = {
-    "AL": "Alabama",
-    "AK": "Alaska",
-    "AZ": "Arizona",
-    "AR": "Arkansas",
-    "CA": "California",
-    "CO": "Colorado",
-    "CT": "Connecticut",
-    "DE": "Delaware",
-    "DC": "District of Columbia",
-    "FL": "Florida",
-    "GA": "Georgia",
-    "HI": "Hawaii",
-    "ID": "Idaho",
-    "IL": "Illinois",
-    "IN": "Indiana",
-    "IA": "Iowa",
-    "KS": "Kansas",
-    "KY": "Kentucky",
-    "LA": "Louisiana",
-    "ME": "Maine",
-    "MD": "Maryland",
-    "MA": "Massachusetts",
-    "MI": "Michigan",
-    "MN": "Minnesota",
-    "MS": "Mississippi",
-    "MO": "Missouri",
-    "MT": "Montana",
-    "NE": "Nebraska",
-    "NV": "Nevada",
-    "NH": "New Hampshire",
-    "NJ": "New Jersey",
-    "NM": "New Mexico",
-    "NY": "New York",
-    "NC": "North Carolina",
-    "ND": "North Dakota",
-    "OH": "Ohio",
-    "OK": "Oklahoma",
-    "OR": "Oregon",
-    "PA": "Pennsylvania",
-    "RI": "Rhode Island",
-    "SC": "South Carolina",
-    "SD": "South Dakota",
-    "TN": "Tennessee",
-    "TX": "Texas",
-    "UT": "Utah",
-    "VT": "Vermont",
-    "VA": "Virginia",
-    "WA": "Washington",
-    "WV": "West Virginia",
-    "WI": "Wisconsin",
-    "WY": "Wyoming",
-}
-_EN_US_STATE_ALIASES = {
-    key.lower(): key
-    for key in _EN_US_STATE_NAMES
-}
-_EN_US_STATE_ALIASES.update(
-    {
-        value.lower(): key
-        for key, value in _EN_US_STATE_NAMES.items()
-    }
-)
-_COMMON_COMPOUND_SURNAMES = {
-    "欧阳",
-    "太史",
-    "端木",
-    "上官",
-    "司马",
-    "东方",
-    "独孤",
-    "南宫",
-    "万俟",
-    "闻人",
-    "夏侯",
-    "诸葛",
-    "尉迟",
-    "公羊",
-    "赫连",
-    "澹台",
-    "皇甫",
-    "宗政",
-    "濮阳",
-    "公冶",
-    "太叔",
-    "申屠",
-    "公孙",
-    "慕容",
-    "仲孙",
-    "钟离",
-    "长孙",
-    "宇文",
-    "司徒",
-    "鲜于",
-    "司空",
-    "闾丘",
-    "子车",
-    "亓官",
-    "司寇",
-    "巫马",
-    "公西",
-    "颛孙",
-    "壤驷",
-    "公良",
-    "漆雕",
-    "乐正",
-    "宰父",
-    "谷梁",
-    "拓跋",
-    "夹谷",
-    "轩辕",
-    "令狐",
-    "段干",
-    "百里",
-    "呼延",
-    "东郭",
-    "南门",
-    "羊舌",
-    "微生",
-    "公户",
-    "公玉",
-    "梁丘",
-    "左丘",
-    "东门",
-    "西门",
-    "第五",
-}
+# 省级 alias 不再维护；中文地址按 geo 词典/检测链路解析，不在此做省级别名归一。
+_PROVINCE_ALIASES: dict[str, str] = {}
+_COUNTRY_PREFIX_ALIASES = load_zh_country_prefix_aliases()
+
+_DELETED_INTERNAL_ZH_ADMIN_ALIAS_TABLES = True
+@lru_cache(maxsize=1)
+def _en_address_street_suffixes() -> tuple[str, ...]:
+    for group in load_en_address_keyword_groups():
+        if group.component_type.value == "street":
+            return tuple(str(k).strip().lower() for k in group.keywords if str(k).strip())
+    return ()
+
+
+@lru_cache(maxsize=1)
+def _en_address_unit_prefixes() -> tuple[str, ...]:
+    accepted = {"unit", "floor", "room"}
+    prefixes: list[str] = []
+    for group in load_en_address_keyword_groups():
+        if group.component_type.value not in accepted:
+            continue
+        for kw in group.keywords:
+            text = str(kw).strip().lower()
+            if text:
+                prefixes.append(text)
+    prefixes.append("#")
+    return tuple(sorted(set(prefixes), key=len, reverse=True))
+
+
+_EN_ADDRESS_COUNTRY_ALIASES = load_en_address_country_aliases()
+_EN_US_STATE_NAMES = load_en_us_states()
+
+@lru_cache(maxsize=1)
+def _en_us_state_aliases() -> dict[str, str]:
+    aliases: dict[str, str] = {code.lower(): code for code in _EN_US_STATE_NAMES}
+    aliases.update({name.lower(): code for code, name in _EN_US_STATE_NAMES.items()})
+    return aliases
+_COMMON_COMPOUND_SURNAMES = set(load_zh_compound_surnames())
 _CITY_PATTERN = re.compile(r"^(?P<city>[^0-9]{1,16}?(?:自治州|地区|盟|市))")
 _DISTRICT_PATTERN = re.compile(r"^(?P<district>[^0-9]{1,16}?(?:新区|自治县|自治旗|区|县|旗|市))")
 _ZH_BUILDING_PATTERN = re.compile(r"(?P<building>[0-9A-Za-z一二三四五六七八九十百零两]+(?:号楼|栋|幢|座|单元))$")
 _ZH_ROOM_PATTERN = re.compile(r"(?P<room>[0-9A-Za-z一二三四五六七八九十百零两]+(?:室|房|层|户))$")
-_EN_STREET_SUFFIX_PATTERN = re.compile(
-    rf"\b(?:{'|'.join(map(re.escape, _EN_ADDRESS_STREET_SUFFIXES))})\.?\b",
-    re.IGNORECASE,
-)
+@lru_cache(maxsize=1)
+def _EN_STREET_SUFFIX_PATTERN() -> re.Pattern[str]:
+    suffixes = _en_address_street_suffixes()
+    escaped = "|".join(map(re.escape, suffixes)) if suffixes else r"$^"
+    return re.compile(rf"\b(?:{escaped})\.?\b", re.IGNORECASE)
 _EN_ADDRESS_PO_BOX_PATTERN = re.compile(r"^\s*P\.?\s*O\.?\s*Box\s+\d{1,10}\s*$", re.IGNORECASE)
-_EN_ADDRESS_UNIT_PATTERN = re.compile(
-    rf"(?P<unit>(?:#|(?:{'|'.join(map(re.escape, _EN_ADDRESS_UNIT_PREFIXES))})\.?)\s*[A-Za-z0-9\-]+(?:\s+[A-Za-z0-9\-]+)?)$",
-    re.IGNORECASE,
-)
+@lru_cache(maxsize=1)
+def _EN_ADDRESS_UNIT_PATTERN() -> re.Pattern[str]:
+    prefixes = _en_address_unit_prefixes()
+    escaped = "|".join(map(re.escape, prefixes)) if prefixes else r"$^"
+    return re.compile(
+        rf"(?P<unit>(?:#|(?:{escaped})\.?)\s*[A-Za-z0-9\-]+(?:\s+[A-Za-z0-9\-]+)?)$",
+        re.IGNORECASE,
+    )
 _EN_ADDRESS_POSTAL_PATTERN = re.compile(r"(?P<postal>\d{5}(?:-\d{4})?)$")
-_EN_ADDRESS_STREET_PREFIX_PATTERN = re.compile(
-    rf"^(?P<street>(?:P\.?\s*O\.?\s*Box\s+\d{{1,10}}|\d{{1,6}}[A-Za-z0-9\-]*\s+[A-Za-z0-9.'\- ]{{2,80}}?\b"
-    rf"(?:{'|'.join(map(re.escape, _EN_ADDRESS_STREET_SUFFIXES))})\.?(?:\s+(?:N|S|E|W|NE|NW|SE|SW))?"
-    rf"(?:\s+(?:#|(?:{'|'.join(map(re.escape, _EN_ADDRESS_UNIT_PREFIXES))})\.?)\s*[A-Za-z0-9\-]+(?:\s+[A-Za-z0-9\-]+)?)?))"
-    rf"(?:\s+(?P<rest>.+))?$",
-    re.IGNORECASE,
-)
-_EN_US_STATE_PATTERN = re.compile(
-    rf"(?P<state>(?:{'|'.join(sorted((re.escape(name) for name in _EN_US_STATE_NAMES.values()), key=len, reverse=True))}"
-    rf"|{'|'.join(sorted(_EN_US_STATE_NAMES.keys(), key=len, reverse=True))}))$",
-    re.IGNORECASE,
-)
+@lru_cache(maxsize=1)
+def _EN_ADDRESS_STREET_PREFIX_PATTERN() -> re.Pattern[str]:
+    suffixes = _en_address_street_suffixes()
+    unit_prefixes = _en_address_unit_prefixes()
+    street_suffix_alt = "|".join(map(re.escape, suffixes)) if suffixes else r"$^"
+    unit_prefix_alt = "|".join(map(re.escape, unit_prefixes)) if unit_prefixes else r"$^"
+    return re.compile(
+        rf"^(?P<street>(?:P\.?\s*O\.?\s*Box\s+\d{{1,10}}|\d{{1,6}}[A-Za-z0-9\-]*\s+[A-Za-z0-9.'\- ]{{2,80}}?\b"
+        rf"(?:{street_suffix_alt})\.?(?:\s+(?:N|S|E|W|NE|NW|SE|SW))?"
+        rf"(?:\s+(?:#|(?:{unit_prefix_alt})\.?)\s*[A-Za-z0-9\-]+(?:\s+[A-Za-z0-9\-]+)?)?))"
+        rf"(?:\s+(?P<rest>.+))?$",
+        re.IGNORECASE,
+    )
+@lru_cache(maxsize=1)
+def _EN_US_STATE_PATTERN() -> re.Pattern[str]:
+    state_name_alt = "|".join(sorted((re.escape(name) for name in _EN_US_STATE_NAMES.values()), key=len, reverse=True)) if _EN_US_STATE_NAMES else r"$^"
+    state_code_alt = "|".join(sorted(_EN_US_STATE_NAMES.keys(), key=len, reverse=True)) if _EN_US_STATE_NAMES else r"$^"
+    return re.compile(rf"(?P<state>(?:{state_name_alt}|{state_code_alt}))$", re.IGNORECASE)
 _NAME_SPACE_CHARS = set(" \t\r\n\f\v\u3000")
 _NAME_MATCH_IGNORABLE = _NAME_SPACE_CHARS | set("·•・0123456789０１２３４５６７８９")
 _PHONE_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：+＋")
@@ -874,12 +680,7 @@ def _parse_zh_address_components(value: str) -> AddressComponents:
             remaining = remaining[len(alias):]
             break
 
-    for alias, canonical in sorted(_PROVINCE_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
-        if remaining.startswith(alias):
-            components.province_text = canonical
-            components.province_key = canonical
-            remaining = remaining[len(alias):]
-            break
+    # 不再做省级别名替换：省市区应由 detector 的 geo 词典解析提供结构化结果。
 
     if components.province_text in _DIRECT_CONTROLLED:
         components.city_text = components.province_text
@@ -1144,9 +945,9 @@ def _looks_like_en_address_text(value: str) -> bool:
         return False
     if _EN_ADDRESS_PO_BOX_PATTERN.search(text):
         return True
-    if _EN_ADDRESS_UNIT_PATTERN.fullmatch(text):
+    if _EN_ADDRESS_UNIT_PATTERN().fullmatch(text):
         return True
-    if _EN_STREET_SUFFIX_PATTERN.search(text):
+    if _EN_STREET_SUFFIX_PATTERN().search(text):
         return True
     if _EN_ADDRESS_POSTAL_PATTERN.search(text):
         return True
@@ -1180,7 +981,7 @@ def _split_en_street_and_unit(street_segment: str) -> tuple[str | None, str | No
         return (None, None)
     if _EN_ADDRESS_PO_BOX_PATTERN.fullmatch(cleaned):
         return (cleaned, None)
-    unit_match = _EN_ADDRESS_UNIT_PATTERN.search(cleaned)
+    unit_match = _EN_ADDRESS_UNIT_PATTERN().search(cleaned)
     if unit_match is None:
         return (cleaned, None)
     unit_text = unit_match.group("unit").strip()
@@ -1212,7 +1013,7 @@ def _extract_en_trailing_postal(value: str) -> tuple[str, str | None]:
 
 def _extract_en_trailing_state(value: str) -> tuple[str, str | None]:
     working = value.rstrip(", ")
-    match = _EN_US_STATE_PATTERN.search(working)
+    match = _EN_US_STATE_PATTERN().search(working)
     if match is None:
         return (working, None)
     state_text = match.group("state").strip()
@@ -1227,7 +1028,7 @@ def _extract_en_street_prefix(value: str) -> tuple[str | None, str]:
     cleaned = _normalize_address_parse_text(value)
     if not cleaned:
         return (None, "")
-    match = _EN_ADDRESS_STREET_PREFIX_PATTERN.match(cleaned)
+    match = _EN_ADDRESS_STREET_PREFIX_PATTERN().match(cleaned)
     if match is None:
         return (None, cleaned)
     street_text = match.group("street").strip()
@@ -1241,7 +1042,7 @@ def _looks_like_en_street_segment(value: str) -> bool:
         return False
     if _EN_ADDRESS_PO_BOX_PATTERN.fullmatch(cleaned):
         return True
-    if _EN_STREET_SUFFIX_PATTERN.search(cleaned):
+    if _EN_STREET_SUFFIX_PATTERN().search(cleaned):
         return True
     return bool(re.search(r"^\d{1,6}\s+[A-Za-z]", cleaned))
 
@@ -1264,7 +1065,7 @@ def _address_component_key(value: str | None, *, state_hint: bool = False) -> st
 def _normalize_us_state_key(value: str) -> str | None:
     normalized = unicodedata.normalize("NFKC", str(value)).strip().lower().replace(".", "")
     normalized = re.sub(r"\s+", " ", normalized)
-    return _EN_US_STATE_ALIASES.get(normalized)
+    return _en_us_state_aliases().get(normalized)
 
 
 def _compact_text(value: str) -> str:

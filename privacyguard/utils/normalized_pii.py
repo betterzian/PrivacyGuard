@@ -8,8 +8,11 @@ from collections.abc import Iterable, Mapping
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.models.normalized_pii import NormalizedPII
-from privacyguard.infrastructure.pii.address.lexicon import collect_components
-from privacyguard.infrastructure.pii.detector.lexicon_loader import load_company_suffixes
+from privacyguard.infrastructure.pii.detector.lexicon_loader import (
+    load_company_suffixes,
+    load_en_address_suffix_strippers,
+    load_zh_address_suffix_strippers,
+)
 from privacyguard.utils.pii_value import parse_name_components
 
 _NAME_COMPONENT_KEYS = ("full", "family", "given", "alias", "middle")
@@ -191,9 +194,10 @@ def _normalize_address(
     if details_tokens:
         identity["details_part"] = "-".join(details_tokens)
     match_terms = tuple(
-        normalized_components[key]
+        term
         for key in _ADDRESS_MATCH_KEYS
-        if normalized_components.get(key)
+        if (value := normalized_components.get(key))
+        if (term := _address_match_term(key, value))
     )
     return NormalizedPII(
         attr_type=PIIAttributeType.ADDRESS,
@@ -204,6 +208,35 @@ def _normalize_address(
         identity=identity,
     )
 
+
+def _address_match_term(component_key: str, component_value: str) -> str:
+    """生成地址组件的匹配 term。
+
+    仅用于 match_terms：去掉组件后缀类别词，让词典匹配更短更稳定。
+    例如：city=上海市 -> 上海；district=浦东新区 -> 浦东；compound=阳光小区 -> 阳光。
+    """
+    value = str(component_value or "").strip()
+    if not value:
+        return ""
+    # 英文地址：match_terms 保留原始大小写与后缀（如 “Harbor Ave”、“North Plaza”），避免过度截断。
+    # 中文地址：为了词典匹配稳定性，仍做 suffix-only 裁剪（如 “上海市”->“上海”）。
+    compact = _compact_component_text(value)
+    if not compact:
+        return ""
+    if _looks_like_en_text(compact):
+        return value
+    # 用 scanner 词典派生的 suffix-only 裁剪器作为单一真源，确保 session/local 一致。
+    strippers = load_zh_address_suffix_strippers()
+    pattern = strippers.get(component_key)
+    if pattern is None:
+        return compact
+    stripped = pattern.sub("", compact).strip()
+    return stripped or compact
+
+
+def _looks_like_en_text(text: str) -> bool:
+    """粗略判断文本是否更像英文地址片段。"""
+    return any(("A" <= ch <= "Z") or ("a" <= ch <= "z") for ch in text)
 
 def _same_name(left: NormalizedPII, right: NormalizedPII) -> bool:
     left_given = left.identity.get("given", "")
@@ -319,19 +352,10 @@ def _address_components(
     traced = _components_from_address_metadata(metadata)
     if traced:
         return traced
-    collected = collect_components(raw_text, locale_profile="mixed")
-    resolved: dict[str, str] = {}
-    for item in collected:
-        component_type = _ADDRESS_COMPONENT_ALIASES.get(item.component_type, item.component_type)
-        if component_type not in _ADDRESS_COMPONENT_KEYS:
-            continue
-        value = str(item.value_text or "").strip()
-        if not value:
-            continue
-        previous = resolved.get(component_type, "")
-        if len(value) > len(previous):
-            resolved[component_type] = value
-    return resolved
+    raise ValueError(
+        "normalize_pii(ADDRESS) 不再支持从 raw_text 进行内部正则兜底抽取；"
+        "请提供结构化 components，或提供来自 detector/addressstack 的 metadata（含 address_component_trace）。"
+    )
 
 
 def _components_from_address_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]:

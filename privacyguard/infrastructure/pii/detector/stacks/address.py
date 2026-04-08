@@ -8,11 +8,14 @@ from dataclasses import dataclass
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value, has_address_signal, trim_candidate
 from privacyguard.infrastructure.pii.detector.models import AddressComponentType, CandidateDraft, ClaimStrength, Clue, ClueRole
+from privacyguard.infrastructure.pii.detector.lexicon_loader import load_en_address_keyword_groups
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
     _is_stop_control_clue,
     _skip_separators,
+    _unit_index_at_or_after,
+    _unit_index_left_of,
     _unit_char_end,
     _unit_char_start,
     is_break_clue,
@@ -57,7 +60,22 @@ _DETAIL_COMPONENTS = {
     AddressComponentType.FLOOR,
     AddressComponentType.ROOM,
 }
-_PREFIX_EN_KEYWORDS = {"apt", "apartment", "suite", "ste", "unit", "#", "floor", "fl", "room", "rm"}
+def _en_prefix_keywords() -> set[str]:
+    """从外部 lexicon 派生英文前缀关键字集合（unit/floor/room/# 等）。"""
+    keywords: set[str] = set()
+    for group in load_en_address_keyword_groups():
+        if group.component_type not in {AddressComponentType.UNIT, AddressComponentType.FLOOR, AddressComponentType.ROOM}:
+            continue
+        for kw in group.keywords:
+            text = str(kw or "").strip().lower()
+            if text:
+                keywords.add(text)
+    # 兼容 unit 组里可能存在的 '#'
+    keywords.add("#")
+    return keywords
+
+
+_PREFIX_EN_KEYWORDS = _en_prefix_keywords()
 _EN_VALUE_KEY_GAP_RE = re.compile(r"^[ ]*$")
 _SINGLE_EVIDENCE_ADMIN = {
     AddressComponentType.PROVINCE,
@@ -104,20 +122,17 @@ class AddressStack(BaseStack):
             return self._build_direct_run()
 
         raw_text = self.context.stream.text
+        stream = self.context.stream
         locale = self._value_locale()
         is_label_seed = self.clue.role == ClueRole.LABEL
 
         if is_label_seed:
             address_start = _skip_separators(raw_text, self.clue.end)
-            first_index = _next_address_index(
-                self.context.clues,
-                self.clue_index + 1,
-                locale=locale,
-                raw_text=raw_text,
-            )
-            if first_index is None:
+            start_unit = _unit_index_at_or_after(stream, address_start)
+            seed_index = _label_seed_address_index(self.context.clues, start_unit, max_units=6)
+            if seed_index is None:
                 return None
-            scan_index = first_index
+            scan_index = seed_index
             consumed_ids: set[str] = {self.clue.clue_id}
             handled_labels: set[str] = {self.clue.clue_id}
             evidence_count = 1
@@ -135,22 +150,23 @@ class AddressStack(BaseStack):
         last_tier = 0
         pending_value: dict[AddressComponentType, Clue] = {}
         index = scan_index
+        negative_spans: list[tuple[int, int]] = []
+        last_consumed_address_clue: Clue | None = None
+        last_value_clue: Clue | None = None
 
         while index < len(self.context.clues):
             clue = self.context.clues[index]
 
+            if is_break_clue(clue):
+                break
+            if is_negative_clue(clue):
+                negative_spans.append((clue.start, clue.end))
+                index += 1
+                continue
+            if clue.attr_type is None:
+                index += 1
+                continue
             if clue.attr_type != PIIAttributeType.ADDRESS:
-                if is_break_clue(clue) or is_negative_clue(clue):
-                    break
-                if _has_nearby_address_clue(
-                    self.context.clues,
-                    index + 1,
-                    last_end,
-                    locale=locale,
-                    raw_text=raw_text,
-                ):
-                    index += 1
-                    continue
                 break
             if clue.role == ClueRole.LABEL:
                 index += 1
@@ -159,8 +175,8 @@ class AddressStack(BaseStack):
                 index += 1
                 continue
 
-            gap_text = raw_text[last_end:clue.start]
-            if clue.start > last_end and _address_gap_too_wide(gap_text, locale):
+            # 6 个 unit 之内没有新的 clue 则截止（按 unit 差计数，含空格 unit）。
+            if last_consumed_address_clue is not None and clue.unit_start - last_consumed_address_clue.unit_end > 6:
                 break
 
             comp_type = clue.component_type
@@ -169,15 +185,17 @@ class AddressStack(BaseStack):
                 continue
             tier = _COMPONENT_TIER.get(comp_type, 999)
             if last_tier and tier < last_tier - _MAX_TIER_BACKTRACK:
-                break
+                pass
 
             consumed_ids.add(clue.clue_id)
+            last_consumed_address_clue = clue
 
             if clue.role == ClueRole.VALUE:
                 if comp_type in pending_value:
                     break
                 self._flush_pending_values(pending_value, tier, components)
                 pending_value[comp_type] = clue
+                last_value_clue = clue
                 last_end = max(last_end, clue.end)
                 last_tier = tier
                 index += 1
@@ -214,7 +232,11 @@ class AddressStack(BaseStack):
                         last_end = max(last_end, int(key_comp["end"]))
                     last_tier = tier
             else:
-                component = self._build_key_component(raw_text, clue, comp_type, index, locale)
+                component = None
+                if last_value_clue is not None and clue.unit_start - last_value_clue.unit_end <= 1:
+                    component = _build_cross_tier_value_key_component(raw_text, last_value_clue, clue, comp_type)
+                if component is None:
+                    component = self._build_key_component(raw_text, clue, comp_type, index, locale)
                 if component is not None:
                     components.append(component)
                     evidence_count += 1
@@ -226,6 +248,12 @@ class AddressStack(BaseStack):
 
         if not components:
             return None
+        if negative_spans:
+            components = _pop_components_overlapping_negative(components, negative_spans)
+            if not components:
+                return None
+
+        components = _extend_components_with_digit_tail(components, stream)
         if not _meets_commit_threshold(
             evidence_count,
             components,
@@ -337,7 +365,13 @@ class AddressStack(BaseStack):
         if locale.startswith("en"):
             expand_start = _left_expand_en_word(raw_text, clue.start, floor)
         else:
-            expand_start = _left_expand_zh_chars(raw_text, clue.start, floor, max_chars=2)
+            # 中文 key：优先吸收 key 左侧紧邻的 digit_run unit（如 “100号”“3楼”“201室”）。
+            stream = self.context.stream
+            left_ui = _unit_index_left_of(stream, clue.start)
+            if 0 <= left_ui < len(stream.units) and stream.units[left_ui].kind == "digit_run":
+                expand_start = stream.units[left_ui].char_start
+            else:
+                expand_start = _left_expand_zh_chars(raw_text, clue.start, floor, max_chars=2)
 
         value = _normalize_address_value(comp_type, raw_text[expand_start:clue.start])
         if not value:
@@ -460,6 +494,152 @@ def _build_value_key_component(
         "key": key_clue.text,
         "is_detail": comp_type in _DETAIL_COMPONENTS,
     }, True
+
+
+def _label_seed_address_index(clues: tuple[Clue, ...], start_unit: int, *, max_units: int) -> int | None:
+    """label 起栈：start_unit 覆盖的 VALUE 优先，否则 max_units 内必须有 KEY。"""
+    key_index: int | None = None
+    for idx, clue in enumerate(clues):
+        if clue.attr_type != PIIAttributeType.ADDRESS:
+            continue
+        if clue.role == ClueRole.LABEL:
+            continue
+        if clue.role == ClueRole.VALUE and clue.unit_start <= start_unit < clue.unit_end:
+            return idx
+        if clue.role == ClueRole.KEY and clue.unit_start >= start_unit and clue.unit_start - start_unit <= max_units:
+            if key_index is None or clue.unit_start < clues[key_index].unit_start:
+                key_index = idx
+    return key_index
+
+
+def _build_cross_tier_value_key_component(
+    raw_text: str,
+    value_clue: Clue,
+    key_clue: Clue,
+    comp_type: AddressComponentType,
+) -> dict[str, object] | None:
+    del raw_text
+    start = min(value_clue.start, key_clue.start)
+    end = max(value_clue.end, key_clue.end)
+    value = _normalize_address_value(comp_type, value_clue.text)
+    if not value:
+        return None
+    return {
+        "component_type": comp_type,
+        "start": start,
+        "end": end,
+        "value": value,
+        "key": key_clue.text,
+        "is_detail": comp_type in _DETAIL_COMPONENTS,
+    }
+
+
+def _overlaps_any_span(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
+    return any(not (end <= s or start >= e) for s, e in spans)
+
+
+def _pop_components_overlapping_negative(
+    components: list[dict[str, object]],
+    negative_spans: list[tuple[int, int]],
+) -> list[dict[str, object]]:
+    ordered = list(components)
+    while ordered:
+        final_start = min(int(c["start"]) for c in ordered)
+        final_end = max(int(c["end"]) for c in ordered)
+        if not _overlaps_any_span(final_start, final_end, negative_spans):
+            return ordered
+        # 吐出最右侧 component（end 最大；若相等则 start 最大）。
+        ordered.sort(key=lambda c: (int(c["end"]), int(c["start"])))
+        ordered.pop()
+    return []
+
+
+_DIGIT_TAIL_RE = re.compile(r"^\s*(\d{1,4})(?:-(\d{1,4}))?(?:-(\d{1,4}))?\s*$")
+
+
+def _parse_digit_tail(text: str) -> tuple[str, ...] | None:
+    """解析 digit_run unit.text（允许含 '-'），最多 3 段，每段 ≤4 位。"""
+    cleaned = str(text or "").strip()
+    match = _DIGIT_TAIL_RE.fullmatch(cleaned)
+    if match is None:
+        return None
+    parts = tuple(p for p in match.groups() if p is not None)
+    if not parts:
+        return None
+    if cleaned.count("-") > 2:
+        return None
+    return parts
+
+
+def _digit_tail_next_component_type(prev: AddressComponentType, first_segment: str) -> AddressComponentType:
+    """由前一 component_type 推导尾随数字的第一个层级。"""
+    if prev in {AddressComponentType.ROAD, AddressComponentType.STREET, AddressComponentType.COMPOUND}:
+        return AddressComponentType.BUILDING
+    if prev == AddressComponentType.NUMBER:
+        return AddressComponentType.BUILDING
+    if prev == AddressComponentType.BUILDING:
+        return AddressComponentType.ROOM if len(first_segment) >= 3 else AddressComponentType.UNIT
+    if prev == AddressComponentType.UNIT:
+        return AddressComponentType.ROOM if len(first_segment) >= 3 else AddressComponentType.FLOOR
+    if prev == AddressComponentType.FLOOR:
+        return AddressComponentType.ROOM
+    return AddressComponentType.BUILDING
+
+
+def _digit_tail_step_down(comp_type: AddressComponentType) -> AddressComponentType:
+    if comp_type == AddressComponentType.BUILDING:
+        return AddressComponentType.UNIT
+    if comp_type == AddressComponentType.UNIT:
+        return AddressComponentType.ROOM
+    if comp_type == AddressComponentType.FLOOR:
+        return AddressComponentType.ROOM
+    if comp_type == AddressComponentType.NUMBER:
+        return AddressComponentType.BUILDING
+    return AddressComponentType.ROOM
+
+
+def _extend_components_with_digit_tail(components: list[dict[str, object]], stream) -> list[dict[str, object]]:
+    if not components or not getattr(stream, "units", None):
+        return components
+    last = max(components, key=lambda c: (int(c["end"]), int(c["start"])))
+    end_char = int(last["end"])
+    # 以 end_char 为锚点，取“起始位置在 end_char 或其右侧”的第一个 unit 作为紧邻候选。
+    if end_char >= len(stream.text):
+        return components
+    next_ui = _unit_index_at_or_after(stream, end_char)
+    if next_ui >= len(stream.units):
+        return components
+    next_unit = stream.units[next_ui]
+    if next_unit.kind != "digit_run":
+        return components
+    parts = _parse_digit_tail(next_unit.text)
+    if parts is None:
+        return components
+    prev_type = last.get("component_type")
+    if not isinstance(prev_type, AddressComponentType):
+        return components
+    current_type = _digit_tail_next_component_type(prev_type, parts[0])
+    new_components: list[dict[str, object]] = []
+    cursor = next_unit.char_start
+    for idx, seg in enumerate(parts):
+        seg_start = stream.text.find(seg, cursor, next_unit.char_end)
+        if seg_start < 0:
+            seg_start = cursor
+        seg_end = seg_start + len(seg)
+        new_components.append(
+            {
+                "component_type": current_type,
+                "start": seg_start,
+                "end": seg_end,
+                "value": seg,
+                "key": "",
+                "is_detail": current_type in _DETAIL_COMPONENTS,
+            }
+        )
+        cursor = seg_end
+        if idx < len(parts) - 1:
+            current_type = _digit_tail_step_down(current_type)
+    return [*components, *new_components]
 
 
 def _left_expand_en_word(raw_text: str, pos: int, floor: int) -> int:

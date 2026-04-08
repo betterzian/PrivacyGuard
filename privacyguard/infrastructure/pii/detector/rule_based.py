@@ -149,11 +149,16 @@ class RuleBasedPIIDetector:
         for record in records:
             if turn_id is not None and record.turn_id >= turn_id:
                 continue
-            normalized = record.normalized_source or normalize_pii(
-                record.attr_type,
-                record.source_text,
-                metadata=record.metadata,
-            )
+            normalized = record.normalized_source or normalize_pii(record.attr_type, record.source_text, metadata=record.metadata)
+            # 对 session 地址：优先复用持久化的结构化 components，并用统一归一逻辑重建 match_terms，
+            # 避免“session/local 裁剪规则不一致”导致的漂移（如 南京东路 -> 南京 / 南京东）。
+            if record.attr_type == PIIAttributeType.ADDRESS and normalized.components:
+                normalized = normalize_pii(
+                    PIIAttributeType.ADDRESS,
+                    record.source_text,
+                    components=normalized.components,
+                    metadata=record.metadata,
+                )
             source_text = normalized_primary_text(normalized)
             if not source_text:
                 continue

@@ -856,9 +856,14 @@ def _build_stream_units(text: str) -> tuple[tuple[StreamUnit, ...], tuple[int, .
                     end=end,
                 )
                 continue
-            # 连续数字合并为一个 digit_run unit；允许夹杂单个空格（如银行卡号 "6222 0000"）。
+            # 连续数字合并为一个 digit_run unit；允许数字之间夹杂单个空格或连字符 "-"。
+            # 注意：这里不做清洗，unit.text 保留空格与连字符（例如 "+86 139-1234-1234"）。
             while end < len(text):
-                if text[end] == " " and end + 1 < len(text) and _is_ascii_digit(text[end + 1]):
+                if (
+                    text[end] in {" ", "-"}
+                    and end + 1 < len(text)
+                    and _is_ascii_digit(text[end + 1])
+                ):
                     end += 2
                     continue
                 if _is_ascii_digit(text[end]):

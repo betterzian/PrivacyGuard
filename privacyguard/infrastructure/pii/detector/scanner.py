@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.infrastructure.pii.address.geo_db import load_china_geo_lexicon, load_en_geo_lexicon
+from privacyguard.infrastructure.pii.address.geo_db import load_en_geo_lexicon, load_zh_geo_lexicon
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_company_suffixes,
@@ -41,9 +41,9 @@ from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_str
 from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_INLINE_GAP_TOKEN
 
 _HARD_SOURCE_PRIORITY = {
-    "session": 4,
-    "local": 3,
-    "prompt": 2,
+    "prompt": 4,
+    "session": 3,
+    "local": 2,
     "regex": 1,
 }
 
@@ -78,8 +78,9 @@ _TIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("time_zh_date", re.compile(r"\d{4}年\d{1,2}月\d{1,2}日")),
 )
 
-# 通用数字片段：连续数字（允许内部单空格）。
-_DIGIT_FRAGMENT_PATTERN = re.compile(r"\d(?:[ ]?\d)*")
+# 通用数字片段：允许常见“电话号码写法”的连接符。
+# 目的：把 "+86 139-1234-1234" 这类写法抽成一个片段，后续再在 structured stack 中统一去连接符/去国家码做校验。
+_DIGIT_FRAGMENT_PATTERN = re.compile(r"\+?\d(?:[ \-()]*\d)*")
 
 # 混合片段：字母数字混合（至少包含一个数字和一个字母）。
 _ALNUM_FRAGMENT_PATTERN = re.compile(r"(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]+")
@@ -114,7 +115,9 @@ _START_MASKED_SOFT_ROLES = frozenset(
         ClueRole.GIVEN_NAME,
     }
 )
+# 注意：NEGATIVE clue 用于 stack 内部的“事后回吐/裁剪”决策，不能在 sweep 阶段被 seed 遮蔽。
 _SOFT_CONTROL_ROLES = frozenset({ClueRole.NEGATIVE, ClueRole.CONNECTOR})
+_SOFT_CONTROL_ROLES_SEED_MASKED = frozenset({ClueRole.CONNECTOR})
 
 # 数字的非隐私上下文模式。
 _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -994,10 +997,14 @@ def _iter_negative_word_specs() -> tuple[tuple[str, str], ...]:
 
 
 def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
-    """加权区间调度：优先保留更长 / 更高来源优先级的 hard clue。
+    """hard clue 裁决：仅覆盖“被完全包含”的 clue。
 
-    按"赢"的标准降序排列后贪心选取，跳过与已选 clue 重叠的候选。
-    解决旧实现只替换第一个重叠者、遗漏后续被覆盖 clue 的问题。
+    规则：
+    - 若 A 的区间完全包含 B（含相等区间），则 B 被覆盖（移除）。
+    - 若两条 clue 仅“部分重叠”，但互不完全包含，则两者都保留。
+
+    实现上仍使用“更长 / 更高来源优先级”的排序来稳定地先处理更强的 clue，
+    但冲突判定从“任意重叠即互斥”改为“仅完全包含才覆盖”。
     """
     if not clues:
         return ()
@@ -1012,8 +1019,11 @@ def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
     )
     accepted: list[Clue] = []
     for clue in ranked:
-        if any(clue.start < a.end and clue.end > a.start for a in accepted):
+        # 若当前 clue 被任意已接受 clue 完全包含，则跳过。
+        if any(a.start <= clue.start and clue.end <= a.end for a in accepted):
             continue
+        # 若当前 clue 完全包含了已接受的某些 clue，则覆盖它们。
+        accepted = [a for a in accepted if not (clue.start <= a.start and a.end <= clue.end)]
         accepted.append(clue)
     accepted.sort(key=lambda c: (c.start, c.end, -c.priority))
     return tuple(accepted)
@@ -1340,7 +1350,7 @@ def _company_suffix_matcher() -> AhoMatcher:
 
 @lru_cache(maxsize=1)
 def _zh_address_value_matcher() -> AhoMatcher:
-    lexicon = load_china_geo_lexicon()
+    lexicon = load_zh_geo_lexicon()
     direct_city_names = {"北京", "上海", "天津", "重庆", "香港", "澳门"}
     geo_specs = (
         (AddressComponentType.PROVINCE, tuple(item for item in lexicon.provinces if item not in direct_city_names)),
@@ -1598,8 +1608,8 @@ def _sweep_pass2(clues: list[Clue], text_len: int) -> list[Clue]:
                 survivors.append(clue)
                 continue
 
-            # SOFT_CONTROL（NEGATIVE / CONNECTOR）被 seed 遮蔽。
-            if role in _SOFT_CONTROL_ROLES and active_seed > 0:
+            # SOFT_CONTROL：仅 CONNECTOR 被 seed 遮蔽；NEGATIVE 必须保留给各 stack 做交叉裁剪。
+            if role in _SOFT_CONTROL_ROLES_SEED_MASKED and active_seed > 0:
                 continue
             # START 只遮蔽需要按原始值区域推断的软 clue，不遮蔽词典 full/alias。
             if role in _START_MASKED_SOFT_ROLES and active_start > 0:

@@ -28,6 +28,10 @@ from privacyguard.infrastructure.repository.schemas import (
 )
 from privacyguard.utils.normalized_pii import normalize_pii, render_address_text
 from privacyguard.utils.pii_value import NameComponents, parse_name_components, render_name_like_source
+from privacyguard.infrastructure.pii.detector.context import DetectContext
+from privacyguard.infrastructure.pii.detector.parser import StreamParser
+from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
+from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 
 DEFAULT_PERSONA_REPOSITORY_PATH = "data/persona_repository.json"
 DEFAULT_PERSONA_SAMPLE_PATH = "data/personas.sample.json"
@@ -120,17 +124,28 @@ def _name_text_to_storage_slot(text: str) -> NameSlotStorage:
 
 
 def _address_text_to_storage_slot(text: str) -> AddressSlotStorage:
-    normalized = normalize_pii(PIIAttributeType.ADDRESS, text)
+    # 地址归一必须走 detector 的外部词典主链（data/scanner_lexicons），不再使用 normalize_pii 的内部兜底抽取。
+    stream = build_prompt_stream(text)
+    ctx = DetectContext()
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+    parsed = StreamParser(locale_profile="mixed", ctx=ctx).parse(stream, bundle)
+    candidate = next((c for c in parsed.candidates if c.attr_type == PIIAttributeType.ADDRESS), None)
+    if candidate is None:
+        raise ValueError("地址无法通过 detector 外部词典解析为结构化组件")
+    normalized = normalize_pii(PIIAttributeType.ADDRESS, candidate.text, metadata=candidate.metadata)
     components = {
         key: value
         for key, value in normalized.components.items()
         if key in _ADDRESS_LEVEL_KEYS and str(value).strip()
     }
     if not components:
-        stripped = str(text or "").strip()
-        if not stripped:
-            raise ValueError("地址不能为空")
-        components = {"road": stripped}
+        raise ValueError("地址无法归一为结构化组件")
     return AddressSlotStorage(
         **{
             key: _shared_slot(value)
@@ -454,16 +469,29 @@ class JsonPersonaRepository:
             return None
         if not source_text:
             return render_address_text(selected) or None
-        source_normalized = normalize_pii(PIIAttributeType.ADDRESS, source_text)
-        if source_normalized.components:
-            rendered = {
-                key: value
-                for key, value in selected.items()
-                if key in source_normalized.components
-            }
-            if rendered:
-                return render_address_text(rendered) or None
-        return render_address_text(selected) or None
+        # 源文本的地址组件必须走 detector 主链解析；若解析失败则直接报错（不再 fallback 到全量渲染）。
+        stream = build_prompt_stream(source_text)
+        ctx = DetectContext()
+        bundle = build_clue_bundle(
+            stream,
+            ctx=ctx,
+            session_entries=(),
+            local_entries=(),
+            locale_profile="mixed",
+        )
+        parsed = StreamParser(locale_profile="mixed", ctx=ctx).parse(stream, bundle)
+        candidate = next((c for c in parsed.candidates if c.attr_type == PIIAttributeType.ADDRESS), None)
+        if candidate is None:
+            raise ValueError("source_text 无法解析为地址组件，无法按来源裁剪渲染")
+        source_normalized = normalize_pii(PIIAttributeType.ADDRESS, candidate.text, metadata=candidate.metadata)
+        rendered = {
+            key: value
+            for key, value in selected.items()
+            if key in source_normalized.components
+        }
+        if not rendered:
+            raise ValueError("source_text 解析结果缺少可用于裁剪的地址组件")
+        return render_address_text(rendered) or None
 
     def _to_storage_document(self) -> PersonaRepositoryDocument:
         personas = list(self._stored_fake_personas.values())
