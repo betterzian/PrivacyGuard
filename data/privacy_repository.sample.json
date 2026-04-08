@@ -34,23 +34,13 @@
             "aliases": []
           }
         ],
-        "card_number": [
+        "bank_number": [
           {
             "value": "4000000000000002",
             "aliases": []
           },
           {
             "value": "4000000000009995",
-            "aliases": []
-          }
-        ],
-        "bank_account": [
-          {
-            "value": "0005678900003001",
-            "aliases": []
-          },
-          {
-            "value": "0005678900003002",
             "aliases": []
           }
         ],
@@ -158,7 +148,7 @@
         ],
         "id_number": [
           {
-            "value": "ID-ZH-SAMPLE-0003",
+            "value": "320311770706001",
             "aliases": []
           }
         ],
@@ -208,23 +198,13 @@
             "aliases": []
           }
         ],
-        "card_number": [
+        "bank_number": [
           {
             "value": "6011111111111117",
             "aliases": []
           },
           {
             "value": "3530111333300000",
-            "aliases": []
-          }
-        ],
-        "bank_account": [
-          {
-            "value": "0006543200004001",
-            "aliases": []
-          },
-          {
-            "value": "0006543200004002",
             "aliases": []
           }
         ],
@@ -316,7 +296,7 @@
         ],
         "id_number": [
           {
-            "value": "ID-EN-SAMPLE-0004",
+            "value": "987654321012345678",
             "aliases": []
           }
         ],

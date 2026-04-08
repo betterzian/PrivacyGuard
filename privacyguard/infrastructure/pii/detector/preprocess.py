@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
@@ -59,7 +60,7 @@ def build_prompt_stream(text: str) -> StreamInput:
 
 
 def build_ocr_stream(blocks: list[OCRTextBlock]) -> PreparedOCRContext:
-    """构建 OCR 流：合并前预计算每块链 A/B 与入度；源点取入度 0 后阅读序最小；行内合并后刷新共享链 B；段间 ``OCR_BREAK``。"""
+    """构建 OCR 流：预计算链 A/B 一次后供合并图使用；段间 ``OCR_BREAK``。"""
     materialized = [b for b in blocks if (b.text or "").strip() and b.bbox is not None]
     if not materialized:
         empty_stream = StreamInput(
@@ -72,7 +73,8 @@ def build_ocr_stream(blocks: list[OCRTextBlock]) -> PreparedOCRContext:
         )
         return PreparedOCRContext(raw_text="", stream=empty_stream, scene=_build_scene([]))
 
-    chunks = _build_recursive_ocr_chunks(materialized)
+    pre_a, pre_b = _precompute_all_chains(materialized)
+    chunks = _build_recursive_ocr_chunks(materialized, pre_a=pre_a, pre_b_static=pre_b)
     return _build_stream_from_chunks(chunks)
 
 
@@ -184,54 +186,64 @@ def _compare_chain_a_candidates(a: OCRTextBlock, b: OCRTextBlock) -> int:
     return 0
 
 
-def _precompute_chain_a_static(cur: OCRTextBlock, all_blocks: list[OCRTextBlock]) -> list[OCRTextBlock]:
-    """合并前链 A：与 ``cur`` 在 ``y`` 上有正重叠且 **严格** 在 ``cur`` 右边界右侧的块；排序见 ``_compare_chain_a_candidates``；仅首元参与入度边。"""
-    cb = cur.bbox
-    if cb is None:
-        return []
-    right_edge = float(cb.x + cb.width)
-    cand: list[OCRTextBlock] = []
-    for b in all_blocks:
-        if b is cur:
-            continue
-        bb = b.bbox
-        if bb is None:
-            continue
-        if float(bb.x) <= right_edge:
-            continue
-        if not _y_overlaps_interval_open(cur, b):
-            continue
-        cand.append(b)
-    cand.sort(key=cmp_to_key(_compare_chain_a_candidates))
-    return cand
 
+def _precompute_all_chains(
+    materialized: list[OCRTextBlock],
+) -> tuple[dict[int, list[OCRTextBlock]], dict[int, list[OCRTextBlock]]]:
+    """一次遍历构建所有块的链 A（同行右侧）和链 B（下方对齐），用 y 排序 + bisect 加速。"""
+    by_y = sorted(materialized, key=lambda b: float(b.bbox.y + b.bbox.height / 2) if b.bbox else 0.0)
+    y_centers = [float(b.bbox.y + b.bbox.height / 2) if b.bbox else 0.0 for b in by_y]
 
-def _precompute_chain_b_static(cur: OCRTextBlock, all_blocks: list[OCRTextBlock]) -> list[OCRTextBlock]:
-    """合并前链 B：在 ``cur`` 下方且 x 与 ``cur`` 左缘对齐容差内。"""
-    cb = cur.bbox
-    if cb is None:
-        return []
-    cur_y_end = float(cb.y + cb.height)
-    cur_x = float(cb.x)
-    cur_h = float(cb.height)
-    cand: list[OCRTextBlock] = []
-    for b in all_blocks:
-        if b is cur:
+    pre_a: dict[int, list[OCRTextBlock]] = {id(b): [] for b in materialized}
+    pre_b: dict[int, list[OCRTextBlock]] = {id(b): [] for b in materialized}
+
+    for cur in materialized:
+        cb = cur.bbox
+        if cb is None:
             continue
-        bb = b.bbox
-        if bb is None:
-            continue
-        bh = float(bb.height)
-        h_max = max(cur_h, bh, 1e-6)
-        if float(bb.y) < cur_y_end:
-            continue
-        if abs(float(bb.x) - cur_x) > h_max:
-            continue
-        cand.append(b)
-    cand.sort(
-        key=lambda b: (float(b.bbox.y), float(b.bbox.x), b.block_id or "", id(b)) if b.bbox else (0.0, 0.0, "", id(b)),
-    )
-    return cand
+        cur_id = id(cur)
+        cur_h = float(cb.height)
+        cur_right = float(cb.x + cb.width)
+        cur_y_end = float(cb.y + cb.height)
+        cur_x = float(cb.x)
+        cur_cy = float(cb.y) + cur_h / 2
+
+        # 链 A：y 区间重叠的块中，在 cur 右边界右侧的。
+        lo = bisect.bisect_left(y_centers, cur_cy - cur_h)
+        hi = bisect.bisect_right(y_centers, cur_cy + cur_h)
+        for j in range(lo, hi):
+            b = by_y[j]
+            if b is cur:
+                continue
+            bb = b.bbox
+            if bb is None or float(bb.x) <= cur_right:
+                continue
+            if not _y_overlaps_interval_open(cur, b):
+                continue
+            pre_a[cur_id].append(b)
+        pre_a[cur_id].sort(key=cmp_to_key(_compare_chain_a_candidates))
+
+        # 链 B：在 cur 下方且左缘对齐。
+        start_idx = bisect.bisect_left(y_centers, cur_y_end - cur_h * 0.5)
+        for j in range(start_idx, len(by_y)):
+            b = by_y[j]
+            if b is cur:
+                continue
+            bb = b.bbox
+            if bb is None:
+                continue
+            if float(bb.y) < cur_y_end:
+                continue
+            bh = float(bb.height)
+            h_max = max(cur_h, bh, 1e-6)
+            if abs(float(bb.x) - cur_x) > h_max:
+                continue
+            pre_b[cur_id].append(b)
+        pre_b[cur_id].sort(
+            key=lambda b: (float(b.bbox.y), float(b.bbox.x), b.block_id or "", id(b)) if b.bbox else (0.0, 0.0, "", id(b)),
+        )
+
+    return pre_a, pre_b
 
 
 def _below_list_for_semantic_chain(
@@ -351,15 +363,14 @@ def _space_expand_chain_from_start(
     return chain
 
 
-def _build_recursive_ocr_chunks(materialized: list[OCRTextBlock]) -> list[list[OCRTextBlock]]:
-    """预计算每块链 A/B 与入度；起点必须在 ``remaining`` 内入度 0 的块中阅读序最小，否则抛 ``OCRSemanticChunkGraphError``。池用 ``id`` 集合。"""
+def _build_recursive_ocr_chunks(
+    materialized: list[OCRTextBlock],
+    *,
+    pre_a: dict[int, list[OCRTextBlock]],
+    pre_b_static: dict[int, list[OCRTextBlock]],
+) -> list[list[OCRTextBlock]]:
+    """根据已预计算的链 A/B 构建合并图；起点取 ``remaining`` 内入度 0 且阅读序最小的块。"""
     id_to_block = {id(b): b for b in materialized}
-    pre_a: dict[int, list[OCRTextBlock]] = {}
-    pre_b_static: dict[int, list[OCRTextBlock]] = {}
-    for b in materialized:
-        bid = id(b)
-        pre_a[bid] = _precompute_chain_a_static(b, materialized)
-        pre_b_static[bid] = _precompute_chain_b_static(b, materialized)
 
     succ_by_id: dict[int, list[int]] = {}
     indeg: dict[int, int] = defaultdict(int)
@@ -394,6 +405,7 @@ def _build_recursive_ocr_chunks(materialized: list[OCRTextBlock]) -> list[list[O
         chunks.append(chain)
 
     return chunks
+
 
 
 def _max_block_height(line: list[OCRTextBlock]) -> float:
@@ -472,7 +484,9 @@ def _can_merge_across_lines(upper: list[OCRTextBlock], lower: list[OCRTextBlock]
     return True
 
 
-def _build_stream_from_chunks(chunks: list[list[OCRTextBlock]]) -> PreparedOCRContext:
+def _build_stream_from_chunks(
+    chunks: list[list[OCRTextBlock]],
+) -> PreparedOCRContext:
     """链内用语义 ``inline_gap`` 拼接；链与链之间 ``OCR_BREAK``。"""
     raw_chunks: list[str] = []
     clean_chunks: list[str] = []
@@ -813,29 +827,44 @@ def _build_stream_units(text: str) -> tuple[tuple[StreamUnit, ...], tuple[int, .
             continue
         if _is_ascii_letter(char):
             end = cursor + 1
-            while end < len(text) and _is_ascii_letter(text[end]):
+            seen_digit = False
+            while end < len(text) and (_is_ascii_letter(text[end]) or _is_ascii_digit(text[end])):
+                seen_digit = seen_digit or _is_ascii_digit(text[end])
                 end += 1
             cursor = _append_unit(
                 units,
                 char_to_unit,
-                kind="ascii_word",
+                kind="alnum_run" if seen_digit else "ascii_word",
                 text=text[cursor:end],
                 start=cursor,
                 end=end,
             )
             continue
         if _is_ascii_digit(char):
-            # 连续数字合并为一个 digit_run unit；允许夹杂单个空格（如银行卡号 "6222 0000"）。
             end = cursor + 1
+            seen_letter = False
+            while end < len(text) and (_is_ascii_letter(text[end]) or _is_ascii_digit(text[end])):
+                seen_letter = seen_letter or _is_ascii_letter(text[end])
+                end += 1
+            if seen_letter:
+                cursor = _append_unit(
+                    units,
+                    char_to_unit,
+                    kind="alnum_run",
+                    text=text[cursor:end],
+                    start=cursor,
+                    end=end,
+                )
+                continue
+            # 连续数字合并为一个 digit_run unit；允许夹杂单个空格（如银行卡号 "6222 0000"）。
             while end < len(text):
-                next_char = text[end]
-                if _is_ascii_digit(next_char):
-                    end += 1
-                elif next_char == " " and end + 1 < len(text) and _is_ascii_digit(text[end + 1]):
-                    # 单个空格后紧跟数字，视为同一 digit_run 的内部间隔。
+                if text[end] == " " and end + 1 < len(text) and _is_ascii_digit(text[end + 1]):
                     end += 2
-                else:
-                    break
+                    continue
+                if _is_ascii_digit(text[end]):
+                    end += 1
+                    continue
+                break
             cursor = _append_unit(
                 units,
                 char_to_unit,

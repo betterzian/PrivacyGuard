@@ -22,6 +22,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueBundle,
     ClueFamily,
     ParseResult,
+    StructuredLookupIndex,
     StreamInput,
 )
 from privacyguard.infrastructure.pii.detector.stacks import BaseStack, StackManager, StackRun, get_stack_spec
@@ -42,6 +43,7 @@ class StackContext:
     locale_profile: str
     protection_level: ProtectionLevel = ProtectionLevel.STRONG
     clues: tuple[Clue, ...] = ()
+    structured_lookup_index: StructuredLookupIndex = field(default_factory=StructuredLookupIndex)
     committed_until: int = 0
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
@@ -58,12 +60,19 @@ class StreamParser:
     # 主循环
     # ------------------------------------------------------------------
 
-    def parse(self, stream: StreamInput, bundle: ClueBundle) -> ParseResult:
+    def parse(
+        self,
+        stream: StreamInput,
+        bundle: ClueBundle,
+        *,
+        structured_lookup_index: StructuredLookupIndex | None = None,
+    ) -> ParseResult:
         context = StackContext(
             stream=stream,
             locale_profile=self.locale_profile,
             protection_level=self.ctx.protection_level,
             clues=bundle.all_clues,
+            structured_lookup_index=structured_lookup_index or StructuredLookupIndex(),
         )
         # consumed_ids 仅在 _commit_run 时追加，不在构建 run 时提前标记。
         # 这样 shrink 失败时败方 clue 不会被永久锁死。

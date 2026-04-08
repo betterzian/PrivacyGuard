@@ -296,8 +296,7 @@ def _aggregate_repository_stats(personas: list[PersonaDocument]) -> RepositorySt
     slot_totals = {
         "name": ExposureInfo(),
         "phone": ExposureInfo(),
-        "card_number": ExposureInfo(),
-        "bank_account": ExposureInfo(),
+        "bank_number": ExposureInfo(),
         "passport_number": ExposureInfo(),
         "driver_license": ExposureInfo(),
         "email": ExposureInfo(),
@@ -315,8 +314,7 @@ def _aggregate_repository_stats(personas: list[PersonaDocument]) -> RepositorySt
     slots_stats = SlotStats(
         name=slot_totals["name"],
         phone=slot_totals["phone"],
-        card_number=slot_totals["card_number"],
-        bank_account=slot_totals["bank_account"],
+        bank_number=slot_totals["bank_number"],
         passport_number=slot_totals["passport_number"],
         driver_license=slot_totals["driver_license"],
         email=slot_totals["email"],

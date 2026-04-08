@@ -58,15 +58,14 @@ def normalize_pii(
         return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
     if attr_type in {
         PIIAttributeType.PHONE,
-        PIIAttributeType.CARD_NUMBER,
-        PIIAttributeType.BANK_ACCOUNT,
+        PIIAttributeType.BANK_NUMBER,
         PIIAttributeType.ID_NUMBER,
     }:
         canonical = _digits_only(normalized_raw)
         if attr_type == PIIAttributeType.PHONE:
             canonical = _normalize_phone_digits(canonical)
         return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
-    if attr_type in {PIIAttributeType.PASSPORT_NUMBER, PIIAttributeType.DRIVER_LICENSE}:
+    if attr_type in {PIIAttributeType.PASSPORT_NUMBER, PIIAttributeType.DRIVER_LICENSE, PIIAttributeType.ALNUM}:
         canonical = _alnum_only(normalized_raw).upper()
         return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
     if attr_type == PIIAttributeType.TIME:

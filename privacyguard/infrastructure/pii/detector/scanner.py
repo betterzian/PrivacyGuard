@@ -63,8 +63,7 @@ _PLACEHOLDER_BY_ATTR = {
     PIIAttributeType.PHONE: "<phone>",
     PIIAttributeType.EMAIL: "<email>",
     PIIAttributeType.ID_NUMBER: "<id>",
-    PIIAttributeType.CARD_NUMBER: "<card>",
-    PIIAttributeType.BANK_ACCOUNT: "<bank>",
+    PIIAttributeType.BANK_NUMBER: "<bank>",
     PIIAttributeType.PASSPORT_NUMBER: "<passport>",
     PIIAttributeType.DRIVER_LICENSE: "<driver_license>",
 }
@@ -78,9 +77,6 @@ _TIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("time_clock", re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")),
     ("time_zh_date", re.compile(r"\d{4}年\d{1,2}月\d{1,2}日")),
 )
-
-# 电话候选模式——带国际区号/括号格式，优先于通用数字提取。
-_PHONE_CANDIDATE_PATTERN = re.compile(r"\+?\d[\d ()\-]{6,}\d")
 
 # 通用数字片段：连续数字（允许内部单空格）。
 _DIGIT_FRAGMENT_PATTERN = re.compile(r"\d(?:[ ]?\d)*")
@@ -191,27 +187,34 @@ def build_clue_bundle(
     ocr_break_spans = _find_ocr_break_spans(stream)
     session_name_entries = tuple(entry for entry in session_entries if entry.attr_type == PIIAttributeType.NAME)
     local_name_entries = tuple(entry for entry in local_entries if entry.attr_type == PIIAttributeType.NAME)
-    session_hard_entries = tuple(entry for entry in session_entries if entry.attr_type != PIIAttributeType.NAME)
-    local_hard_entries = tuple(entry for entry in local_entries if entry.attr_type != PIIAttributeType.NAME)
-
+    session_non_structured_entries = tuple(
+        entry
+        for entry in session_entries
+        if entry.attr_type in {PIIAttributeType.ORGANIZATION, PIIAttributeType.ADDRESS}
+    )
+    local_non_structured_entries = tuple(
+        entry
+        for entry in local_entries
+        if entry.attr_type in {PIIAttributeType.ORGANIZATION, PIIAttributeType.ADDRESS}
+    )
     # ── Pass 1: hard clue 扫描与裁决 ──
     hard_clues = _resolve_hard_conflicts(
         [
-            *_scan_hard_patterns(ctx, stream, ignored_spans=ocr_break_spans),
             *_scan_dictionary_hard_clues(
                 ctx,
                 stream,
-                session_hard_entries,
+                session_non_structured_entries,
                 source_kind="session",
                 ignored_spans=ocr_break_spans,
             ),
             *_scan_dictionary_hard_clues(
                 ctx,
                 stream,
-                local_hard_entries,
+                local_non_structured_entries,
                 source_kind="local",
                 ignored_spans=ocr_break_spans,
             ),
+            *_scan_hard_patterns(ctx, stream, ignored_spans=ocr_break_spans),
         ]
     )
 
@@ -241,9 +244,9 @@ def build_clue_bundle(
 
 
 def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_spans: tuple[tuple[int, int], ...] = ()) -> list[Clue]:
-    """提取-验证流程：先排除 email/time，再提取数字/混合候选片段。
+    """提取 hard clue：先排除 email/time，再提取通用数字/混合候选片段。
 
-    scanner 只负责提取，不做 Luhn/手机/身份证等验证；验证由 stack 完成。
+    scanner 只负责提取，不做 phone/id/bank 等规则验证；验证与词典反查由 stack 完成。
     """
     text = stream.text
     clues: list[Clue] = []
@@ -298,34 +301,31 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
             )
             excluded_spans.append((match.start(), match.end()))
 
-    # ── 2b: 提取电话候选片段 ──
-    for match in _PHONE_CANDIDATE_PATTERN.finditer(text):
-        value = match.group(0).strip()
-        if not value:
-            continue
+    # ── 2b: 先提取字母数字混合片段，避免其内部数字被提前拆走。 ──
+    for match in _ALNUM_FRAGMENT_PATTERN.finditer(text):
+        value = match.group(0)
         if _overlaps_any(match.start(), match.end(), excluded_spans):
             continue
-        digits = re.sub(r"\D", "", value)
-        if len(digits) < 7:
+        digits = re.sub(r"[^0-9]", "", value)
+        if not digits:
             continue
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
                 family=ClueFamily.STRUCTURED,
                 role=ClueRole.VALUE,
-                attr_type=PIIAttributeType.NUMERIC,
+                attr_type=PIIAttributeType.ALNUM,
                 strength=ClaimStrength.HARD,
                 start=match.start(),
                 end=match.end(),
                 text=value,
-                priority=90,
-                source_kind="extract_phone_candidate",
+                priority=85,
+                source_kind="extract_alnum_fragment",
                 source_metadata={
                     "hard_source": ["regex"],
-                    "placeholder": ["<numeric>"],
-                    "fragment_type": ["NUM"],
+                    "placeholder": ["<alnum>"],
+                    "fragment_type": ["ALNUM"],
                     "pure_digits": [digits],
-                    "fragment_hint": ["phone_candidate"],
                 },
             )
         )
@@ -358,36 +358,6 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     "hard_source": ["regex"],
                     "placeholder": ["<numeric>"],
                     "fragment_type": ["NUM"],
-                    "pure_digits": [digits],
-                },
-            )
-        )
-        excluded_spans.append((match.start(), match.end()))
-
-    # ── 2c: 提取字母数字混合片段 ──
-    for match in _ALNUM_FRAGMENT_PATTERN.finditer(text):
-        value = match.group(0)
-        if _overlaps_any(match.start(), match.end(), excluded_spans):
-            continue
-        digits = re.sub(r"[^0-9]", "", value)
-        if not digits:
-            continue
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.STRUCTURED,
-                role=ClueRole.VALUE,
-                attr_type=PIIAttributeType.OTHER,
-                strength=ClaimStrength.HARD,
-                start=match.start(),
-                end=match.end(),
-                text=value,
-                priority=85,
-                source_kind="extract_alnum_fragment",
-                source_metadata={
-                    "hard_source": ["regex"],
-                    "placeholder": ["<other>"],
-                    "fragment_type": ["ALNUM"],
                     "pure_digits": [digits],
                 },
             )

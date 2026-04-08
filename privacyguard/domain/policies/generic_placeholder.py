@@ -13,8 +13,7 @@ from privacyguard.domain.enums import PIIAttributeType
 GENERIC_PLACEHOLDER_LABELS_ZH: dict[PIIAttributeType, str] = {
     PIIAttributeType.NAME: "姓名",
     PIIAttributeType.PHONE: "手机号",
-    PIIAttributeType.CARD_NUMBER: "卡号",
-    PIIAttributeType.BANK_ACCOUNT: "银行账号",
+    PIIAttributeType.BANK_NUMBER: "银行号",
     PIIAttributeType.PASSPORT_NUMBER: "护照号",
     PIIAttributeType.DRIVER_LICENSE: "驾驶证号",
     PIIAttributeType.EMAIL: "邮箱",
@@ -24,6 +23,7 @@ GENERIC_PLACEHOLDER_LABELS_ZH: dict[PIIAttributeType, str] = {
     PIIAttributeType.ORGANIZATION: "机构",
     PIIAttributeType.TIME: "时间",
     PIIAttributeType.NUMERIC: "数字",
+    PIIAttributeType.ALNUM: "字母数字",
     PIIAttributeType.TEXTUAL: "文字",
     PIIAttributeType.OTHER: "敏感信息",
 }
@@ -31,8 +31,7 @@ GENERIC_PLACEHOLDER_LABELS_ZH: dict[PIIAttributeType, str] = {
 GENERIC_PLACEHOLDER_LABELS_EN: dict[PIIAttributeType, str] = {
     PIIAttributeType.NAME: "name",
     PIIAttributeType.PHONE: "phone",
-    PIIAttributeType.CARD_NUMBER: "card",
-    PIIAttributeType.BANK_ACCOUNT: "account",
+    PIIAttributeType.BANK_NUMBER: "bank_number",
     PIIAttributeType.PASSPORT_NUMBER: "passport",
     PIIAttributeType.DRIVER_LICENSE: "license",
     PIIAttributeType.EMAIL: "email",
@@ -42,6 +41,7 @@ GENERIC_PLACEHOLDER_LABELS_EN: dict[PIIAttributeType, str] = {
     PIIAttributeType.ORGANIZATION: "organization",
     PIIAttributeType.TIME: "time",
     PIIAttributeType.NUMERIC: "number",
+    PIIAttributeType.ALNUM: "alnum",
     PIIAttributeType.TEXTUAL: "text",
     PIIAttributeType.OTHER: "sensitive",
 }

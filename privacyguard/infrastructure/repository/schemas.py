@@ -82,8 +82,7 @@ class AddressStats(RepositoryBaseModel):
 class SlotStats(RepositoryBaseModel):
     name: ExposureInfo = Field(default_factory=ExposureInfo)
     phone: ExposureInfo = Field(default_factory=ExposureInfo)
-    card_number: ExposureInfo = Field(default_factory=ExposureInfo)
-    bank_account: ExposureInfo = Field(default_factory=ExposureInfo)
+    bank_number: ExposureInfo = Field(default_factory=ExposureInfo)
     passport_number: ExposureInfo = Field(default_factory=ExposureInfo)
     driver_license: ExposureInfo = Field(default_factory=ExposureInfo)
     email: ExposureInfo = Field(default_factory=ExposureInfo)
@@ -266,8 +265,7 @@ class AddressSlotRuntime(RepositoryBaseModel):
 class PersonaSlots(RepositoryBaseModel):
     name: list[NameSlotStorage] | None = None
     phone: list[SharedSlotStorage] | None = None
-    card_number: list[SharedSlotStorage] | None = None
-    bank_account: list[SharedSlotStorage] | None = None
+    bank_number: list[SharedSlotStorage] | None = None
     passport_number: list[SharedSlotStorage] | None = None
     driver_license: list[SharedSlotStorage] | None = None
     email: list[SharedSlotStorage] | None = None
@@ -279,8 +277,7 @@ class PersonaSlots(RepositoryBaseModel):
     def _validate_non_empty(self) -> "PersonaSlots":
         _validate_slot_list(self.name, field_name="name")
         _validate_slot_list(self.phone, field_name="phone")
-        _validate_slot_list(self.card_number, field_name="card_number")
-        _validate_slot_list(self.bank_account, field_name="bank_account")
+        _validate_slot_list(self.bank_number, field_name="bank_number")
         _validate_slot_list(self.passport_number, field_name="passport_number")
         _validate_slot_list(self.driver_license, field_name="driver_license")
         _validate_slot_list(self.email, field_name="email")
@@ -291,8 +288,7 @@ class PersonaSlots(RepositoryBaseModel):
             (
                 self.name,
                 self.phone,
-                self.card_number,
-                self.bank_account,
+                self.bank_number,
                 self.passport_number,
                 self.driver_license,
                 self.email,
@@ -308,8 +304,7 @@ class PersonaSlots(RepositoryBaseModel):
 class PersonaSlotsRuntime(RepositoryBaseModel):
     name: list[NameSlotRuntime] | None = None
     phone: list[SharedSlotRuntime] | None = None
-    card_number: list[SharedSlotRuntime] | None = None
-    bank_account: list[SharedSlotRuntime] | None = None
+    bank_number: list[SharedSlotRuntime] | None = None
     passport_number: list[SharedSlotRuntime] | None = None
     driver_license: list[SharedSlotRuntime] | None = None
     email: list[SharedSlotRuntime] | None = None
@@ -410,8 +405,7 @@ def _project_slots_to_runtime(slots: PersonaSlots, alias_role: AliasRole) -> Per
     return PersonaSlotsRuntime(
         name=project_storage_slot_to_runtime(slots.name, alias_role) if slots.name else None,
         phone=project_storage_slot_to_runtime(slots.phone, alias_role) if slots.phone else None,
-        card_number=project_storage_slot_to_runtime(slots.card_number, alias_role) if slots.card_number else None,
-        bank_account=project_storage_slot_to_runtime(slots.bank_account, alias_role) if slots.bank_account else None,
+        bank_number=project_storage_slot_to_runtime(slots.bank_number, alias_role) if slots.bank_number else None,
         passport_number=project_storage_slot_to_runtime(slots.passport_number, alias_role) if slots.passport_number else None,
         driver_license=project_storage_slot_to_runtime(slots.driver_license, alias_role) if slots.driver_license else None,
         email=project_storage_slot_to_runtime(slots.email, alias_role) if slots.email else None,

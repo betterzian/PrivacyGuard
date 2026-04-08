@@ -189,6 +189,12 @@ class DictionaryEntry:
     metadata: dict[str, list[str]] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class StructuredLookupIndex:
+    numeric_entries: dict[str, DictionaryEntry] = field(default_factory=dict)
+    alnum_entries: dict[str, DictionaryEntry] = field(default_factory=dict)
+
+
 @dataclass(frozen=True, slots=True)
 class OCRSceneBlock:
     block: OCRTextBlock

@@ -48,19 +48,19 @@ class PIIAttributeType(str, Enum):
     """定义常见 PII 属性类别。
 
     ``OTHER`` 为兜底：凡无法明确归入其余任一细分类（姓名、电话、地址等语义类，或
-    TIME / NUMERIC / TEXTUAL 等形态类）的，均应使用 ``OTHER``。
+    TIME / NUMERIC / ALNUM / TEXTUAL 等形态类）的，均应使用 ``OTHER``。
 
     按字符串形态粗分时：
     - 时钟时间片段（如 ``14:07``、``08:09:10``）为 ``TIME``
     - 仅数字与少量符号为 ``NUMERIC``
+    - 字母与数字并存为 ``ALNUM``
     - 仅文字与少量符号为 ``TEXTUAL``
-    - 其余（字母与数字并存、仅符号、空白、空串等）为 ``OTHER``
+    - 其余（仅符号、空白、空串等）为 ``OTHER``
     """
 
     NAME = "name"
     PHONE = "phone"
-    CARD_NUMBER = "card_number"
-    BANK_ACCOUNT = "bank_account"
+    BANK_NUMBER = "bank_number"
     PASSPORT_NUMBER = "passport_number"
     DRIVER_LICENSE = "driver_license"
     EMAIL = "email"
@@ -70,5 +70,6 @@ class PIIAttributeType(str, Enum):
     ORGANIZATION = "organization"
     TIME = "time"
     NUMERIC = "numeric"
+    ALNUM = "alnum"
     TEXTUAL = "textual"
     OTHER = "other"

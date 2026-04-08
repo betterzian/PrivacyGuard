@@ -190,8 +190,7 @@ class TinyPolicyRuntime:
         self.persona_attr_types = {
             PIIAttributeType.NAME,
             PIIAttributeType.PHONE,
-            PIIAttributeType.CARD_NUMBER,
-            PIIAttributeType.BANK_ACCOUNT,
+            PIIAttributeType.BANK_NUMBER,
             PIIAttributeType.PASSPORT_NUMBER,
             PIIAttributeType.DRIVER_LICENSE,
             PIIAttributeType.ADDRESS,
@@ -321,11 +320,11 @@ class TinyPolicyRuntime:
         generic_score += min(0.16, history_attr_exposure_count * 0.025)
         if attr_type in {
             PIIAttributeType.ID_NUMBER,
-            PIIAttributeType.CARD_NUMBER,
-            PIIAttributeType.BANK_ACCOUNT,
+            PIIAttributeType.BANK_NUMBER,
             PIIAttributeType.PASSPORT_NUMBER,
             PIIAttributeType.DRIVER_LICENSE,
             PIIAttributeType.ORGANIZATION,
+            PIIAttributeType.ALNUM,
             PIIAttributeType.OTHER,
         }:
             generic_score += 0.12

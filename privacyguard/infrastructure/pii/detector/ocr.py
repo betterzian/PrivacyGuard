@@ -269,46 +269,48 @@ def _find_candidate_blocks(
     *,
     median_h: float,
 ) -> tuple[OCRSceneBlock, ...]:
-    """查找 label 右侧或下方的候选 block。阈值按 median_h 归一化。"""
-    norm = max(median_h, 10.0)
-    # 同行右侧水平间距阈值：median_h * 12 倍。
-    h_gap_first = norm * 12.0
-    # 同行后续 block 间距阈值：median_h * 4.5 倍。
-    h_gap_follow = norm * 4.5
-    # 下方行垂直距离阈值：median_h * 11 倍。
-    v_gap_max = norm * 11.0
-    same_line = scene.line_to_blocks.get(label_block.line_index, ())
-    right_blocks = [block for block in same_line if block.order_index > label_block.order_index and block.block_id not in label_block_ids]
-    if right_blocks:
-        first = right_blocks[0]
-        if _horizontal_gap(label_block, first) <= h_gap_first:
-            collected = [first]
-            for follower in right_blocks[1:]:
-                if follower.block_id in label_block_ids:
-                    break
-                if _horizontal_gap(collected[-1], follower) > h_gap_follow:
-                    break
-                collected.append(follower)
-            return tuple(collected)
-    for line_index in range(label_block.line_index + 1, label_block.line_index + 3):
-        line_blocks = scene.line_to_blocks.get(line_index, ())
-        ranked = sorted(
-            [block for block in line_blocks if block.block_id not in label_block_ids],
-            key=lambda block: (_vertical_score(label_block, block), block.order_index),
-        )
-        if not ranked:
+    """宽松空间搜索：不依赖预计算 chain，直接在 scene 中按几何邻近度查找值 block。"""
+    lb = label_block.block.bbox
+    if lb is None:
+        return ()
+    label_right = float(lb.x + lb.width)
+    label_bottom = float(lb.y + lb.height)
+    label_cy = float(lb.y) + float(lb.height) / 2
+    label_x = float(lb.x)
+
+    # 搜索半径（以 median_h 为单位）。
+    _MAX_H_RIGHT = 8.0
+    _MAX_V_DOWN = 3.0
+
+    scored: list[tuple[float, OCRSceneBlock]] = []
+    for block in scene.blocks:
+        if block.block_id in label_block_ids or block.block_id == label_block.block_id:
             continue
-        candidate = ranked[0]
-        if _vertical_score(label_block, candidate) > v_gap_max:
+        bb = block.block.bbox
+        if bb is None or not block.clean_text.strip():
             continue
-        collected = [candidate]
-        followers = [block for block in line_blocks if block.order_index > candidate.order_index and block.block_id not in label_block_ids]
-        for follower in followers:
-            if _horizontal_gap(collected[-1], follower) > h_gap_follow:
-                break
-            collected.append(follower)
-        return tuple(collected)
-    return ()
+        block_cy = float(bb.y) + float(bb.height) / 2
+
+        # 同行右侧：y 中心差 < median_h 且 x 在 label 右边界右侧。
+        if abs(block_cy - label_cy) < median_h and float(bb.x) >= label_right:
+            h_gap = float(bb.x) - label_right
+            if h_gap <= _MAX_H_RIGHT * median_h:
+                score = 2.0 - h_gap / (_MAX_H_RIGHT * median_h)
+                scored.append((score, block))
+                continue
+
+        # 下方：y 起始在 label 底边附近或以下。
+        if float(bb.y) >= label_bottom - 0.3 * median_h:
+            v_gap = float(bb.y) - label_bottom
+            if 0 <= v_gap <= _MAX_V_DOWN * median_h:
+                x_offset = abs(float(bb.x) - label_x)
+                score = 1.0 - v_gap / (_MAX_V_DOWN * median_h) - x_offset / (_MAX_H_RIGHT * median_h) * 0.3
+                scored.append((score, block))
+
+    if not scored:
+        return ()
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return (scored[0][1],)
 
 
 def _remap_candidate(candidate: CandidateDraft, prepared: PreparedOCRContext) -> CandidateDraft:

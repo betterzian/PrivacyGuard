@@ -102,3 +102,19 @@ def test_address_same_entity_accepts_local_admin_cross_field_and_detail_subseque
     )
 
     assert same_entity(left, right) is True
+
+
+def test_bank_number_canonical_keeps_digits_only():
+    normalized = normalize_pii(PIIAttributeType.BANK_NUMBER, "6222 0000 1234 5678")
+
+    assert normalized.raw_text == "6222 0000 1234 5678"
+    assert normalized.canonical == "6222000012345678"
+    assert normalized.match_terms == ("6222000012345678",)
+
+
+def test_alnum_canonical_keeps_uppercase_letters_and_digits_only():
+    normalized = normalize_pii(PIIAttributeType.ALNUM, "ab-12 cd")
+
+    assert normalized.raw_text == "ab-12 cd"
+    assert normalized.canonical == "AB12CD"
+    assert normalized.match_terms == ("AB12CD",)

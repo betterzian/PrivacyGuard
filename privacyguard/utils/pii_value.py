@@ -293,13 +293,12 @@ _EN_US_STATE_PATTERN = re.compile(
 _NAME_SPACE_CHARS = set(" \t\r\n\f\v\u3000")
 _NAME_MATCH_IGNORABLE = _NAME_SPACE_CHARS | set("·•・0123456789０１２３４５６７８９")
 _PHONE_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：+＋")
-_CARD_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
-_BANK_ACCOUNT_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
+_BANK_NUMBER_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
 _PASSPORT_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
 _DRIVER_LICENSE_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
 _ID_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•()（）[]【】/\\|:：")
 _EMAIL_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000")
-_OTHER_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•/\\|:：")
+_ALNUM_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000-－—_.,，。·•/\\|:：")
 _TIME_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000")
 _ADDRESS_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000,，;；:：、()（）.-/#")
 _LOCATION_MATCH_IGNORABLE = set(" \t\r\n\f\v\u3000,，;；:：、()（）")
@@ -388,12 +387,13 @@ class NameComponents:
 
 
 def classify_content_shape_attr(value: str | None) -> PIIAttributeType:
-    """按内容形态粗分为 TIME / NUMERIC / TEXTUAL；其余一律为 OTHER（兜底）。
+    """按内容形态粗分为 TIME / NUMERIC / ALNUM / TEXTUAL；其余一律为 OTHER（兜底）。
 
-    ``OTHER`` 表示未被 TIME / NUMERIC / TEXTUAL 规则容纳的内容：混合、仅符号、空白、空串等。
+    ``OTHER`` 表示未被 TIME / NUMERIC / ALNUM / TEXTUAL 规则容纳的内容：仅符号、空白、空串等。
 
     - 时钟时间片段（如 ``14:07``、``08:09:10``）：TIME
     - 仅数字与少量符号（无 Unicode 字母）：NUMERIC
+    - 字母与数字并存：ALNUM
     - 仅文字与少量符号（无数字；字母含拉丁与中日韩等）：TEXTUAL
     - 其它任意情况：OTHER
     """
@@ -407,7 +407,7 @@ def classify_content_shape_attr(value: str | None) -> PIIAttributeType:
     has_letter = any(char.isalpha() for char in text)
     has_digit = any(char.isdigit() for char in text)
     if has_letter and has_digit:
-        return PIIAttributeType.OTHER
+        return PIIAttributeType.ALNUM
     if has_digit and not has_letter:
         return PIIAttributeType.NUMERIC
     if has_letter and not has_digit:
@@ -1307,10 +1307,8 @@ def _is_ignorable_match_char(attr_type: PIIAttributeType, char: str) -> bool:
         return char in _NAME_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.PHONE:
         return char in _PHONE_MATCH_IGNORABLE
-    if attr_type == PIIAttributeType.CARD_NUMBER:
-        return char in _CARD_MATCH_IGNORABLE
-    if attr_type == PIIAttributeType.BANK_ACCOUNT:
-        return char in _BANK_ACCOUNT_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.BANK_NUMBER:
+        return char in _BANK_NUMBER_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.PASSPORT_NUMBER:
         return char in _PASSPORT_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.DRIVER_LICENSE:
@@ -1321,10 +1319,12 @@ def _is_ignorable_match_char(attr_type: PIIAttributeType, char: str) -> bool:
         return char in _EMAIL_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.TIME:
         return char in _TIME_MATCH_IGNORABLE
-    if attr_type == PIIAttributeType.OTHER:
-        return char in _OTHER_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.ALNUM:
+        return char in _ALNUM_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.NUMERIC:
-        return char in _OTHER_MATCH_IGNORABLE
+        return char in _ALNUM_MATCH_IGNORABLE
+    if attr_type == PIIAttributeType.OTHER:
+        return char in _ALNUM_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.TEXTUAL:
         return char in _ORG_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ADDRESS:
@@ -1352,7 +1352,7 @@ def _normalize_match_char(attr_type: PIIAttributeType, char: str) -> str:
 
 
 def _normalize_mask_char(attr_type: PIIAttributeType, char: str) -> str:
-    if attr_type in {PIIAttributeType.PHONE, PIIAttributeType.CARD_NUMBER, PIIAttributeType.BANK_ACCOUNT}:
+    if attr_type in {PIIAttributeType.PHONE, PIIAttributeType.BANK_NUMBER}:
         if char in _MASK_EQUIVALENTS_WITH_X:
             return "*"
     if attr_type in {

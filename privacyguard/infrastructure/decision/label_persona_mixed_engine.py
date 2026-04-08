@@ -26,8 +26,7 @@ class LabelPersonaMixedDecisionEngine:
         self.persona_attr_types = {
             PIIAttributeType.NAME,
             PIIAttributeType.PHONE,
-            PIIAttributeType.CARD_NUMBER,
-            PIIAttributeType.BANK_ACCOUNT,
+            PIIAttributeType.BANK_NUMBER,
             PIIAttributeType.PASSPORT_NUMBER,
             PIIAttributeType.DRIVER_LICENSE,
             PIIAttributeType.ADDRESS,

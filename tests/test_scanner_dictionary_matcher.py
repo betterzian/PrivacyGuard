@@ -117,11 +117,12 @@ def test_ascii_literal_keeps_word_boundary_behavior_for_name_dictionary_clues():
 
 
 def test_prompt_stream_builds_single_layer_units_for_ascii_digit_cjk_and_tokens():
-    stream = build_prompt_stream(f"12345678 apples 张三 {_OCR_INLINE_GAP_TOKEN} {OCR_BREAK}")
+    stream = build_prompt_stream(f"12345678 apples h123 12345678a 张三 {_OCR_INLINE_GAP_TOKEN} {OCR_BREAK}")
 
     assert len(stream.char_to_unit) == len(stream.text)
     assert [unit.text for unit in stream.units if unit.kind == "digit_run"] == ["12345678"]
     assert [unit.text for unit in stream.units if unit.kind == "ascii_word"] == ["apples"]
+    assert [unit.text for unit in stream.units if unit.kind == "alnum_run"] == ["h123", "12345678a"]
     assert [unit.text for unit in stream.units if unit.kind == "cjk_char"] == ["张", "三"]
     assert [unit.text for unit in stream.units if unit.kind == "inline_gap"] == [_OCR_INLINE_GAP_TOKEN]
     assert [unit.text for unit in stream.units if unit.kind == "ocr_break"] == [OCR_BREAK]
@@ -130,6 +131,20 @@ def test_prompt_stream_builds_single_layer_units_for_ascii_digit_cjk_and_tokens(
     ocr_break_start = stream.text.index(OCR_BREAK)
     assert len(set(stream.char_to_unit[inline_start : inline_start + len(_OCR_INLINE_GAP_TOKEN)])) == 1
     assert len(set(stream.char_to_unit[ocr_break_start : ocr_break_start + len(OCR_BREAK)])) == 1
+
+
+def test_hard_pattern_scan_prefers_alnum_fragment_over_nested_digit_fragment():
+    stream = build_prompt_stream("h123 12345678a")
+
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [(clue.source_kind, clue.text, clue.attr_type) for clue in clues] == [
+        ("extract_alnum_fragment", "h123", PIIAttributeType.ALNUM),
+        ("extract_alnum_fragment", "12345678a", PIIAttributeType.ALNUM),
+    ]
 
 
 def test_non_ascii_literal_still_matches_substring():
@@ -434,3 +449,4 @@ def test_local_dictionary_matcher_cache_rebuilds_when_content_changes():
     assert matcher1 is not matcher2
     assert info.misses == 2
     assert info.hits == 0
+

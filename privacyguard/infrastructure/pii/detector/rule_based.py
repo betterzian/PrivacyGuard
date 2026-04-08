@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from privacyguard.application.services.resolver_service import CandidateResolverService
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
@@ -10,7 +11,7 @@ from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.models.ocr import OCRTextBlock
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, DictionaryEntry
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, DictionaryEntry, StructuredLookupIndex
 from privacyguard.infrastructure.pii.detector.ocr import apply_ocr_geometry
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
@@ -51,6 +52,10 @@ class RuleBasedPIIDetector:
             turn_id=turn_id,
         )
         session_entries = self._load_session_dictionary(session_id=session_id, turn_id=turn_id)
+        structured_lookup_index = self._build_structured_lookup_index(
+            session_entries=session_entries,
+            local_entries=self.local_entries,
+        )
         parser = StreamParser(locale_profile=self.locale_profile, ctx=ctx)
         candidates: list[PIICandidate] = []
 
@@ -62,7 +67,7 @@ class RuleBasedPIIDetector:
             local_entries=self.local_entries,
             locale_profile=self.locale_profile,
         )
-        prompt_result = parser.parse(prompt_stream, prompt_bundle)
+        prompt_result = parser.parse(prompt_stream, prompt_bundle, structured_lookup_index=structured_lookup_index)
         candidates.extend(self._to_pii_candidates(prompt_result.candidates))
 
         prepared_ocr = build_ocr_stream(ocr_blocks)
@@ -74,7 +79,7 @@ class RuleBasedPIIDetector:
             local_entries=self.local_entries,
             locale_profile=self.locale_profile,
         )
-        ocr_result = parser.parse(ocr_stream, ocr_bundle)
+        ocr_result = parser.parse(ocr_stream, ocr_bundle, structured_lookup_index=structured_lookup_index)
         ocr_drafts = apply_ocr_geometry(
             prepared=prepared_ocr,
             bundle=ocr_bundle,
@@ -115,8 +120,7 @@ class RuleBasedPIIDetector:
                 if slot.middle:
                     entries.append(self._name_entry(component="middle", value=slot.middle.value, persona_id=persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.PHONE, slots.phone, persona.persona_id))
-            entries.extend(self._scalar_slot_entries(PIIAttributeType.CARD_NUMBER, slots.card_number, persona.persona_id))
-            entries.extend(self._scalar_slot_entries(PIIAttributeType.BANK_ACCOUNT, slots.bank_account, persona.persona_id))
+            entries.extend(self._scalar_slot_entries(PIIAttributeType.BANK_NUMBER, slots.bank_number, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.PASSPORT_NUMBER, slots.passport_number, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.DRIVER_LICENSE, slots.driver_license, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.EMAIL, slots.email, persona.persona_id))
@@ -161,7 +165,7 @@ class RuleBasedPIIDetector:
             entries.append(
                 self._dictionary_entry(
                     attr_type=record.attr_type,
-                    match_terms=normalized.match_terms or ((source_text,) if source_text else ()),
+                    match_terms=self._structured_match_terms(record.source_text, normalized.match_terms or ((source_text,) if source_text else ())),
                     matched_by="dictionary_session",
                     metadata=metadata,
                 )
@@ -190,12 +194,64 @@ class RuleBasedPIIDetector:
             entries.append(
                 self._dictionary_entry(
                     attr_type=attr_type,
-                    match_terms=normalized.match_terms or ((normalized_primary_text(normalized),) if normalized_primary_text(normalized) else ()),
+                    match_terms=self._structured_match_terms(
+                        slot.value,
+                        normalized.match_terms or ((normalized_primary_text(normalized),) if normalized_primary_text(normalized) else ()),
+                    ),
                     matched_by="dictionary_local",
                     metadata={"local_entity_ids": [persona_id]},
                 )
             )
         return entries
+
+    def _build_structured_lookup_index(
+        self,
+        *,
+        session_entries: tuple[DictionaryEntry, ...],
+        local_entries: tuple[DictionaryEntry, ...],
+    ) -> StructuredLookupIndex:
+        index = StructuredLookupIndex()
+        for entry in (*session_entries, *local_entries):
+            if entry.attr_type in {
+                PIIAttributeType.NAME,
+                PIIAttributeType.EMAIL,
+                PIIAttributeType.ADDRESS,
+                PIIAttributeType.ORGANIZATION,
+                PIIAttributeType.TIME,
+            }:
+                continue
+            for term in entry.match_terms:
+                text = str(term or "").strip()
+                if not text:
+                    continue
+                has_letter = any(char.isalpha() for char in text)
+                has_digit = any(char.isdigit() for char in text)
+                if has_digit and not has_letter:
+                    key = re.sub(r"\D", "", text)
+                    if key and key not in index.numeric_entries:
+                        index.numeric_entries[key] = entry
+                    continue
+                if has_digit and has_letter:
+                    key = re.sub(r"[^0-9A-Za-z]", "", text).upper()
+                    if key and key not in index.alnum_entries:
+                        index.alnum_entries[key] = entry
+        return index
+
+    def _structured_match_terms(self, raw_value: str, normalized_terms: tuple[str, ...]) -> tuple[str, ...]:
+        terms = [term for term in normalized_terms if str(term).strip()]
+        raw_text = str(raw_value or "").strip()
+        if raw_text:
+            has_letter = any(char.isalpha() for char in raw_text)
+            has_digit = any(char.isdigit() for char in raw_text)
+            if has_digit and has_letter:
+                alnum_text = re.sub(r"[^0-9A-Za-z]", "", raw_text).upper()
+                if alnum_text:
+                    terms.append(alnum_text)
+            elif has_digit:
+                digits = re.sub(r"\D", "", raw_text)
+                if digits:
+                    terms.append(digits)
+        return tuple(dict.fromkeys(terms))
 
     def _to_pii_candidates(self, drafts: list[CandidateDraft]) -> list[PIICandidate]:
         output: list[PIICandidate] = []
