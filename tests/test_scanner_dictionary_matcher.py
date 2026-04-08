@@ -70,7 +70,6 @@ def test_local_dictionary_hard_clue_fields_match_legacy_contract():
     assert clue.strength == ClaimStrength.HARD
     assert clue.attr_type == PIIAttributeType.EMAIL
     assert clue.text == "Jordan Demo"
-    assert clue.priority == 290
     assert clue.source_kind == "dictionary_local"
     assert clue.source_metadata["hard_source"] == ["local"]
     assert clue.source_metadata["local_entity_ids"] == ["persona-1"]
@@ -95,7 +94,6 @@ def test_session_dictionary_hard_clue_fields_match_legacy_contract():
     clue = clues[0]
     assert clue.attr_type == PIIAttributeType.EMAIL
     assert clue.text == "demo@example.com"
-    assert clue.priority == 300
     assert clue.source_kind == "dictionary_session"
     assert clue.source_metadata["hard_source"] == ["session"]
     assert clue.source_metadata["session_turn_ids"] == ["3"]

@@ -49,7 +49,7 @@ def load_label_specs() -> tuple[LabelSpec, ...]:
     if not isinstance(payload, list):
         raise ValueError("labels.json 格式错误：根节点应为数组。")
     items: list[LabelSpec] = []
-    for entry in payload:
+    for index, entry in enumerate(payload):
         if not isinstance(entry, dict):
             raise ValueError("labels.json 格式错误：条目应为对象。")
         keyword = str(entry.get("keyword", "")).strip()
@@ -59,7 +59,7 @@ def load_label_specs() -> tuple[LabelSpec, ...]:
             LabelSpec(
                 keyword=keyword,
                 attr_type=PIIAttributeType(str(entry.get("attr_type", "")).strip()),
-                priority=int(entry.get("priority", 0)),
+                order_index=index,
                 source_kind=str(entry.get("source_kind", "")).strip(),
                 ocr_source_kind=str(entry.get("ocr_source_kind", "")).strip(),
                 ascii_boundary=bool(entry.get("ascii_boundary", False)),

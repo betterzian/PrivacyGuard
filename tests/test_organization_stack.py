@@ -18,7 +18,6 @@ def _clue(
     text: str,
     *,
     source_kind: str,
-    priority: int = 240,
     attr_type: PIIAttributeType | None = PIIAttributeType.ORGANIZATION,
     hard_source: str | None = None,
     strength: ClaimStrength = ClaimStrength.SOFT,
@@ -35,7 +34,6 @@ def _clue(
         start=start,
         end=end,
         text=text,
-        priority=priority,
         source_kind=source_kind,
         source_metadata=md,
     )
@@ -84,7 +82,6 @@ def test_label_seed_skips_separators_and_starts_from_first_value_char():
             len(label),
             label,
             source_kind="context_organization_field",
-            priority=259,
         ),
     )
 
@@ -129,7 +126,6 @@ def test_label_seed_prefers_suffix_within_ten_non_space_units():
             label_start + len(label),
             label,
             source_kind="context_organization_field",
-            priority=256,
         ),
         _clue(
             "suffix-1",
@@ -158,7 +154,6 @@ def test_label_seed_caps_zh_length_without_suffix():
             len(label),
             label,
             source_kind="context_organization_field",
-            priority=259,
         ),
     )
 
@@ -179,7 +174,6 @@ def test_label_seed_caps_en_length_without_suffix():
             len(label),
             label,
             source_kind="context_organization_field",
-            priority=256,
         ),
     )
 
@@ -259,7 +253,6 @@ def test_hard_seed_submits_directly():
             len(text),
             text,
             source_kind="dictionary_local",
-            priority=290,
             hard_source="local",
             strength=ClaimStrength.HARD,
         ),
@@ -286,7 +279,6 @@ def test_parser_label_path_matches_between_weak_and_strong():
             label_start + len(label),
             label,
             source_kind="context_organization_field",
-            priority=256,
         ),
         _clue(
             "suffix-1",

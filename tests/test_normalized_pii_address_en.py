@@ -35,7 +35,7 @@ def test_english_address_normalization_keeps_full_hierarchy_components():
     }
     assert normalized.canonical == (
         "province=ca|city=sandiego|road=harborave|compound=northplaza|"
-        "unit=apt7b|floor=floor12|room=room1203|postal_code=92101"
+        "unit=apt7b|floor=floor12|room=room1203|postal_code=92101|number=[7B,12,1203]"
     )
     assert normalized.match_terms == ("CA", "San Diego", "Harbor Ave", "North Plaza")
     assert normalized.identity["address_part"] == "ca|sandiego|harborave|northplaza"
@@ -105,7 +105,7 @@ def test_ocr_address_component_trace_maps_alias_fields_and_prefers_longest_value
     }
     assert normalized.canonical == (
         "province=ca|city=sandiego|road=harboravenue|compound=northplaza|"
-        "unit=7b|floor=12|room=1203"
+        "unit=7b|floor=12|room=1203|number=[7B,12,1203]"
     )
     assert normalized.match_terms == ("CA", "San Diego", "Harbor Avenue", "North Plaza")
     assert normalized.identity["details_part"] == "7-12-1203"

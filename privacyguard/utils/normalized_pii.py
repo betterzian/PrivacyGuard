@@ -38,6 +38,7 @@ _ADDRESS_COMPONENT_ALIASES = {"street": "road", "state": "province"}
 _PUNCT_TRIM_RE = re.compile(r"[\s\-_.,，。:：;；/\\|()（）【】\[\]#]+")
 _DIGIT_RE = re.compile(r"\d+")
 _NAME_COMPONENT_RE = re.compile(r"^[A-Za-z][A-Za-z .,'\-]{0,80}$")
+_ZH_NUMERAL_CHARS = set("零〇一二三四五六七八九十百千两")
 
 
 def normalize_pii(
@@ -188,10 +189,15 @@ def _normalize_address(
         identity[key] = normalized_value
         if key in _ADDRESS_MATCH_KEYS:
             address_part_values.append(normalized_value)
+    numbers = _address_numbers(raw_text=raw_text, metadata=metadata, normalized_components=normalized_components)
     details_tokens = _address_detail_tokens(normalized_components)
     if address_part_values:
         identity["address_part"] = "|".join(address_part_values)
+    if numbers:
+        identity["number"] = ",".join(numbers)
+        canonical_parts.append(f"number=[{','.join(numbers)}]")
     if details_tokens:
+        # 仍保留 details_part 作为展示/调试信息，但同实体判定不再依赖它。
         identity["details_part"] = "-".join(details_tokens)
     match_terms = tuple(
         term
@@ -206,6 +212,7 @@ def _normalize_address(
         components=normalized_components,
         match_terms=_dedupe_terms(match_terms),
         identity=identity,
+        numbers=tuple(numbers),
     )
 
 
@@ -268,13 +275,32 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
     for key in ("road", "compound"):
         if not _shared_component_subset(left.identity, right.identity, key):
             return False
-    left_details = left.identity.get("details_part", "")
-    right_details = right.identity.get("details_part", "")
-    if left_details and right_details and not _is_detail_subsequence(left_details, right_details):
+    if not _numbers_match(left.numbers, right.numbers):
         return False
     if not left.identity.get("address_part") or not right.identity.get("address_part"):
         return False
     return True
+
+
+def _numbers_match(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
+    """号码序列判定：从末尾往前做逆序一致的子序列匹配，且至少命中 2 个 token。"""
+    if not left or not right:
+        return False
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    # 逆序对齐：shorter[::-1] 必须是 longer[::-1] 的子序列。
+    s = list(reversed(shorter))
+    l = list(reversed(longer))
+    pointer = 0
+    matched = 0
+    for token in l:
+        if pointer < len(s) and token == s[pointer]:
+            matched += 1
+            pointer += 1
+            if pointer == len(s):
+                break
+    if pointer != len(s):
+        return False
+    return matched >= 2
 
 
 def _shared_component_subset(left: Mapping[str, str], right: Mapping[str, str], key: str) -> bool:
@@ -310,6 +336,98 @@ def _is_detail_subsequence(left: str, right: str) -> bool:
         if pointer < len(shorter) and token == shorter[pointer]:
             pointer += 1
     return pointer == len(shorter)
+
+
+def _address_numbers(
+    *,
+    raw_text: str,
+    metadata: Mapping[str, object] | None,
+    normalized_components: Mapping[str, str],
+) -> list[str]:
+    """按地址从左到右出现顺序提取号码序列。"""
+    del raw_text
+    tokens: list[str] = []
+    # 优先使用 addressstack 的 trace（天然保持组件生成顺序）。
+    if metadata:
+        trace = metadata.get("address_component_trace")
+        if isinstance(trace, list):
+            for item in trace:
+                if not isinstance(item, str) or ":" not in item:
+                    continue
+                comp_type, value = item.split(":", 1)
+                comp_type = comp_type.strip()
+                value = value.strip()
+                if comp_type in {"building", "unit", "floor", "room", "number"}:
+                    tokens.extend(_extract_number_tokens(value))
+            return [t for t in tokens if t]
+    # fallback：无 trace 时按 detail keys 顺序提取（仅用于 components 直传场景）。
+    for key in _ADDRESS_DETAIL_KEYS:
+        if value := str(normalized_components.get(key) or "").strip():
+            tokens.extend(_extract_number_tokens(value))
+    return [t for t in tokens if t]
+
+
+def _extract_number_tokens(value: str) -> list[str]:
+    """从 value 中抽取数字或字母 token。"""
+    text = str(value or "").strip()
+    if not text:
+        return []
+    # 若包含中文数字且不含阿拉伯数字，尝试整体转为阿拉伯数字。
+    if any(ch in _ZH_NUMERAL_CHARS for ch in text) and not any(ch.isdigit() for ch in text):
+        parsed = _parse_zh_numeral(text)
+        if parsed is not None:
+            return [str(parsed)]
+    # 其它情况：抽取连续字母/数字段（如 “10A”、“B座”->“B”）。
+    raw_tokens = [m.group(0) for m in re.finditer(r"[A-Za-z0-9]+", text)]
+    if not raw_tokens:
+        return []
+    # 过滤：优先保留含数字的 token（7B/1203/10），丢弃 “Apt/Floor/Room” 这类纯字母描述词。
+    keep: list[str] = [t for t in raw_tokens if any(ch.isdigit() for ch in t)]
+    if keep:
+        return keep
+    # 若没有数字，允许单字母（如 “A座”->“A”），避免把长英文单词误当作号码。
+    return [t for t in raw_tokens if len(t) == 1 and t.isalpha()]
+
+
+def _parse_zh_numeral(text: str) -> int | None:
+    """把常见中文数字（<=9999）转成 int。只处理纯数字表达，失败返回 None。"""
+    s = str(text or "").strip()
+    if not s:
+        return None
+    s = s.replace("〇", "零")
+    if any(ch not in _ZH_NUMERAL_CHARS for ch in s):
+        return None
+    digit_map = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    unit_map = {"十": 10, "百": 100, "千": 1000}
+    total = 0
+    num = 0
+    unit = 1
+    # 从右向左解析（适配“二百零一”“十二”“十”等）。
+    for ch in reversed(s):
+        if ch in digit_map:
+            num += digit_map[ch] * unit
+        elif ch in unit_map:
+            u = unit_map[ch]
+            if u > unit:
+                unit = u
+            else:
+                # 不规范写法，放弃。
+                return None
+            if num == 0:
+                # “十/百/千”前省略“一”
+                num = 1 * unit
+                unit = 1
+                total += num
+                num = 0
+                unit = 1
+        else:
+            return None
+    total += num
+    if total <= 0:
+        return None
+    if total > 9999:
+        return None
+    return total
 
 
 def _name_components(

@@ -44,7 +44,6 @@ def _clue(
         start=start,
         end=end,
         text=text,
-        priority=300,
         source_kind="test",
         component_type=component_type,
         unit_start=0,
@@ -113,3 +112,19 @@ def test_digit_tail_extends_after_last_component():
     addr = next((c for c in candidates if c.attr_type.value == "address"), None)
     assert addr is not None
     assert "79" in addr.text
+
+
+def test_same_tier_value_replaces_pending_and_flushes_previous():
+    # 连续出现同层级 VALUE 时，旧 VALUE 应立即落成 component（自动补 key），然后新 VALUE 进入 pending。
+    # 例：上海(CITY value) + 南京(CITY value) + 路(ROAD key) → 候选应包含“上海南京路”。
+    text = "收货地址：上海南京路"
+    clues = (
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("v1", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=7, text="上海", component_type=AddressComponentType.CITY),
+        _clue("v2", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=7, end=9, text="南京", component_type=AddressComponentType.CITY),
+        _clue("k1", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=9, end=10, text="路", component_type=AddressComponentType.ROAD),
+    )
+    candidates = _detect_candidates(text, clues)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+    assert addr is not None
+    assert "上海南京路" in addr.text

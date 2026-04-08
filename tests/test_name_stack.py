@@ -18,7 +18,6 @@ def _clue(
     text: str,
     *,
     source_kind: str,
-    priority: int = 220,
     component_hint: NameComponentHint | None = None,
     attr_type: PIIAttributeType | None = PIIAttributeType.NAME,
     hard_source: str | None = None,
@@ -39,7 +38,6 @@ def _clue(
         start=start,
         end=end,
         text=text,
-        priority=priority,
         source_kind=source_kind,
         source_metadata=md,
     )
@@ -66,7 +64,6 @@ def test_label_seed_skips_separators_and_captures_value_chars():
             2,
             "姓名",
             source_kind="context_name_field",
-            priority=247,
             component_hint=NameComponentHint.FULL,
         ),
     )
@@ -87,7 +84,6 @@ def test_start_seed_uses_first_character_after_separator():
             2,
             "我是",
             source_kind="name_start",
-            priority=230,
         ),
     )
 
@@ -107,7 +103,6 @@ def test_zh_given_name_seed_stops_at_self():
             3,
             "汉文",
             source_kind="zh_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
     )
@@ -128,7 +123,6 @@ def test_en_given_name_seed_can_expand_left_one_plain_word():
             10,
             "Marie",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
     )
@@ -149,7 +143,6 @@ def test_en_given_name_seed_can_chain_right_given_names():
             3,
             "Ann",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
         _clue(
@@ -159,7 +152,6 @@ def test_en_given_name_seed_can_chain_right_given_names():
             12,
             "Marie",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
         _clue(
@@ -169,7 +161,6 @@ def test_en_given_name_seed_can_chain_right_given_names():
             19,
             "Claire",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
     )
@@ -190,7 +181,6 @@ def test_en_given_name_seed_stops_when_gap_has_two_words():
             3,
             "Ann",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
         _clue(
@@ -200,7 +190,6 @@ def test_en_given_name_seed_stops_when_gap_has_two_words():
             15,
             "Marie",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
     )
@@ -221,7 +210,6 @@ def test_en_family_name_seed_switches_to_given_chain():
             3,
             "Doe",
             source_kind="en_family_name",
-            priority=220,
             component_hint=NameComponentHint.FAMILY,
         ),
         _clue(
@@ -231,7 +219,6 @@ def test_en_family_name_seed_switches_to_given_chain():
             8,
             "John",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
         _clue(
@@ -241,7 +228,6 @@ def test_en_family_name_seed_switches_to_given_chain():
             13,
             "Paul",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
     )
@@ -262,7 +248,6 @@ def test_label_seed_switches_to_given_chain_in_english():
             4,
             "name",
             source_kind="context_name_field",
-            priority=247,
             component_hint=NameComponentHint.FULL,
         ),
         _clue(
@@ -272,7 +257,6 @@ def test_label_seed_switches_to_given_chain_in_english():
             10,
             "John",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
         _clue(
@@ -282,7 +266,6 @@ def test_label_seed_switches_to_given_chain_in_english():
             15,
             "Paul",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
     )
@@ -302,7 +285,6 @@ def test_full_name_and_alias_submit_directly_under_weak():
             11,
             "Jordan Demo",
             source_kind="dictionary_local",
-            priority=290,
             component_hint=NameComponentHint.FULL,
             hard_source="local",
             strength=ClaimStrength.HARD,
@@ -317,7 +299,6 @@ def test_full_name_and_alias_submit_directly_under_weak():
             2,
             "阿宝",
             source_kind="dictionary_local",
-            priority=290,
             component_hint=NameComponentHint.ALIAS,
             hard_source="local",
             strength=ClaimStrength.HARD,
@@ -343,7 +324,6 @@ def test_balanced_accepts_single_dictionary_given_name_longer_than_one_char():
             2,
             "汉文",
             source_kind="dictionary_local",
-            priority=290,
             component_hint=NameComponentHint.GIVEN,
             hard_source="local",
             strength=ClaimStrength.HARD,
@@ -366,7 +346,6 @@ def test_weak_rejects_single_non_privileged_name_clue():
             3,
             "Ann",
             source_kind="en_given_name",
-            priority=215,
             component_hint=NameComponentHint.GIVEN,
         ),
     )
@@ -386,7 +365,6 @@ def test_same_role_clues_only_count_once_under_weak():
             3,
             "van",
             source_kind="en_family_name",
-            priority=220,
             component_hint=NameComponentHint.FAMILY,
         ),
         _clue(
@@ -396,7 +374,6 @@ def test_same_role_clues_only_count_once_under_weak():
             11,
             "Helsing",
             source_kind="en_family_name",
-            priority=220,
             component_hint=NameComponentHint.FAMILY,
         ),
     )
@@ -416,7 +393,6 @@ def test_negative_overlap_blocks_non_privileged_submit_when_not_fully_exited():
             1,
             "杨",
             source_kind="family_name",
-            priority=220,
             component_hint=NameComponentHint.FAMILY,
         ),
         _clue(
@@ -426,7 +402,6 @@ def test_negative_overlap_blocks_non_privileged_submit_when_not_fully_exited():
             3,
             "汉文",
             source_kind="zh_given_name",
-            priority=210,
             component_hint=NameComponentHint.GIVEN,
         ),
         _clue(
@@ -436,7 +411,6 @@ def test_negative_overlap_blocks_non_privileged_submit_when_not_fully_exited():
             4,
             "文档",
             source_kind="negative_ui_word",
-            priority=600,
             attr_type=None,
         ),
     )

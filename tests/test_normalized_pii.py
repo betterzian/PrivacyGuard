@@ -68,7 +68,7 @@ def test_address_normalization_prefers_metadata_components():
         "unit": "1",
         "room": "102",
     }
-    assert normalized.canonical == "city=上海|district=浦东|compound=阳光国际|building=10|unit=1|room=102"
+    assert normalized.canonical == "city=上海|district=浦东|compound=阳光国际|building=10|unit=1|room=102|number=[10,1,102]"
     assert normalized.match_terms == ("上海", "浦东", "阳光国际")
     assert normalized.identity["address_part"] == "上海|浦东|阳光国际"
     assert normalized.identity["details_part"] == "10-1-102"

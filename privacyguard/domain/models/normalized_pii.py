@@ -18,6 +18,9 @@ class NormalizedPII(BaseModel):
     components: dict[str, str] = Field(default_factory=dict)
     match_terms: tuple[str, ...] = ()
     identity: dict[str, str] = Field(default_factory=dict)
+    # 地址专属：从左到右提取的数字/字母序列（号/栋/单元/楼/室等 detail 层级）。
+    # 用于同一地址判定时的逆序对齐匹配。
+    numbers: tuple[str, ...] = ()
 
 
 __all__ = ["NormalizedPII"]

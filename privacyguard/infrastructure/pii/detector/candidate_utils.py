@@ -179,11 +179,6 @@ def trim_candidate(
             label_driven=candidate.label_driven,
         )
     elif candidate.attr_type == PIIAttributeType.ADDRESS:
-        metadata_base = {
-            key: values
-            for key, values in candidate.metadata.items()
-            if not key.startswith("address_component") and not key.startswith("address_details")
-        }
         rebuilt = build_address_candidate_from_value(
             source=candidate.source,
             value_text=segment,

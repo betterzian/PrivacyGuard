@@ -38,14 +38,26 @@ from privacyguard.infrastructure.pii.detector.models import (
     StreamInput,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-from privacyguard.infrastructure.pii.rule_based_detector_shared import _OCR_INLINE_GAP_TOKEN
+from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
 
 _HARD_SOURCE_PRIORITY = {
-    "prompt": 4,
-    "session": 3,
-    "local": 2,
+    "session": 4,
+    "local": 3,
+    "prompt": 2,
     "regex": 1,
 }
+
+_FAMILY_ORDER: dict[ClueFamily, int] = {
+    ClueFamily.ADDRESS: 0,
+    ClueFamily.NAME: 1,
+    ClueFamily.ORGANIZATION: 2,
+    ClueFamily.STRUCTURED: 3,
+    ClueFamily.CONTROL: 4,
+}
+
+
+def _family_order(family: ClueFamily) -> int:
+    return _FAMILY_ORDER.get(family, 99)
 
 
 def _attr_to_family(attr_type: PIIAttributeType | None) -> ClueFamily:
@@ -70,13 +82,42 @@ _PLACEHOLDER_BY_ATTR = {
 
 _EMAIL_PATTERN = re.compile(r"(?<![\w.+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w.-])")
 
+# 与 ``pii_value._TIME_PATTERN`` 一致的时钟片段（时 0–23，分/秒 0–59，冒号半角/全角）。
+_TIME_CLOCK_STRICT = r"(?:[01]?\d|2[0-3])[:：][0-5]\d(?:[:：][0-5]\d)?"
+
 # 时间/日期模式——先行匹配并排除，防止其中的数字被当作候选片段。
 _TIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("time_datetime", re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?")),
+    ("time_datetime", re.compile(rf"\d{{4}}[-/]\d{{1,2}}[-/]\d{{1,2}}(?:[T ]{_TIME_CLOCK_STRICT})?")),
     ("time_date_mdy", re.compile(r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}")),
-    ("time_clock", re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")),
+    ("time_clock", re.compile(_TIME_CLOCK_STRICT)),
     ("time_zh_date", re.compile(r"\d{4}年\d{1,2}月\d{1,2}日")),
 )
+
+# 以下三类需在左右两侧满足「空白 / OCR 块界 / 链内间隙」之一（或紧贴文本首尾），避免粘在语句或数值中间。
+_TIME_KINDS_WITH_TOKEN_BOUNDARY = frozenset({"time_datetime", "time_date_mdy", "time_clock"})
+
+
+def _time_match_adjacent_ok(text: str, start: int, end: int) -> bool:
+    """TIME 匹配片段左侧与右侧是否仅邻接空白、``OCR_BREAK``、``inline_gap`` 标记或串首/串尾。"""
+    if start < 0 or end > len(text) or start > end:
+        return False
+    if start > 0:
+        left_ch = text[start - 1]
+        if left_ch.isspace() or left_ch == _OCR_INLINE_GAP_TOKEN:
+            pass
+        elif len(OCR_BREAK) <= start and text[start - len(OCR_BREAK) : start] == OCR_BREAK:
+            pass
+        else:
+            return False
+    if end < len(text):
+        right_ch = text[end]
+        if right_ch.isspace() or right_ch == _OCR_INLINE_GAP_TOKEN:
+            pass
+        elif end + len(OCR_BREAK) <= len(text) and text[end : end + len(OCR_BREAK)] == OCR_BREAK:
+            pass
+        else:
+            return False
+    return True
 
 # 通用数字片段：允许常见“电话号码写法”的连接符。
 # 目的：把 "+86 139-1234-1234" 这类写法抽成一个片段，后续再在 structured stack 中统一去连接符/去国家码做校验。
@@ -154,6 +195,7 @@ class _ScanSegment:
     text: str
     raw_start: int
     folded_text: str
+    gap_offsets: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,10 +226,11 @@ def build_clue_bundle(
 ) -> ClueBundle:
     """两遍扫描构建 ClueBundle。
 
-    Pass 1 — hard clue 扫描与裁决，确定屏蔽区间。
-    Pass 2 — segment-major soft clue 扫描，事件扫描线裁决。
+    Pass 1 — STRUCTURED clue 扫描与裁决，确定屏蔽区间。
+    Pass 2 — segment-major 词典/soft clue 扫描，事件扫描线裁决。
     """
-    ocr_break_spans = _find_ocr_break_spans(stream)
+    all_ocr_spans = _find_ocr_break_spans(stream)
+    ocr_break_only_spans = _find_ocr_break_only_spans(stream)
     session_name_entries = tuple(entry for entry in session_entries if entry.attr_type == PIIAttributeType.NAME)
     local_name_entries = tuple(entry for entry in local_entries if entry.attr_type == PIIAttributeType.NAME)
     session_non_structured_entries = tuple(
@@ -200,31 +243,19 @@ def build_clue_bundle(
         for entry in local_entries
         if entry.attr_type in {PIIAttributeType.ORGANIZATION, PIIAttributeType.ADDRESS}
     )
-    # ── Pass 1: hard clue 扫描与裁决 ──
-    hard_clues = _resolve_hard_conflicts(
-        [
-            *_scan_dictionary_hard_clues(
-                ctx,
-                stream,
-                session_non_structured_entries,
-                source_kind="session",
-                ignored_spans=ocr_break_spans,
-            ),
-            *_scan_dictionary_hard_clues(
-                ctx,
-                stream,
-                local_non_structured_entries,
-                source_kind="local",
-                ignored_spans=ocr_break_spans,
-            ),
-            *_scan_hard_patterns(ctx, stream, ignored_spans=ocr_break_spans),
-        ]
+
+    # ── Pass 1: STRUCTURED clue 扫描与裁决 ──
+    structured_clues = _resolve_structured_conflicts(
+        _scan_hard_patterns(ctx, stream, ignored_spans=all_ocr_spans)
     )
 
-    # ── Pass 2: soft clue 扫描（segment-major，对缓存局部性友好）──
-    scan_segments = _build_soft_scan_segments(stream, hard_clues, extra_blocked_spans=ocr_break_spans)
+    # ── Pass 2: segment-major clue 扫描 ──
+    # 分块依据：STRUCTURED clue span + ocr_break span。段内去除 inline_gap。
+    scan_segments = _build_soft_scan_segments(stream, structured_clues, ocr_break_spans=ocr_break_only_spans)
     soft_clues: list[Clue] = []
     for segment in scan_segments:
+        soft_clues.extend(_scan_org_address_dictionary_clues(ctx, segment, session_non_structured_entries, source_kind="session"))
+        soft_clues.extend(_scan_org_address_dictionary_clues(ctx, segment, local_non_structured_entries, source_kind="local"))
         soft_clues.extend(_scan_name_dictionary_clues(ctx, segment, session_name_entries, source_kind="session"))
         soft_clues.extend(_scan_name_dictionary_clues(ctx, segment, local_name_entries, source_kind="local"))
         soft_clues.extend(_scan_label_clues(ctx, segment))
@@ -240,9 +271,9 @@ def build_clue_bundle(
         soft_clues.extend(_scan_negative_clues(ctx, segment))
 
     # ── 事件扫描线裁决 ──
-    all_clues = [*hard_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_spans), *soft_clues]
+    all_clues = [*structured_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_only_spans), *soft_clues]
     resolved_clues = _attach_unit_spans(stream, _sweep_resolve(stream.text, all_clues))
-    ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, -item.priority, item.end)))
+    ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, _family_order(item.family), item.end)))
     return ClueBundle(all_clues=ordered_clues)
 
 
@@ -272,7 +303,6 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 start=match.start(),
                 end=match.end(),
                 text=value,
-                priority=120,
                 source_kind="regex_email",
                 source_metadata={"hard_source": ["regex"], "placeholder": ["<email>"]},
             )
@@ -282,6 +312,10 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
     # ── 2a: 先行匹配 time/date ──
     for source_kind, pattern in _TIME_PATTERNS:
         for match in pattern.finditer(text):
+            if source_kind in _TIME_KINDS_WITH_TOKEN_BOUNDARY and not _time_match_adjacent_ok(
+                text, match.start(), match.end()
+            ):
+                continue
             value = match.group(0).strip()
             if not value:
                 continue
@@ -297,7 +331,6 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     start=match.start(),
                     end=match.end(),
                     text=value,
-                    priority=100,
                     source_kind=source_kind,
                     source_metadata={"hard_source": ["regex"], "placeholder": ["<time>"]},
                 )
@@ -322,7 +355,6 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 start=match.start(),
                 end=match.end(),
                 text=value,
-                priority=85,
                 source_kind="extract_alnum_fragment",
                 source_metadata={
                     "hard_source": ["regex"],
@@ -355,7 +387,6 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 start=match.start(),
                 end=match.end(),
                 text=value,
-                priority=90,
                 source_kind="extract_digit_fragment",
                 source_metadata={
                     "hard_source": ["regex"],
@@ -400,10 +431,8 @@ def _scan_dictionary_hard_clues(
     if not entries:
         return []
     clues: list[Clue] = []
-    priority = 300 if source_kind == "session" else 290
     signature = _dictionary_matcher_signature(entries)
     matcher = _session_dictionary_matcher(signature) if source_kind == "session" else _local_dictionary_matcher(signature)
-    # 这里按旧实现的“entry/variant 注册顺序”恢复输出顺序，避免等长重叠命中的稳定性发生漂移。
     matches = matcher.find_matches(stream.text, folded_text=stream.text.lower())
     matches.sort(key=lambda item: (item.payload.emission_order, item.start, item.end))
     for match in matches:
@@ -427,7 +456,50 @@ def _scan_dictionary_hard_clues(
                 start=start,
                 end=end,
                 text=matched_text,
-                priority=priority,
+                source_kind=payload.matched_by,
+                source_metadata=dict_metadata,
+            )
+        )
+    return clues
+
+
+def _scan_org_address_dictionary_clues(
+    ctx: DetectContext,
+    segment: _ScanSegment,
+    entries: tuple[DictionaryEntry, ...],
+    *,
+    source_kind: str,
+) -> list[Clue]:
+    """在 pass2 segment 上扫描 org/address 词典条目，产出 HARD clue。"""
+    entries = tuple(entry for entry in entries if entry.attr_type != PIIAttributeType.NAME)
+    if not entries:
+        return []
+    clues: list[Clue] = []
+    signature = _dictionary_matcher_signature(entries)
+    matcher = _session_dictionary_matcher(signature) if source_kind == "session" else _local_dictionary_matcher(signature)
+    matches = matcher.find_matches(segment.text, folded_text=segment.folded_text)
+    matches.sort(key=lambda item: (item.payload.emission_order, item.start, item.end))
+    for match in matches:
+        normalized = _normalize_segment_ascii_match(
+            segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary,
+        )
+        if normalized is None:
+            continue
+        start, end, matched_text = normalized
+        payload = match.payload
+        dict_metadata = {key: list(values) for key, values in payload.metadata_items}
+        dict_metadata["hard_source"] = [source_kind]
+        dict_metadata["placeholder"] = [_PLACEHOLDER_BY_ATTR.get(payload.attr_type, f"<{payload.attr_type.value}>")]
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=_attr_to_family(payload.attr_type),
+                role=ClueRole.VALUE,
+                attr_type=payload.attr_type,
+                strength=ClaimStrength.HARD,
+                start=start,
+                end=end,
+                text=matched_text,
                 source_kind=payload.matched_by,
                 source_metadata=dict_metadata,
             )
@@ -459,7 +531,6 @@ def _scan_name_dictionary_clues(
         return []
 
     clues: list[Clue] = []
-    priority = 300 if source_kind == "session" else 290
     signature = _dictionary_matcher_signature(name_entries)
     matcher = _session_dictionary_matcher(signature) if source_kind == "session" else _local_dictionary_matcher(signature)
     matches = matcher.find_matches(normalized_stream.text, folded_text=normalized_stream.text.lower())
@@ -507,7 +578,6 @@ def _scan_name_dictionary_clues(
                 start=start,
                 end=end,
                 text=matched_text,
-                priority=priority,
                 source_kind=payload.matched_by,
                 source_metadata=metadata,
             )
@@ -552,7 +622,7 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
         matches.append((raw_start, raw_end, match.payload))
     accepted: list[tuple[int, int, object]] = []
     occupied: list[tuple[int, int]] = []
-    for start, end, spec in sorted(matches, key=lambda item: (-(item[1] - item[0]), -len(item[2].keyword), -item[2].priority, item[0])):
+    for start, end, spec in sorted(matches, key=lambda item: (-(item[1] - item[0]), -len(item[2].keyword), item[2].order_index, item[0])):
         if any(not (end <= left or start >= right) for left, right in occupied):
             continue
         occupied.append((start, end))
@@ -572,7 +642,6 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
                 start=start,
                 end=end,
                 text=spec.keyword,
-                priority=spec.priority,
                 source_kind=spec.source_kind,
                 source_metadata=label_metadata,
             )
@@ -595,7 +664,6 @@ def _scan_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
                     start=raw_start,
                     end=raw_end,
                     text=match.group(0),
-                    priority=480,
                     source_kind=source_kind,
                     break_type=break_type,
                 )
@@ -620,7 +688,6 @@ def _scan_ocr_break_clues(
                 start=start,
                 end=end,
                 text=stream.text[start:end],
-                priority=500,
                 source_kind="break_ocr",
                 break_type=BreakType.OCR,
             )
@@ -645,7 +712,6 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 start=raw_start,
                 end=raw_end,
                 text=str(match.payload),
-                priority=230,
                 source_kind="name_start",
             )
         )
@@ -672,7 +738,6 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
                 start=raw_start,
                 end=raw_end,
                 text=str(match.payload),
-                priority=220,
                 source_kind="family_name",
             )
         )
@@ -697,7 +762,6 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
-                priority=218,
                 source_kind="en_surname",
             )
         )
@@ -722,7 +786,6 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
-                priority=215,
                 source_kind="en_given_name",
             )
         )
@@ -747,7 +810,6 @@ def _scan_zh_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 start=raw_start,
                 end=raw_end,
                 text=str(match.payload),
-                priority=210,
                 source_kind="zh_given_name",
             )
         )
@@ -776,7 +838,6 @@ def _scan_connector_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clu
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
-                priority=150,
                 source_kind=str(match.payload),
             )
         )
@@ -800,7 +861,6 @@ def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> lis
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
-                priority=240,
                 source_kind="company_suffix",
             )
         )
@@ -834,7 +894,6 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 start=raw_start,
                 end=raw_end,
                 text=payload.canonical_text,
-                priority=205,
                 source_kind="geo_db",
                 component_type=payload.component_type,
             )
@@ -855,7 +914,6 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 start=raw_start,
                 end=raw_end,
                 text=payload.canonical_text,
-                priority=204,
                 source_kind="address_keyword",
                 component_type=payload.component_type,
             )
@@ -881,7 +939,6 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 start=raw_start,
                 end=raw_end,
                 text=payload.canonical_text,
-                priority=205,
                 source_kind="geo_db",
                 component_type=payload.component_type,
             )
@@ -902,7 +959,6 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
-                priority=204,
                 source_kind="address_keyword",
                 component_type=payload.component_type,
             )
@@ -919,7 +975,6 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 start=raw_start,
                 end=raw_end,
                 text=token_match.group(0),
-                priority=203,
                 source_kind="postal_value",
                 component_type=AddressComponentType.POSTAL_CODE,
             )
@@ -946,7 +1001,6 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
-                priority=600,
                 source_kind=str(match.payload),
             )
         )
@@ -964,7 +1018,6 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                     start=raw_start,
                     end=raw_end,
                     text=token_match.group(0),
-                    priority=600,
                     source_kind="negative_numeric_context",
                 )
             )
@@ -996,7 +1049,7 @@ def _iter_negative_word_specs() -> tuple[tuple[str, str], ...]:
     )
 
 
-def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
+def _resolve_structured_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
     """hard clue 裁决：仅覆盖“被完全包含”的 clue。
 
     规则：
@@ -1008,7 +1061,6 @@ def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
     """
     if not clues:
         return ()
-    # 优先保留更长的 clue；等长则按来源优先级降序；再按 start 升序（稳定性）。
     ranked = sorted(
         clues,
         key=lambda c: (
@@ -1019,43 +1071,87 @@ def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
     )
     accepted: list[Clue] = []
     for clue in ranked:
-        # 若当前 clue 被任意已接受 clue 完全包含，则跳过。
         if any(a.start <= clue.start and clue.end <= a.end for a in accepted):
             continue
-        # 若当前 clue 完全包含了已接受的某些 clue，则覆盖它们。
         accepted = [a for a in accepted if not (clue.start <= a.start and a.end <= clue.end)]
         accepted.append(clue)
-    accepted.sort(key=lambda c: (c.start, c.end, -c.priority))
+    accepted.sort(key=lambda c: (c.start, c.end))
     return tuple(accepted)
 
 
 def _build_soft_scan_segments(
     stream: StreamInput,
-    hard_clues: tuple[Clue, ...],
+    structured_clues: tuple[Clue, ...],
     *,
-    extra_blocked_spans: tuple[tuple[int, int], ...] = (),
+    ocr_break_spans: tuple[tuple[int, int], ...] = (),
 ) -> tuple[_ScanSegment, ...]:
-    segments: list[_ScanSegment] = []
+    """构建 pass2 扫描段。
+
+    分块依据：STRUCTURED clue span + ocr_break span。
+    段内去除 inline_gap token（直接拼接），构建位置回映表。
+    """
+    inline_gap_spans = _find_inline_gap_spans(stream)
     blocked_spans = sorted(
-        [(clue.start, clue.end) for clue in hard_clues] + list(extra_blocked_spans),
+        [(clue.start, clue.end) for clue in structured_clues] + list(ocr_break_spans),
         key=lambda item: (item[0], item[1]),
     )
+    segments: list[_ScanSegment] = []
     cursor = 0
     for start, end in blocked_spans:
         if start < cursor:
             continue
         if cursor < start:
-            segment_text = stream.text[cursor:start]
-            segments.append(_ScanSegment(stream=stream, text=segment_text, raw_start=cursor, folded_text=segment_text.lower()))
+            segments.append(_build_segment_with_gap_removal(stream, cursor, start, inline_gap_spans))
         cursor = end
     if cursor < len(stream.text):
-        segment_text = stream.text[cursor:]
-        segments.append(_ScanSegment(stream=stream, text=segment_text, raw_start=cursor, folded_text=segment_text.lower()))
+        segments.append(_build_segment_with_gap_removal(stream, cursor, len(stream.text), inline_gap_spans))
     return tuple(segments)
 
 
+def _build_segment_with_gap_removal(
+    stream: StreamInput,
+    raw_start: int,
+    raw_end: int,
+    inline_gap_spans: tuple[tuple[int, int], ...],
+) -> _ScanSegment:
+    """构建单个扫描段，去除其中的 inline_gap token 并记录偏移。"""
+    gaps_in_range = [
+        (gs, ge) for gs, ge in inline_gap_spans
+        if gs >= raw_start and ge <= raw_end
+    ]
+    if not gaps_in_range:
+        seg_text = stream.text[raw_start:raw_end]
+        return _ScanSegment(stream=stream, text=seg_text, raw_start=raw_start, folded_text=seg_text.lower())
+
+    pieces: list[str] = []
+    gap_offsets: list[tuple[int, int]] = []
+    piece_cursor = raw_start
+    cleaned_pos = 0
+    for gs, ge in sorted(gaps_in_range):
+        if piece_cursor < gs:
+            piece = stream.text[piece_cursor:gs]
+            pieces.append(piece)
+            cleaned_pos += len(piece)
+        gap_offsets.append((cleaned_pos, ge - gs))
+        piece_cursor = ge
+    if piece_cursor < raw_end:
+        pieces.append(stream.text[piece_cursor:raw_end])
+
+    seg_text = "".join(pieces)
+    return _ScanSegment(
+        stream=stream,
+        text=seg_text,
+        raw_start=raw_start,
+        folded_text=seg_text.lower(),
+        gap_offsets=tuple(gap_offsets),
+    )
+
+
 def _segment_span_to_raw(segment: _ScanSegment, start: int, end: int) -> tuple[int, int]:
-    return (segment.raw_start + start, segment.raw_start + end)
+    """将 segment cleaned text 的 [start, end) 映射回 stream 原始位置。"""
+    start_offset = sum(gl for gp, gl in segment.gap_offsets if gp <= start)
+    end_offset = sum(gl for gp, gl in segment.gap_offsets if gp < end)
+    return (segment.raw_start + start + start_offset, segment.raw_start + end + end_offset)
 
 
 def _attach_unit_spans(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
@@ -1136,10 +1232,11 @@ def _normalize_segment_ascii_match(
     pattern_text: str,
     ascii_boundary: bool,
 ) -> tuple[int, int, str] | None:
+    raw_s, raw_e = _segment_span_to_raw(segment, start, end)
     normalized = _normalize_ascii_match(
         segment.stream,
-        segment.raw_start + start,
-        segment.raw_start + end,
+        raw_s,
+        raw_e,
         matched_text,
         pattern_text,
         ascii_boundary,
@@ -1151,12 +1248,31 @@ def _normalize_segment_ascii_match(
 
 
 def _find_ocr_break_spans(stream: StreamInput) -> tuple[tuple[int, int], ...]:
+    """返回 ocr_break 和 inline_gap 的 unit span（pass1 排除用）。"""
     spans = [
         (unit.char_start, unit.char_end)
         for unit in stream.units
         if unit.kind in {"inline_gap", "ocr_break"}
     ]
     return tuple(spans)
+
+
+def _find_ocr_break_only_spans(stream: StreamInput) -> tuple[tuple[int, int], ...]:
+    """仅返回 ocr_break span（分块边界、BREAK clue 来源）。"""
+    return tuple(
+        (unit.char_start, unit.char_end)
+        for unit in stream.units
+        if unit.kind == "ocr_break"
+    )
+
+
+def _find_inline_gap_spans(stream: StreamInput) -> tuple[tuple[int, int], ...]:
+    """返回 inline_gap span（段内去除用）。"""
+    return tuple(
+        (unit.char_start, unit.char_end)
+        for unit in stream.units
+        if unit.kind == "inline_gap"
+    )
 
 
 def _needs_ascii_keyword_boundary(keyword: str) -> bool:
@@ -1430,7 +1546,7 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
         key=lambda item: (
             item.start,
             -(item.end - item.start),
-            -item.priority,
+            _family_order(item.family),
             item.role.value,
             item.attr_type.value if item.attr_type is not None else "",
             item.component_type or "",
@@ -1450,33 +1566,51 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
         )
         if key in seen:
             continue
+        # 同类型线索覆盖：若 clue 完全包含于已保留线索，且 role/attr/component_type 相同，则子 clue 被覆盖丢弃。
+        # 典型：district KEY “新区” 覆盖 “区”。
+        covered = False
+        for kept in reversed(ordered):
+            if kept.start <= clue.start and clue.end <= kept.end:
+                if (
+                    kept.role == clue.role
+                    and kept.attr_type == clue.attr_type
+                    and kept.component_type == clue.component_type
+                    and kept.strength == clue.strength
+                ):
+                    covered = True
+                    break
+            if kept.start < clue.start and kept.end <= clue.start:
+                # 已离开可能覆盖范围。
+                break
+        if covered:
+            continue
         seen.add(key)
         ordered.append(clue)
-    return sorted(ordered, key=lambda item: (item.start, item.end, -item.priority))
+    return sorted(ordered, key=lambda item: (item.start, _family_order(item.family), item.end))
 
 
 def _sweep_resolve(raw_text: str, clues: list[Clue]) -> list[Clue]:
     """事件扫描线裁决所有 clue 重叠。
 
-    三步：
-    1. 扫描轮 1：hard / break 遮蔽过滤，同时收集 seed 连通块。
-    2. Seed 裁决：每个连通块选出 winner，移除败选 seed。
-    3. 扫描轮 2：seed 依赖规则（soft_control / soft_content 遮蔽）。
-    4. Label vs soft content 裁决（保留原有语义）。
+    1. 扫描轮 1：STRUCTURED / BREAK 遮蔽，同时收集 seed 连通块。
+    2. Seed 裁决：完全包含→大的覆盖；否则保留 start 更靠后的。
+    3. 扫描轮 2：seed 依赖规则。
+    4. 姓名组件覆盖。
+    5. Label vs soft content：完全包含→大的覆盖；其余保留。
     """
     if not clues:
         return []
     text_len = len(raw_text)
     deduped = _dedupe_clues(clues)
 
-    # ── 轮 1：hard / break 遮蔽 + seed 连通块 ──
+    # ── 轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块 ──
     survivors, seed_groups = _sweep_pass1(deduped, text_len)
 
     # ── Seed 裁决 ──
     seed_winner_ids: set[str] = set()
     for group in seed_groups:
-        winner = max(group, key=_seed_winner_key)
-        seed_winner_ids.add(winner.clue_id)
+        for winner in _resolve_seed_group(group):
+            seed_winner_ids.add(winner.clue_id)
     survivors = [
         clue for clue in survivors
         if clue.role not in _SEED_ROLES or clue.clue_id in seed_winner_ids
@@ -1489,14 +1623,14 @@ def _sweep_resolve(raw_text: str, clues: list[Clue]) -> list[Clue]:
     survivors = _apply_name_component_coverage(survivors)
 
     # ── Label vs soft content ──
-    return _label_vs_soft_filter(raw_text, survivors)
+    return _label_vs_soft_filter(survivors)
 
 
 def _build_events(
     clues: list[Clue],
     text_len: int,
 ) -> tuple[list[list[Clue]], list[list[Clue]]]:
-    """构建 start / end 事件数组。O(n) 注册，每个 clue 只写两个位置。"""
+    """构建 start / end 事件数组。"""
     start_events: list[list[Clue]] = [[] for _ in range(text_len + 1)]
     end_events: list[list[Clue]] = [[] for _ in range(text_len + 1)]
     for clue in clues:
@@ -1509,17 +1643,14 @@ def _sweep_pass1(
     clues: list[Clue],
     text_len: int,
 ) -> tuple[list[Clue], list[list[Clue]]]:
-    """扫描轮 1：hard / break 遮蔽 + seed 连通块收集。
+    """扫描轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块收集。
 
-    从左到右遍历每个字符位置：
-    - 先处理 end 事件（移出 active）。
-    - 再处理 start 事件（准入判断 + 加入 active）。
-    同时维护 seed 连通块：如果当前 seed 的 start < 上一组 seed_group_end，
-    则合并到同一组。
+    STRUCTURED 和 BREAK 无条件保留并形成活跃区间；
+    其他 soft clue 落在活跃区间内则过滤。
     """
     start_events, end_events = _build_events(clues, text_len)
 
-    active_hard = 0
+    active_structured = 0
     active_break = 0
     survivors: list[Clue] = []
 
@@ -1528,14 +1659,12 @@ def _sweep_pass1(
     seed_group_end = -1
 
     for pos in range(text_len + 1):
-        # 移除到期 clue。
         for clue in end_events[pos]:
-            if clue.strength == ClaimStrength.HARD:
-                active_hard -= 1
+            if clue.family == ClueFamily.STRUCTURED and clue.role not in _SEED_ROLES:
+                active_structured -= 1
             elif clue.role == ClueRole.BREAK:
                 active_break -= 1
 
-        # 刷新 seed 组：当前位置已超出连通块右端。
         if cur_seed_group and pos >= seed_group_end:
             seed_groups.append(cur_seed_group)
             cur_seed_group = []
@@ -1544,9 +1673,10 @@ def _sweep_pass1(
         for clue in start_events[pos]:
             role = clue.role
 
-            # HARD / BREAK 无条件通过。
-            if clue.strength == ClaimStrength.HARD:
-                active_hard += 1
+            # STRUCTURED VALUE 无条件通过并形成阻塞区间。
+            # LABEL/START 虽然可能 family=STRUCTURED，但属于 seed，不作为阻塞源。
+            if clue.family == ClueFamily.STRUCTURED and role not in _SEED_ROLES:
+                active_structured += 1
                 survivors.append(clue)
                 continue
             if role == ClueRole.BREAK:
@@ -1554,16 +1684,15 @@ def _sweep_pass1(
                 survivors.append(clue)
                 continue
 
-            # 被 hard 遮蔽。
-            if active_hard > 0:
+            # 被 STRUCTURED 遮蔽。
+            if active_structured > 0:
                 continue
-            # 被 break 遮蔽。
+            # 被 BREAK 遮蔽。
             if active_break > 0:
                 continue
 
             survivors.append(clue)
 
-            # 追踪 seed 连通块。
             if role in _SEED_ROLES:
                 if clue.start < seed_group_end:
                     cur_seed_group.append(clue)
@@ -1573,18 +1702,31 @@ def _sweep_pass1(
                     cur_seed_group = [clue]
                 seed_group_end = max(seed_group_end, clue.end)
 
-    # 收尾：最后一组 seed。
     if cur_seed_group:
         seed_groups.append(cur_seed_group)
 
     return survivors, seed_groups
 
 
-def _sweep_pass2(clues: list[Clue], text_len: int) -> list[Clue]:
-    """扫描轮 2：seed 遮蔽 soft_control，START 遮蔽 soft_content。
+def _resolve_seed_group(group: list[Clue]) -> list[Clue]:
+    """Seed 连通块裁决。完全包含→大的覆盖；部分重叠→保留 start 更靠后的。"""
+    if len(group) <= 1:
+        return list(group)
+    # 按 start 降序处理：start 大的先入队，后续只需检查是否被已有 survivor 覆盖或重叠。
+    ranked = sorted(group, key=lambda c: (-c.start, -(c.end - c.start)))
+    survivors: list[Clue] = []
+    for clue in ranked:
+        if any(s.start <= clue.start and clue.end <= s.end for s in survivors):
+            continue
+        survivors = [s for s in survivors if not (clue.start <= s.start and s.end <= clue.end)]
+        if any(_clues_overlap(clue, s) for s in survivors):
+            continue
+        survivors.append(clue)
+    return survivors
 
-    此时 seed 列表已完成连通块裁决，仅含 winner。
-    """
+
+def _sweep_pass2(clues: list[Clue], text_len: int) -> list[Clue]:
+    """扫描轮 2：seed 遮蔽 soft_control，START 遮蔽 soft_content。"""
     start_events, end_events = _build_events(clues, text_len)
 
     active_seed = 0
@@ -1608,10 +1750,8 @@ def _sweep_pass2(clues: list[Clue], text_len: int) -> list[Clue]:
                 survivors.append(clue)
                 continue
 
-            # SOFT_CONTROL：仅 CONNECTOR 被 seed 遮蔽；NEGATIVE 必须保留给各 stack 做交叉裁剪。
             if role in _SOFT_CONTROL_ROLES_SEED_MASKED and active_seed > 0:
                 continue
-            # START 只遮蔽需要按原始值区域推断的软 clue，不遮蔽词典 full/alias。
             if role in _START_MASKED_SOFT_ROLES and active_start > 0:
                 continue
 
@@ -1621,6 +1761,10 @@ def _sweep_pass2(clues: list[Clue], text_len: int) -> list[Clue]:
 
 
 def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
+    """姓名组件覆盖裁决。
+
+    FULL_NAME / ALIAS 仅在完全包含时做覆盖，部分重叠都保留。
+    """
     full_name_winners = _resolve_name_component_overlap_winners(
         [clue for clue in clues if clue.role == ClueRole.FULL_NAME]
     )
@@ -1654,165 +1798,50 @@ def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
 
 
 def _resolve_name_component_overlap_winners(clues: list[Clue]) -> list[Clue]:
+    """姓名组件重叠裁决：仅完全包含时做覆盖，部分重叠都保留。"""
     if not clues:
         return []
-    ordered = sorted(clues, key=lambda clue: (clue.start, clue.end, -clue.priority))
-    groups: list[list[Clue]] = []
-    current_group: list[Clue] = []
-    current_end = -1
-    for clue in ordered:
-        if current_group and clue.start < current_end:
-            current_group.append(clue)
-        else:
-            if current_group:
-                groups.append(current_group)
-            current_group = [clue]
-        current_end = max(current_end, clue.end)
-    if current_group:
-        groups.append(current_group)
-    winners = [max(group, key=_seed_winner_key) for group in groups]
-    return sorted(winners, key=lambda clue: (clue.start, clue.end, -clue.priority))
+    survivors: list[Clue] = []
+    for clue in clues:
+        if any(
+            other.start <= clue.start and clue.end <= other.end
+            and (other.start < clue.start or clue.end < other.end)
+            for other in clues
+            if other.clue_id != clue.clue_id
+        ):
+            continue
+        survivors.append(clue)
+    return sorted(survivors, key=lambda c: (c.start, c.end))
 
 
-def _label_vs_soft_filter(raw_text: str, clues: list[Clue]) -> list[Clue]:
+def _label_vs_soft_filter(clues: list[Clue]) -> list[Clue]:
     """Label vs soft content 裁决。
 
-    逻辑与重构前一致：
-    - label 输给同属性更长的 soft content → 移除 label 及不同属性 soft。
-    - 否则 label 赢 → 移除所有重叠 soft content。
+    完全包含→大的覆盖小的；其余情况（完全重合、部分重叠）→两者都保留。
     """
     label_clues = [c for c in clues if c.role == ClueRole.LABEL]
     soft_content_clues = [c for c in clues if c.role in _SOFT_CONTENT_ROLES]
     if not label_clues or not soft_content_clues:
         return clues
 
-    break_clues = [c for c in clues if c.role == ClueRole.BREAK]
-    break_start_map = _build_break_start_map(break_clues)
-    break_end_map = _build_break_end_map(break_clues)
     dropped_ids: set[str] = set()
-
     for label in label_clues:
         if label.clue_id in dropped_ids:
             continue
-        overlapping_soft = [
-            c for c in soft_content_clues
-            if c.clue_id not in dropped_ids and _clues_overlap(label, c)
-        ]
-        if not overlapping_soft:
-            continue
-        same_attr = [c for c in overlapping_soft if c.attr_type == label.attr_type]
-        if _label_loses_to_same_attr_soft(raw_text, label, same_attr, break_start_map, break_end_map):
-            dropped_ids.add(label.clue_id)
-            for c in overlapping_soft:
-                if c.attr_type != label.attr_type:
-                    dropped_ids.add(c.clue_id)
-            continue
-        for c in overlapping_soft:
-            dropped_ids.add(c.clue_id)
+        for soft in soft_content_clues:
+            if soft.clue_id in dropped_ids:
+                continue
+            if not _clues_overlap(label, soft):
+                continue
+            # 严格包含（区间不完全相等时一方包含另一方）→大的覆盖小的。
+            label_contains = label.start <= soft.start and soft.end <= label.end and (label.start < soft.start or soft.end < label.end)
+            soft_contains = soft.start <= label.start and label.end <= soft.end and (soft.start < label.start or label.end < soft.end)
+            if label_contains:
+                dropped_ids.add(soft.clue_id)
+            elif soft_contains:
+                dropped_ids.add(label.clue_id)
 
     return [c for c in clues if c.clue_id not in dropped_ids]
-
-
-def _seed_winner_key(clue: Clue) -> tuple[int, int, int, int]:
-    return (
-        clue.end - clue.start,
-        clue.priority,
-        -clue.start,
-        clue.end,
-    )
-
-
-def _label_loses_to_same_attr_soft(
-    raw_text: str,
-    label_clue: Clue,
-    same_attr_conflicts: list[Clue],
-    break_start_map: dict[int, list[Clue]],
-    break_end_map: dict[int, list[Clue]],
-) -> bool:
-    """同属性 label vs soft content：先比长度，等长再看字段边界。"""
-
-    if not same_attr_conflicts:
-        return False
-    label_length = label_clue.end - label_clue.start
-    for clue in same_attr_conflicts:
-        clue_length = clue.end - clue.start
-        if label_length > clue_length:
-            continue
-        if label_length < clue_length:
-            return True
-        if not _label_wins_equal_length_conflict(raw_text, label_clue, break_start_map, break_end_map):
-            return True
-    return False
-
-
-def _label_wins_equal_length_conflict(
-    raw_text: str,
-    label_clue: Clue,
-    break_start_map: dict[int, list[Clue]],
-    break_end_map: dict[int, list[Clue]],
-) -> bool:
-    """等长冲突时，优先保留更像字段标题的 label。"""
-
-    if _has_label_field_separator_after(raw_text, label_clue):
-        return True
-    return _label_is_wrapped_by_boundaries(raw_text, label_clue, break_start_map, break_end_map)
-
-
-def _has_label_field_separator_after(raw_text: str, label_clue: Clue) -> bool:
-    index = _skip_whitespace_right(raw_text, label_clue.end)
-    return index < len(raw_text) and raw_text[index] in _LABEL_FIELD_SEPARATOR_CHARS
-
-
-def _label_is_wrapped_by_boundaries(
-    raw_text: str,
-    label_clue: Clue,
-    break_start_map: dict[int, list[Clue]],
-    break_end_map: dict[int, list[Clue]],
-) -> bool:
-    return (
-        _is_left_label_boundary(raw_text, label_clue.start, break_end_map)
-        and _is_right_label_boundary(raw_text, label_clue.end, break_start_map)
-    )
-
-
-def _build_break_start_map(break_clues: list[Clue]) -> dict[int, list[Clue]]:
-    mapping: dict[int, list[Clue]] = {}
-    for clue in break_clues:
-        mapping.setdefault(clue.start, []).append(clue)
-    return mapping
-
-
-def _build_break_end_map(break_clues: list[Clue]) -> dict[int, list[Clue]]:
-    mapping: dict[int, list[Clue]] = {}
-    for clue in break_clues:
-        mapping.setdefault(clue.end, []).append(clue)
-    return mapping
-
-
-def _is_left_label_boundary(raw_text: str, start: int, break_end_map: dict[int, list[Clue]]) -> bool:
-    index = start
-    while index > 0:
-        if index in break_end_map:
-            return True
-        previous = raw_text[index - 1]
-        if previous.isspace():
-            index -= 1
-            continue
-        return False
-    return True
-
-
-def _is_right_label_boundary(raw_text: str, end: int, break_start_map: dict[int, list[Clue]]) -> bool:
-    index = end
-    while index < len(raw_text):
-        if index in break_start_map:
-            return True
-        current = raw_text[index]
-        if current.isspace():
-            index += 1
-            continue
-        return False
-    return True
 
 
 def _skip_whitespace_right(raw_text: str, start: int) -> int:

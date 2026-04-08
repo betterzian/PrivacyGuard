@@ -110,7 +110,7 @@ class StreamInput:
 class LabelSpec:
     keyword: str
     attr_type: PIIAttributeType
-    priority: int
+    order_index: int
     source_kind: str
     ocr_source_kind: str
     ascii_boundary: bool = False
@@ -164,7 +164,6 @@ class Clue:
     unit_end: int = 0
 
     # —— 来源 ——
-    priority: int = 0
     source_kind: str = ""
     source_metadata: dict[str, list[str]] = field(default_factory=dict)
 

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value, has_address_signal, trim_candidate
 from privacyguard.infrastructure.pii.detector.models import AddressComponentType, CandidateDraft, ClaimStrength, Clue, ClueRole
-from privacyguard.infrastructure.pii.detector.lexicon_loader import load_en_address_keyword_groups
+from privacyguard.infrastructure.pii.detector.lexicon_loader import (
+    load_en_address_keyword_groups,
+    load_zh_address_keyword_groups,
+ )
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
@@ -192,7 +196,15 @@ class AddressStack(BaseStack):
 
             if clue.role == ClueRole.VALUE:
                 if comp_type in pending_value:
-                    break
+                    # 同层级连续 VALUE：旧 VALUE 不再继续 pending，直接按其层级落成 component，并自动补一个默认 key。
+                    previous = pending_value[comp_type]
+                    default_key = _default_key_for_component_type(comp_type, locale)
+                    standalone = _build_standalone_address_component_with_key(previous, comp_type, key=default_key)
+                    if standalone is not None:
+                        components.append(standalone)
+                        evidence_count += 1
+                        last_end = max(last_end, int(standalone["end"]))
+                    del pending_value[comp_type]
                 self._flush_pending_values(pending_value, tier, components)
                 pending_value[comp_type] = clue
                 last_value_clue = clue
@@ -694,6 +706,48 @@ def _build_standalone_address_component(clue: Clue, component_type: AddressCompo
         "key": "",
         "is_detail": component_type in _DETAIL_COMPONENTS,
     }
+
+
+def _build_standalone_address_component_with_key(
+    clue: Clue,
+    component_type: AddressComponentType,
+    *,
+    key: str,
+) -> dict[str, object] | None:
+    component = _build_standalone_address_component(clue, component_type)
+    if component is None:
+        return None
+    component["key"] = str(key or "")
+    return component
+
+
+@lru_cache(maxsize=1)
+def _default_zh_address_keys() -> dict[AddressComponentType, str]:
+    """从 `zh_address_keywords.json` 推导每个 component_type 的默认 key（用于 value-only 的自动补全）。"""
+    keys: dict[AddressComponentType, str] = {}
+    for group in load_zh_address_keyword_groups():
+        if not group.keywords:
+            continue
+        # 选择更通用的短 key（如 “区”“路”“号”），避免 “新区/大道/街道” 这类更具体后缀。
+        keys[group.component_type] = min(group.keywords, key=len)
+    return keys
+
+
+@lru_cache(maxsize=1)
+def _default_en_address_keys() -> dict[AddressComponentType, str]:
+    """从 `en_address_keywords.json` 推导每个 component_type 的默认 key。"""
+    keys: dict[AddressComponentType, str] = {}
+    for group in load_en_address_keyword_groups():
+        if not group.keywords:
+            continue
+        keys[group.component_type] = min(group.keywords, key=len)
+    return keys
+
+
+def _default_key_for_component_type(component_type: AddressComponentType, locale: str) -> str:
+    if locale.startswith("en"):
+        return _default_en_address_keys().get(component_type, "")
+    return _default_zh_address_keys().get(component_type, "")
 
 
 def _left_address_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
