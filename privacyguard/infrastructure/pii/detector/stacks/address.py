@@ -100,8 +100,8 @@ class AddressStack(BaseStack):
 
     def run(self) -> StackRun | None:
         """地址 stack 主入口。"""
-        if self.clue.role == ClueRole.HARD:
-            return self._build_hard_run()
+        if self.clue.strength == ClaimStrength.HARD:
+            return self._build_direct_run()
 
         raw_text = self.context.stream.text
         locale = self._value_locale()

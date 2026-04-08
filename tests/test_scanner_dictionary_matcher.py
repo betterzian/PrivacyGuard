@@ -8,7 +8,7 @@ from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import ClueRole, DictionaryEntry
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueRole, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
@@ -66,13 +66,14 @@ def test_local_dictionary_hard_clue_fields_match_legacy_contract():
 
     assert len(clues) == 1
     clue = clues[0]
-    assert clue.role == ClueRole.HARD
+    assert clue.role == ClueRole.VALUE
+    assert clue.strength == ClaimStrength.HARD
     assert clue.attr_type == PIIAttributeType.EMAIL
     assert clue.text == "Jordan Demo"
     assert clue.priority == 290
     assert clue.source_kind == "dictionary_local"
-    assert clue.hard_source == "local"
-    assert clue.source_metadata == {"local_entity_ids": ["persona-1"]}
+    assert clue.source_metadata["hard_source"] == ["local"]
+    assert clue.source_metadata["local_entity_ids"] == ["persona-1"]
 
 
 def test_session_dictionary_hard_clue_fields_match_legacy_contract():
@@ -96,8 +97,9 @@ def test_session_dictionary_hard_clue_fields_match_legacy_contract():
     assert clue.text == "demo@example.com"
     assert clue.priority == 300
     assert clue.source_kind == "dictionary_session"
-    assert clue.hard_source == "session"
-    assert clue.source_metadata == {"session_turn_ids": ["3"], "local_entity_ids": ["persona-7"]}
+    assert clue.source_metadata["hard_source"] == ["session"]
+    assert clue.source_metadata["session_turn_ids"] == ["3"]
+    assert clue.source_metadata["local_entity_ids"] == ["persona-7"]
 
 
 def test_ascii_literal_keeps_word_boundary_behavior_for_name_dictionary_clues():
@@ -194,7 +196,7 @@ def test_ascii_dictionary_match_only_accepts_exact_s_and_es_word_units():
     dictionary_clues = [
         clue
         for clue in bundle.all_clues
-        if clue.role == ClueRole.HARD and clue.source_kind == "dictionary_local"
+        if clue.strength == ClaimStrength.HARD and clue.source_kind == "dictionary_local"
     ]
     assert [clue.text for clue in dictionary_clues] == ["apple", "apples", "applees"]
     assert [clue.unit_end - clue.unit_start for clue in dictionary_clues] == [1, 1, 1]

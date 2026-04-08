@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
-from privacyguard.infrastructure.pii.detector.candidate_utils import build_name_candidate_from_value
-from privacyguard.infrastructure.pii.detector.models import Clue, ClueRole, NameComponentHint, StreamInput, StreamUnit
+from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint, build_name_candidate_from_value
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueRole, StreamInput, StreamUnit
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
@@ -33,8 +33,8 @@ class NameStack(BaseStack):
     """姓名检测 stack。"""
 
     def run(self) -> StackRun | None:
-        if self.clue.role == ClueRole.HARD:
-            return self._build_hard_run()
+        if self.clue.strength == ClaimStrength.HARD:
+            return self._build_direct_run()
         locale = self._value_locale()
         if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
             return self._build_name_run(start=self.clue.start, end=self.clue.end)
@@ -207,12 +207,23 @@ class NameStack(BaseStack):
         if self.clue.role == ClueRole.FAMILY_NAME:
             return NameComponentHint.FAMILY
         if self.clue.role == ClueRole.GIVEN_NAME:
-            return self.clue.component_hint or NameComponentHint.GIVEN
+            # GIVEN_NAME 可能携带 MIDDLE 提示（字典来源区分）。
+            hint_values = self.clue.source_metadata.get("name_component_hint")
+            if hint_values and hint_values[0] == "middle":
+                return NameComponentHint.MIDDLE
+            return NameComponentHint.GIVEN
         if self.clue.role == ClueRole.ALIAS:
             return NameComponentHint.ALIAS
         if self.clue.role == ClueRole.FULL_NAME:
             return NameComponentHint.FULL
-        return self.clue.component_hint or NameComponentHint.FULL
+        # LABEL / START：检查 source_metadata 中是否有提示。
+        hint_values = self.clue.source_metadata.get("name_component_hint")
+        if hint_values:
+            try:
+                return NameComponentHint(hint_values[0])
+            except ValueError:
+                pass
+        return NameComponentHint.FULL
 
     def _scan_plain_right(self, *, start: int, cursor: int, upper: int, locale: str) -> int:
         if upper <= cursor:

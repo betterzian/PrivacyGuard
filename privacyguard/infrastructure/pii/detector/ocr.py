@@ -7,6 +7,7 @@ from statistics import median
 
 from privacyguard.domain.enums import PIISourceType, PIIAttributeType
 from privacyguard.infrastructure.pii.detector.candidate_utils import (
+    NameComponentHint,
     build_address_candidate_from_value,
     build_name_candidate_from_value,
     build_organization_candidate_from_value,
@@ -19,7 +20,6 @@ from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import (
     CandidateDraft,
     Clue,
-    NameComponentHint,
     OCRScene,
     OCRSceneBlock,
     ParseResult,
@@ -87,8 +87,13 @@ def _build_candidate_from_blocks(event: Clue, blocks: tuple[OCRSceneBlock, ...])
         return None
     start = blocks[0].clean_start
     end = blocks[-1].clean_end
-    source_kind = str(event.ocr_source_kind or event.source_kind)
-    component_hint = event.component_hint or NameComponentHint.FULL
+    source_kind = str((event.source_metadata.get("ocr_source_kind") or [event.source_kind])[0])
+    # 从 source_metadata 读取 name_component_hint；默认 FULL。
+    _hint_raw = (event.source_metadata.get("name_component_hint") or ["full"])[0]
+    try:
+        component_hint = NameComponentHint(_hint_raw)
+    except ValueError:
+        component_hint = NameComponentHint.FULL
     if event.attr_type == PIIAttributeType.NAME:
         return build_name_candidate_from_value(
             source=PIISourceType.OCR,
@@ -157,8 +162,12 @@ def _attribute_segment_score(event: Clue, text: str) -> float:
         return -999.0
     if event.attr_type == PIIAttributeType.NAME:
         score = 0.0
-        component_hint = event.component_hint or NameComponentHint.FULL
-        if looks_like_name_value(sample, component_hint=component_hint):
+        _h = (event.source_metadata.get("name_component_hint") or ["full"])[0]
+        try:
+            _attr_hint = NameComponentHint(_h)
+        except ValueError:
+            _attr_hint = NameComponentHint.FULL
+        if looks_like_name_value(sample, component_hint=_attr_hint):
             score += 1.4
         if has_organization_suffix(sample):
             score -= 2.2
@@ -230,7 +239,8 @@ def _bind_label_to_candidate(candidate: CandidateDraft, event: Clue) -> None:
     metadata["bound_label_clue_ids"] = list(
         dict.fromkeys([*metadata.get("bound_label_clue_ids", []), event.clue_id])
     )
-    metadata["matched_by"] = list(dict.fromkeys([*metadata.get("matched_by", []), str(event.ocr_source_kind or event.source_kind)]))
+    _ocr_sk = (event.source_metadata.get("ocr_source_kind") or [event.source_kind])[0]
+    metadata["matched_by"] = list(dict.fromkeys([*metadata.get("matched_by", []), str(_ocr_sk)]))
     candidate.metadata = metadata
 
 

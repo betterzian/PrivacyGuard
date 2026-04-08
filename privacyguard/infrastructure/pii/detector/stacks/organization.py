@@ -12,7 +12,7 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import (
     organization_suffix_start,
     trim_candidate,
 )
-from privacyguard.infrastructure.pii.detector.models import Clue, ClueRole, StreamInput
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueRole, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
@@ -61,8 +61,8 @@ class OrganizationStack(BaseStack):
         )
 
     def run(self) -> StackRun | None:
-        if self.clue.role == ClueRole.HARD:
-            return self._build_hard_run()
+        if self.clue.strength == ClaimStrength.HARD:
+            return self._build_direct_run()
         is_label_seed = self.clue.role == ClueRole.LABEL
         locale = self._value_locale()
         if is_label_seed:
@@ -160,7 +160,7 @@ class OrganizationStack(BaseStack):
     def _is_label_right_blocker(self, clue: Clue) -> bool:
         if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.CONNECTOR, ClueRole.LABEL}:
             return True
-        if clue.role == ClueRole.HARD:
+        if clue.strength == ClaimStrength.HARD:
             return True
         if clue.attr_type is None:
             return False
@@ -192,7 +192,7 @@ class OrganizationStack(BaseStack):
                 break
             if clue.attr_type != PIIAttributeType.ORGANIZATION:
                 continue
-            if clue.role == ClueRole.HARD:
+            if clue.strength == ClaimStrength.HARD:
                 continue
             matches.append((index, clue))
         return matches

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import AddressComponentType, Clue, ClueBundle, ClueRole
+from privacyguard.infrastructure.pii.detector.models import AddressComponentType, ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks import AddressStack
@@ -24,8 +24,10 @@ def _clue(
 ) -> Clue:
     return Clue(
         clue_id=clue_id,
+        family=ClueFamily.ADDRESS if attr_type == PIIAttributeType.ADDRESS else ClueFamily.CONTROL,
         role=role,
         attr_type=attr_type,
+        strength=ClaimStrength.SOFT,
         start=start,
         end=end,
         text=text,
@@ -214,7 +216,8 @@ def test_shrink_returns_none_when_trimmed_text_loses_address_signal():
     assert stack.shrink(run, run.candidate.unit_end - 1, run.candidate.unit_end) is None
 
 
-def test_parser_value_path_matches_between_balanced_and_strong():
+def test_parser_value_path_strong_accepts_single_road_component():
+    """STRONG 无门槛直接 commit；BALANCED 对单 ROAD 组件需 >=2 evidence，故不匹配。"""
     text = "Main St"
     clues = (
         _clue(
@@ -237,14 +240,15 @@ def test_parser_value_path_matches_between_balanced_and_strong():
         ),
     )
 
-    balanced = _parse_address_texts(text, clues, protection_level=ProtectionLevel.BALANCED)
     strong = _parse_address_texts(text, clues, protection_level=ProtectionLevel.STRONG)
+    balanced = _parse_address_texts(text, clues, protection_level=ProtectionLevel.BALANCED)
 
-    assert balanced == [text]
-    assert strong == balanced
+    assert strong == [text]
+    assert balanced == []
 
 
-def test_parser_key_path_matches_between_weak_and_strong():
+def test_parser_key_path_strong_accepts_single_road_keyword():
+    """STRONG 无门槛；WEAK 需 >=2 evidence，单 KEY 不满足。"""
     text = "人民路"
     start = text.index("路")
     clues = (
@@ -259,8 +263,8 @@ def test_parser_key_path_matches_between_weak_and_strong():
         ),
     )
 
-    weak = _parse_address_texts(text, clues, protection_level=ProtectionLevel.WEAK)
     strong = _parse_address_texts(text, clues, protection_level=ProtectionLevel.STRONG)
+    weak = _parse_address_texts(text, clues, protection_level=ProtectionLevel.WEAK)
 
-    assert weak == [text]
-    assert strong == weak
+    assert strong == [text]
+    assert weak == []

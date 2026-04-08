@@ -29,11 +29,12 @@ from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPatt
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
     BreakType,
+    ClaimStrength,
     Clue,
     ClueBundle,
+    ClueFamily,
     ClueRole,
     DictionaryEntry,
-    NameComponentHint,
     StreamInput,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
@@ -45,6 +46,18 @@ _HARD_SOURCE_PRIORITY = {
     "prompt": 2,
     "regex": 1,
 }
+
+
+def _attr_to_family(attr_type: PIIAttributeType | None) -> ClueFamily:
+    """从 attr_type 推导 ClueFamily。"""
+    if attr_type is None:
+        return ClueFamily.CONTROL
+    _MAP = {
+        PIIAttributeType.NAME: ClueFamily.NAME,
+        PIIAttributeType.ORGANIZATION: ClueFamily.ORGANIZATION,
+        PIIAttributeType.ADDRESS: ClueFamily.ADDRESS,
+    }
+    return _MAP.get(attr_type, ClueFamily.STRUCTURED)
 
 _PLACEHOLDER_BY_ATTR = {
     PIIAttributeType.PHONE: "<phone>",
@@ -81,6 +94,9 @@ _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
 )
 
 _LABEL_FIELD_SEPARATOR_CHARS = ":：-—–=|"
+# 标签边界：匹配到的 label 前方或后方至少有一侧满足此集合中的 unit kind，
+# 或处于文本起止位置。防止自然语句中嵌入的关键词被误识别为标签。
+_LABEL_BOUNDARY_UNIT_KINDS = frozenset({"punct", "inline_gap", "ocr_break"})
 _SEED_ROLES = frozenset({ClueRole.LABEL, ClueRole.START})
 _SOFT_CONTENT_ROLES = frozenset(
     {
@@ -243,15 +259,16 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                role=ClueRole.HARD,
+                family=ClueFamily.STRUCTURED,
+                role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.EMAIL,
+                strength=ClaimStrength.HARD,
                 start=match.start(),
                 end=match.end(),
                 text=value,
                 priority=120,
                 source_kind="regex_email",
-                hard_source="regex",
-                placeholder=_PLACEHOLDER_BY_ATTR[PIIAttributeType.EMAIL],
+                source_metadata={"hard_source": ["regex"], "placeholder": ["<email>"]},
             )
         )
         excluded_spans.append((match.start(), match.end()))
@@ -267,15 +284,16 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
-                    role=ClueRole.HARD,
+                    family=ClueFamily.STRUCTURED,
+                    role=ClueRole.VALUE,
                     attr_type=PIIAttributeType.TIME,
+                    strength=ClaimStrength.HARD,
                     start=match.start(),
                     end=match.end(),
                     text=value,
                     priority=100,
                     source_kind=source_kind,
-                    hard_source="regex",
-                    placeholder="<time>",
+                    source_metadata={"hard_source": ["regex"], "placeholder": ["<time>"]},
                 )
             )
             excluded_spans.append((match.start(), match.end()))
@@ -293,16 +311,18 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                role=ClueRole.HARD,
+                family=ClueFamily.STRUCTURED,
+                role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.NUMERIC,
+                strength=ClaimStrength.HARD,
                 start=match.start(),
                 end=match.end(),
                 text=value,
                 priority=90,
                 source_kind="extract_phone_candidate",
-                hard_source="regex",
-                placeholder="<numeric>",
                 source_metadata={
+                    "hard_source": ["regex"],
+                    "placeholder": ["<numeric>"],
                     "fragment_type": ["NUM"],
                     "pure_digits": [digits],
                     "fragment_hint": ["phone_candidate"],
@@ -325,16 +345,18 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                role=ClueRole.HARD,
+                family=ClueFamily.STRUCTURED,
+                role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.NUMERIC,
+                strength=ClaimStrength.HARD,
                 start=match.start(),
                 end=match.end(),
                 text=value,
                 priority=90,
                 source_kind="extract_digit_fragment",
-                hard_source="regex",
-                placeholder="<numeric>",
                 source_metadata={
+                    "hard_source": ["regex"],
+                    "placeholder": ["<numeric>"],
                     "fragment_type": ["NUM"],
                     "pure_digits": [digits],
                 },
@@ -353,16 +375,18 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                role=ClueRole.HARD,
+                family=ClueFamily.STRUCTURED,
+                role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.OTHER,
+                strength=ClaimStrength.HARD,
                 start=match.start(),
                 end=match.end(),
                 text=value,
                 priority=85,
                 source_kind="extract_alnum_fragment",
-                hard_source="regex",
-                placeholder="<other>",
                 source_metadata={
+                    "hard_source": ["regex"],
+                    "placeholder": ["<other>"],
                     "fragment_type": ["ALNUM"],
                     "pure_digits": [digits],
                 },
@@ -417,19 +441,22 @@ def _scan_dictionary_hard_clues(
         if _overlaps_any(start, end, ignored_spans):
             continue
         payload = match.payload
+        dict_metadata = {key: list(values) for key, values in payload.metadata_items}
+        dict_metadata["hard_source"] = [source_kind]
+        dict_metadata["placeholder"] = [_PLACEHOLDER_BY_ATTR.get(payload.attr_type, f"<{payload.attr_type.value}>")]
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
-                role=ClueRole.HARD,
+                family=_attr_to_family(payload.attr_type),
+                role=ClueRole.VALUE,
                 attr_type=payload.attr_type,
+                strength=ClaimStrength.HARD,
                 start=start,
                 end=end,
                 text=matched_text,
                 priority=priority,
                 source_kind=payload.matched_by,
-                hard_source=source_kind,
-                placeholder=_PLACEHOLDER_BY_ATTR.get(payload.attr_type, f"<{payload.attr_type.value}>"),
-                source_metadata={key: list(values) for key, values in payload.metadata_items},
+                source_metadata=dict_metadata,
             )
         )
     return clues
@@ -494,19 +521,21 @@ def _scan_name_dictionary_clues(
         payload = match.payload
         metadata = {key: list(values) for key, values in payload.metadata_items}
         component = _dictionary_name_component(metadata)
-        role, component_hint = _dictionary_name_role(component)
+        role, hint_value = _dictionary_name_role(component)
+        metadata["hard_source"] = [source_kind]
+        metadata["name_component_hint"] = [hint_value]
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NAME,
                 role=role,
                 attr_type=PIIAttributeType.NAME,
+                strength=ClaimStrength.HARD,
                 start=start,
                 end=end,
                 text=matched_text,
                 priority=priority,
                 source_kind=payload.matched_by,
-                component_hint=component_hint,
-                hard_source=source_kind,
                 source_metadata=metadata,
             )
         )
@@ -518,16 +547,17 @@ def _dictionary_name_component(metadata: dict[str, list[str]]) -> str:
     return str(values[0]).strip().lower() if values else "full"
 
 
-def _dictionary_name_role(component: str) -> tuple[ClueRole, NameComponentHint]:
+def _dictionary_name_role(component: str) -> tuple[ClueRole, str]:
+    """从字典 name_component 推导 role 和 hint 值字符串。"""
     if component == "family":
-        return (ClueRole.FAMILY_NAME, NameComponentHint.FAMILY)
+        return (ClueRole.FAMILY_NAME, "family")
     if component == "given":
-        return (ClueRole.GIVEN_NAME, NameComponentHint.GIVEN)
+        return (ClueRole.GIVEN_NAME, "given")
     if component == "alias":
-        return (ClueRole.ALIAS, NameComponentHint.ALIAS)
+        return (ClueRole.ALIAS, "alias")
     if component == "middle":
-        return (ClueRole.GIVEN_NAME, NameComponentHint.MIDDLE)
-    return (ClueRole.FULL_NAME, NameComponentHint.FULL)
+        return (ClueRole.GIVEN_NAME, "middle")
+    return (ClueRole.FULL_NAME, "full")
 
 
 def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, ...]:
@@ -544,6 +574,8 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
         if normalized is None:
             continue
         raw_start, raw_end, _matched_text = normalized
+        if not _has_label_boundary(segment.stream, raw_start, raw_end):
+            continue
         matches.append((raw_start, raw_end, match.payload))
     accepted: list[tuple[int, int, object]] = []
     occupied: list[tuple[int, int]] = []
@@ -554,18 +586,22 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
         accepted.append((start, end, spec))
     clues: list[Clue] = []
     for start, end, spec in sorted(accepted, key=lambda item: (item[0], item[1])):
+        label_metadata: dict[str, list[str]] = {}
+        if spec.ocr_source_kind:
+            label_metadata["ocr_source_kind"] = [spec.ocr_source_kind]
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=_attr_to_family(spec.attr_type),
                 role=ClueRole.LABEL,
                 attr_type=spec.attr_type,
+                strength=ClaimStrength.SOFT,
                 start=start,
                 end=end,
                 text=spec.keyword,
                 priority=spec.priority,
                 source_kind=spec.source_kind,
-                component_hint=spec.component_hint,
-                ocr_source_kind=spec.ocr_source_kind,
+                source_metadata=label_metadata,
             )
         )
     return tuple(clues)
@@ -579,8 +615,10 @@ def _scan_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.CONTROL,
                     role=ClueRole.BREAK,
                     attr_type=None,
+                    strength=ClaimStrength.SOFT,
                     start=raw_start,
                     end=raw_end,
                     text=match.group(0),
@@ -602,8 +640,10 @@ def _scan_ocr_break_clues(
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.CONTROL,
                 role=ClueRole.BREAK,
                 attr_type=None,
+                strength=ClaimStrength.SOFT,
                 start=start,
                 end=end,
                 text=stream.text[start:end],
@@ -625,8 +665,10 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NAME,
                 role=ClueRole.START,
                 attr_type=PIIAttributeType.NAME,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=str(match.payload),
@@ -650,8 +692,10 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NAME,
                 role=ClueRole.FAMILY_NAME,
                 attr_type=PIIAttributeType.NAME,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=str(match.payload),
@@ -673,14 +717,15 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NAME,
                 role=ClueRole.FAMILY_NAME,
                 attr_type=PIIAttributeType.NAME,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
                 priority=218,
                 source_kind="en_surname",
-                component_hint=NameComponentHint.FAMILY,
             )
         )
     return _dedupe_clues(clues)
@@ -697,14 +742,15 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NAME,
                 role=ClueRole.GIVEN_NAME,
                 attr_type=PIIAttributeType.NAME,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
                 priority=215,
                 source_kind="en_given_name",
-                component_hint=NameComponentHint.GIVEN,
             )
         )
     return _dedupe_clues(clues)
@@ -721,14 +767,15 @@ def _scan_zh_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.NAME,
                 role=ClueRole.GIVEN_NAME,
                 attr_type=PIIAttributeType.NAME,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=str(match.payload),
                 priority=210,
                 source_kind="zh_given_name",
-                component_hint=NameComponentHint.GIVEN,
             )
         )
     return _dedupe_clues(clues)
@@ -749,8 +796,10 @@ def _scan_connector_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clu
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.CONTROL,
                 role=ClueRole.CONNECTOR,
                 attr_type=None,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
@@ -771,8 +820,10 @@ def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> lis
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.ORGANIZATION,
                 role=ClueRole.SUFFIX,
                 attr_type=PIIAttributeType.ORGANIZATION,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
@@ -803,8 +854,10 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=payload.canonical_text,
@@ -822,8 +875,10 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.ADDRESS,
                 role=ClueRole.KEY,
                 attr_type=PIIAttributeType.ADDRESS,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=payload.canonical_text,
@@ -846,8 +901,10 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=payload.canonical_text,
@@ -865,8 +922,10 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.ADDRESS,
                 role=ClueRole.KEY,
                 attr_type=PIIAttributeType.ADDRESS,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
@@ -880,8 +939,10 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=token_match.group(0),
@@ -905,8 +966,10 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
+                family=ClueFamily.CONTROL,
                 role=ClueRole.NEGATIVE,
                 attr_type=None,
+                strength=ClaimStrength.SOFT,
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
@@ -921,8 +984,10 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.CONTROL,
                     role=ClueRole.NEGATIVE,
                     attr_type=None,
+                    strength=ClaimStrength.SOFT,
                     start=raw_start,
                     end=raw_end,
                     text=token_match.group(0),
@@ -971,7 +1036,7 @@ def _resolve_hard_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
         clues,
         key=lambda c: (
             -(c.end - c.start),
-            -_HARD_SOURCE_PRIORITY.get(str(c.hard_source or ""), 0),
+            -_HARD_SOURCE_PRIORITY.get((c.source_metadata.get("hard_source") or [""])[0], 0),
             c.start,
         ),
     )
@@ -1024,6 +1089,27 @@ def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[
     if not stream.char_to_unit or start >= end:
         return (0, 0)
     return (stream.char_to_unit[start], stream.char_to_unit[end - 1] + 1)
+
+
+def _has_label_boundary(stream: StreamInput, raw_start: int, raw_end: int) -> bool:
+    """检查 label 匹配区间的前方或后方至少有一侧是标签边界。
+
+    边界条件（满足任一即可）：
+    - 处于流文本的起始 / 末尾位置。
+    - 相邻 unit 的 kind 属于 ``_LABEL_BOUNDARY_UNIT_KINDS``（punct / inline_gap / ocr_break）。
+    """
+    if not stream.char_to_unit:
+        return True
+    unit_start, unit_end = _char_span_to_unit_span(stream, raw_start, raw_end)
+    if unit_start >= unit_end:
+        return True
+    # 左侧：起始位置或相邻 unit 为边界类型。
+    if unit_start == 0 or stream.units[unit_start - 1].kind in _LABEL_BOUNDARY_UNIT_KINDS:
+        return True
+    # 右侧：末尾位置或相邻 unit 为边界类型。
+    if unit_end >= len(stream.units) or stream.units[unit_end].kind in _LABEL_BOUNDARY_UNIT_KINDS:
+        return True
+    return False
 
 
 def _normalize_ascii_match(
@@ -1375,9 +1461,8 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
             clue.role,
             clue.attr_type,
             clue.component_type,
-            clue.component_hint,
+            clue.strength,
             clue.break_type,
-            clue.hard_source,
             clue.source_kind,
             clue.start,
             clue.end,
@@ -1465,7 +1550,7 @@ def _sweep_pass1(
     for pos in range(text_len + 1):
         # 移除到期 clue。
         for clue in end_events[pos]:
-            if clue.role == ClueRole.HARD:
+            if clue.strength == ClaimStrength.HARD:
                 active_hard -= 1
             elif clue.role == ClueRole.BREAK:
                 active_break -= 1
@@ -1480,7 +1565,7 @@ def _sweep_pass1(
             role = clue.role
 
             # HARD / BREAK 无条件通过。
-            if role == ClueRole.HARD:
+            if clue.strength == ClaimStrength.HARD:
                 active_hard += 1
                 survivors.append(clue)
                 continue

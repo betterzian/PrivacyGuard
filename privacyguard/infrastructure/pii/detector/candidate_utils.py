@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 import re
+from enum import Enum
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, NameComponentHint
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
+
+
+class NameComponentHint(str, Enum):
+    """姓名候选的成分提示，用于验证逻辑。从 ClueRole 推导而来。"""
+    FULL = "full"
+    FAMILY = "family"
+    GIVEN = "given"
+    ALIAS = "alias"
+    MIDDLE = "middle"
 
 _ORG_SUFFIX_RE = re.compile(
     r"(?i)(股份有限公司|有限责任公司|有限公司|研究院|实验室|工作室|事务所|集团|公司|大学|学院|银行|酒店|医院|中心"

@@ -28,11 +28,13 @@ class StackRun:
     next_index: int = 0
 
 
-def _build_hard_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
+def _build_value_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
+    """从高置信 VALUE 线索构建候选。hard_source / placeholder 从 source_metadata 读取。"""
     metadata = {key: list(values) for key, values in clue.source_metadata.items()}
+    hard_source = (metadata.get("hard_source") or ["regex"])[0]
     metadata = merge_metadata(
         metadata,
-        {"matched_by": [clue.source_kind], "hard_source": [str(clue.hard_source or "regex")]},
+        {"matched_by": [clue.source_kind], "hard_source": [str(hard_source)]},
     )
     return CandidateDraft(
         attr_type=clue.attr_type,
@@ -98,10 +100,11 @@ class BaseStack:
             return "zh"
         return "en"
 
-    def _build_hard_run(self) -> StackRun | None:
+    def _build_direct_run(self) -> StackRun | None:
+        """高置信 VALUE 线索直接产出候选。"""
         if self.clue.attr_type is None:
             return None
-        candidate = _build_hard_candidate(self.clue, self.context.stream.source)
+        candidate = _build_value_candidate(self.clue, self.context.stream.source)
         return StackRun(
             attr_type=candidate.attr_type,
             candidate=candidate,

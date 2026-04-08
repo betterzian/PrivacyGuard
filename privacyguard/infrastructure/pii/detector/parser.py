@@ -20,6 +20,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClaimStrength,
     Clue,
     ClueBundle,
+    ClueFamily,
     ParseResult,
     StreamInput,
 )
@@ -28,7 +29,7 @@ from privacyguard.infrastructure.pii.detector.stacks import BaseStack, StackMana
 
 def _is_control_clue(clue: Clue) -> bool:
     """控制 clue 不建 stack，只供 stack 扩张时观察。"""
-    return clue.attr_type is None
+    return clue.family == ClueFamily.CONTROL
 
 
 def _candidates_overlap(a: CandidateDraft, b: CandidateDraft) -> bool:
@@ -218,17 +219,10 @@ class StreamParser:
     def _try_run_stack(self, context: StackContext, index: int) -> tuple[StackRun | None, BaseStack | None]:
         """尝试在 index 处启动 stack，返回 (run, stack_instance)。"""
         clue = context.clues[index]
-        attr_type = clue.attr_type
-        if attr_type is None:
-            return None, None
-        spec = get_stack_spec(attr_type)
+        spec = get_stack_spec(clue.family)
         if spec is None:
             return None, None
-        allowed_roles = spec.start_roles_by_level.get(
-            context.protection_level,
-            spec.start_roles_by_level.get(ProtectionLevel.STRONG, frozenset()),
-        )
-        if clue.role not in allowed_roles:
+        if clue.role not in spec.start_roles:
             return None, None
         stack = spec.stack_cls(clue=clue, clue_index=index, context=context)
         run = stack.run()
@@ -237,7 +231,9 @@ class StreamParser:
         return run, stack
 
     def _soft_priority(self, attr_type: PIIAttributeType) -> int:
-        spec = get_stack_spec(attr_type)
+        """按 attr_type 推导 family 后查询 soft_priority。"""
+        from privacyguard.infrastructure.pii.detector.scanner import _attr_to_family
+        spec = get_stack_spec(_attr_to_family(attr_type))
         if spec is None:
             return 0
         return spec.soft_priority

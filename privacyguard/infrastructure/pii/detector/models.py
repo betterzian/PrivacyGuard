@@ -13,17 +13,36 @@ class ClaimStrength(str, Enum):
     HARD = "hard"
     SOFT = "soft"
 
+
+class ClueFamily(str, Enum):
+    """线索所属的 stack 家族，用于分发到对应 stack。"""
+    NAME = "name"
+    ORGANIZATION = "organization"
+    ADDRESS = "address"
+    STRUCTURED = "structured"
+    CONTROL = "control"
+
+
 class ClueRole(str, Enum):
-    HARD = "hard"
+    """线索的语义角色。各 family 可用的合法 role 由注册表约束。"""
+    # 通用（所有 PII family 共享）
     LABEL = "label"
-    KEY = "key"
     VALUE = "value"
+
+    # NAME family
     START = "start"
     FAMILY_NAME = "family_name"
     GIVEN_NAME = "given_name"
     FULL_NAME = "full_name"
     ALIAS = "alias"
+
+    # ORGANIZATION family
     SUFFIX = "suffix"
+
+    # ADDRESS family
+    KEY = "key"
+
+    # CONTROL（不触发任何 stack）
     BREAK = "break"
     CONNECTOR = "connector"
     NEGATIVE = "negative"
@@ -45,20 +64,15 @@ class AddressComponentType(str, Enum):
     ROOM = "room"
     STATE = "state"
     POSTAL_CODE = "postal_code"
+    NUMBER = "number"
+    ADMIN = "admin"
+    DIRECTION = "direction"
 
 
 class BreakType(str, Enum):
     OCR = "ocr"
     PUNCT = "punct"
     NEWLINE = "newline"
-
-
-class NameComponentHint(str, Enum):
-    FULL = "full"
-    FAMILY = "family"
-    GIVEN = "given"
-    ALIAS = "alias"
-    MIDDLE = "middle"
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +113,6 @@ class LabelSpec:
     priority: int
     source_kind: str
     ocr_source_kind: str
-    component_hint: NameComponentHint | None = None
     ascii_boundary: bool = False
 
 
@@ -136,23 +149,28 @@ class CandidateDraft:
 
 @dataclass(frozen=True, slots=True)
 class Clue:
+    # —— 核心标识 ——
     clue_id: str
+    family: ClueFamily
     role: ClueRole
     attr_type: PIIAttributeType | None
+    strength: ClaimStrength
+
+    # —— 位置 ——
     start: int
     end: int
     text: str
-    priority: int
-    source_kind: str
     unit_start: int = 0
     unit_end: int = 0
-    component_type: AddressComponentType | None = None
-    component_hint: NameComponentHint | None = None
-    break_type: BreakType | None = None
-    hard_source: str | None = None
-    placeholder: str | None = None
-    ocr_source_kind: str | None = None
+
+    # —— 来源 ——
+    priority: int = 0
+    source_kind: str = ""
     source_metadata: dict[str, list[str]] = field(default_factory=dict)
+
+    # —— family 专属（可选） ——
+    component_type: AddressComponentType | None = None
+    break_type: BreakType | None = None
 
 @dataclass(slots=True)
 class ClueBundle:

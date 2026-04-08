@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import Clue, ClueBundle, ClueRole
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks import OrganizationStack
@@ -21,17 +21,23 @@ def _clue(
     priority: int = 240,
     attr_type: PIIAttributeType | None = PIIAttributeType.ORGANIZATION,
     hard_source: str | None = None,
+    strength: ClaimStrength = ClaimStrength.SOFT,
 ) -> Clue:
+    md: dict[str, list[str]] = {}
+    if hard_source:
+        md["hard_source"] = [hard_source]
     return Clue(
         clue_id=clue_id,
+        family=ClueFamily.ORGANIZATION,
         role=role,
         attr_type=attr_type,
+        strength=strength,
         start=start,
         end=end,
         text=text,
         priority=priority,
         source_kind=source_kind,
-        hard_source=hard_source,
+        source_metadata=md,
     )
 
 
@@ -248,13 +254,14 @@ def test_hard_seed_submits_directly():
     clues = (
         _clue(
             "hard-1",
-            ClueRole.HARD,
+            ClueRole.VALUE,
             0,
             len(text),
             text,
             source_kind="dictionary_local",
             priority=290,
             hard_source="local",
+            strength=ClaimStrength.HARD,
         ),
     )
 

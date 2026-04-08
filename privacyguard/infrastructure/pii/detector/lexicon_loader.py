@@ -7,7 +7,7 @@ from functools import lru_cache
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.lexicon_store import read_scanner_lexicon_json
-from privacyguard.infrastructure.pii.detector.models import AddressComponentType, LabelSpec, NameComponentHint
+from privacyguard.infrastructure.pii.detector.models import AddressComponentType, LabelSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,12 +30,6 @@ def _parse_component_type(raw_value: object) -> AddressComponentType:
     return AddressComponentType(str(raw_value).strip())
 
 
-def _parse_component_hint(raw_value: object) -> NameComponentHint | None:
-    if raw_value is None or str(raw_value).strip() == "":
-        return None
-    return NameComponentHint(str(raw_value).strip())
-
-
 @lru_cache(maxsize=1)
 def load_label_specs() -> tuple[LabelSpec, ...]:
     payload = _read_json("labels.json")
@@ -55,7 +49,6 @@ def load_label_specs() -> tuple[LabelSpec, ...]:
                 priority=int(entry.get("priority", 0)),
                 source_kind=str(entry.get("source_kind", "")).strip(),
                 ocr_source_kind=str(entry.get("ocr_source_kind", "")).strip(),
-                component_hint=_parse_component_hint(entry.get("component_hint")),
                 ascii_boundary=bool(entry.get("ascii_boundary", False)),
             )
         )

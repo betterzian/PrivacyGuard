@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
-from privacyguard.infrastructure.pii.detector.models import Clue, ClueRole, NameComponentHint
+from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueFamily, ClueRole
 from privacyguard.infrastructure.pii.detector.parser import StackContext
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks import NameStack
@@ -22,19 +23,25 @@ def _clue(
     attr_type: PIIAttributeType | None = PIIAttributeType.NAME,
     hard_source: str | None = None,
     source_metadata: dict[str, list[str]] | None = None,
+    strength: ClaimStrength = ClaimStrength.SOFT,
 ) -> Clue:
+    md = dict(source_metadata) if source_metadata else {}
+    if hard_source:
+        md.setdefault("hard_source", [hard_source])
+    if component_hint is not None:
+        md.setdefault("name_component_hint", [component_hint.value])
     return Clue(
         clue_id=clue_id,
+        family=ClueFamily.NAME if attr_type in (PIIAttributeType.NAME, None) else ClueFamily.CONTROL,
         role=role,
         attr_type=attr_type,
+        strength=strength,
         start=start,
         end=end,
         text=text,
         priority=priority,
         source_kind=source_kind,
-        component_hint=component_hint,
-        hard_source=hard_source,
-        source_metadata=source_metadata or {},
+        source_metadata=md,
     )
 
 
@@ -298,6 +305,7 @@ def test_full_name_and_alias_submit_directly_under_weak():
             priority=290,
             component_hint=NameComponentHint.FULL,
             hard_source="local",
+            strength=ClaimStrength.HARD,
             source_metadata={"name_component": ["full"]},
         ),
     )
@@ -312,6 +320,7 @@ def test_full_name_and_alias_submit_directly_under_weak():
             priority=290,
             component_hint=NameComponentHint.ALIAS,
             hard_source="local",
+            strength=ClaimStrength.HARD,
             source_metadata={"name_component": ["alias"]},
         ),
     )
@@ -337,6 +346,7 @@ def test_balanced_accepts_single_dictionary_given_name_longer_than_one_char():
             priority=290,
             component_hint=NameComponentHint.GIVEN,
             hard_source="local",
+            strength=ClaimStrength.HARD,
             source_metadata={"name_component": ["given"]},
         ),
     )
