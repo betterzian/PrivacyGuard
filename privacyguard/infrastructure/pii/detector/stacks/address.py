@@ -13,7 +13,7 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_en_address_keyword_groups,
     load_zh_address_keyword_groups,
  )
-from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
+from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
     _is_stop_control_clue,
@@ -374,7 +374,53 @@ class AddressStack(BaseStack):
             if not components:
                 return None
 
-        components = _extend_components_with_digit_tail(components, stream)
+        # digit_tail 三路分支：不扩展 / 直接扩展 / 挑战 StructuredStack。
+        tail = _analyze_digit_tail(components, stream, self.context.clues, index)
+        if tail is None:
+            pass
+        elif tail.followed_by_address_key:
+            components = [*components, *tail.new_components]
+        else:
+            conservative_run = self._build_address_run(
+                components, consumed_ids, handled_labels,
+                evidence_count, locale, index,
+            )
+            if conservative_run is None:
+                return None
+            extended_run = self._build_address_run(
+                [*components, *tail.new_components], consumed_ids, handled_labels,
+                evidence_count, locale, index,
+            )
+            if extended_run is None:
+                return conservative_run
+            if tail.challenge_clue_index is None:
+                # 没有对应的 NUMERIC/ALNUM clue，无竞争，直接用扩展候选。
+                return extended_run
+            conservative_run.pending_challenge = PendingChallenge(
+                clue_index=tail.challenge_clue_index,
+                cached_digit_text=tail.unit_text,
+                cached_pure_digits=tail.pure_digits,
+                extended_candidate=extended_run.candidate,
+                extended_consumed_ids=extended_run.consumed_ids,
+                extended_next_index=extended_run.next_index,
+            )
+            return conservative_run
+
+        return self._build_address_run(
+            components, consumed_ids, handled_labels,
+            evidence_count, locale, index,
+        )
+
+    def _build_address_run(
+        self,
+        components: list[dict[str, object]],
+        consumed_ids: set[str],
+        handled_labels: set[str],
+        evidence_count: int,
+        locale: str,
+        next_index: int,
+    ) -> StackRun | None:
+        """从 components 构建地址候选并包装为 StackRun。"""
         if not _meets_commit_threshold(
             evidence_count,
             components,
@@ -382,9 +428,9 @@ class AddressStack(BaseStack):
             protection_level=self.context.protection_level,
         ):
             return None
-
-        final_start = min(int(component["start"]) for component in components)
-        final_end = max(int(component["end"]) for component in components)
+        raw_text = self.context.stream.text
+        final_start = min(int(c["start"]) for c in components)
+        final_end = max(int(c["end"]) for c in components)
         text = clean_value(raw_text[final_start:final_end])
         if not text:
             return None
@@ -406,15 +452,15 @@ class AddressStack(BaseStack):
             source_kind=self.clue.source_kind,
             claim_strength=ClaimStrength.SOFT,
             metadata=_address_metadata(self.clue, components),
-            label_clue_ids=handled_labels,
+            label_clue_ids=set(handled_labels),
             label_driven=(self.clue.role == ClueRole.LABEL),
         )
         return StackRun(
             attr_type=PIIAttributeType.ADDRESS,
             candidate=candidate,
-            consumed_ids=consumed_ids,
-            handled_label_clue_ids=handled_labels,
-            next_index=index,
+            consumed_ids=set(consumed_ids),
+            handled_label_clue_ids=set(handled_labels),
+            next_index=next_index,
         )
 
     def _flush_pending_values(
@@ -727,18 +773,49 @@ def _digit_tail_segment_valid(seg: str, comp_type: AddressComponentType) -> bool
     return len(seg) <= max_len
 
 
-def _digit_tail_next_component_type(prev: AddressComponentType) -> AddressComponentType:
-    """由前一 component_type 推导尾随数字的第一个层级（严格层级顺序）。"""
+_DETAIL_HIERARCHY = (
+    AddressComponentType.BUILDING,
+    AddressComponentType.UNIT,
+    AddressComponentType.FLOOR,
+    AddressComponentType.ROOM,
+)
+
+
+def _available_types_after(prev: AddressComponentType) -> list[AddressComponentType]:
+    """由前驱 component 返回 digit_tail 可用的有序类型列表（贪心匹配用）。"""
     if prev in {AddressComponentType.ROAD, AddressComponentType.STREET,
                 AddressComponentType.COMPOUND, AddressComponentType.STREET_NUMBER}:
-        return AddressComponentType.BUILDING
-    if prev == AddressComponentType.BUILDING:
-        return AddressComponentType.UNIT
-    if prev == AddressComponentType.UNIT:
-        return AddressComponentType.FLOOR
-    if prev == AddressComponentType.FLOOR:
-        return AddressComponentType.ROOM
-    return AddressComponentType.BUILDING
+        return list(_DETAIL_HIERARCHY)
+    try:
+        start = _DETAIL_HIERARCHY.index(prev) + 1
+    except ValueError:
+        return list(_DETAIL_HIERARCHY)
+    return list(_DETAIL_HIERARCHY[start:])
+
+
+def _greedy_assign_types(
+    segments: tuple[str, ...],
+    available: list[AddressComponentType],
+) -> list[AddressComponentType] | None:
+    """贪心为每段分配类型：依次尝试可用类型，第一个通过长度验证的即采用。
+
+    返回与 segments 等长的类型列表；若某段无可用类型则返回 None。
+    """
+    result: list[AddressComponentType] = []
+    avail = list(available)
+    for seg in segments:
+        assigned = False
+        while avail:
+            candidate_type = avail[0]
+            if _digit_tail_segment_valid(seg, candidate_type):
+                result.append(candidate_type)
+                avail.pop(0)
+                assigned = True
+                break
+            avail.pop(0)
+        if not assigned:
+            return None
+    return result
 
 
 def _digit_tail_step_down(comp_type: AddressComponentType) -> AddressComponentType:
@@ -752,51 +829,134 @@ def _digit_tail_step_down(comp_type: AddressComponentType) -> AddressComponentTy
     return AddressComponentType.ROOM
 
 
-def _extend_components_with_digit_tail(components: list[dict[str, object]], stream) -> list[dict[str, object]]:
+@dataclass(slots=True)
+class DigitTailResult:
+    """digit_tail 分析结果。"""
+    new_components: list[dict[str, object]]
+    unit_text: str
+    pure_digits: str
+    followed_by_address_key: bool
+    challenge_clue_index: int | None
+
+
+def _find_clue_for_digit_run(
+    clues: tuple[Clue, ...],
+    unit_char_start: int,
+    unit_char_end: int,
+    from_index: int = 0,
+) -> int | None:
+    """在 clues 中查找覆盖指定 digit_run 区间的 NUMERIC/ALNUM clue 索引。"""
+    for i in range(from_index, len(clues)):
+        c = clues[i]
+        if c.start > unit_char_end:
+            break
+        if c.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}:
+            if c.start <= unit_char_start and c.end >= unit_char_end:
+                return i
+    return None
+
+
+def _has_following_address_key(
+    clues: tuple[Clue, ...],
+    digit_char_end: int,
+    raw_text: str,
+    from_index: int = 0,
+) -> bool:
+    """digit_run 后紧邻是否存在地址 KEY clue（gap 内无 hard break）。"""
+    gap = raw_text[digit_char_end:digit_char_end + 6] if digit_char_end < len(raw_text) else ""
+    if any(is_hard_break(ch) for ch in gap):
+        return False
+    for i in range(from_index, len(clues)):
+        c = clues[i]
+        if c.start > digit_char_end + 6:
+            break
+        if c.start < digit_char_end:
+            continue
+        if c.attr_type == PIIAttributeType.ADDRESS and c.role == ClueRole.KEY:
+            return True
+    return False
+
+
+def _analyze_digit_tail(
+    components: list[dict[str, object]],
+    stream,
+    clues: tuple[Clue, ...],
+    clue_scan_index: int,
+) -> DigitTailResult | None:
+    """分析地址尾部 digit_run，返回 DigitTailResult 或 None（不扩展）。
+
+    三路分支：
+    1. 段不符合长度限制 -> None。
+    2. 段符合 + 后接 KEY -> followed_by_address_key=True。
+    3. 段符合 + 无 KEY -> followed_by_address_key=False，填 challenge_clue_index。
+    """
     if not components or not getattr(stream, "units", None):
-        return components
+        return None
     last = max(components, key=lambda c: (int(c["end"]), int(c["start"])))
     end_char = int(last["end"])
-    # 以 end_char 为锚点，取“起始位置在 end_char 或其右侧”的第一个 unit 作为紧邻候选。
     if end_char >= len(stream.text):
-        return components
+        return None
     next_ui = _unit_index_at_or_after(stream, end_char)
     if next_ui >= len(stream.units):
-        return components
+        return None
     next_unit = stream.units[next_ui]
     if next_unit.kind != "digit_run":
-        return components
+        return None
     prev_type = last.get("component_type")
     if not isinstance(prev_type, AddressComponentType):
-        return components
+        return None
+
     max_dashes = _max_dashes_for_prev_type(prev_type)
     parts = _parse_digit_tail(next_unit.text, max_dashes)
     if parts is None:
-        return components
-    current_type = _digit_tail_next_component_type(prev_type)
+        return None
+
+    available = _available_types_after(prev_type)
+    assigned_types = _greedy_assign_types(parts, available)
+    if assigned_types is None:
+        return None
+
+    # 防御性缓存 digit_run 原文和纯数字。
+    cached_text = next_unit.text
+    cached_digits = re.sub(r"\D", "", cached_text)
+
     new_components: list[dict[str, object]] = []
     cursor = next_unit.char_start
-    for idx, seg in enumerate(parts):
-        if not _digit_tail_segment_valid(seg, current_type):
-            break
+    for seg, comp_type in zip(parts, assigned_types):
         seg_start = stream.text.find(seg, cursor, next_unit.char_end)
         if seg_start < 0:
             seg_start = cursor
         seg_end = seg_start + len(seg)
-        new_components.append(
-            {
-                "component_type": current_type,
-                "start": seg_start,
-                "end": seg_end,
-                "value": seg,
-                "key": "",
-                "is_detail": current_type in _DETAIL_COMPONENTS,
-            }
-        )
+        new_components.append({
+            "component_type": comp_type,
+            "start": seg_start,
+            "end": seg_end,
+            "value": seg,
+            "key": "",
+            "is_detail": comp_type in _DETAIL_COMPONENTS,
+        })
         cursor = seg_end
-        if idx < len(parts) - 1:
-            current_type = _digit_tail_step_down(current_type)
-    return [*components, *new_components]
+
+    raw_text = stream.text
+    if _has_following_address_key(clues, next_unit.char_end, raw_text, clue_scan_index):
+        return DigitTailResult(
+            new_components=new_components,
+            unit_text=cached_text,
+            pure_digits=cached_digits,
+            followed_by_address_key=True,
+            challenge_clue_index=None,
+        )
+
+    clue_idx = _find_clue_for_digit_run(
+        clues, next_unit.char_start, next_unit.char_end, clue_scan_index,
+    )
+    return DigitTailResult(
+        new_components=new_components,
+        unit_text=cached_text,
+        pure_digits=cached_digits,
+        followed_by_address_key=False,
+        challenge_clue_index=clue_idx,
+    )
 
 
 def _left_expand_en_word(raw_text: str, pos: int, floor: int) -> int:

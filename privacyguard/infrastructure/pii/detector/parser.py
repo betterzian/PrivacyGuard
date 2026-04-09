@@ -89,6 +89,9 @@ class StreamParser:
                 index += 1
                 continue
 
+            if current_run.pending_challenge is not None:
+                current_run = self._resolve_pending_challenge(context, current_run)
+
             # 查找下一个不在 current_run 中、不同类型的 clue 作为 challenger。
             challenger_run, challenger_stack = None, None
             skip_ids = consumed_ids | current_run.consumed_ids
@@ -238,6 +241,30 @@ class StreamParser:
         if run is None or not run.candidate.text.strip():
             return None, None
         return run, stack
+
+    def _resolve_pending_challenge(self, context: StackContext, run: StackRun) -> StackRun:
+        """挑战裁决：运行 StructuredStack 判定 digit_run，决定使用保守还是扩展候选。"""
+        challenge = run.pending_challenge
+        assert challenge is not None
+        struct_run, _ = self._try_run_stack(context, challenge.clue_index)
+        use_extended = False
+        if struct_run is None:
+            use_extended = True
+        else:
+            use_extended = struct_run.candidate.attr_type in {
+                PIIAttributeType.NUMERIC,
+                PIIAttributeType.ALNUM,
+            }
+        if use_extended:
+            return StackRun(
+                attr_type=run.attr_type,
+                candidate=challenge.extended_candidate,
+                consumed_ids=challenge.extended_consumed_ids,
+                handled_label_clue_ids=run.handled_label_clue_ids,
+                next_index=challenge.extended_next_index,
+            )
+        run.pending_challenge = None
+        return run
 
     def _soft_priority(self, attr_type: PIIAttributeType) -> int:
         """按 attr_type 推导 family 后查询 soft_priority。"""
