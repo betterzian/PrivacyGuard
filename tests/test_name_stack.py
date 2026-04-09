@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueFamily, ClueRole
-from privacyguard.infrastructure.pii.detector.parser import StackContext
+from privacyguard.infrastructure.pii.detector.context import DetectContext
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole
+from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
+from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
 from privacyguard.infrastructure.pii.detector.stacks import NameStack
 
 
@@ -52,6 +56,25 @@ def _run_name_stack(text: str, clue_index: int, clues: tuple[Clue, ...], *, prot
         clues=clues,
     )
     return NameStack(clue=clues[clue_index], clue_index=clue_index, context=context)
+
+
+def _with_units(stream, clue: Clue) -> Clue:
+    unit_start, unit_end = _char_span_to_unit_span(stream, clue.start, clue.end)
+    return replace(clue, unit_start=unit_start, unit_end=unit_end)
+
+
+def _parse_name_texts(
+    text: str,
+    clues: tuple[Clue, ...],
+    *,
+    protection_level: ProtectionLevel = ProtectionLevel.STRONG,
+) -> list[str]:
+    ctx = DetectContext(protection_level=protection_level)
+    stream = build_prompt_stream(text)
+    fixed = tuple(_with_units(stream, clue) for clue in clues)
+    parser = StreamParser(locale_profile="mixed", ctx=ctx)
+    result = parser.parse(stream, ClueBundle(all_clues=fixed))
+    return [candidate.text for candidate in result.candidates if candidate.attr_type == PIIAttributeType.NAME]
 
 
 def test_label_seed_skips_separators_and_captures_value_chars():
@@ -418,3 +441,277 @@ def test_negative_overlap_blocks_non_privileged_submit_when_not_fully_exited():
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
     assert run is None
+
+
+def test_start_seed_keeps_exact_negative_name_under_strong():
+    text = "我叫张力"
+    clues = (
+        _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            2,
+            3,
+            "张",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "张力", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "张力"
+
+
+def test_start_seed_keeps_two_char_negative_word_name_under_strong():
+    text = "我叫高兴"
+    clues = (
+        _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            2,
+            3,
+            "高",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "高兴", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "高兴"
+
+
+def test_start_seed_keeps_three_char_name_when_prefix_is_negative():
+    text = "我叫王国庆"
+    clues = (
+        _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            2,
+            3,
+            "王",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "王国", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "王国庆"
+
+
+def test_label_seed_keeps_three_char_name_when_prefix_is_negative():
+    text = "收件人：孟子轩"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            3,
+            "收件人",
+            source_kind="context_name_field",
+            component_hint=NameComponentHint.FULL,
+        ),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            4,
+            5,
+            "孟",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
+            5,
+            7,
+            "子轩",
+            source_kind="zh_given_name",
+            component_hint=NameComponentHint.GIVEN,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "孟子", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "孟子轩"
+
+
+def test_label_seed_keeps_two_char_negative_word_name_under_strong():
+    text = "收件人：高兴"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            3,
+            "收件人",
+            source_kind="context_name_field",
+            component_hint=NameComponentHint.FULL,
+        ),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            4,
+            5,
+            "高",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "高兴", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "高兴"
+
+
+def test_label_seed_keeps_name_when_prefix_is_negative_and_given_name_exists():
+    text = "用户许可欣"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            2,
+            "用户",
+            source_kind="context_name_field",
+            component_hint=NameComponentHint.FULL,
+        ),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            2,
+            3,
+            "许",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
+            3,
+            5,
+            "可欣",
+            source_kind="zh_given_name",
+            component_hint=NameComponentHint.GIVEN,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "许可", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "许可欣"
+
+
+def test_parser_keeps_start_seed_name_despite_negative():
+    text = "我叫张力"
+    clues = (
+        _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            2,
+            3,
+            "张",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "张力", source_kind="negative_name_word", attr_type=None),
+    )
+
+    assert _parse_name_texts(text, clues) == ["张力"]
+
+
+def test_parser_keeps_label_seed_name_despite_negative():
+    text = "收件人：孟子轩"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            3,
+            "收件人",
+            source_kind="context_name_field",
+            component_hint=NameComponentHint.FULL,
+        ),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            4,
+            5,
+            "孟",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
+            5,
+            7,
+            "子轩",
+            source_kind="zh_given_name",
+            component_hint=NameComponentHint.GIVEN,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "孟子", source_kind="negative_name_word", attr_type=None),
+    )
+
+    assert _parse_name_texts(text, clues) == ["孟子轩"]
+
+
+def test_parser_keeps_two_char_name_from_label_seed_despite_negative():
+    text = "收件人：高兴"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            3,
+            "收件人",
+            source_kind="context_name_field",
+            component_hint=NameComponentHint.FULL,
+        ),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            4,
+            5,
+            "高",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "高兴", source_kind="negative_name_word", attr_type=None),
+    )
+
+    assert _parse_name_texts(text, clues) == ["高兴"]
+
+
+def test_parser_still_blocks_non_seed_negative_phrase():
+    text = "高兴地说"
+    clues = (
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            0,
+            1,
+            "高",
+            source_kind="family_name",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 0, 2, "高兴", source_kind="negative_name_word", attr_type=None),
+    )
+
+    assert _parse_name_texts(text, clues) == []

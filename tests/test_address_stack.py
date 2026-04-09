@@ -85,19 +85,16 @@ def test_cross_tier_merge_city_plus_road_key():
     assert "上海路" in addr.text
 
 
-def test_negative_overlap_pops_rightmost_component():
-    # “路由”是 negative_address_word，和“上海路”在“路”处交叉，需回吐右侧 road 组件。
-    text = "收货地址：上海路由"
+def test_rightmost_negative_drops_single_component_address():
+    # “路由”命中最右组件本身时，应整段放弃。
+    text = "收货地址：朝阳路由用户反馈"
     clues = (
         _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
-        _clue("v1", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=7, text="上海", component_type=AddressComponentType.CITY),
-        _clue("k1", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=7, end=8, text="路", component_type=AddressComponentType.ROAD),
+        _clue("v1", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=8, text="朝阳路", component_type=AddressComponentType.ROAD),
         _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=7, end=9, text="路由", family=ClueFamily.CONTROL),
     )
     candidates = _detect_candidates(text, clues)
-    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
-    assert addr is not None
-    assert "路" not in addr.text
+    assert not any(c.attr_type.value == "address" for c in candidates)
 
 
 def test_digit_tail_extends_after_last_component():
@@ -128,3 +125,68 @@ def test_same_tier_value_replaces_pending_and_flushes_previous():
     addr = next((c for c in candidates if c.attr_type.value == "address"), None)
     assert addr is not None
     assert "上海南京路" in addr.text
+
+
+def test_middle_negative_keeps_address_when_rightmost_component_is_clean_city_center_case():
+    text = "收货地址：上海市中心路109号"
+    clues = (
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("city", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=8, text="上海市", component_type=AddressComponentType.CITY),
+        _clue("road", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=10, end=11, text="路", component_type=AddressComponentType.ROAD),
+        _clue("building", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=14, end=15, text="号", component_type=AddressComponentType.BUILDING),
+        _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=7, end=10, text="市中心", family=ClueFamily.CONTROL),
+    )
+
+    candidates = _detect_candidates(text, clues)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+
+    assert addr is not None
+    assert addr.text == "上海市中心路109号"
+
+
+def test_middle_negative_keeps_address_when_rightmost_component_is_clean_road_case():
+    text = "收货地址：北京市朝阳区建国路88号"
+    clues = (
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("city", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=8, text="北京市", component_type=AddressComponentType.CITY),
+        _clue("district", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=8, end=11, text="朝阳区", component_type=AddressComponentType.DISTRICT),
+        _clue("road", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=13, end=14, text="路", component_type=AddressComponentType.ROAD),
+        _clue("building", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=16, end=17, text="号", component_type=AddressComponentType.BUILDING),
+        _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=11, end=13, text="建国", family=ClueFamily.CONTROL),
+    )
+
+    candidates = _detect_candidates(text, clues)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+
+    assert addr is not None
+    assert addr.text == "北京市朝阳区建国路88号"
+
+
+def test_middle_negative_keeps_open_road_name_when_rightmost_component_is_clean():
+    text = "收货地址：上海市浦东新区域名路23号"
+    clues = (
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("city", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=8, text="上海市", component_type=AddressComponentType.CITY),
+        _clue("district", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=8, end=11, text="浦东新", component_type=AddressComponentType.DISTRICT),
+        _clue("road", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=14, end=15, text="路", component_type=AddressComponentType.ROAD),
+        _clue("building", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=17, end=18, text="号", component_type=AddressComponentType.BUILDING),
+        _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=11, end=13, text="区域", family=ClueFamily.CONTROL),
+    )
+
+    candidates = _detect_candidates(text, clues)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+
+    assert addr is not None
+    assert addr.text == "上海市浦东新区域名路23号"
+
+
+def test_rightmost_negative_drops_street_admin_candidate():
+    text = "收货地址：长安街道办事处"
+    clues = (
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("value", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=9, text="长安街道", component_type=AddressComponentType.STREET_ADMIN),
+        _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=7, end=9, text="街道", family=ClueFamily.CONTROL),
+    )
+
+    candidates = _detect_candidates(text, clues)
+    assert not any(c.attr_type.value == "address" for c in candidates)

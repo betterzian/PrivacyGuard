@@ -554,14 +554,12 @@ def _pop_components_overlapping_negative(
     components: list[dict[str, object]],
     negative_spans: list[tuple[int, int]],
 ) -> list[dict[str, object]]:
-    ordered = list(components)
+    """仅按最右组件判断 negative，避免中间命中连坐整个右尾。"""
+    ordered = sorted(components, key=lambda c: (int(c["end"]), int(c["start"])))
     while ordered:
-        final_start = min(int(c["start"]) for c in ordered)
-        final_end = max(int(c["end"]) for c in ordered)
-        if not _overlaps_any_span(final_start, final_end, negative_spans):
+        last = ordered[-1]
+        if not _overlaps_any_span(int(last["start"]), int(last["end"]), negative_spans):
             return ordered
-        # 吐出最右侧 component（end 最大；若相等则 start 最大）。
-        ordered.sort(key=lambda c: (int(c["end"]), int(c["start"])))
         ordered.pop()
     return []
 

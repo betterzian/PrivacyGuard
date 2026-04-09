@@ -47,6 +47,7 @@ class NameStack(BaseStack):
                 end=start,
                 search_index=self.clue_index + 1,
                 locale=locale,
+                ignore_negative=True,
             )
             return self._build_name_run(start=start, end=end)
         if self.clue.role == ClueRole.FAMILY_NAME:
@@ -97,12 +98,14 @@ class NameStack(BaseStack):
             unique_roles.discard(self.clue.role)
         clue_count = 1 + len(unique_roles)
         negative_count = len(self._negative_clue_ids_in_span(start, end))
+        negative_exempt = self.clue.role in {ClueRole.LABEL, ClueRole.START}
 
         if self.clue.role not in {ClueRole.FULL_NAME, ClueRole.ALIAS} and not self._meets_commit_threshold(
             candidate_text=candidate.text,
             clue_count=clue_count,
             negative_count=negative_count,
             name_clues=name_clues,
+            negative_exempt=negative_exempt,
         ):
             return None
 
@@ -135,15 +138,20 @@ class NameStack(BaseStack):
         end: int,
         search_index: int,
         locale: str,
+        ignore_negative: bool = False,
     ) -> int:
         cursor = end
         next_index = search_index
         while True:
-            if self._has_active_stop_overlap(cursor):
+            if self._has_active_stop_overlap(cursor, ignore_negative=ignore_negative):
                 return cursor
 
             next_component = self._find_next_component_clue(cursor, next_index)
-            next_blocker = self._find_next_right_blocker(cursor, next_index)
+            next_blocker = self._find_next_right_blocker(
+                cursor,
+                next_index,
+                ignore_negative=ignore_negative,
+            )
 
             plain_limit = len(self.context.stream.text)
             if next_component is not None:
@@ -173,16 +181,28 @@ class NameStack(BaseStack):
                 start=start,
                 end=cursor,
                 search_index=next_index,
+                ignore_negative=ignore_negative,
             )
 
-    def _extend_given_chain_right_en(self, start: int, end: int, search_index: int) -> int:
+    def _extend_given_chain_right_en(
+        self,
+        start: int,
+        end: int,
+        search_index: int,
+        *,
+        ignore_negative: bool = False,
+    ) -> int:
         cursor = end
         next_index = search_index
         while True:
-            if self._has_active_stop_overlap(cursor):
+            if self._has_active_stop_overlap(cursor, ignore_negative=ignore_negative):
                 return cursor
             next_component = self._find_next_component_clue(cursor, next_index)
-            next_blocker = self._find_next_right_blocker(cursor, next_index)
+            next_blocker = self._find_next_right_blocker(
+                cursor,
+                next_index,
+                ignore_negative=ignore_negative,
+            )
             if next_component is None:
                 return cursor
             component_index, component = next_component
@@ -296,23 +316,34 @@ class NameStack(BaseStack):
                 return (index, clue)
         return None
 
-    def _find_next_right_blocker(self, cursor: int, search_index: int) -> tuple[int, Clue] | None:
+    def _find_next_right_blocker(
+        self,
+        cursor: int,
+        search_index: int,
+        *,
+        ignore_negative: bool = False,
+    ) -> tuple[int, Clue] | None:
         for index in range(search_index, len(self.context.clues)):
             clue = self.context.clues[index]
             if clue.start < cursor:
                 continue
-            if self._is_name_blocker(clue):
+            if self._is_name_blocker(clue, ignore_negative=ignore_negative):
                 return (index, clue)
         return None
 
-    def _has_active_stop_overlap(self, cursor: int) -> bool:
+    def _has_active_stop_overlap(self, cursor: int, *, ignore_negative: bool = False) -> bool:
         for clue in self.context.clues:
-            if clue.start < cursor < clue.end and self._is_name_blocker(clue):
+            if clue.start < cursor < clue.end and self._is_name_blocker(
+                clue,
+                ignore_negative=ignore_negative,
+            ):
                 return True
         return False
 
-    def _is_name_blocker(self, clue: Clue) -> bool:
-        if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.CONNECTOR}:
+    def _is_name_blocker(self, clue: Clue, *, ignore_negative: bool = False) -> bool:
+        if clue.role == ClueRole.NEGATIVE:
+            return not ignore_negative
+        if clue.role in {ClueRole.BREAK, ClueRole.CONNECTOR}:
             return True
         if clue.attr_type is None:
             return False
@@ -397,8 +428,9 @@ class NameStack(BaseStack):
         clue_count: int,
         negative_count: int,
         name_clues: list[tuple[int, Clue]],
+        negative_exempt: bool = False,
     ) -> bool:
-        if negative_count > 0:
+        if negative_count > 0 and not negative_exempt:
             return False
         if self.context.protection_level == ProtectionLevel.STRONG:
             return clue_count >= 2 or len(candidate_text) > 1
