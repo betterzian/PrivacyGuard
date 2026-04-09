@@ -343,7 +343,7 @@ class NameStack(BaseStack):
     def _is_name_blocker(self, clue: Clue, *, ignore_negative: bool = False) -> bool:
         if clue.role == ClueRole.NEGATIVE:
             return not ignore_negative
-        if clue.role in {ClueRole.BREAK, ClueRole.CONNECTOR}:
+        if clue.role == ClueRole.BREAK:
             return True
         if clue.attr_type is None:
             return False

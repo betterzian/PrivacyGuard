@@ -32,8 +32,8 @@ _NAME_ROLES = frozenset({
     ClueRole.ALIAS,
     ClueRole.VALUE,
 })
-_ORGANIZATION_ROLES = frozenset({ClueRole.LABEL, ClueRole.SUFFIX, ClueRole.VALUE})
-_ADDRESS_ROLES = frozenset({ClueRole.LABEL, ClueRole.VALUE, ClueRole.KEY})
+_ORGANIZATION_ROLES = frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.SUFFIX, ClueRole.VALUE})
+_ADDRESS_ROLES = frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE, ClueRole.KEY})
 
 # —— 合法性校验表（开发期断言用） ——
 
@@ -42,7 +42,7 @@ VALID_ROLES: dict[ClueFamily, frozenset[ClueRole]] = {
     ClueFamily.ORGANIZATION: _ORGANIZATION_ROLES,
     ClueFamily.ADDRESS: _ADDRESS_ROLES,
     ClueFamily.STRUCTURED: _STRUCTURED_ROLES,
-    ClueFamily.CONTROL: frozenset({ClueRole.BREAK, ClueRole.CONNECTOR, ClueRole.NEGATIVE}),
+    ClueFamily.CONTROL: frozenset({ClueRole.BREAK, ClueRole.NEGATIVE}),
 }
 
 # —— 注册表：4 条 ——

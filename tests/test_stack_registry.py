@@ -31,14 +31,14 @@ def test_organization_start_roles():
     spec = get_stack_spec(ClueFamily.ORGANIZATION)
 
     assert spec is not None
-    assert spec.start_roles == frozenset({ClueRole.LABEL, ClueRole.SUFFIX, ClueRole.VALUE})
+    assert spec.start_roles == frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.SUFFIX, ClueRole.VALUE})
 
 
 def test_address_start_roles():
     spec = get_stack_spec(ClueFamily.ADDRESS)
 
     assert spec is not None
-    assert spec.start_roles == frozenset({ClueRole.LABEL, ClueRole.VALUE, ClueRole.KEY})
+    assert spec.start_roles == frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE, ClueRole.KEY})
 
 
 def test_control_family_returns_none():

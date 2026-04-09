@@ -28,9 +28,9 @@ class ClueRole(str, Enum):
     # 通用（所有 PII family 共享）
     LABEL = "label"
     VALUE = "value"
+    START = "start"
 
     # NAME family
-    START = "start"
     FAMILY_NAME = "family_name"
     GIVEN_NAME = "given_name"
     FULL_NAME = "full_name"
@@ -44,7 +44,6 @@ class ClueRole(str, Enum):
 
     # CONTROL（不触发任何 stack）
     BREAK = "break"
-    CONNECTOR = "connector"
     NEGATIVE = "negative"
 
 

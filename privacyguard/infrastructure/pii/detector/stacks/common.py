@@ -14,16 +14,12 @@ def is_negative_clue(clue: Clue) -> bool:
     return clue.role == ClueRole.NEGATIVE
 
 
-def is_connector_clue(clue: Clue) -> bool:
-    return clue.role == ClueRole.CONNECTOR
-
-
 def is_control_clue(clue: Clue) -> bool:
     return clue.attr_type is None
 
 
 def _is_stop_control_clue(clue: Clue) -> bool:
-    return clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.CONNECTOR}
+    return clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
 
 
 def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[int, int]:

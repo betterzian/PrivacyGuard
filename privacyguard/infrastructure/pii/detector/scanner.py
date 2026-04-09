@@ -156,10 +156,6 @@ _START_MASKED_SOFT_ROLES = frozenset(
         ClueRole.GIVEN_NAME,
     }
 )
-# 注意：NEGATIVE clue 用于 stack 内部的“事后回吐/裁剪”决策，不能在 sweep 阶段被 seed 遮蔽。
-_SOFT_CONTROL_ROLES = frozenset({ClueRole.NEGATIVE, ClueRole.CONNECTOR})
-_SOFT_CONTROL_ROLES_SEED_MASKED = frozenset({ClueRole.CONNECTOR})
-
 # 数字的非隐私上下文模式。
 _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\d{4}年"),
@@ -265,14 +261,14 @@ def build_clue_bundle(
         soft_clues.extend(_scan_en_surname_clues(ctx, segment))
         soft_clues.extend(_scan_en_given_name_clues(ctx, segment))
         soft_clues.extend(_scan_zh_given_name_clues(ctx, segment))
-        soft_clues.extend(_scan_connector_clues(ctx, segment))
         soft_clues.extend(_scan_company_suffix_clues(ctx, segment))
         soft_clues.extend(_scan_address_clues(ctx, segment, locale_profile=locale_profile))
         soft_clues.extend(_scan_negative_clues(ctx, segment))
 
     # ── 事件扫描线裁决 ──
     all_clues = [*structured_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_only_spans), *soft_clues]
-    resolved_clues = _attach_unit_spans(stream, _sweep_resolve(stream.text, all_clues))
+    all_clues_with_units = _attach_unit_spans(stream, all_clues)
+    resolved_clues = _sweep_resolve(stream, all_clues_with_units)
     ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, _family_order(item.family), item.end)))
     return ClueBundle(all_clues=ordered_clues)
 
@@ -617,8 +613,6 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
         if normalized is None:
             continue
         raw_start, raw_end, _matched_text = normalized
-        if not _has_label_boundary(segment.stream, raw_start, raw_end):
-            continue
         matches.append((raw_start, raw_end, match.payload))
     accepted: list[tuple[int, int, object]] = []
     occupied: list[tuple[int, int]] = []
@@ -811,34 +805,6 @@ def _scan_zh_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 end=raw_end,
                 text=str(match.payload),
                 source_kind="zh_given_name",
-            )
-        )
-    return _dedupe_clues(clues)
-
-
-def _scan_connector_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
-    """扫描连接词/介词，产出 CONNECTOR clue。
-
-    中文：的、得、是、于、去。英文：is、or、at。
-    这类 clue 不起栈，但会被 stack 当作软控制信号读取。
-    """
-    clues: list[Clue] = []
-    for match in _connector_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
-        if normalized is None:
-            continue
-        raw_start, raw_end, matched_text = normalized
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.CONTROL,
-                role=ClueRole.CONNECTOR,
-                attr_type=None,
-                strength=ClaimStrength.SOFT,
-                start=raw_start,
-                end=raw_end,
-                text=matched_text,
-                source_kind=str(match.payload),
             )
         )
     return _dedupe_clues(clues)
@@ -1188,6 +1154,40 @@ def _has_label_boundary(stream: StreamInput, raw_start: int, raw_end: int) -> bo
     return False
 
 
+_LABEL_START_CONNECTOR_SKIPPABLE_UNIT_KINDS = frozenset({"space", "inline_gap"})
+
+
+def _try_convert_label_to_start(stream: StreamInput, clue: Clue) -> Clue | None:
+    """尝试将 LABEL 转为 START：后面紧跟"是"或"is"（英文允许跳过空白 unit）则合并。"""
+    if not stream.units or clue.unit_end >= len(stream.units):
+        return None
+    next_idx = clue.unit_end
+    # 中文：紧邻的下一个 unit 是"是"。
+    if stream.units[next_idx].text == "是":
+        target = stream.units[next_idx]
+        return replace(
+            clue,
+            role=ClueRole.START,
+            end=target.char_end,
+            unit_end=next_idx + 1,
+            text=stream.text[clue.start : target.char_end],
+        )
+    # 英文：跳过空白/gap unit，检查下一个实质 unit 是否为 "is"。
+    scan = next_idx
+    while scan < len(stream.units) and stream.units[scan].kind in _LABEL_START_CONNECTOR_SKIPPABLE_UNIT_KINDS:
+        scan += 1
+    if scan < len(stream.units) and stream.units[scan].text.lower() == "is":
+        target = stream.units[scan]
+        return replace(
+            clue,
+            role=ClueRole.START,
+            end=target.char_end,
+            unit_end=scan + 1,
+            text=stream.text[clue.start : target.char_end],
+        )
+    return None
+
+
 def _normalize_ascii_match(
     stream: StreamInput,
     start: int,
@@ -1423,33 +1423,6 @@ def _zh_given_name_matcher() -> AhoMatcher:
     )
 
 
-# 连接词/介词：中文（的、得、是、于、去）、英文（is、or、at）。
-_CONNECTOR_SPECS: tuple[tuple[str, str], ...] = (
-    ("的", "connector_zh"),
-    ("得", "connector_zh"),
-    ("是", "connector_zh"),
-    ("于", "connector_zh"),
-    ("去", "connector_zh"),
-    ("is", "connector_en"),
-    ("or", "connector_en"),
-    ("at", "connector_en"),
-)
-
-
-@lru_cache(maxsize=1)
-def _connector_matcher() -> AhoMatcher:
-    return AhoMatcher.from_patterns(
-        tuple(
-            AhoPattern(
-                text=word,
-                payload=source_kind,
-                ascii_boundary=_needs_ascii_keyword_boundary(word),
-            )
-            for word, source_kind in _CONNECTOR_SPECS
-        )
-    )
-
-
 @lru_cache(maxsize=1)
 def _company_suffix_matcher() -> AhoMatcher:
     return AhoMatcher.from_patterns(
@@ -1589,10 +1562,10 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
     return sorted(ordered, key=lambda item: (item.start, _family_order(item.family), item.end))
 
 
-def _sweep_resolve(raw_text: str, clues: list[Clue]) -> list[Clue]:
+def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
     """事件扫描线裁决所有 clue 重叠。
 
-    1. 扫描轮 1：STRUCTURED / BREAK 遮蔽，同时收集 seed 连通块。
+    1. 扫描轮 1：STRUCTURED / BREAK 遮蔽，同时收集 seed 连通块；LABEL 当场做边界判断与 START 转换。
     2. Seed 裁决：完全包含→大的覆盖；否则保留 start 更靠后的。
     3. 扫描轮 2：seed 依赖规则。
     4. 姓名组件覆盖。
@@ -1600,11 +1573,11 @@ def _sweep_resolve(raw_text: str, clues: list[Clue]) -> list[Clue]:
     """
     if not clues:
         return []
-    text_len = len(raw_text)
+    unit_len = len(stream.units)
     deduped = _dedupe_clues(clues)
 
-    # ── 轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块 ──
-    survivors, seed_groups = _sweep_pass1(deduped, text_len)
+    # ── 轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块 + label 边界/START 转换 ──
+    survivors, seed_groups = _sweep_pass1(stream, deduped, unit_len)
 
     # ── Seed 裁决 ──
     seed_winner_ids: set[str] = set()
@@ -1617,7 +1590,7 @@ def _sweep_resolve(raw_text: str, clues: list[Clue]) -> list[Clue]:
     ]
 
     # ── 轮 2：seed 依赖规则 ──
-    survivors = _sweep_pass2(survivors, text_len)
+    survivors = _sweep_pass2(survivors, unit_len)
 
     # ── 姓名组件覆盖 ──
     survivors = _apply_name_component_coverage(survivors)
@@ -1628,27 +1601,29 @@ def _sweep_resolve(raw_text: str, clues: list[Clue]) -> list[Clue]:
 
 def _build_events(
     clues: list[Clue],
-    text_len: int,
+    unit_len: int,
 ) -> tuple[list[list[Clue]], list[list[Clue]]]:
-    """构建 start / end 事件数组。"""
-    start_events: list[list[Clue]] = [[] for _ in range(text_len + 1)]
-    end_events: list[list[Clue]] = [[] for _ in range(text_len + 1)]
+    """构建 unit 轴上的 start / end 事件数组。"""
+    start_events: list[list[Clue]] = [[] for _ in range(unit_len + 1)]
+    end_events: list[list[Clue]] = [[] for _ in range(unit_len + 1)]
     for clue in clues:
-        start_events[clue.start].append(clue)
-        end_events[clue.end].append(clue)
+        start_events[clue.unit_start].append(clue)
+        end_events[clue.unit_end].append(clue)
     return start_events, end_events
 
 
 def _sweep_pass1(
+    stream: StreamInput,
     clues: list[Clue],
-    text_len: int,
+    unit_len: int,
 ) -> tuple[list[Clue], list[list[Clue]]]:
-    """扫描轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块收集。
+    """扫描轮 1（unit 轴）：STRUCTURED / BREAK 遮蔽 + seed 连通块收集 + LABEL 边界/START 转换。
 
     STRUCTURED 和 BREAK 无条件保留并形成活跃区间；
     其他 soft clue 落在活跃区间内则过滤。
+    LABEL 先尝试拼接"是"/"is"转 START；否则走边界过滤。
     """
-    start_events, end_events = _build_events(clues, text_len)
+    start_events, end_events = _build_events(clues, unit_len)
 
     active_structured = 0
     active_break = 0
@@ -1658,7 +1633,7 @@ def _sweep_pass1(
     cur_seed_group: list[Clue] = []
     seed_group_end = -1
 
-    for pos in range(text_len + 1):
+    for pos in range(unit_len + 1):
         for clue in end_events[pos]:
             if clue.family == ClueFamily.STRUCTURED and clue.role not in _SEED_ROLES:
                 active_structured -= 1
@@ -1673,8 +1648,6 @@ def _sweep_pass1(
         for clue in start_events[pos]:
             role = clue.role
 
-            # STRUCTURED VALUE 无条件通过并形成阻塞区间。
-            # LABEL/START 虽然可能 family=STRUCTURED，但属于 seed，不作为阻塞源。
             if clue.family == ClueFamily.STRUCTURED and role not in _SEED_ROLES:
                 active_structured += 1
                 survivors.append(clue)
@@ -1684,23 +1657,30 @@ def _sweep_pass1(
                 survivors.append(clue)
                 continue
 
-            # 被 STRUCTURED 遮蔽。
             if active_structured > 0:
                 continue
-            # 被 BREAK 遮蔽。
             if active_break > 0:
                 continue
+
+            # LABEL 当场判定：先尝试拼接"是"/"is"转 START，再走边界过滤。
+            if role == ClueRole.LABEL:
+                converted = _try_convert_label_to_start(stream, clue)
+                if converted is not None:
+                    clue = converted
+                    role = ClueRole.START
+                elif not _has_label_boundary(stream, clue.start, clue.end):
+                    continue
 
             survivors.append(clue)
 
             if role in _SEED_ROLES:
-                if clue.start < seed_group_end:
+                if clue.unit_start < seed_group_end:
                     cur_seed_group.append(clue)
                 else:
                     if cur_seed_group:
                         seed_groups.append(cur_seed_group)
                     cur_seed_group = [clue]
-                seed_group_end = max(seed_group_end, clue.end)
+                seed_group_end = max(seed_group_end, clue.unit_end)
 
     if cur_seed_group:
         seed_groups.append(cur_seed_group)
@@ -1725,15 +1705,15 @@ def _resolve_seed_group(group: list[Clue]) -> list[Clue]:
     return survivors
 
 
-def _sweep_pass2(clues: list[Clue], text_len: int) -> list[Clue]:
-    """扫描轮 2：seed 遮蔽 soft_control，START 遮蔽 soft_content。"""
-    start_events, end_events = _build_events(clues, text_len)
+def _sweep_pass2(clues: list[Clue], unit_len: int) -> list[Clue]:
+    """扫描轮 2（unit 轴）：seed 遮蔽 soft_control，START 遮蔽 soft_content。"""
+    start_events, end_events = _build_events(clues, unit_len)
 
     active_seed = 0
     active_start = 0
     survivors: list[Clue] = []
 
-    for pos in range(text_len + 1):
+    for pos in range(unit_len + 1):
         for clue in end_events[pos]:
             if clue.role in _SEED_ROLES:
                 active_seed -= 1
@@ -1750,8 +1730,6 @@ def _sweep_pass2(clues: list[Clue], text_len: int) -> list[Clue]:
                 survivors.append(clue)
                 continue
 
-            if role in _SOFT_CONTROL_ROLES_SEED_MASKED and active_seed > 0:
-                continue
             if role in _START_MASKED_SOFT_ROLES and active_start > 0:
                 continue
 

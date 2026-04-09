@@ -63,7 +63,7 @@ class OrganizationStack(BaseStack):
     def run(self) -> StackRun | None:
         if self.clue.strength == ClaimStrength.HARD:
             return self._build_direct_run()
-        is_label_seed = self.clue.role == ClueRole.LABEL
+        is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
         locale = self._value_locale()
         if is_label_seed:
             start = _skip_separators(self.context.stream.text, self.clue.end)
@@ -88,7 +88,7 @@ class OrganizationStack(BaseStack):
             unit_start=unit_start,
             unit_end=unit_end,
             label_clue_id=self.clue.clue_id if is_label_seed else None,
-            label_driven=is_label_seed,
+            label_driven=(self.clue.role == ClueRole.LABEL),
         )
         if candidate is None:
             return None
@@ -158,7 +158,7 @@ class OrganizationStack(BaseStack):
         return None
 
     def _is_label_right_blocker(self, clue: Clue) -> bool:
-        if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.CONNECTOR, ClueRole.LABEL}:
+        if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}:
             return True
         if clue.strength == ClaimStrength.HARD:
             return True

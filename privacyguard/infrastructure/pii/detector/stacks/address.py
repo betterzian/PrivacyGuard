@@ -87,6 +87,14 @@ _SINGLE_EVIDENCE_ADMIN = {
     AddressComponentType.CITY,
 }
 
+# 地址内可吸收的非 ADDRESS attr_type——数字片段和字母数字片段。
+_ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM})
+
+
+def _is_absorbable_digit_clue(clue: Clue) -> bool:
+    """判断非 ADDRESS clue 是否为可被地址栈吸收的数字片段。"""
+    return clue.attr_type in _ABSORBABLE_DIGIT_ATTR_TYPES
+
 
 @dataclass(slots=True)
 class AddressStack(BaseStack):
@@ -128,7 +136,7 @@ class AddressStack(BaseStack):
         raw_text = self.context.stream.text
         stream = self.context.stream
         locale = self._value_locale()
-        is_label_seed = self.clue.role == ClueRole.LABEL
+        is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
 
         if is_label_seed:
             address_start = _skip_separators(raw_text, self.clue.end)
@@ -157,6 +165,8 @@ class AddressStack(BaseStack):
         negative_spans: list[tuple[int, int]] = []
         last_consumed_address_clue: Clue | None = None
         last_value_clue: Clue | None = None
+        # 记录已吸收的数字 clue 的最远 unit_end，用于 gap 锚点。
+        absorbed_digit_unit_end: int = 0
 
         while index < len(self.context.clues):
             clue = self.context.clues[index]
@@ -171,6 +181,12 @@ class AddressStack(BaseStack):
                 index += 1
                 continue
             if clue.attr_type != PIIAttributeType.ADDRESS:
+                # 数字/字母数字片段不终止地址扫描——地址常含门牌号、楼号等数字。
+                if _is_absorbable_digit_clue(clue):
+                    absorbed_digit_unit_end = max(absorbed_digit_unit_end, clue.unit_end)
+                    last_end = max(last_end, clue.end)
+                    index += 1
+                    continue
                 break
             if clue.role == ClueRole.LABEL:
                 index += 1
@@ -180,8 +196,11 @@ class AddressStack(BaseStack):
                 continue
 
             # 6 个 unit 之内没有新的 clue 则截止（按 unit 差计数，含空格 unit）。
-            if last_consumed_address_clue is not None and clue.unit_start - last_consumed_address_clue.unit_end > 6:
-                break
+            # gap 锚点取 last_consumed_address_clue 与已吸收数字位置的较远者。
+            if last_consumed_address_clue is not None:
+                gap_anchor = max(last_consumed_address_clue.unit_end, absorbed_digit_unit_end)
+                if clue.unit_start - gap_anchor > 6:
+                    break
 
             comp_type = clue.component_type
             if comp_type is None:
@@ -298,7 +317,7 @@ class AddressStack(BaseStack):
             claim_strength=ClaimStrength.SOFT,
             metadata=_address_metadata(self.clue, components),
             label_clue_ids=handled_labels,
-            label_driven=is_label_seed,
+            label_driven=(self.clue.role == ClueRole.LABEL),
         )
         return StackRun(
             attr_type=PIIAttributeType.ADDRESS,
