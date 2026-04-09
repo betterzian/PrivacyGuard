@@ -63,7 +63,7 @@ class AddressComponentType(str, Enum):
     ROOM = "room"
     STATE = "state"
     POSTAL_CODE = "postal_code"
-    NUMBER = "number"
+    STREET_NUMBER = "street_number"
     ADMIN = "admin"
     DIRECTION = "direction"
 

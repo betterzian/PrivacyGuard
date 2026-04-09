@@ -190,6 +190,7 @@ def _normalize_address(
         if key in _ADDRESS_MATCH_KEYS:
             address_part_values.append(normalized_value)
     numbers = _address_numbers(raw_text=raw_text, metadata=metadata, normalized_components=normalized_components)
+    keyed_numbers = _extract_keyed_numbers(metadata)
     details_tokens = _address_detail_tokens(normalized_components)
     if address_part_values:
         identity["address_part"] = "|".join(address_part_values)
@@ -213,6 +214,7 @@ def _normalize_address(
         match_terms=_dedupe_terms(match_terms),
         identity=identity,
         numbers=tuple(numbers),
+        keyed_numbers=keyed_numbers,
     )
 
 
@@ -275,19 +277,35 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
     for key in ("road", "compound"):
         if not _shared_component_subset(left.identity, right.identity, key):
             return False
-    if not _numbers_match(left.numbers, right.numbers):
+    if not _numbers_match(left.numbers, right.numbers,
+                          left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers):
         return False
     if not left.identity.get("address_part") or not right.identity.get("address_part"):
         return False
     return True
 
 
-def _numbers_match(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
+def _numbers_match(
+    left: tuple[str, ...],
+    right: tuple[str, ...],
+    left_keyed: dict[str, str] | None = None,
+    right_keyed: dict[str, str] | None = None,
+) -> bool:
+    """号码判定：优先 keyed 路径（共有 key 值相等），fallback 到逆序子序列匹配。"""
+    # 路径 1: keyed 比对——仅比较双方共有的 key，值相等即通过。
+    if left_keyed and right_keyed:
+        common = left_keyed.keys() & right_keyed.keys()
+        if common:
+            return all(left_keyed[k] == right_keyed[k] for k in common)
+    # 路径 2: fallback 到 numbers 逆序子序列匹配。
+    return _numbers_sequence_match(left, right)
+
+
+def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
     """号码序列判定：从末尾往前做逆序一致的子序列匹配，且至少命中 2 个 token。"""
     if not left or not right:
         return False
     shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
-    # 逆序对齐：shorter[::-1] 必须是 longer[::-1] 的子序列。
     s = list(reversed(shorter))
     l = list(reversed(longer))
     pointer = 0
@@ -338,6 +356,34 @@ def _is_detail_subsequence(left: str, right: str) -> bool:
     return pointer == len(shorter)
 
 
+_KEYED_NUMBER_TYPES = {"building", "unit", "floor", "room", "street_number"}
+
+
+def _extract_keyed_numbers(metadata: Mapping[str, object] | None) -> dict[str, str]:
+    """从 address_component_trace + address_component_key_trace 提取有明确 key 的数字。"""
+    if not metadata:
+        return {}
+    trace = metadata.get("address_component_trace")
+    key_trace = metadata.get("address_component_key_trace")
+    if not isinstance(trace, list) or not isinstance(key_trace, list):
+        return {}
+    # 收集 key_trace 中出现过的 component_type（有 key 意味着有明确关键字标记）。
+    key_set: set[str] = set()
+    for entry in key_trace:
+        if isinstance(entry, str) and ":" in entry:
+            ct, _ = entry.split(":", 1)
+            key_set.add(ct.strip())
+    keyed: dict[str, str] = {}
+    for entry in trace:
+        if not isinstance(entry, str) or ":" not in entry:
+            continue
+        ct, val = entry.split(":", 1)
+        ct = ct.strip()
+        if ct in _KEYED_NUMBER_TYPES and ct in key_set:
+            keyed[ct] = val.strip()
+    return keyed
+
+
 def _address_numbers(
     *,
     raw_text: str,
@@ -357,7 +403,7 @@ def _address_numbers(
                 comp_type, value = item.split(":", 1)
                 comp_type = comp_type.strip()
                 value = value.strip()
-                if comp_type in {"building", "unit", "floor", "room", "number"}:
+                if comp_type in {"building", "unit", "floor", "room", "street_number"}:
                     tokens.extend(_extract_number_tokens(value))
             return [t for t in tokens if t]
     # fallback：无 trace 时按 detail keys 顺序提取（仅用于 components 直传场景）。

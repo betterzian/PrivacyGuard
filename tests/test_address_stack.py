@@ -133,7 +133,7 @@ def test_middle_negative_keeps_address_when_rightmost_component_is_clean_city_ce
         _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
         _clue("city", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=8, text="上海市", component_type=AddressComponentType.CITY),
         _clue("road", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=10, end=11, text="路", component_type=AddressComponentType.ROAD),
-        _clue("building", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=14, end=15, text="号", component_type=AddressComponentType.BUILDING),
+        _clue("street_number", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=14, end=15, text="号", component_type=AddressComponentType.STREET_NUMBER),
         _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=7, end=10, text="市中心", family=ClueFamily.CONTROL),
     )
 
@@ -151,7 +151,7 @@ def test_middle_negative_keeps_address_when_rightmost_component_is_clean_road_ca
         _clue("city", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=8, text="北京市", component_type=AddressComponentType.CITY),
         _clue("district", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=8, end=11, text="朝阳区", component_type=AddressComponentType.DISTRICT),
         _clue("road", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=13, end=14, text="路", component_type=AddressComponentType.ROAD),
-        _clue("building", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=16, end=17, text="号", component_type=AddressComponentType.BUILDING),
+        _clue("street_number", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=16, end=17, text="号", component_type=AddressComponentType.STREET_NUMBER),
         _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=11, end=13, text="建国", family=ClueFamily.CONTROL),
     )
 
@@ -169,7 +169,7 @@ def test_middle_negative_keeps_open_road_name_when_rightmost_component_is_clean(
         _clue("city", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=8, text="上海市", component_type=AddressComponentType.CITY),
         _clue("district", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=8, end=11, text="浦东新", component_type=AddressComponentType.DISTRICT),
         _clue("road", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=14, end=15, text="路", component_type=AddressComponentType.ROAD),
-        _clue("building", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=17, end=18, text="号", component_type=AddressComponentType.BUILDING),
+        _clue("street_number", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=17, end=18, text="号", component_type=AddressComponentType.STREET_NUMBER),
         _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=11, end=13, text="区域", family=ClueFamily.CONTROL),
     )
 

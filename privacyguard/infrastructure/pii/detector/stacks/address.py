@@ -34,30 +34,90 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import (
     is_soft_break,
 )
 
-_TIER_ADMIN = 1
-_TIER_STREET = 2
-_TIER_DETAIL = 3
-_TIER_POSTAL = 4
+_ADMIN_TYPES = frozenset({
+    AddressComponentType.PROVINCE, AddressComponentType.STATE,
+    AddressComponentType.CITY, AddressComponentType.DISTRICT,
+    AddressComponentType.STREET_ADMIN, AddressComponentType.TOWN,
+    AddressComponentType.VILLAGE,
+})
 
-_COMPONENT_TIER: dict[AddressComponentType, int] = {
-    AddressComponentType.PROVINCE: _TIER_ADMIN,
-    AddressComponentType.STATE: _TIER_ADMIN,
-    AddressComponentType.CITY: _TIER_ADMIN,
-    AddressComponentType.DISTRICT: _TIER_ADMIN,
-    AddressComponentType.STREET_ADMIN: _TIER_ADMIN,
-    AddressComponentType.TOWN: _TIER_ADMIN,
-    AddressComponentType.VILLAGE: _TIER_ADMIN,
-    AddressComponentType.ROAD: _TIER_STREET,
-    AddressComponentType.STREET: _TIER_STREET,
-    AddressComponentType.COMPOUND: _TIER_STREET,
-    AddressComponentType.BUILDING: _TIER_DETAIL,
-    AddressComponentType.UNIT: _TIER_DETAIL,
-    AddressComponentType.FLOOR: _TIER_DETAIL,
-    AddressComponentType.ROOM: _TIER_DETAIL,
-    AddressComponentType.POSTAL_CODE: _TIER_POSTAL,
+_STREET_LEVEL = frozenset({AddressComponentType.ROAD, AddressComponentType.STREET})
+_DETAIL_LEVEL = frozenset({
+    AddressComponentType.STREET_NUMBER, AddressComponentType.COMPOUND,
+    AddressComponentType.BUILDING, AddressComponentType.UNIT,
+    AddressComponentType.FLOOR, AddressComponentType.ROOM,
+})
+
+# 每个 component_type 的合法直接后继。
+_VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] = {
+    # ADMIN 类：正序下级 + 逆序上级 + ROAD/STREET/COMPOUND/DIRECTION
+    AddressComponentType.PROVINCE: _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
+    AddressComponentType.STATE:    _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
+    AddressComponentType.CITY:     _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
+    AddressComponentType.DISTRICT: _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
+    AddressComponentType.STREET_ADMIN: _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
+    AddressComponentType.TOWN:     _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
+    AddressComponentType.VILLAGE:  _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
+    AddressComponentType.ADMIN:    _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
+    # DIRECTION → ROAD/STREET/ADMIN 类
+    AddressComponentType.DIRECTION: _STREET_LEVEL | _ADMIN_TYPES,
+    # ROAD / STREET → STREET_NUMBER, COMPOUND, BUILDING, UNIT, FLOOR, ROOM
+    AddressComponentType.ROAD:   frozenset({AddressComponentType.STREET_NUMBER, AddressComponentType.COMPOUND,
+                                            AddressComponentType.BUILDING, AddressComponentType.UNIT,
+                                            AddressComponentType.FLOOR, AddressComponentType.ROOM}),
+    AddressComponentType.STREET: frozenset({AddressComponentType.STREET_NUMBER, AddressComponentType.COMPOUND,
+                                            AddressComponentType.BUILDING, AddressComponentType.UNIT,
+                                            AddressComponentType.FLOOR, AddressComponentType.ROOM}),
+    # STREET_NUMBER → COMPOUND, BUILDING, UNIT, FLOOR, ROOM
+    AddressComponentType.STREET_NUMBER: frozenset({AddressComponentType.COMPOUND, AddressComponentType.BUILDING,
+                                                   AddressComponentType.UNIT, AddressComponentType.FLOOR,
+                                                   AddressComponentType.ROOM}),
+    # COMPOUND → BUILDING, UNIT, FLOOR, ROOM, STREET_NUMBER
+    AddressComponentType.COMPOUND: frozenset({AddressComponentType.BUILDING, AddressComponentType.UNIT,
+                                              AddressComponentType.FLOOR, AddressComponentType.ROOM,
+                                              AddressComponentType.STREET_NUMBER}),
+    # BUILDING → UNIT, FLOOR, ROOM
+    AddressComponentType.BUILDING: frozenset({AddressComponentType.UNIT, AddressComponentType.FLOOR, AddressComponentType.ROOM}),
+    # UNIT → FLOOR, ROOM
+    AddressComponentType.UNIT: frozenset({AddressComponentType.FLOOR, AddressComponentType.ROOM}),
+    # FLOOR → ROOM
+    AddressComponentType.FLOOR: frozenset({AddressComponentType.ROOM}),
+    # ROOM → 终止
+    AddressComponentType.ROOM: frozenset(),
 }
 
-_MAX_TIER_BACKTRACK = 1
+# 可在任意节点后出现的类型。
+_ANYWHERE_TYPES = frozenset({AddressComponentType.POSTAL_CODE})
+
+# 可在地址末尾逆序追加的顶层 ADMIN（仅省/市/区级别），且必须此前未出现过。
+_TRAILING_ADMIN_TYPES = frozenset({
+    AddressComponentType.PROVINCE, AddressComponentType.STATE,
+    AddressComponentType.CITY, AddressComponentType.DISTRICT,
+})
+
+
+def _compute_reachable(
+    successors: dict[AddressComponentType, frozenset[AddressComponentType]],
+) -> dict[AddressComponentType, frozenset[AddressComponentType]]:
+    """计算传递闭包：从每个节点出发可多步到达的所有节点集合。"""
+    reachable: dict[AddressComponentType, set[AddressComponentType]] = {}
+    for node in successors:
+        visited: set[AddressComponentType] = set()
+        stack = list(successors.get(node, frozenset()))
+        while stack:
+            cur = stack.pop()
+            if cur in visited:
+                continue
+            visited.add(cur)
+            stack.extend(successors.get(cur, frozenset()))
+        reachable[node] = visited
+    return {k: frozenset(v) for k, v in reachable.items()}
+
+
+_REACHABLE = _compute_reachable(_VALID_SUCCESSORS)
+# 首个 component 可为任意已知类型。
+_ALL_TYPES = frozenset(AddressComponentType)
+
 _DETAIL_COMPONENTS = {
     AddressComponentType.BUILDING,
     AddressComponentType.UNIT,
@@ -92,8 +152,11 @@ _ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttribute
 
 
 def _is_absorbable_digit_clue(clue: Clue) -> bool:
-    """判断非 ADDRESS clue 是否为可被地址栈吸收的数字片段。"""
-    return clue.attr_type in _ABSORBABLE_DIGIT_ATTR_TYPES
+    """判断非 ADDRESS clue 是否为可被地址栈吸收的数字片段（≤5 位）。"""
+    if clue.attr_type not in _ABSORBABLE_DIGIT_ATTR_TYPES:
+        return False
+    digits = (clue.source_metadata.get("pure_digits") or [""])[0]
+    return len(digits) <= 5
 
 
 @dataclass(slots=True)
@@ -159,7 +222,9 @@ class AddressStack(BaseStack):
 
         components: list[dict[str, object]] = []
         last_end = address_start
-        last_tier = 0
+        last_component_type: AddressComponentType | None = None
+        seen_types: set[AddressComponentType] = set()
+        in_trailing_admin = False
         pending_value: dict[AddressComponentType, Clue] = {}
         index = scan_index
         negative_spans: list[tuple[int, int]] = []
@@ -181,12 +246,19 @@ class AddressStack(BaseStack):
                 index += 1
                 continue
             if clue.attr_type != PIIAttributeType.ADDRESS:
-                # 数字/字母数字片段不终止地址扫描——地址常含门牌号、楼号等数字。
+                # 数字/字母数字片段（≤5 位）不终止地址扫描——地址常含门牌号、楼号等数字。
                 if _is_absorbable_digit_clue(clue):
                     absorbed_digit_unit_end = max(absorbed_digit_unit_end, clue.unit_end)
-                    last_end = max(last_end, clue.end)
                     index += 1
                     continue
+                # NAME/ORG clue：仅当后续紧邻有 ADDRESS clue 时才吸收，否则打断。
+                if clue.attr_type in {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
+                    if _has_nearby_address_clue(self.context.clues, index + 1, clue.end,
+                                                locale=locale, raw_text=raw_text):
+                        absorbed_digit_unit_end = max(absorbed_digit_unit_end, clue.unit_end)
+                        index += 1
+                        continue
+                    break
                 break
             if clue.role == ClueRole.LABEL:
                 index += 1
@@ -206,10 +278,28 @@ class AddressStack(BaseStack):
             if comp_type is None:
                 index += 1
                 continue
-            tier = _COMPONENT_TIER.get(comp_type, 999)
-            if last_tier and tier < last_tier - _MAX_TIER_BACKTRACK:
-                pass
 
+            # "号"上下文重映射：STREET_NUMBER 出现在楼/单元/栋后面时重映射为 ROOM。
+            if comp_type == AddressComponentType.STREET_NUMBER:
+                if last_component_type in {
+                    AddressComponentType.FLOOR, AddressComponentType.BUILDING,
+                    AddressComponentType.UNIT,
+                }:
+                    comp_type = AddressComponentType.ROOM
+
+            # 邻接表检查。进入尾部逆序后只允许更多未出现的顶层 ADMIN，不再回到正序。
+            if last_component_type is not None:
+                if in_trailing_admin:
+                    if comp_type not in _TRAILING_ADMIN_TYPES or comp_type in seen_types:
+                        break
+                elif comp_type not in _REACHABLE.get(last_component_type, _ALL_TYPES) \
+                     and comp_type not in _ANYWHERE_TYPES:
+                    if comp_type in _TRAILING_ADMIN_TYPES and comp_type not in seen_types:
+                        in_trailing_admin = True
+                    else:
+                        break
+
+            seen_types.add(comp_type)
             consumed_ids.add(clue.clue_id)
             last_consumed_address_clue = clue
 
@@ -224,16 +314,16 @@ class AddressStack(BaseStack):
                         evidence_count += 1
                         last_end = max(last_end, int(standalone["end"]))
                     del pending_value[comp_type]
-                self._flush_pending_values(pending_value, tier, components)
+                self._flush_pending_values(pending_value, comp_type, components)
                 pending_value[comp_type] = clue
                 last_value_clue = clue
                 last_end = max(last_end, clue.end)
-                last_tier = tier
+                last_component_type = comp_type
                 index += 1
                 continue
 
             same_tier_value = pending_value.pop(comp_type, None)
-            flushed = self._flush_pending_values(pending_value, tier, components)
+            flushed = self._flush_pending_values(pending_value, comp_type, components)
             evidence_count += flushed
 
             if same_tier_value is not None:
@@ -249,7 +339,7 @@ class AddressStack(BaseStack):
                         components.append(component)
                         evidence_count += 1
                         last_end = max(last_end, int(component["end"]))
-                        last_tier = tier
+                        last_component_type = comp_type
                 else:
                     standalone = _build_standalone_address_component(same_tier_value, comp_type)
                     if standalone is not None:
@@ -261,7 +351,7 @@ class AddressStack(BaseStack):
                         components.append(key_comp)
                         evidence_count += 1
                         last_end = max(last_end, int(key_comp["end"]))
-                    last_tier = tier
+                    last_component_type = comp_type
             else:
                 component = None
                 if last_value_clue is not None and clue.unit_start - last_value_clue.unit_end <= 1:
@@ -272,7 +362,7 @@ class AddressStack(BaseStack):
                     components.append(component)
                     evidence_count += 1
                     last_end = max(last_end, int(component["end"]))
-                    last_tier = tier
+                    last_component_type = comp_type
             index += 1
 
         evidence_count += self._flush_all_pending(pending_value, components)
@@ -330,14 +420,14 @@ class AddressStack(BaseStack):
     def _flush_pending_values(
         self,
         pending: dict[AddressComponentType, Clue],
-        current_tier: int,
+        current_type: AddressComponentType,
         components: list[dict[str, object]],
     ) -> int:
+        """将 pending 中与 current_type 不同类型的 VALUE flush 为独立 component。"""
         flushed = 0
         to_remove: list[AddressComponentType] = []
         for comp_type, value_clue in pending.items():
-            value_tier = _COMPONENT_TIER.get(comp_type, 999)
-            if value_tier == current_tier:
+            if comp_type == current_type:
                 continue
             component = _build_standalone_address_component(value_clue, comp_type)
             if component is not None:
@@ -583,47 +673,82 @@ def _pop_components_overlapping_negative(
     return []
 
 
-_DIGIT_TAIL_RE = re.compile(r"^\s*(\d{1,4})(?:-(\d{1,4}))?(?:-(\d{1,4}))?\s*$")
+# digit_tail 每个层级的长度上限：(含字母时, 纯数字时)。纯数字 = 上限 - 1。
+_DIGIT_TAIL_MAX_LEN: dict[AddressComponentType, tuple[int, int]] = {
+    AddressComponentType.BUILDING: (5, 4),
+    AddressComponentType.UNIT: (3, 2),
+    AddressComponentType.FLOOR: (3, 2),
+    AddressComponentType.ROOM: (5, 4),
+}
+
+_DIGIT_TAIL_SEGMENT_RE = re.compile(r"^[A-Za-z0-9]+$")
 
 
-def _parse_digit_tail(text: str) -> tuple[str, ...] | None:
-    """解析 digit_run unit.text（允许含 '-'），最多 3 段，每段 ≤4 位。"""
+def _max_dashes_for_prev_type(prev_type: AddressComponentType) -> int:
+    """根据前驱 component 类型返回 digit_tail 允许的最大 dash 数。"""
+    if prev_type in {AddressComponentType.ROAD, AddressComponentType.STREET,
+                     AddressComponentType.COMPOUND, AddressComponentType.STREET_NUMBER}:
+        return 3
+    if prev_type == AddressComponentType.BUILDING:
+        return 2
+    if prev_type == AddressComponentType.UNIT:
+        return 1
+    return 0
+
+
+def _parse_digit_tail(text: str, max_dashes: int) -> tuple[str, ...] | None:
+    """解析 digit_run unit.text，按 '-' 分段，dash 数不超过 max_dashes。"""
     cleaned = str(text or "").strip()
-    match = _DIGIT_TAIL_RE.fullmatch(cleaned)
-    if match is None:
+    if not cleaned:
         return None
-    parts = tuple(p for p in match.groups() if p is not None)
-    if not parts:
+    dash_count = cleaned.count("-")
+    if dash_count > max_dashes:
         return None
-    if cleaned.count("-") > 2:
-        return None
-    return parts
+    if dash_count == 0:
+        if not _DIGIT_TAIL_SEGMENT_RE.fullmatch(cleaned):
+            return None
+        return (cleaned,)
+    segments: list[str] = []
+    for part in cleaned.split("-"):
+        seg = part.strip()
+        if not seg or not _DIGIT_TAIL_SEGMENT_RE.fullmatch(seg):
+            return None
+        segments.append(seg)
+    return tuple(segments) if segments else None
 
 
-def _digit_tail_next_component_type(prev: AddressComponentType, first_segment: str) -> AddressComponentType:
-    """由前一 component_type 推导尾随数字的第一个层级。"""
-    if prev in {AddressComponentType.ROAD, AddressComponentType.STREET, AddressComponentType.COMPOUND}:
-        return AddressComponentType.BUILDING
-    if prev == AddressComponentType.NUMBER:
+def _digit_tail_segment_valid(seg: str, comp_type: AddressComponentType) -> bool:
+    """检查 digit_tail 段长度是否符合对应层级上限（纯数字上限 - 1）。"""
+    limits = _DIGIT_TAIL_MAX_LEN.get(comp_type)
+    if limits is None:
+        return False
+    alnum_max, digit_max = limits
+    max_len = digit_max if seg.isdigit() else alnum_max
+    return len(seg) <= max_len
+
+
+def _digit_tail_next_component_type(prev: AddressComponentType) -> AddressComponentType:
+    """由前一 component_type 推导尾随数字的第一个层级（严格层级顺序）。"""
+    if prev in {AddressComponentType.ROAD, AddressComponentType.STREET,
+                AddressComponentType.COMPOUND, AddressComponentType.STREET_NUMBER}:
         return AddressComponentType.BUILDING
     if prev == AddressComponentType.BUILDING:
-        return AddressComponentType.ROOM if len(first_segment) >= 3 else AddressComponentType.UNIT
+        return AddressComponentType.UNIT
     if prev == AddressComponentType.UNIT:
-        return AddressComponentType.ROOM if len(first_segment) >= 3 else AddressComponentType.FLOOR
+        return AddressComponentType.FLOOR
     if prev == AddressComponentType.FLOOR:
         return AddressComponentType.ROOM
     return AddressComponentType.BUILDING
 
 
 def _digit_tail_step_down(comp_type: AddressComponentType) -> AddressComponentType:
+    """严格层级下降：BUILDING → UNIT → FLOOR → ROOM。"""
     if comp_type == AddressComponentType.BUILDING:
         return AddressComponentType.UNIT
     if comp_type == AddressComponentType.UNIT:
-        return AddressComponentType.ROOM
+        return AddressComponentType.FLOOR
     if comp_type == AddressComponentType.FLOOR:
         return AddressComponentType.ROOM
-    if comp_type == AddressComponentType.NUMBER:
-        return AddressComponentType.BUILDING
     return AddressComponentType.ROOM
 
 
@@ -641,16 +766,19 @@ def _extend_components_with_digit_tail(components: list[dict[str, object]], stre
     next_unit = stream.units[next_ui]
     if next_unit.kind != "digit_run":
         return components
-    parts = _parse_digit_tail(next_unit.text)
-    if parts is None:
-        return components
     prev_type = last.get("component_type")
     if not isinstance(prev_type, AddressComponentType):
         return components
-    current_type = _digit_tail_next_component_type(prev_type, parts[0])
+    max_dashes = _max_dashes_for_prev_type(prev_type)
+    parts = _parse_digit_tail(next_unit.text, max_dashes)
+    if parts is None:
+        return components
+    current_type = _digit_tail_next_component_type(prev_type)
     new_components: list[dict[str, object]] = []
     cursor = next_unit.char_start
     for idx, seg in enumerate(parts):
+        if not _digit_tail_segment_valid(seg, current_type):
+            break
         seg_start = stream.text.find(seg, cursor, next_unit.char_end)
         if seg_start < 0:
             seg_start = cursor

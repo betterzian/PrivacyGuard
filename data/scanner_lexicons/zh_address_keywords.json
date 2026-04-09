@@ -36,7 +36,7 @@
     "keywords": ["号楼", "栋", "幢", "座", "楼"]
   },
   {
-    "component_type": "number",
+    "component_type": "street_number",
     "keywords": ["号", "门牌", "门牌号"]
   },
   {
