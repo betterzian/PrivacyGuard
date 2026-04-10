@@ -158,6 +158,29 @@ def test_address_same_entity_only_uses_current_component_suspected():
     assert same_entity(left, right) is False
 
 
+def test_address_same_entity_keeps_number_match_when_building_prefix_is_missing():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "10号楼2楼102室",
+        metadata={
+            "address_component_trace": ["building:10", "detail:2", "detail:102"],
+            "address_component_key_trace": ["building:号楼", "detail:楼", "detail:室"],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "2楼102室",
+        metadata={
+            "address_component_trace": ["detail:2", "detail:102"],
+            "address_component_key_trace": ["detail:楼", "detail:室"],
+        },
+    )
+
+    assert left.numbers == ("10", "2", "102")
+    assert right.numbers == ("2", "102")
+    assert same_entity(left, right) is True
+
+
 def test_bank_number_canonical_keeps_digits_only():
     normalized = normalize_pii(PIIAttributeType.BANK_NUMBER, "6222 0000 1234 5678")
 
