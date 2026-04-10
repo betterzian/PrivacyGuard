@@ -35,64 +35,50 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import (
 )
 
 _ADMIN_TYPES = frozenset({
-    AddressComponentType.PROVINCE, AddressComponentType.STATE,
+    AddressComponentType.PROVINCE,
     AddressComponentType.CITY, AddressComponentType.DISTRICT,
-    AddressComponentType.STREET_ADMIN, AddressComponentType.TOWN,
-    AddressComponentType.VILLAGE,
+    AddressComponentType.SUBDISTRICT,
 })
 
-_STREET_LEVEL = frozenset({AddressComponentType.ROAD, AddressComponentType.STREET})
-_DETAIL_LEVEL = frozenset({
-    AddressComponentType.STREET_NUMBER, AddressComponentType.COMPOUND,
-    AddressComponentType.BUILDING, AddressComponentType.UNIT,
-    AddressComponentType.FLOOR, AddressComponentType.ROOM,
-})
-
-# 每个 component_type 的合法直接后继。
+# 精简后的后继图（9 节点）。
 _VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] = {
-    # ADMIN 类：正序下级 + 逆序上级 + ROAD/STREET/COMPOUND/DIRECTION
-    AddressComponentType.PROVINCE: _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
-    AddressComponentType.STATE:    _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
-    AddressComponentType.CITY:     _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
-    AddressComponentType.DISTRICT: _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
-    AddressComponentType.STREET_ADMIN: _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
-    AddressComponentType.TOWN:     _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
-    AddressComponentType.VILLAGE:  _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
-    AddressComponentType.ADMIN:    _ADMIN_TYPES | _STREET_LEVEL | {AddressComponentType.COMPOUND, AddressComponentType.DIRECTION},
-    # DIRECTION → ROAD/STREET/ADMIN 类
-    AddressComponentType.DIRECTION: _STREET_LEVEL | _ADMIN_TYPES,
-    # ROAD / STREET → STREET_NUMBER, COMPOUND, BUILDING, UNIT, FLOOR, ROOM
-    AddressComponentType.ROAD:   frozenset({AddressComponentType.STREET_NUMBER, AddressComponentType.COMPOUND,
-                                            AddressComponentType.BUILDING, AddressComponentType.UNIT,
-                                            AddressComponentType.FLOOR, AddressComponentType.ROOM}),
-    AddressComponentType.STREET: frozenset({AddressComponentType.STREET_NUMBER, AddressComponentType.COMPOUND,
-                                            AddressComponentType.BUILDING, AddressComponentType.UNIT,
-                                            AddressComponentType.FLOOR, AddressComponentType.ROOM}),
-    # STREET_NUMBER → COMPOUND, BUILDING, UNIT, FLOOR, ROOM
-    AddressComponentType.STREET_NUMBER: frozenset({AddressComponentType.COMPOUND, AddressComponentType.BUILDING,
-                                                   AddressComponentType.UNIT, AddressComponentType.FLOOR,
-                                                   AddressComponentType.ROOM}),
-    # COMPOUND → BUILDING, UNIT, FLOOR, ROOM, STREET_NUMBER
-    AddressComponentType.COMPOUND: frozenset({AddressComponentType.BUILDING, AddressComponentType.UNIT,
-                                              AddressComponentType.FLOOR, AddressComponentType.ROOM,
-                                              AddressComponentType.STREET_NUMBER}),
-    # BUILDING → UNIT, FLOOR, ROOM
-    AddressComponentType.BUILDING: frozenset({AddressComponentType.UNIT, AddressComponentType.FLOOR, AddressComponentType.ROOM}),
-    # UNIT → FLOOR, ROOM
-    AddressComponentType.UNIT: frozenset({AddressComponentType.FLOOR, AddressComponentType.ROOM}),
-    # FLOOR → ROOM
-    AddressComponentType.FLOOR: frozenset({AddressComponentType.ROOM}),
-    # ROOM → 终止
-    AddressComponentType.ROOM: frozenset(),
+    AddressComponentType.PROVINCE:    frozenset({AddressComponentType.CITY, AddressComponentType.DISTRICT,
+                                                 AddressComponentType.SUBDISTRICT, AddressComponentType.ROAD,
+                                                 AddressComponentType.POI}),
+    AddressComponentType.CITY:        frozenset({AddressComponentType.DISTRICT, AddressComponentType.SUBDISTRICT,
+                                                 AddressComponentType.ROAD, AddressComponentType.POI}),
+    AddressComponentType.DISTRICT:    frozenset({AddressComponentType.SUBDISTRICT, AddressComponentType.ROAD,
+                                                 AddressComponentType.POI}),
+    AddressComponentType.SUBDISTRICT: frozenset({AddressComponentType.SUBDISTRICT, AddressComponentType.ROAD,
+                                                 AddressComponentType.POI, AddressComponentType.NUMBER}),
+    AddressComponentType.ROAD:        frozenset({AddressComponentType.NUMBER, AddressComponentType.POI,
+                                                 AddressComponentType.BUILDING, AddressComponentType.DETAIL}),
+    AddressComponentType.NUMBER:      frozenset({AddressComponentType.POI, AddressComponentType.BUILDING,
+                                                 AddressComponentType.DETAIL}),
+    AddressComponentType.POI:         frozenset({AddressComponentType.NUMBER, AddressComponentType.BUILDING,
+                                                 AddressComponentType.DETAIL}),
+    AddressComponentType.BUILDING:    frozenset({AddressComponentType.DETAIL}),
+    AddressComponentType.DETAIL:      frozenset({AddressComponentType.DETAIL}),
 }
 
-# 可在任意节点后出现的类型。
-_ANYWHERE_TYPES = frozenset({AddressComponentType.POSTAL_CODE})
-
-# 可在地址末尾逆序追加的顶层 ADMIN（仅省/市/区级别），且必须此前未出现过。
+# 可在地址末尾逆序追加的顶层 ADMIN（仅省/市/区），且必须此前未出现过。
 _TRAILING_ADMIN_TYPES = frozenset({
-    AddressComponentType.PROVINCE, AddressComponentType.STATE,
+    AddressComponentType.PROVINCE,
     AddressComponentType.CITY, AddressComponentType.DISTRICT,
+})
+
+# POI 延迟提交时，这些后续 KEY 类型视为「可组合」——丢弃 POI 语义，用后续 KEY 的类型构建。
+_POI_COMBINABLE_TYPES = frozenset({
+    AddressComponentType.ROAD, AddressComponentType.BUILDING,
+    AddressComponentType.DETAIL, AddressComponentType.SUBDISTRICT,
+    AddressComponentType.POI,
+})
+
+# 省/市 VALUE 出现在这些层级后面时，降级为路名前缀文字而非独立 admin 组件。
+_ADMIN_DEMOTABLE_AFTER = frozenset({
+    AddressComponentType.PROVINCE,
+    AddressComponentType.CITY,
+    AddressComponentType.DISTRICT,
 })
 
 
@@ -115,26 +101,24 @@ def _compute_reachable(
 
 
 _REACHABLE = _compute_reachable(_VALID_SUCCESSORS)
-# 首个 component 可为任意已知类型。
 _ALL_TYPES = frozenset(AddressComponentType)
 
 _DETAIL_COMPONENTS = {
     AddressComponentType.BUILDING,
-    AddressComponentType.UNIT,
-    AddressComponentType.FLOOR,
-    AddressComponentType.ROOM,
+    AddressComponentType.DETAIL,
 }
+
+
 def _en_prefix_keywords() -> set[str]:
-    """从外部 lexicon 派生英文前缀关键字集合（unit/floor/room/# 等）。"""
+    """从外部 lexicon 派生英文前缀关键字集合（detail 类如 apt/suite/unit/floor/room/# 等）。"""
     keywords: set[str] = set()
     for group in load_en_address_keyword_groups():
-        if group.component_type not in {AddressComponentType.UNIT, AddressComponentType.FLOOR, AddressComponentType.ROOM}:
+        if group.component_type != AddressComponentType.DETAIL:
             continue
         for kw in group.keywords:
             text = str(kw or "").strip().lower()
             if text:
                 keywords.add(text)
-    # 兼容 unit 组里可能存在的 '#'
     keywords.add("#")
     return keywords
 
@@ -143,7 +127,6 @@ _PREFIX_EN_KEYWORDS = _en_prefix_keywords()
 _EN_VALUE_KEY_GAP_RE = re.compile(r"^[ ]*$")
 _SINGLE_EVIDENCE_ADMIN = {
     AddressComponentType.PROVINCE,
-    AddressComponentType.STATE,
     AddressComponentType.CITY,
 }
 
@@ -230,8 +213,12 @@ class AddressStack(BaseStack):
         negative_spans: list[tuple[int, int]] = []
         last_consumed_address_clue: Clue | None = None
         last_value_clue: Clue | None = None
-        # 记录已吸收的数字 clue 的最远 unit_end，用于 gap 锚点。
         absorbed_digit_unit_end: int = 0
+        # POI 延迟提交状态。
+        deferred_poi: Clue | None = None
+        deferred_poi_index: int = -1
+        # 省/市 VALUE 降级为路名前缀时，记录首个降级 VALUE 的 start 位置。
+        demoted_value_start: int | None = None
 
         while index < len(self.context.clues):
             clue = self.context.clues[index]
@@ -246,12 +233,10 @@ class AddressStack(BaseStack):
                 index += 1
                 continue
             if clue.attr_type != PIIAttributeType.ADDRESS:
-                # 数字/字母数字片段（≤5 位）不终止地址扫描——地址常含门牌号、楼号等数字。
                 if _is_absorbable_digit_clue(clue):
                     absorbed_digit_unit_end = max(absorbed_digit_unit_end, clue.unit_end)
                     index += 1
                     continue
-                # NAME/ORG clue：仅当后续紧邻有 ADDRESS clue 时才吸收，否则打断。
                 if clue.attr_type in {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
                     if _has_nearby_address_clue(self.context.clues, index + 1, clue.end,
                                                 locale=locale, raw_text=raw_text):
@@ -267,8 +252,7 @@ class AddressStack(BaseStack):
                 index += 1
                 continue
 
-            # 6 个 unit 之内没有新的 clue 则截止（按 unit 差计数，含空格 unit）。
-            # gap 锚点取 last_consumed_address_clue 与已吸收数字位置的较远者。
+            # gap 检查：6 unit 以内没有新 clue 则截止。
             if last_consumed_address_clue is not None:
                 gap_anchor = max(last_consumed_address_clue.unit_end, absorbed_digit_unit_end)
                 if clue.unit_start - gap_anchor > 6:
@@ -279,33 +263,99 @@ class AddressStack(BaseStack):
                 index += 1
                 continue
 
-            # "号"上下文重映射：STREET_NUMBER 出现在楼/单元/栋后面时重映射为 ROOM。
-            if comp_type == AddressComponentType.STREET_NUMBER:
-                if last_component_type in {
-                    AddressComponentType.FLOOR, AddressComponentType.BUILDING,
-                    AddressComponentType.UNIT,
-                }:
-                    comp_type = AddressComponentType.ROOM
+            # "号"上下文重映射：NUMBER 出现在 BUILDING/DETAIL 后面时重映射为 DETAIL。
+            if comp_type == AddressComponentType.NUMBER:
+                if last_component_type in {AddressComponentType.BUILDING, AddressComponentType.DETAIL}:
+                    comp_type = AddressComponentType.DETAIL
 
-            # 邻接表检查。进入尾部逆序后只允许更多未出现的顶层 ADMIN，不再回到正序。
+            # ---- 邻接表检查 ----
             if last_component_type is not None:
                 if in_trailing_admin:
                     if comp_type not in _TRAILING_ADMIN_TYPES or comp_type in seen_types:
                         break
-                elif comp_type not in _REACHABLE.get(last_component_type, _ALL_TYPES) \
-                     and comp_type not in _ANYWHERE_TYPES:
+                elif comp_type not in _REACHABLE.get(last_component_type, _ALL_TYPES):
                     if comp_type in _TRAILING_ADMIN_TYPES and comp_type not in seen_types:
+                        # 逆序必须有逗号。
+                        gap_text = raw_text[last_end:clue.start]
+                        if ',' not in gap_text and '，' not in gap_text:
+                            break
                         in_trailing_admin = True
+                    elif (comp_type in {AddressComponentType.PROVINCE, AddressComponentType.CITY}
+                          and clue.role == ClueRole.VALUE
+                          and last_component_type in _ADMIN_DEMOTABLE_AFTER):
+                        # 省/市 VALUE 出现在区以上层级后面 → 降级为路名前缀文字。
+                        if demoted_value_start is None:
+                            demoted_value_start = clue.start
+                        consumed_ids.add(clue.clue_id)
+                        last_consumed_address_clue = clue
+                        last_end = max(last_end, clue.end)
+                        index += 1
+                        continue
                     else:
                         break
+
+            # ---- POI 延迟提交（KEY 和 VALUE 统一） ----
+            if comp_type == AddressComponentType.POI and clue.role in {ClueRole.KEY, ClueRole.VALUE}:
+                # 先处理前一个 deferred_poi（如果有）。
+                if deferred_poi is not None:
+                    poi_adjacent = _is_adjacent(raw_text, deferred_poi, clue)
+                    if poi_adjacent:
+                        pass  # POI 叠 POI 且相邻 → 替换，旧 deferred 文字保留在跨度内。
+                    else:
+                        poi_comp = self._submit_deferred_poi(raw_text, deferred_poi, deferred_poi_index, locale)
+                        if poi_comp is not None:
+                            components.append(poi_comp)
+                            evidence_count += 1
+                            last_end = max(last_end, int(poi_comp["end"]))
+                            last_component_type = AddressComponentType.POI
+                # 存为新的 deferred。
+                seen_types.add(comp_type)
+                consumed_ids.add(clue.clue_id)
+                last_consumed_address_clue = clue
+                last_end = max(last_end, clue.end)
+                deferred_poi = clue
+                deferred_poi_index = index
+                index += 1
+                continue
+
+            # 非 POI clue 到达时，解决已有的 deferred_poi。
+            if deferred_poi is not None:
+                if clue.role == ClueRole.KEY:
+                    adjacent = _is_adjacent(raw_text, deferred_poi, clue)
+                    if adjacent and comp_type in _POI_COMBINABLE_TYPES:
+                        combo = self._build_deferred_poi_combo(raw_text, deferred_poi, deferred_poi_index,
+                                                               clue, comp_type, index, locale)
+                        deferred_poi = None
+                        deferred_poi_index = -1
+                        seen_types.add(comp_type)
+                        consumed_ids.add(clue.clue_id)
+                        last_consumed_address_clue = clue
+                        if combo is not None:
+                            components.append(combo)
+                            evidence_count += 1
+                            last_end = max(last_end, int(combo["end"]))
+                            last_component_type = comp_type
+                        index += 1
+                        continue
+                # 不可组合 / 不相邻 / 当前是 VALUE → 独立提交 deferred_poi。
+                poi_comp = self._submit_deferred_poi(raw_text, deferred_poi, deferred_poi_index, locale)
+                if poi_comp is not None:
+                    components.append(poi_comp)
+                    evidence_count += 1
+                    last_end = max(last_end, int(poi_comp["end"]))
+                    last_component_type = AddressComponentType.POI
+                deferred_poi = None
+                deferred_poi_index = -1
+                # 继续正常处理当前 clue（不 continue）。
 
             seen_types.add(comp_type)
             consumed_ids.add(clue.clue_id)
             last_consumed_address_clue = clue
 
             if clue.role == ClueRole.VALUE:
+                # 正常 VALUE 到达，清除之前的降级记录。
+                demoted_value_start = None
                 if comp_type in pending_value:
-                    # 同层级连续 VALUE：旧 VALUE 不再继续 pending，直接按其层级落成 component，并自动补一个默认 key。
                     previous = pending_value[comp_type]
                     default_key = _default_key_for_component_type(comp_type, locale)
                     standalone = _build_standalone_address_component_with_key(previous, comp_type, key=default_key)
@@ -327,6 +377,7 @@ class AddressStack(BaseStack):
             evidence_count += flushed
 
             if same_tier_value is not None:
+                demoted_value_start = None  # 同层合并优先，清除降级记录。
                 component, merged = _build_value_key_component(
                     raw_text,
                     same_tier_value,
@@ -354,7 +405,22 @@ class AddressStack(BaseStack):
                     last_component_type = comp_type
             else:
                 component = None
-                if last_value_clue is not None and clue.unit_start - last_value_clue.unit_end <= 1:
+                # 有被降级的省/市 VALUE → 用其 start 作为 value 左边界。
+                if demoted_value_start is not None:
+                    dv_start = demoted_value_start
+                    demoted_value_start = None
+                    value_text = raw_text[dv_start:clue.start]
+                    value = _normalize_address_value(comp_type, value_text)
+                    if value:
+                        component = {
+                            "component_type": comp_type,
+                            "start": dv_start,
+                            "end": clue.end,
+                            "value": value,
+                            "key": clue.text,
+                            "is_detail": comp_type in _DETAIL_COMPONENTS,
+                        }
+                elif last_value_clue is not None and clue.unit_start - last_value_clue.unit_end <= 1:
                     component = _build_cross_tier_value_key_component(raw_text, last_value_clue, clue, comp_type)
                 if component is None:
                     component = self._build_key_component(raw_text, clue, comp_type, index, locale)
@@ -364,6 +430,15 @@ class AddressStack(BaseStack):
                     last_end = max(last_end, int(component["end"]))
                     last_component_type = comp_type
             index += 1
+
+        # 循环结束后提交残留的 deferred_poi。
+        if deferred_poi is not None:
+            poi_comp = self._submit_deferred_poi(raw_text, deferred_poi, deferred_poi_index, locale)
+            if poi_comp is not None:
+                components.append(poi_comp)
+                evidence_count += 1
+                last_end = max(last_end, int(poi_comp["end"]))
+            deferred_poi = None
 
         evidence_count += self._flush_all_pending(pending_value, components)
 
@@ -552,10 +627,70 @@ class AddressStack(BaseStack):
             "is_detail": comp_type in _DETAIL_COMPONENTS,
         }
 
+    def _submit_deferred_poi(
+        self,
+        raw_text: str,
+        poi_clue: Clue,
+        poi_index: int,
+        locale: str,
+    ) -> dict[str, object] | None:
+        """将 deferred_poi 作为独立 POI 提交。KEY 走 _build_key_component，VALUE 走 standalone。"""
+        if poi_clue.role == ClueRole.KEY:
+            return self._build_key_component(raw_text, poi_clue,
+                                             AddressComponentType.POI, poi_index, locale)
+        return _build_standalone_address_component(poi_clue, AddressComponentType.POI)
+
+    def _build_deferred_poi_combo(
+        self,
+        raw_text: str,
+        poi_clue: Clue,
+        poi_index: int,
+        next_key: Clue,
+        next_comp_type: AddressComponentType,
+        next_index: int,
+        locale: str,
+    ) -> dict[str, object] | None:
+        """POI 延迟提交的组合构建：用 deferred_poi 的位置取 value，next_key 的类型构建 component。"""
+        if poi_clue.role == ClueRole.VALUE:
+            # VALUE 自身就是完整文字，不需要左扩展。
+            expand_start = poi_clue.start
+        else:
+            # KEY：左扩展找 value。
+            floor = _left_address_floor(self.context.clues, poi_index)
+            if locale.startswith("en"):
+                expand_start = _left_expand_en_word(raw_text, poi_clue.start, floor)
+            else:
+                stream = self.context.stream
+                left_ui = _unit_index_left_of(stream, poi_clue.start)
+                if 0 <= left_ui < len(stream.units) and stream.units[left_ui].kind == "digit_run":
+                    expand_start = stream.units[left_ui].char_start
+                else:
+                    expand_start = _left_expand_zh_chars(raw_text, poi_clue.start, floor, max_chars=2)
+        value_text = raw_text[expand_start:next_key.start]
+        value = _normalize_address_value(next_comp_type, value_text)
+        if not value:
+            return None
+        return {
+            "component_type": next_comp_type,
+            "start": expand_start,
+            "end": next_key.end,
+            "value": value,
+            "key": next_key.text,
+            "is_detail": next_comp_type in _DETAIL_COMPONENTS,
+        }
+
     def _seed_left_boundary(self) -> int | None:
         if self.clue.role in {ClueRole.VALUE, ClueRole.KEY}:
             return self.clue.start
         return None
+
+
+def _is_adjacent(raw_text: str, left_clue: Clue, right_clue: Clue) -> bool:
+    """判断两个 clue 是否紧邻（中间无有效字符，仅允许空白）。"""
+    if left_clue.end > right_clue.start:
+        return False
+    gap = raw_text[left_clue.end:right_clue.start]
+    return not gap or gap.isspace()
 
 
 def _next_address_index(
@@ -719,12 +854,10 @@ def _pop_components_overlapping_negative(
     return []
 
 
-# digit_tail 每个层级的长度上限：(含字母时, 纯数字时)。纯数字 = 上限 - 1。
+# digit_tail 每个层级的长度上限：(含字母时, 纯数字时)。
 _DIGIT_TAIL_MAX_LEN: dict[AddressComponentType, tuple[int, int]] = {
     AddressComponentType.BUILDING: (5, 4),
-    AddressComponentType.UNIT: (3, 2),
-    AddressComponentType.FLOOR: (3, 2),
-    AddressComponentType.ROOM: (5, 4),
+    AddressComponentType.DETAIL: (5, 4),
 }
 
 _DIGIT_TAIL_SEGMENT_RE = re.compile(r"^[A-Za-z0-9]+$")
@@ -732,12 +865,11 @@ _DIGIT_TAIL_SEGMENT_RE = re.compile(r"^[A-Za-z0-9]+$")
 
 def _max_dashes_for_prev_type(prev_type: AddressComponentType) -> int:
     """根据前驱 component 类型返回 digit_tail 允许的最大 dash 数。"""
-    if prev_type in {AddressComponentType.ROAD, AddressComponentType.STREET,
-                     AddressComponentType.COMPOUND, AddressComponentType.STREET_NUMBER}:
+    if prev_type in {AddressComponentType.ROAD, AddressComponentType.POI, AddressComponentType.NUMBER}:
         return 3
     if prev_type == AddressComponentType.BUILDING:
         return 2
-    if prev_type == AddressComponentType.UNIT:
+    if prev_type == AddressComponentType.DETAIL:
         return 1
     return 0
 
@@ -775,22 +907,19 @@ def _digit_tail_segment_valid(seg: str, comp_type: AddressComponentType) -> bool
 
 _DETAIL_HIERARCHY = (
     AddressComponentType.BUILDING,
-    AddressComponentType.UNIT,
-    AddressComponentType.FLOOR,
-    AddressComponentType.ROOM,
+    AddressComponentType.DETAIL,
 )
 
 
 def _available_types_after(prev: AddressComponentType) -> list[AddressComponentType]:
     """由前驱 component 返回 digit_tail 可用的有序类型列表（贪心匹配用）。"""
-    if prev in {AddressComponentType.ROAD, AddressComponentType.STREET,
-                AddressComponentType.COMPOUND, AddressComponentType.STREET_NUMBER}:
+    if prev in {AddressComponentType.ROAD, AddressComponentType.POI, AddressComponentType.NUMBER}:
         return list(_DETAIL_HIERARCHY)
-    try:
-        start = _DETAIL_HIERARCHY.index(prev) + 1
-    except ValueError:
-        return list(_DETAIL_HIERARCHY)
-    return list(_DETAIL_HIERARCHY[start:])
+    if prev == AddressComponentType.BUILDING:
+        return [AddressComponentType.DETAIL]
+    if prev == AddressComponentType.DETAIL:
+        return [AddressComponentType.DETAIL]
+    return list(_DETAIL_HIERARCHY)
 
 
 def _greedy_assign_types(
@@ -819,14 +948,10 @@ def _greedy_assign_types(
 
 
 def _digit_tail_step_down(comp_type: AddressComponentType) -> AddressComponentType:
-    """严格层级下降：BUILDING → UNIT → FLOOR → ROOM。"""
+    """严格层级下降：BUILDING → DETAIL。"""
     if comp_type == AddressComponentType.BUILDING:
-        return AddressComponentType.UNIT
-    if comp_type == AddressComponentType.UNIT:
-        return AddressComponentType.FLOOR
-    if comp_type == AddressComponentType.FLOOR:
-        return AddressComponentType.ROOM
-    return AddressComponentType.ROOM
+        return AddressComponentType.DETAIL
+    return AddressComponentType.DETAIL
 
 
 @dataclass(slots=True)

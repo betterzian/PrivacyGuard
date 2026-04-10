@@ -52,10 +52,9 @@ def test_address_normalization_prefers_metadata_components():
             "address_component_trace": [
                 "city:上海",
                 "district:浦东",
-                "compound:阳光国际",
+                "poi:阳光国际",
                 "building:10",
-                "unit:1",
-                "room:102",
+                "detail:102",
             ]
         },
     )
@@ -63,15 +62,14 @@ def test_address_normalization_prefers_metadata_components():
     assert normalized.components == {
         "city": "上海",
         "district": "浦东",
-        "compound": "阳光国际",
+        "poi": "阳光国际",
         "building": "10",
-        "unit": "1",
-        "room": "102",
+        "detail": "102",
     }
-    assert normalized.canonical == "city=上海|district=浦东|compound=阳光国际|building=10|unit=1|room=102|number=[10,1,102]"
+    assert normalized.canonical == "city=上海|district=浦东|poi=阳光国际|building=10|detail=102|number=[10,102]"
     assert normalized.match_terms == ("上海", "浦东", "阳光国际")
     assert normalized.identity["address_part"] == "上海|浦东|阳光国际"
-    assert normalized.identity["details_part"] == "10-1-102"
+    assert normalized.identity["details_part"] == "10-102"
 
 
 def test_address_same_entity_accepts_local_admin_cross_field_and_detail_subsequence():
@@ -81,11 +79,10 @@ def test_address_same_entity_accepts_local_admin_cross_field_and_detail_subseque
         components={
             "city": "上海",
             "district": "浦东新区",
-            "town": "唐镇",
-            "compound": "阳光国际",
+            "subdistrict": "唐镇",
+            "poi": "阳光国际",
             "building": "10",
-            "unit": "1",
-            "room": "102",
+            "detail": "102",
         },
     )
     right = normalize_pii(
@@ -94,10 +91,10 @@ def test_address_same_entity_accepts_local_admin_cross_field_and_detail_subseque
         components={
             "city": "上海",
             "district": "浦东",
-            "street_admin": "唐镇街道",
-            "compound": "阳光",
+            "subdistrict": "唐镇街道",
+            "poi": "阳光",
             "building": "10",
-            "room": "102",
+            "detail": "102",
         },
     )
 

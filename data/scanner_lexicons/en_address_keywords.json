@@ -1,34 +1,18 @@
 [
   {
-    "component_type": "street",
+    "component_type": "road",
     "keywords": ["street", "st", "road", "rd", "avenue", "ave", "boulevard", "blvd", "drive", "dr", "lane", "ln", "court", "ct", "place", "pl", "parkway", "pkwy", "terrace", "ter", "circle", "cir", "way", "highway", "hwy", "trail", "trl", "alley", "aly", "crescent", "cres", "crossing", "xing", "loop", "path", "pike", "row", "run", "square", "sq", "turnpike", "tpke", "freeway", "fwy", "expressway", "expy"]
   },
   {
-    "component_type": "direction",
-    "keywords": ["north", "south", "east", "west", "northeast", "northwest", "southeast", "southwest", "n", "s", "e", "w", "ne", "nw", "se", "sw"]
-  },
-  {
-    "component_type": "unit",
-    "keywords": ["apt", "apartment", "suite", "ste", "unit", "#", "lot", "slip", "space", "spc"]
-  },
-  {
-    "component_type": "floor",
-    "keywords": ["floor", "fl", "level", "lvl"]
-  },
-  {
-    "component_type": "room",
-    "keywords": ["room", "rm"]
+    "component_type": "detail",
+    "keywords": ["apt", "apartment", "suite", "ste", "unit", "#", "lot", "slip", "space", "spc", "floor", "fl", "level", "lvl", "room", "rm"]
   },
   {
     "component_type": "building",
     "keywords": ["building", "bldg", "tower", "twr", "block", "blk", "house", "complex"]
   },
   {
-    "component_type": "compound",
+    "component_type": "poi",
     "keywords": ["plaza", "plz", "center", "centre", "park", "estate", "residence", "manor", "villa", "gardens", "heights", "terrace", "court", "mansion"]
-  },
-  {
-    "component_type": "admin",
-    "keywords": ["city", "town", "county", "state", "province", "district", "borough", "parish", "township", "village", "municipality", "region", "territory", "zip", "zipcode", "postal"]
   }
 ]

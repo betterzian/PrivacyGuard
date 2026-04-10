@@ -48,24 +48,16 @@ class ClueRole(str, Enum):
 
 
 class AddressComponentType(str, Enum):
+    """地址组件类型（9 类精简版）。"""
     PROVINCE = "province"
     CITY = "city"
     DISTRICT = "district"
-    STREET_ADMIN = "street_admin"
-    TOWN = "town"
-    VILLAGE = "village"
+    SUBDISTRICT = "subdistrict"
     ROAD = "road"
-    STREET = "street"
-    COMPOUND = "compound"
+    NUMBER = "number"
+    POI = "poi"
     BUILDING = "building"
-    UNIT = "unit"
-    FLOOR = "floor"
-    ROOM = "room"
-    STATE = "state"
-    POSTAL_CODE = "postal_code"
-    STREET_NUMBER = "street_number"
-    ADMIN = "admin"
-    DIRECTION = "direction"
+    DETAIL = "detail"
 
 
 class BreakType(str, Enum):

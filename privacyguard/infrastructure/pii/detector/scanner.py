@@ -942,7 +942,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=token_match.group(0),
                 source_kind="postal_value",
-                component_type=AddressComponentType.POSTAL_CODE,
+                component_type=AddressComponentType.DETAIL,
             )
         )
     return clues
@@ -1478,7 +1478,7 @@ def _zh_address_key_matcher() -> AhoMatcher:
 def _en_address_value_matcher() -> AhoMatcher:
     lexicon = load_en_geo_lexicon()
     geo_specs = (
-        (AddressComponentType.STATE, tuple([*lexicon.tier_a_state_names, *lexicon.tier_a_state_codes])),
+        (AddressComponentType.PROVINCE, tuple([*lexicon.tier_a_state_names, *lexicon.tier_a_state_codes])),
         (AddressComponentType.CITY, lexicon.tier_b_places),
     )
     patterns: list[AhoPattern] = []

@@ -212,7 +212,7 @@ def _extract_numeric_pool(person: dict[str, Any]) -> list[str]:
         leaf = path[-1].lower() if path else ""
         if "phone" in path_str or "postal" in path_str or "zip" in path_str:
             continue
-        if "street_number" in path_str or "birth_year" in path_str:
+        if "number" in path_str or "birth_year" in path_str:
             continue
         if "date" in path_str or path_str.endswith(".class"):
             continue
@@ -393,21 +393,18 @@ def _cn_reference_components(address: dict[str, Any]) -> tuple[dict[str, str], d
         components["road"] = address["street"]
         trace.append(f"road:{address['street']}")
     if address.get("map_search_short"):
-        components["compound"] = address["map_search_short"]
-        trace.append(f"compound:{address['map_search_short']}")
+        components["poi"] = address["map_search_short"]
+        trace.append(f"poi:{address['map_search_short']}")
     street_number = str(address.get("street_number", "")).strip()
     if street_number:
-        trace.append(f"street_number:{street_number}")
-        key_trace.append(f"street_number:{_digits(street_number) or street_number}")
+        trace.append(f"number:{street_number}")
+        key_trace.append(f"number:{_digits(street_number) or street_number}")
     building = str(address.get("building_unit_room", "")).strip()
     if building:
         components["building"] = building
         trace.append(f"building:{building}")
         token = _digits(building) or _alnum(building).upper() or building
         key_trace.append(f"building:{token}")
-    if address.get("postal_code"):
-        components["postal_code"] = address["postal_code"]
-        trace.append(f"postal_code:{address['postal_code']}")
     return components, {
         "address_component_trace": trace,
         "address_component_key_trace": key_trace,
@@ -434,17 +431,14 @@ def _us_reference_components(address: dict[str, Any]) -> tuple[dict[str, str], d
         trace.append(f"road:{street}")
     number = str(address.get("street_number", "")).strip()
     if number:
-        trace.append(f"street_number:{number}")
-        key_trace.append(f"street_number:{_digits(number) or number}")
+        trace.append(f"number:{number}")
+        key_trace.append(f"number:{_digits(number) or number}")
     unit = str(address.get("apartment_suite_unit", "")).strip()
     if unit:
-        components["unit"] = unit
-        trace.append(f"unit:{unit}")
+        components["detail"] = unit
+        trace.append(f"detail:{unit}")
         token = _digits(unit) or _alnum(unit).upper() or unit
-        key_trace.append(f"unit:{token}")
-    if address.get("zip_code"):
-        components["postal_code"] = address["zip_code"]
-        trace.append(f"postal_code:{address['zip_code']}")
+        key_trace.append(f"detail:{token}")
     return components, {
         "address_component_trace": trace,
         "address_component_key_trace": key_trace,

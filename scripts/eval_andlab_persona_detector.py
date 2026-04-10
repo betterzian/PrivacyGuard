@@ -168,7 +168,7 @@ def _extract_numeric_pool(person: dict[str, Any]) -> list[str]:
             return
         if "phone" in key_path or "postal" in key_path or "zip" in key_path:
             return
-        if "street_number" in key_path:
+        if "number" in key_path:
             return
         if "date" in key_path or "birth_year" in key_path or key_path.endswith(".class"):
             return

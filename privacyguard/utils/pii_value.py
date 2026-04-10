@@ -30,14 +30,14 @@ _DELETED_INTERNAL_ZH_ADMIN_ALIAS_TABLES = True
 @lru_cache(maxsize=1)
 def _en_address_street_suffixes() -> tuple[str, ...]:
     for group in load_en_address_keyword_groups():
-        if group.component_type.value == "street":
+        if group.component_type.value == "road":
             return tuple(str(k).strip().lower() for k in group.keywords if str(k).strip())
     return ()
 
 
 @lru_cache(maxsize=1)
 def _en_address_unit_prefixes() -> tuple[str, ...]:
-    accepted = {"unit", "floor", "room"}
+    accepted = {"detail"}
     prefixes: list[str] = []
     for group in load_en_address_keyword_groups():
         if group.component_type.value not in accepted:

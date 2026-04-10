@@ -316,16 +316,12 @@ class RuleBasedPIIDetector:
                 "province",
                 "city",
                 "district",
-                "street_admin",
-                "town",
-                "village",
+                "subdistrict",
                 "road",
-                "compound",
+                "number",
+                "poi",
                 "building",
-                "unit",
-                "floor",
-                "room",
-                "postal_code",
+                "detail",
             )
             if getattr(slot, key, None) is not None
         }

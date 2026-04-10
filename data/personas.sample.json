@@ -104,7 +104,7 @@
                 "三号楼"
               ]
             },
-            "room": {
+            "detail": {
               "value": "502室",
               "aliases": [
                 "502"
@@ -138,7 +138,7 @@
               "value": "创新楼",
               "aliases": []
             },
-            "room": {
+            "detail": {
               "value": "1201室",
               "aliases": [
                 "1201"
@@ -262,15 +262,11 @@
                 "Harbor Avenue"
               ]
             },
-            "unit": {
+            "detail": {
               "value": "Apt 7B",
               "aliases": [
                 "Apartment 7B"
               ]
-            },
-            "postal_code": {
-              "value": "92101",
-              "aliases": []
             }
           },
           {
@@ -290,15 +286,11 @@
                 "Demo Plaza"
               ]
             },
-            "unit": {
+            "detail": {
               "value": "Suite 210",
               "aliases": [
                 "Ste 210"
               ]
-            },
-            "postal_code": {
-              "value": "92108",
-              "aliases": []
             }
           }
         ],

@@ -11,7 +11,6 @@ from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_str
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 from privacyguard.infrastructure.pii.detector.stacks.address import (
     _build_cross_tier_value_key_component,
-    _extend_components_with_digit_tail,
     _label_seed_address_index,
     _pop_components_overlapping_negative,
 )
@@ -198,7 +197,7 @@ def trace_address_stack(text: str, *, locale_profile: str = "zh_cn") -> None:
                     "end": v.end,
                     "value": v.text,
                     "key": "",
-                    "is_detail": t in {AddressComponentType.BUILDING, AddressComponentType.UNIT, AddressComponentType.FLOOR, AddressComponentType.ROOM},
+                    "is_detail": t in {AddressComponentType.BUILDING, AddressComponentType.DETAIL},
                 }
             )
             evidence_count += 1
@@ -211,8 +210,7 @@ def trace_address_stack(text: str, *, locale_profile: str = "zh_cn") -> None:
         components = _pop_components_overlapping_negative(components, negative_spans)
         print("components_count(after_negative):", len(components))
 
-    components = _extend_components_with_digit_tail(components, stream)
-    print("components(after_digit_tail):")
+    print("components(final):")
     for comp in components:
         ct = comp["component_type"].value if hasattr(comp["component_type"], "value") else str(comp["component_type"])
         print(" -", ct, "span", (comp["start"], comp["end"]), "value", comp.get("value"), "key", comp.get("key"))

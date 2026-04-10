@@ -20,21 +20,29 @@ _ADDRESS_COMPONENT_KEYS = (
     "province",
     "city",
     "district",
-    "street_admin",
-    "town",
-    "village",
+    "subdistrict",
     "road",
-    "compound",
+    "number",
+    "poi",
     "building",
-    "unit",
-    "floor",
-    "room",
-    "postal_code",
+    "detail",
 )
-_ADDRESS_MATCH_KEYS = ("province", "city", "district", "street_admin", "town", "village", "road", "compound")
-_ADDRESS_DETAIL_KEYS = ("building", "unit", "floor", "room")
-_LOCAL_ADMIN_KEYS = ("street_admin", "town", "village")
-_ADDRESS_COMPONENT_ALIASES = {"street": "road", "state": "province"}
+_ADDRESS_MATCH_KEYS = ("province", "city", "district", "subdistrict", "road", "poi")
+_ADDRESS_DETAIL_KEYS = ("building", "detail")
+_LOCAL_ADMIN_KEYS = ("subdistrict",)
+# 旧类型到新类型的别名映射，兼容历史 trace 数据。
+_ADDRESS_COMPONENT_ALIASES = {
+    "street": "road",
+    "state": "province",
+    "compound": "poi",
+    "street_admin": "subdistrict",
+    "town": "subdistrict",
+    "village": "subdistrict",
+    "unit": "detail",
+    "floor": "detail",
+    "room": "detail",
+    "street_number": "number",
+}
 _PUNCT_TRIM_RE = re.compile(r"[\s\-_.,，。:：;；/\\|()（）【】\[\]#]+")
 _DIGIT_RE = re.compile(r"\d+")
 _NAME_COMPONENT_RE = re.compile(r"^[A-Za-z][A-Za-z .,'\-]{0,80}$")
@@ -274,7 +282,7 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
             return False
     if not _local_admin_group_matches(left.identity, right.identity):
         return False
-    for key in ("road", "compound"):
+    for key in ("road", "poi"):
         if not _shared_component_subset(left.identity, right.identity, key):
             return False
     if not _numbers_match(left.numbers, right.numbers,
@@ -356,7 +364,7 @@ def _is_detail_subsequence(left: str, right: str) -> bool:
     return pointer == len(shorter)
 
 
-_KEYED_NUMBER_TYPES = {"building", "unit", "floor", "room", "street_number"}
+_KEYED_NUMBER_TYPES = {"building", "detail", "number"}
 
 
 def _extract_keyed_numbers(metadata: Mapping[str, object] | None) -> dict[str, str]:
@@ -403,7 +411,7 @@ def _address_numbers(
                 comp_type, value = item.split(":", 1)
                 comp_type = comp_type.strip()
                 value = value.strip()
-                if comp_type in {"building", "unit", "floor", "room", "street_number"}:
+                if comp_type in {"building", "detail", "number"}:
                     tokens.extend(_extract_number_tokens(value))
             return [t for t in tokens if t]
     # fallback：无 trace 时按 detail keys 顺序提取（仅用于 components 直传场景）。

@@ -57,16 +57,12 @@ _ADDRESS_LEVEL_KEYS = (
     "province",
     "city",
     "district",
-    "street_admin",
-    "town",
-    "village",
+    "subdistrict",
     "road",
-    "compound",
+    "number",
+    "poi",
     "building",
-    "unit",
-    "floor",
-    "room",
-    "postal_code",
+    "detail",
 )
 
 

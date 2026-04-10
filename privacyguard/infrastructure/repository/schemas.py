@@ -13,16 +13,12 @@ _ADDRESS_LEVEL_FIELDS = (
     "province",
     "city",
     "district",
-    "street_admin",
-    "town",
-    "village",
+    "subdistrict",
     "road",
-    "compound",
+    "number",
+    "poi",
     "building",
-    "unit",
-    "floor",
-    "room",
-    "postal_code",
+    "detail",
 )
 
 
@@ -39,16 +35,12 @@ class AddressLevel(str, Enum):
     PROVINCE = "province"
     CITY = "city"
     DISTRICT = "district"
-    STREET_ADMIN = "street_admin"
-    TOWN = "town"
-    VILLAGE = "village"
+    SUBDISTRICT = "subdistrict"
     ROAD = "road"
-    COMPOUND = "compound"
+    NUMBER = "number"
+    POI = "poi"
     BUILDING = "building"
-    UNIT = "unit"
-    FLOOR = "floor"
-    ROOM = "room"
-    POSTAL_CODE = "postal_code"
+    DETAIL = "detail"
 
 
 class ExposureInfo(RepositoryBaseModel):
@@ -62,16 +54,12 @@ class AddressLevelExposureStats(RepositoryBaseModel):
     province: ExposureInfo = Field(default_factory=ExposureInfo)
     city: ExposureInfo = Field(default_factory=ExposureInfo)
     district: ExposureInfo = Field(default_factory=ExposureInfo)
-    street_admin: ExposureInfo = Field(default_factory=ExposureInfo)
-    town: ExposureInfo = Field(default_factory=ExposureInfo)
-    village: ExposureInfo = Field(default_factory=ExposureInfo)
+    subdistrict: ExposureInfo = Field(default_factory=ExposureInfo)
     road: ExposureInfo = Field(default_factory=ExposureInfo)
-    compound: ExposureInfo = Field(default_factory=ExposureInfo)
+    number: ExposureInfo = Field(default_factory=ExposureInfo)
+    poi: ExposureInfo = Field(default_factory=ExposureInfo)
     building: ExposureInfo = Field(default_factory=ExposureInfo)
-    unit: ExposureInfo = Field(default_factory=ExposureInfo)
-    floor: ExposureInfo = Field(default_factory=ExposureInfo)
-    room: ExposureInfo = Field(default_factory=ExposureInfo)
-    postal_code: ExposureInfo = Field(default_factory=ExposureInfo)
+    detail: ExposureInfo = Field(default_factory=ExposureInfo)
 
 
 class AddressStats(RepositoryBaseModel):
@@ -139,18 +127,14 @@ def _validate_address_levels(
     province: SharedSlotStorage | SharedSlotRuntime | None,
     city: SharedSlotStorage | SharedSlotRuntime | None,
     district: SharedSlotStorage | SharedSlotRuntime | None,
-    street_admin: SharedSlotStorage | SharedSlotRuntime | None,
-    town: SharedSlotStorage | SharedSlotRuntime | None,
-    village: SharedSlotStorage | SharedSlotRuntime | None,
+    subdistrict: SharedSlotStorage | SharedSlotRuntime | None,
     road: SharedSlotStorage | SharedSlotRuntime | None,
-    compound: SharedSlotStorage | SharedSlotRuntime | None,
+    number: SharedSlotStorage | SharedSlotRuntime | None,
+    poi: SharedSlotStorage | SharedSlotRuntime | None,
     building: SharedSlotStorage | SharedSlotRuntime | None,
-    unit: SharedSlotStorage | SharedSlotRuntime | None,
-    floor: SharedSlotStorage | SharedSlotRuntime | None,
-    room: SharedSlotStorage | SharedSlotRuntime | None,
-    postal_code: SharedSlotStorage | SharedSlotRuntime | None,
+    detail: SharedSlotStorage | SharedSlotRuntime | None,
 ) -> None:
-    if not any((province, city, district, street_admin, town, village, road, compound, building, unit, floor, room, postal_code)):
+    if not any((province, city, district, subdistrict, road, number, poi, building, detail)):
         raise ValueError("地址不能为空")
 
 
@@ -158,16 +142,12 @@ class AddressSlotStorage(RepositoryBaseModel):
     province: SharedSlotStorage | None = None
     city: SharedSlotStorage | None = None
     district: SharedSlotStorage | None = None
-    street_admin: SharedSlotStorage | None = None
-    town: SharedSlotStorage | None = None
-    village: SharedSlotStorage | None = None
+    subdistrict: SharedSlotStorage | None = None
     road: SharedSlotStorage | None = None
-    compound: SharedSlotStorage | None = None
+    number: SharedSlotStorage | None = None
+    poi: SharedSlotStorage | None = None
     building: SharedSlotStorage | None = None
-    unit: SharedSlotStorage | None = None
-    floor: SharedSlotStorage | None = None
-    room: SharedSlotStorage | None = None
-    postal_code: SharedSlotStorage | None = None
+    detail: SharedSlotStorage | None = None
 
     @model_validator(mode="after")
     def _validate_address(self) -> "AddressSlotStorage":
@@ -175,16 +155,12 @@ class AddressSlotStorage(RepositoryBaseModel):
             self.province,
             self.city,
             self.district,
-            self.street_admin,
-            self.town,
-            self.village,
+            self.subdistrict,
             self.road,
-            self.compound,
+            self.number,
+            self.poi,
             self.building,
-            self.unit,
-            self.floor,
-            self.room,
-            self.postal_code,
+            self.detail,
         )
         return self
 
@@ -231,16 +207,12 @@ class AddressSlotRuntime(RepositoryBaseModel):
     province: SharedSlotRuntime | None = None
     city: SharedSlotRuntime | None = None
     district: SharedSlotRuntime | None = None
-    street_admin: SharedSlotRuntime | None = None
-    town: SharedSlotRuntime | None = None
-    village: SharedSlotRuntime | None = None
+    subdistrict: SharedSlotRuntime | None = None
     road: SharedSlotRuntime | None = None
-    compound: SharedSlotRuntime | None = None
+    number: SharedSlotRuntime | None = None
+    poi: SharedSlotRuntime | None = None
     building: SharedSlotRuntime | None = None
-    unit: SharedSlotRuntime | None = None
-    floor: SharedSlotRuntime | None = None
-    room: SharedSlotRuntime | None = None
-    postal_code: SharedSlotRuntime | None = None
+    detail: SharedSlotRuntime | None = None
 
     @model_validator(mode="after")
     def _validate_address(self) -> "AddressSlotRuntime":
@@ -248,16 +220,12 @@ class AddressSlotRuntime(RepositoryBaseModel):
             self.province,
             self.city,
             self.district,
-            self.street_admin,
-            self.town,
-            self.village,
+            self.subdistrict,
             self.road,
-            self.compound,
+            self.number,
+            self.poi,
             self.building,
-            self.unit,
-            self.floor,
-            self.room,
-            self.postal_code,
+            self.detail,
         )
         return self
 

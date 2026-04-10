@@ -67,9 +67,9 @@ def test_rule_based_local_dictionary_uses_address_part_terms_and_alias_component
                         {
                             "city": {"value": "上海", "aliases": []},
                             "district": {"value": "浦东", "aliases": []},
-                            "compound": {"value": "阳光国际", "aliases": []},
+                            "poi": {"value": "阳光国际", "aliases": []},
                             "building": {"value": "10", "aliases": []},
-                            "room": {"value": "102", "aliases": []},
+                            "detail": {"value": "102", "aliases": []},
                         }
                     ],
                 },
@@ -136,10 +136,9 @@ def test_placeholder_allocator_reuses_address_placeholder_by_same_entity():
                     components={
                         "city": "上海",
                         "district": "浦东新区",
-                        "compound": "阳光国际",
+                        "poi": "阳光国际",
                         "building": "10",
-                        "unit": "1",
-                        "room": "102",
+                        "detail": "102",
                     },
                 ),
                 canonical_source_text=None,
@@ -166,9 +165,9 @@ def test_placeholder_allocator_reuses_address_placeholder_by_same_entity():
                     components={
                         "city": "上海",
                         "district": "浦东",
-                        "compound": "阳光",
+                        "poi": "阳光",
                         "building": "10",
-                        "room": "102",
+                        "detail": "102",
                     },
                 ),
             )

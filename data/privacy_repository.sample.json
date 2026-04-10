@@ -104,7 +104,7 @@
                 "二号楼"
               ]
             },
-            "room": {
+            "detail": {
               "value": "301室",
               "aliases": [
                 "301"
@@ -138,7 +138,7 @@
               "value": "研发楼",
               "aliases": []
             },
-            "room": {
+            "detail": {
               "value": "908室",
               "aliases": [
                 "908"
@@ -256,12 +256,8 @@
                 "Sample Street"
               ]
             },
-            "unit": {
+            "detail": {
               "value": "Unit 5A",
-              "aliases": []
-            },
-            "postal_code": {
-              "value": "98101",
               "aliases": []
             }
           },
@@ -282,15 +278,11 @@
                 "Demo Boulevard"
               ]
             },
-            "unit": {
+            "detail": {
               "value": "Suite 480",
               "aliases": [
                 "Ste 480"
               ]
-            },
-            "postal_code": {
-              "value": "98104",
-              "aliases": []
             }
           }
         ],
