@@ -47,6 +47,8 @@ class StackRun:
     handled_label_clue_ids: set[str] = field(default_factory=set)
     next_index: int = 0
     pending_challenge: PendingChallenge | None = None
+    #: 地址 run 内已「跨过」的 NAME/ORG clue：parser 不得对其再跑挑战栈，且不得写入 consumed_ids。
+    suppress_challenger_clue_ids: frozenset[str] = field(default_factory=frozenset)
 
 
 def _build_value_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
@@ -106,6 +108,7 @@ class BaseStack:
             consumed_ids=run.consumed_ids,
             handled_label_clue_ids=run.handled_label_clue_ids,
             next_index=run.next_index,
+            suppress_challenger_clue_ids=run.suppress_challenger_clue_ids,
         )
 
     def _value_locale(self) -> str:
@@ -125,4 +128,5 @@ class BaseStack:
             candidate=candidate,
             consumed_ids={self.clue.clue_id},
             next_index=self.clue_index + 1,
+            suppress_challenger_clue_ids=frozenset(),
         )

@@ -1,108 +1,321 @@
+"""生成用于地址 detector 评测的中文/英文地址数据。"""
+
+from __future__ import annotations
+
+import json
 import random
+from pathlib import Path
 
-# 设置随机种子，保证每次运行结果一致（你可以改成别的数字）
-random.seed(42)
 
-# ==================== 中文地址组件 ====================
-chinese_provinces = [
-    "北京市", "上海市", "天津市", "重庆市", "广东省", "江苏省", "浙江省", "四川省",
-    "山东省", "河南省", "河北省", "辽宁省", "黑龙江省", "湖南省", "湖北省", "福建省",
-    "陕西省", "山西省", "广西壮族自治区", "云南省", "贵州省", "吉林省", "甘肃省",
-    "内蒙古自治区", "新疆维吾尔自治区", "安徽省", "江西省", "海南省"
+SEED = 42
+COUNT = 1000
+ROOT = Path(__file__).resolve().parent
+
+
+CN_LOCATIONS = [
+    {"province": "北京市", "city": "北京市", "district": "海淀区", "subdistrict": "中关村街道"},
+    {"province": "北京市", "city": "北京市", "district": "朝阳区", "subdistrict": "望京街道"},
+    {"province": "上海市", "city": "上海市", "district": "浦东新区", "subdistrict": "花木街道"},
+    {"province": "上海市", "city": "上海市", "district": "徐汇区", "subdistrict": "虹梅街道"},
+    {"province": "广东省", "city": "深圳市", "district": "南山区", "subdistrict": "粤海街道"},
+    {"province": "广东省", "city": "广州市", "district": "天河区", "subdistrict": "石牌街道"},
+    {"province": "江苏省", "city": "南京市", "district": "江宁区", "subdistrict": "东山街道"},
+    {"province": "江苏省", "city": "苏州市", "district": "虎丘区", "subdistrict": "狮山街道"},
+    {"province": "浙江省", "city": "杭州市", "district": "西湖区", "subdistrict": "古荡街道"},
+    {"province": "四川省", "city": "成都市", "district": "高新区", "subdistrict": "桂溪街道"},
+    {"province": "湖北省", "city": "武汉市", "district": "洪山区", "subdistrict": "关山街道"},
+    {"province": "湖南省", "city": "长沙市", "district": "岳麓区", "subdistrict": "望城坡街道"},
+    {"province": "山东省", "city": "青岛市", "district": "市南区", "subdistrict": "香港中路街道"},
+    {"province": "福建省", "city": "厦门市", "district": "思明区", "subdistrict": "嘉莲街道"},
 ]
 
-chinese_districts = [
-    "朝阳区", "徐汇区", "沈河区", "青秀区", "江宁区", "武昌区", "雁塔区", "南岗区",
-    "浦东新区", "越秀区", "海淀区", "黄浦区", "和平区", "河东区", "西湖区", "天河区",
-    "高新区", "滨江区", "洪山区", "宝山区", "闵行区", "静安区"
+CN_ROADS = [
+    "中山路",
+    "新华路",
+    "解放路",
+    "建设路",
+    "文一西路",
+    "科技园路",
+    "星海路",
+    "软件大道",
+    "滨江路",
+    "湖滨路",
+    "长安街",
+    "天元西路",
+    "科苑路",
+    "金钟路",
 ]
 
-chinese_streets = [
-    "新华路", "杭州路", "南京路", "广州路", "胜利路", "复兴路", "北京路", "长安街",
-    "中山路", "人民路", "解放路", "建设路", "文化路", "体育路", "湖滨路", "江滨路",
-    "黄河路", "长江路", "和平路", "阳光大道"
+CN_POIS = [
+    "阳光花园",
+    "锦绣大厦",
+    "星河中心",
+    "天悦家园",
+    "紫荆雅苑",
+    "科创园区",
+    "云景新城",
+    "晨曦广场",
+    "海棠府",
+    "观澜湾",
 ]
 
-cn_formats = [
-    "{province}{district}{street}{num}号",
-    "{district}{street}{num}号 {room}室",
-    "{province}{street}{num}弄",
-    "{street}{num}号 {room}楼",
-    "靠近{street}{num}号, {province}{district}",
-    "{province} {district} {street} {num}号 {room}室",
-    "{district}{street}{num}号 {room}栋",
-    "{province}{district} {street}{num}号",
-    "{street}{num}号, {district}",
-    "靠近 {street}{num}号 {room}楼, {province}"
+CN_BUILDINGS = ["1栋", "2栋", "3栋", "5号楼", "A座", "B座", "C幢"]
+CN_DETAILS = ["101室", "502室", "1203室", "2单元502室", "3层301室", "18层1802室"]
+
+
+EN_LOCATIONS = [
+    {"city": "Seattle", "state": "WA"},
+    {"city": "Chicago", "state": "IL"},
+    {"city": "Austin", "state": "TX"},
+    {"city": "Boston", "state": "MA"},
+    {"city": "Phoenix", "state": "AZ"},
+    {"city": "Denver", "state": "CO"},
+    {"city": "Portland", "state": "OR"},
+    {"city": "Detroit", "state": "MI"},
+    {"city": "Nashville", "state": "TN"},
+    {"city": "Bellevue", "state": "WA"},
+    {"city": "Tacoma", "state": "WA"},
+    {"city": "Yakima", "state": "WA"},
 ]
 
-# ==================== 英文地址组件 ====================
-us_cities = [
-    "Los Angeles", "New York", "Chicago", "Houston", "Phoenix", "Philadelphia",
-    "San Antonio", "San Diego", "Dallas", "San Jose", "Austin", "Jacksonville",
-    "Fort Worth", "Columbus", "Indianapolis", "Charlotte", "Seattle", "Denver",
-    "Nashville", "Detroit", "Boston", "Memphis", "Portland", "Oklahoma City", "Las Vegas"
+EN_ROADS = [
+    "MainStreet",
+    "OakAvenue",
+    "PineRoad",
+    "MapleLane",
+    "ElmStreet",
+    "LakeDrive",
+    "RiverRoad",
+    "ParkAvenue",
+    "LincolnAvenue",
+    "OceanDrive",
+    "NorthLakeWay",
+    "QueenAnneAvenue",
 ]
 
-us_states = ["CA", "NY", "IL", "TX", "AZ", "PA", "FL", "OH", "MI", "NC", "WA", "CO", "TN", "MA", "NV", "OK", "OR"]
-
-eng_streets = [
-    "Main Street", "Oak Avenue", "Pine Road", "Maple Lane", "Elm Street",
-    "Cedar Boulevard", "Lake Drive", "River Road", "Sunset Boulevard",
-    "School Road", "Park Avenue", "Washington Street", "Lincoln Avenue", "Ocean Drive"
+EN_POIS = [
+    "SunsetPlaza",
+    "HarborCenter",
+    "LakeViewResidence",
+    "RiverPark",
+    "OakHeights",
+    "MapleEstate",
 ]
 
-eng_formats = [
-    "{num} {street}, {city}, {state} {zip}",
-    "P.O. Box {po}, {city}, {state} {zip}",
-    "{street} {num}-{apt}, {city} {state} {zip}",
-    "{num}-{apt} {street}, {city}, {state} {zip}",
-    "{city}, {state} - {num} {street} {zip}",
-    "Unit {apt}, {street} {num}, {city} {state} {zip}",
-    "P.O. Box {po}, {city} {state} {zip}",
-    "{street} {num}, {city} {state} {zip} Apt {apt}"
-]
+EN_BUILDINGS = ["7Building", "BTower", "CBlock", "9House"]
+EN_DETAILS = ["Apt205", "Unit18", "Suite300", "Room1203", "Floor8"]
 
-# ==================== 生成中文地址 ====================
-def generate_chinese_address():
-    province = random.choice(chinese_provinces)
-    district = random.choice(chinese_districts)
-    street = random.choice(chinese_streets)
-    num = random.randint(1, 999)
-    room = random.randint(101, 999)
-    fmt = random.choice(cn_formats)
-    return fmt.format(province=province, district=district, street=street, num=num, room=room)
 
-# ==================== 生成英文地址 ====================
-def generate_english_address():
-    city = random.choice(us_cities)
-    state = random.choice(us_states)
-    street = random.choice(eng_streets)
-    num = random.randint(1000, 9999)
-    apt = random.randint(1, 999)
-    po = random.randint(1000, 9999)
-    zip_code = random.randint(10000, 99999)
-    fmt = random.choice(eng_formats)
-    return fmt.format(num=num, street=street, city=city, state=state, zip=zip_code, apt=apt, po=po)
+def _compact(text: str) -> str:
+    """移除所有空白，确保生成地址不含空格。"""
+    return "".join(str(text).split())
 
-# ==================== 写入文件 ====================
-print("正在生成地址文件...")
 
-# 中文地址文件
-with open('chinese_addresses.txt', 'w', encoding='utf-8') as f:
-    f.write("=== 1000个中文地址 ===\n\n")
-    for i in range(1000):
-        addr = generate_chinese_address()
-        f.write(f"{i+1}. {addr}\n")
+def _cn_record(index: int) -> dict[str, object]:
+    location = random.choice(CN_LOCATIONS)
+    road = random.choice(CN_ROADS)
+    poi = random.choice(CN_POIS)
+    building = random.choice(CN_BUILDINGS)
+    detail = random.choice(CN_DETAILS)
+    number = f"{random.randint(1, 999)}号"
+    style = random.choice(
+        [
+            "forward_full",
+            "forward_no_subdistrict",
+            "forward_no_poi",
+            "reverse_tail_full",
+            "reverse_tail_city_district",
+            "reverse_tail_segmented",
+        ]
+    )
 
-# 英文地址文件
-with open('english_addresses.txt', 'w', encoding='utf-8') as f:
-    f.write("=== 1000 English Addresses ===\n\n")
-    for i in range(1000):
-        addr = generate_english_address()
-        f.write(f"{i+1}. {addr}\n")
+    if style == "forward_full":
+        text = f"{location['province']}{location['city']}{location['district']}{location['subdistrict']}{road}{number}{poi}{building}{detail}"
+        components = {
+            "province": location["province"],
+            "city": location["city"],
+            "district": location["district"],
+            "subdistrict": location["subdistrict"],
+            "road": road,
+            "number": number,
+            "poi": poi,
+            "building": building,
+            "detail": detail,
+        }
+    elif style == "forward_no_subdistrict":
+        text = f"{location['province']}{location['city']}{location['district']}{road}{number}{poi}{building}{detail}"
+        components = {
+            "province": location["province"],
+            "city": location["city"],
+            "district": location["district"],
+            "road": road,
+            "number": number,
+            "poi": poi,
+            "building": building,
+            "detail": detail,
+        }
+    elif style == "forward_no_poi":
+        text = f"{location['province']}{location['city']}{location['district']}{location['subdistrict']}{road}{number}{building}{detail}"
+        components = {
+            "province": location["province"],
+            "city": location["city"],
+            "district": location["district"],
+            "subdistrict": location["subdistrict"],
+            "road": road,
+            "number": number,
+            "building": building,
+            "detail": detail,
+        }
+    elif style == "reverse_tail_full":
+        text = f"{road}{number}{poi}{building}{detail},{location['district']}{location['city']}{location['province']}"
+        components = {
+            "province": location["province"],
+            "city": location["city"],
+            "district": location["district"],
+            "road": road,
+            "number": number,
+            "poi": poi,
+            "building": building,
+            "detail": detail,
+        }
+    elif style == "reverse_tail_city_district":
+        text = f"{location['subdistrict']}{road}{number}{building}{detail},{location['city']}{location['district']}"
+        components = {
+            "city": location["city"],
+            "district": location["district"],
+            "subdistrict": location["subdistrict"],
+            "road": road,
+            "number": number,
+            "building": building,
+            "detail": detail,
+        }
+    else:
+        text = f"{road}{number}{poi}{building}{detail},{location['district']},{location['city']},{location['province']}"
+        components = {
+            "province": location["province"],
+            "city": location["city"],
+            "district": location["district"],
+            "road": road,
+            "number": number,
+            "poi": poi,
+            "building": building,
+            "detail": detail,
+        }
 
-print("✅ 生成完成！")
-print("   chinese_addresses.txt 已保存（1000个中文地址）")
-print("   english_addresses.txt 已保存（1000个英文地址）")
-print("你可以直接打开这两个TXT文件使用啦～")
+    return {
+        "id": index,
+        "locale": "zh_cn",
+        "text": _compact(text),
+        "format": style,
+        "components": components,
+    }
+
+
+def _en_record(index: int) -> dict[str, object]:
+    location = random.choice(EN_LOCATIONS)
+    road = random.choice(EN_ROADS)
+    poi = random.choice(EN_POIS)
+    building = random.choice(EN_BUILDINGS)
+    detail = random.choice(EN_DETAILS)
+    number = str(random.randint(1000, 9999))
+    zip_code = str(random.randint(10000, 99999))
+    style = random.choice(
+        [
+            "forward_basic",
+            "forward_with_detail",
+            "forward_with_poi",
+            "forward_with_building",
+            "forward_full",
+        ]
+    )
+
+    if style == "forward_basic":
+        text = f"{number}{road},{location['city']},{location['state']},{zip_code}"
+        components = {
+            "city": location["city"],
+            "province": location["state"],
+            "road": road,
+            "number": number,
+            "detail": zip_code,
+        }
+    elif style == "forward_with_detail":
+        text = f"{detail},{number}{road},{location['city']},{location['state']},{zip_code}"
+        components = {
+            "city": location["city"],
+            "province": location["state"],
+            "road": road,
+            "number": number,
+            "detail": detail,
+        }
+    elif style == "forward_with_poi":
+        text = f"{number}{road},{poi},{location['city']},{location['state']},{zip_code}"
+        components = {
+            "city": location["city"],
+            "province": location["state"],
+            "road": road,
+            "number": number,
+            "poi": poi,
+            "detail": zip_code,
+        }
+    elif style == "forward_with_building":
+        text = f"{number}{road},{building},{location['city']},{location['state']},{zip_code}"
+        components = {
+            "city": location["city"],
+            "province": location["state"],
+            "road": road,
+            "number": number,
+            "building": building,
+            "detail": zip_code,
+        }
+    else:
+        text = f"{detail},{number}{road},{building},{poi},{location['city']},{location['state']},{zip_code}"
+        components = {
+            "city": location["city"],
+            "province": location["state"],
+            "road": road,
+            "number": number,
+            "poi": poi,
+            "building": building,
+            "detail": detail,
+        }
+
+    return {
+        "id": index,
+        "locale": "en_us",
+        "text": _compact(text),
+        "format": style,
+        "components": components,
+    }
+
+
+def _write_lines(path: Path, records: list[dict[str, object]]) -> None:
+    path.write_text("\n".join(str(record["text"]) for record in records) + "\n", encoding="utf-8")
+
+
+def _write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
+    with path.open("w", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def main() -> None:
+    random.seed(SEED)
+
+    cn_records = [_cn_record(index) for index in range(1, COUNT + 1)]
+    en_records = [_en_record(index) for index in range(1, COUNT + 1)]
+
+    _write_lines(ROOT / "chinese_addresses.txt", cn_records)
+    _write_lines(ROOT / "english_addresses.txt", en_records)
+    _write_jsonl(ROOT / "chinese_addresses.jsonl", cn_records)
+    _write_jsonl(ROOT / "english_addresses.jsonl", en_records)
+
+    print("正在生成地址文件...")
+    print("✅ 生成完成。")
+    print(f"   {ROOT / 'chinese_addresses.txt'}")
+    print(f"   {ROOT / 'english_addresses.txt'}")
+    print(f"   {ROOT / 'chinese_addresses.jsonl'}")
+    print(f"   {ROOT / 'english_addresses.jsonl'}")
+
+
+if __name__ == "__main__":
+    main()

@@ -7,7 +7,7 @@ import unicodedata
 from collections.abc import Iterable, Mapping
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.domain.models.normalized_pii import NormalizedPII
+from privacyguard.domain.models.normalized_pii import NormalizedAddressComponent, NormalizedPII
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_company_suffixes,
     load_en_address_suffix_strippers,
@@ -29,9 +29,20 @@ _ADDRESS_COMPONENT_KEYS = (
 )
 _ADDRESS_MATCH_KEYS = ("province", "city", "district", "subdistrict", "road", "poi")
 _ADDRESS_DETAIL_KEYS = ("building", "detail")
+_ADDRESS_COMPONENT_COMPARE_KEYS = ("province", "city", "district", "road", "subdistrict")
+_ORDERED_COMPONENT_KEYS = (
+    "province",
+    "city",
+    "district",
+    "road",
+    "number",
+    "subdistrict",
+    "poi",
+    "building",
+    "detail",
+)
 # 与 trace 对齐的 POI 终端 key（仅用于 same_entity 比较时剥末尾 key），可选。
 _ADDRESS_OPTIONAL_KEYS = frozenset({"poi_key"})
-_LOCAL_ADMIN_KEYS = ("subdistrict",)
 # 旧类型到新类型的别名映射，兼容历史 trace 数据。
 _ADDRESS_COMPONENT_ALIASES = {
     "street": "road",
@@ -180,6 +191,7 @@ def _normalize_address(
     components: Mapping[str, str | None] | None,
 ) -> NormalizedPII:
     raw_components = _address_components(raw_text=raw_text, metadata=metadata, components=components)
+    ordered_components = _address_ordered_components(metadata=metadata, components=components)
     normalized_components = {
         key: str(raw_components.get(key) or "").strip()
         for key in _ADDRESS_COMPONENT_KEYS
@@ -220,7 +232,6 @@ def _normalize_address(
         if (value := normalized_components.get(key))
         if (term := _address_match_term(key, value))
     )
-    component_suspected, suspected = _suspected_from_address_metadata(metadata)
     return NormalizedPII(
         attr_type=PIIAttributeType.ADDRESS,
         raw_text=raw_text or render_address_text(normalized_components),
@@ -230,8 +241,7 @@ def _normalize_address(
         identity=identity,
         numbers=tuple(numbers),
         keyed_numbers=keyed_numbers,
-        component_suspected=component_suspected,
-        suspected=suspected,
+        ordered_components=ordered_components,
     )
 
 
@@ -290,16 +300,15 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
     # 必须有实质地址信息。
     if not left.identity.get("address_part") or not right.identity.get("address_part"):
         return False
-    # province / city / district / subdistrict —— 子串匹配 + suspected OR 链。
-    for key in ("province", "city", "district", "subdistrict"):
+    # 单层级组件按组件自身的 suspected 比较，不再做地址级合并。
+    for key in ("province", "city", "district", "road"):
         if not _compare_component_with_suspected(left, right, key):
             return False
-    # road —— 子串匹配 + suspected。
-    if not _compare_component_with_suspected(left, right, "road"):
-        return False
     # numbers —— 逆序子序列 / keyed。
     if not _numbers_match(left.numbers, right.numbers,
                           left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers):
+        return False
+    if not _compare_component_with_suspected(left, right, "subdistrict"):
         return False
     # poi —— 列表双向子集（仅可去掉各 POI 的最后一个 key，不做任意后缀剥离）。
     if not _compare_poi_list(left, right):
@@ -313,53 +322,60 @@ _MIN_POI_LEN = 2
 def _compare_component_with_suspected(
     left: NormalizedPII, right: NormalizedPII, key: str,
 ) -> bool:
-    """§6.2 + §6.3：当前层级的 identity 子集 + suspected OR 链。
-
-    OR 链（对每条疑似）：若对方 suspected 有同级 key → 必须相等，否则判冲突 False；
-    否则依次尝试：疑似值是否出现在对方本层 text 中、是否与对方 identity 同级 value 子串互容。
-    全部疑似条目处理完仍未 True → False（不再默认通过）。
-    """
-    left_value = left.identity.get(key, "")
-    right_value = right.identity.get(key, "")
-
-    # §6.2：双方都缺失或单边缺失 → 不否决。
-    if not left_value or not right_value:
+    """按组件自身 suspected 比较当前层级。"""
+    left_component = _ordered_component_by_type(left, key)
+    right_component = _ordered_component_by_type(right, key)
+    if left_component is None or right_component is None:
         return True
-
-    # §6.3 step 1：本层 text 必须互为子集。
-    shorter, longer = sorted((left_value, right_value), key=len)
-    if shorter not in longer:
+    left_value = _component_value_text(left_component)
+    right_value = _component_value_text(right_component)
+    if not _admin_text_subset_either(left_value, right_value):
         return False
+    if not _component_suspected_matches(left_component, right_component, right):
+        return False
+    if not _component_suspected_matches(right_component, left_component, left):
+        return False
+    return True
 
-    left_susp = _merged_suspected_for_compare(left)
-    right_susp = _merged_suspected_for_compare(right)
-    if not left_susp and not right_susp:
+
+def _ordered_component_by_type(
+    normalized: NormalizedPII,
+    component_type: str,
+) -> NormalizedAddressComponent | None:
+    for component in normalized.ordered_components:
+        if component.component_type == component_type:
+            return component
+    return None
+
+
+def _component_value_text(component: NormalizedAddressComponent | None) -> str:
+    if component is None:
+        return ""
+    if isinstance(component.value, tuple):
+        return "|".join(str(item).strip() for item in component.value if str(item).strip())
+    return str(component.value or "").strip()
+
+
+def _component_suspected_matches(
+    component: NormalizedAddressComponent,
+    other_component: NormalizedAddressComponent,
+    other_normalized: NormalizedPII,
+) -> bool:
+    """逐条比较当前组件自己的 suspected。"""
+    if not component.suspected:
         return True
 
-    # 正向：left 每条 suspected。
-    for level, a_val in left_susp.items():
-        if level in right_susp:
-            if a_val == right_susp[level]:
-                return True
-            return False
-        if a_val in right_value:
+    other_value = _component_value_text(other_component)
+    for level, value in component.suspected.items():
+        peer_suspected = other_component.suspected.get(level)
+        if peer_suspected:
+            return peer_suspected == value
+        if value in other_value:
             return True
-        right_comp = right.identity.get(level, "")
-        if right_comp and _admin_text_subset_either(a_val, right_comp):
+        other_level_component = _ordered_component_by_type(other_normalized, level)
+        other_level_value = _component_value_text(other_level_component)
+        if other_level_value and _admin_text_subset_either(value, other_level_value):
             return True
-
-    # 反向：right 每条 suspected。
-    for level, b_val in right_susp.items():
-        if level in left_susp:
-            if b_val == left_susp[level]:
-                return True
-            return False
-        if b_val in left_value:
-            return True
-        left_comp = left.identity.get(level, "")
-        if left_comp and _admin_text_subset_either(b_val, left_comp):
-            return True
-
     return False
 
 
@@ -452,41 +468,6 @@ def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bo
     return matched >= 2
 
 
-def _shared_component_subset(left: Mapping[str, str], right: Mapping[str, str], key: str) -> bool:
-    left_value = left.get(key, "")
-    right_value = right.get(key, "")
-    if not left_value or not right_value:
-        return True
-    shorter, longer = sorted((left_value, right_value), key=len)
-    return shorter in longer
-
-
-def _local_admin_group_matches(left: Mapping[str, str], right: Mapping[str, str]) -> bool:
-    left_values = [left.get(key, "") for key in _LOCAL_ADMIN_KEYS if left.get(key, "")]
-    right_values = [right.get(key, "") for key in _LOCAL_ADMIN_KEYS if right.get(key, "")]
-    if not left_values or not right_values:
-        return True
-    for left_value in left_values:
-        for right_value in right_values:
-            shorter, longer = sorted((left_value, right_value), key=len)
-            if shorter in longer:
-                return True
-    return False
-
-
-def _is_detail_subsequence(left: str, right: str) -> bool:
-    left_tokens = left.split("-") if left else []
-    right_tokens = right.split("-") if right else []
-    shorter, longer = (left_tokens, right_tokens) if len(left_tokens) <= len(right_tokens) else (right_tokens, left_tokens)
-    if not shorter:
-        return True
-    pointer = 0
-    for token in longer:
-        if pointer < len(shorter) and token == shorter[pointer]:
-            pointer += 1
-    return pointer == len(shorter)
-
-
 _KEYED_NUMBER_TYPES = {"building", "detail", "number"}
 
 
@@ -516,50 +497,117 @@ def _component_suspected_tuple_from_metadata(
     return tuple(_parse_one_component_suspected(str(item or "")) for item in raw)
 
 
-def _merge_suspected_dicts(parts: tuple[dict[str, str], ...]) -> dict[str, str]:
-    """合并各组件 suspected；同级 key 先到先得。"""
-    merged: dict[str, str] = {}
-    for d in parts:
-        for k, v in d.items():
-            if k not in merged:
-                merged[k] = v
-    return merged
-
-
-def _extract_legacy_flat_suspected(metadata: Mapping[str, object] | None) -> dict[str, str]:
-    """旧版 address_suspected_trace（扁平、无组件边界）。"""
-    if not metadata:
-        return {}
-    trace = metadata.get("address_suspected_trace")
-    if not isinstance(trace, list):
-        return {}
-    result: dict[str, str] = {}
-    for entry in trace:
-        if isinstance(entry, str) and ":" in entry:
-            key, value = entry.split(":", 1)
-            key = key.strip()
-            value = value.strip()
-            if key and value and key not in result:
-                result[key] = value
-    return result
-
-
-def _suspected_from_address_metadata(
+def _address_ordered_components(
+    *,
     metadata: Mapping[str, object] | None,
-) -> tuple[tuple[dict[str, str], ...], dict[str, str]]:
-    """优先 per-component；否则回退扁平 trace。"""
-    comp = _component_suspected_tuple_from_metadata(metadata)
-    if comp:
-        return comp, _merge_suspected_dicts(comp)
-    legacy = _extract_legacy_flat_suspected(metadata)
-    return (), legacy
+    components: Mapping[str, str | None] | None,
+) -> tuple[NormalizedAddressComponent, ...]:
+    """构造地址组件级归一结果。"""
+    if components:
+        return _ordered_components_from_direct_components(components)
+    return _ordered_components_from_metadata(metadata)
 
 
-def _merged_suspected_for_compare(n: NormalizedPII) -> dict[str, str]:
-    """same_entity 使用的合并 suspected。"""
-    if n.component_suspected:
-        return _merge_suspected_dicts(n.component_suspected)
-    return dict(n.suspected)
+def _ordered_components_from_direct_components(
+    components: Mapping[str, str | None],
+) -> tuple[NormalizedAddressComponent, ...]:
+    """结构化 components 直传时，按固定层级顺序生成组件。"""
+    ordered: list[NormalizedAddressComponent] = []
+    poi_key_raw = str(components.get("poi_key") or "").strip()
+    poi_keys = tuple(part.strip() for part in poi_key_raw.split("|") if part.strip())
+    for component_type in _ORDERED_COMPONENT_KEYS:
+        raw_value = str(components.get(component_type) or "").strip()
+        if not raw_value:
+            continue
+        if component_type == "poi":
+            values = tuple(part.strip() for part in raw_value.split("|") if part.strip())
+            if not values:
+                continue
+            value: str | tuple[str, ...] = values[0] if len(values) == 1 else values
+            key: str | tuple[str, ...]
+            if not poi_keys:
+                key = ""
+            elif len(poi_keys) == 1:
+                key = poi_keys[0]
+            else:
+                key = poi_keys
+        else:
+            value = raw_value
+            key = ""
+        ordered.append(NormalizedAddressComponent(
+            component_type=component_type,
+            value=value,
+            key=key,
+            suspected={},
+        ))
+    return tuple(ordered)
+
+
+def _ordered_components_from_metadata(
+    metadata: Mapping[str, object] | None,
+) -> tuple[NormalizedAddressComponent, ...]:
+    """从 detector metadata 重建组件顺序与组件级 suspected。"""
+    trace_entries = _parse_address_trace_entries(_metadata_values(metadata, "address_component_trace"))
+    if not trace_entries:
+        return ()
+    key_entries = _parse_address_trace_entries(_metadata_values(metadata, "address_component_key_trace"))
+    suspected_entries = _component_suspected_tuple_from_metadata(metadata)
+
+    ordered: list[NormalizedAddressComponent] = []
+    trace_index = 0
+    key_index = 0
+    component_index = 0
+
+    while trace_index < len(trace_entries):
+        component_type, value = trace_entries[trace_index]
+        suspected = suspected_entries[component_index] if component_index < len(suspected_entries) else {}
+        component_index += 1
+
+        if component_type == "poi":
+            values = [value]
+            trace_index += 1
+            while trace_index < len(trace_entries) and trace_entries[trace_index][0] == "poi":
+                values.append(trace_entries[trace_index][1])
+                trace_index += 1
+            keys: list[str] = []
+            while key_index < len(key_entries) and key_entries[key_index][0] == "poi" and len(keys) < len(values):
+                keys.append(key_entries[key_index][1])
+                key_index += 1
+            ordered.append(NormalizedAddressComponent(
+                component_type="poi",
+                value=tuple(values) if len(values) > 1 else values[0],
+                key=tuple(keys) if len(keys) > 1 else (keys[0] if keys else ""),
+                suspected=dict(suspected),
+            ))
+            continue
+
+        key_value = ""
+        if key_index < len(key_entries) and key_entries[key_index][0] == component_type:
+            key_value = key_entries[key_index][1]
+            key_index += 1
+        ordered.append(NormalizedAddressComponent(
+            component_type=component_type,
+            value=value,
+            key=key_value,
+            suspected=dict(suspected),
+        ))
+        trace_index += 1
+
+    return tuple(ordered)
+
+
+def _parse_address_trace_entries(items: tuple[str, ...]) -> list[tuple[str, str]]:
+    """把 trace 列表解析成标准化的组件项。"""
+    entries: list[tuple[str, str]] = []
+    for item in items:
+        if ":" not in item:
+            continue
+        raw_type, raw_value = item.split(":", 1)
+        component_type = _ADDRESS_COMPONENT_ALIASES.get(raw_type.strip(), raw_type.strip())
+        value = raw_value.strip()
+        if component_type in _ADDRESS_COMPONENT_KEYS and value:
+            entries.append((component_type, value))
+    return entries
 
 
 def _extract_keyed_numbers(metadata: Mapping[str, object] | None) -> dict[str, str]:
@@ -877,6 +925,7 @@ def _dedupe_terms(terms: Iterable[str]) -> tuple[str, ...]:
 
 
 __all__ = [
+    "NormalizedAddressComponent",
     "NormalizedPII",
     "build_match_terms",
     "normalize_pii",

@@ -70,6 +70,40 @@ def test_address_normalization_prefers_metadata_components():
     assert normalized.match_terms == ("上海", "浦东", "阳光国际")
     assert normalized.identity["address_part"] == "上海|浦东|阳光国际"
     assert normalized.identity["details_part"] == "10-102"
+    assert [
+        (component.component_type, component.value, component.key, component.suspected)
+        for component in normalized.ordered_components
+    ] == [
+        ("city", "上海", "", {}),
+        ("district", "浦东", "", {}),
+        ("poi", "阳光国际", "", {}),
+        ("building", "10", "", {}),
+        ("detail", "102", "", {}),
+    ]
+
+
+def test_address_ordered_components_from_components_follow_fixed_order():
+    normalized = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "",
+        components={
+            "city": "上海",
+            "district": "浦东",
+            "road": "中山",
+            "number": "1",
+            "subdistrict": "花木街道",
+            "poi": "阳光国际",
+        },
+    )
+
+    assert [component.component_type for component in normalized.ordered_components] == [
+        "city",
+        "district",
+        "road",
+        "number",
+        "subdistrict",
+        "poi",
+    ]
 
 
 def test_address_same_entity_accepts_local_admin_cross_field_and_detail_subsequence():
@@ -99,6 +133,29 @@ def test_address_same_entity_accepts_local_admin_cross_field_and_detail_subseque
     )
 
     assert same_entity(left, right) is True
+
+
+def test_address_same_entity_only_uses_current_component_suspected():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "北京中山路阳光小区",
+        metadata={
+            "address_component_trace": ["road:中山", "poi:阳光"],
+            "address_component_key_trace": ["road:路", "poi:小区"],
+            "address_component_suspected": ["city:北京", ""],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "上海中山路阳光小区",
+        metadata={
+            "address_component_trace": ["city:上海", "road:中山", "poi:阳光"],
+            "address_component_key_trace": ["road:路", "poi:小区"],
+            "address_component_suspected": ["", "", "city:北京"],
+        },
+    )
+
+    assert same_entity(left, right) is False
 
 
 def test_bank_number_canonical_keeps_digits_only():

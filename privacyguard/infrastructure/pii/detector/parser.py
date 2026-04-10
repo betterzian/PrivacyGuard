@@ -99,7 +99,13 @@ class StreamParser:
             if next_index is not None:
                 next_clue = context.clues[next_index]
                 if next_clue.attr_type != current_run.attr_type:
-                    challenger_run, challenger_stack = self._try_run_stack(context, next_index)
+                    if (
+                        current_run.candidate.attr_type == PIIAttributeType.ADDRESS
+                        and next_clue.clue_id in current_run.suppress_challenger_clue_ids
+                    ):
+                        challenger_run, challenger_stack = None, None
+                    else:
+                        challenger_run, challenger_stack = self._try_run_stack(context, next_index)
 
             # 无 challenger 或不重叠 → 直接 commit。
             if challenger_run is None or not _candidates_overlap(current_run.candidate, challenger_run.candidate):
@@ -265,6 +271,7 @@ class StreamParser:
                 consumed_ids=challenge.extended_consumed_ids,
                 handled_label_clue_ids=run.handled_label_clue_ids,
                 next_index=challenge.extended_next_index,
+                suppress_challenger_clue_ids=run.suppress_challenger_clue_ids,
             )
         run.pending_challenge = None
         return run

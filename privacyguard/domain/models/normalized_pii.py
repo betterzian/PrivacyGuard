@@ -7,6 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from privacyguard.domain.enums import PIIAttributeType
 
 
+class NormalizedAddressComponent(BaseModel):
+    """地址组件级归一结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    component_type: str
+    value: str | tuple[str, ...]
+    key: str | tuple[str, ...] = ""
+    suspected: dict[str, str] = Field(default_factory=dict)
+
+
 class NormalizedPII(BaseModel):
     """承载统一 canonical、组件、匹配词与身份信息。"""
 
@@ -24,10 +35,8 @@ class NormalizedPII(BaseModel):
     # 地址专属：有明确 key 的数字，如 {"building": "10", "floor": "3", "room": "201"}。
     # 用于 keyed 比对路径——双方共有的 key 值必须相等，缺失的 key 忽略。
     keyed_numbers: dict[str, str] = Field(default_factory=dict)
-    # 地址专属：各组件各自的疑似行政信息（与 detector 提交组件顺序一致，每项对应一个组件）。
-    component_suspected: tuple[dict[str, str], ...] = Field(default_factory=tuple)
-    # 由 component_suspected 合并得到，供兼容旧 metadata 与 same_entity 内部使用。
-    suspected: dict[str, str] = Field(default_factory=dict)
+    # 地址专属：按 detector/结构化输入顺序保存的组件级结果。
+    ordered_components: tuple[NormalizedAddressComponent, ...] = Field(default_factory=tuple)
 
 
-__all__ = ["NormalizedPII"]
+__all__ = ["NormalizedAddressComponent", "NormalizedPII"]
