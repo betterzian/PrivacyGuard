@@ -206,7 +206,6 @@ def _normalize_address(
         identity["number"] = ",".join(numbers)
         canonical_parts.append(f"number=[{','.join(numbers)}]")
     if details_tokens:
-        # 仍保留 details_part 作为展示/调试信息，但同实体判定不再依赖它。
         identity["details_part"] = "-".join(details_tokens)
     match_terms = tuple(
         term
@@ -214,6 +213,8 @@ def _normalize_address(
         if (value := normalized_components.get(key))
         if (term := _address_match_term(key, value))
     )
+    # suspected 信息从 metadata 中提取。
+    suspected = _extract_suspected(metadata)
     return NormalizedPII(
         attr_type=PIIAttributeType.ADDRESS,
         raw_text=raw_text or render_address_text(normalized_components),
@@ -223,6 +224,7 @@ def _normalize_address(
         identity=identity,
         numbers=tuple(numbers),
         keyed_numbers=keyed_numbers,
+        suspected=suspected,
     )
 
 
@@ -277,20 +279,103 @@ def _same_organization(left: NormalizedPII, right: NormalizedPII) -> bool:
 
 
 def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
-    for key in ("province", "city", "district"):
-        if not _shared_component_subset(left.identity, right.identity, key):
-            return False
-    if not _local_admin_group_matches(left.identity, right.identity):
+    """§6 canonical 比较顺序：province → city → district → road → numbers → subdistrict → poi。"""
+    # 必须有实质地址信息。
+    if not left.identity.get("address_part") or not right.identity.get("address_part"):
         return False
-    for key in ("road", "poi"):
-        if not _shared_component_subset(left.identity, right.identity, key):
+    # province / city / district —— 子串匹配，考虑 suspected。
+    for key in ("province", "city", "district"):
+        if not _compare_component_with_suspected(left, right, key):
             return False
+    # road —— 子串匹配 + suspected。
+    if not _compare_component_with_suspected(left, right, "road"):
+        return False
+    # numbers —— 逆序子序列 / keyed。
     if not _numbers_match(left.numbers, right.numbers,
                           left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers):
         return False
-    if not left.identity.get("address_part") or not right.identity.get("address_part"):
+    # subdistrict —— 子串匹配。
+    if not _shared_component_subset(left.identity, right.identity, "subdistrict"):
+        return False
+    # poi —— 列表双向子集。
+    if not _compare_poi_list(left, right):
         return False
     return True
+
+
+_MIN_POI_LEN = 2
+
+
+def _compare_component_with_suspected(
+    left: NormalizedPII, right: NormalizedPII, key: str,
+) -> bool:
+    """子串匹配，同时考虑 suspected 信息。
+
+    若一方缺失该 key 的 identity，但对方在 suspected 中有该 key，
+    仍视为兼容（suspected 是被链式吸收降级的行政信息）。
+    """
+    left_value = left.identity.get(key, "")
+    right_value = right.identity.get(key, "")
+    left_suspected = left.suspected.get(key, "")
+    right_suspected = right.suspected.get(key, "")
+    left_any = left_value or left_suspected
+    right_any = right_value or right_suspected
+    if not left_any or not right_any:
+        return True
+    shorter, longer = sorted((left_any, right_any), key=len)
+    return shorter in longer
+
+
+def _compare_poi_list(left: NormalizedPII, right: NormalizedPII) -> bool:
+    """POI 列表比较（§6.5）。
+
+    A×B 任一对满足 subset_either 即 PASS，全部不满足则 FAIL。
+    """
+    left_poi = left.identity.get("poi", "")
+    right_poi = right.identity.get("poi", "")
+    if not left_poi or not right_poi:
+        return True
+    left_items = [s.strip() for s in left_poi.split("|") if s.strip()]
+    right_items = [s.strip() for s in right_poi.split("|") if s.strip()]
+    if not left_items or not right_items:
+        return True
+    for a in left_items:
+        for b in right_items:
+            if _poi_subset_either(a, b) and min(len(a), len(b)) >= _MIN_POI_LEN:
+                return True
+    return False
+
+
+def _poi_subset_either(a: str, b: str) -> bool:
+    """POI 子集匹配：先尝试全文子串，再尝试去后缀后的核心名对比。"""
+    shorter, longer = sorted((a, b), key=len)
+    if shorter in longer:
+        return True
+    # 去除 POI 常见后缀后再做子串匹配。
+    a_core = _strip_poi_suffix(a)
+    b_core = _strip_poi_suffix(b)
+    if a_core and b_core:
+        shorter_c, longer_c = sorted((a_core, b_core), key=len)
+        if shorter_c in longer_c:
+            return True
+    return False
+
+
+_POI_SUFFIX_RE: re.Pattern[str] | None = None
+
+
+def _strip_poi_suffix(text: str) -> str:
+    """去除 POI 常见后缀（广场、小区、花园等）。"""
+    global _POI_SUFFIX_RE
+    if _POI_SUFFIX_RE is None:
+        suffixes = [
+            "广场", "小区", "花园", "大厦", "中心", "大楼", "公寓", "社区",
+            "产业园", "科技园", "工业园", "园区", "住宅", "别墅", "商城",
+            "Plaza", "Center", "Tower", "Building", "Complex",
+        ]
+        escaped = "|".join(re.escape(s) for s in sorted(suffixes, key=len, reverse=True))
+        _POI_SUFFIX_RE = re.compile(f"(?:{escaped})$", re.IGNORECASE)
+    return _POI_SUFFIX_RE.sub("", text).strip()
 
 
 def _numbers_match(
@@ -365,6 +450,24 @@ def _is_detail_subsequence(left: str, right: str) -> bool:
 
 
 _KEYED_NUMBER_TYPES = {"building", "detail", "number"}
+
+
+def _extract_suspected(metadata: Mapping[str, object] | None) -> dict[str, str]:
+    """从 address_suspected_trace 中提取 suspected admin 信息。"""
+    if not metadata:
+        return {}
+    trace = metadata.get("address_suspected_trace")
+    if not isinstance(trace, list):
+        return {}
+    result: dict[str, str] = {}
+    for entry in trace:
+        if isinstance(entry, str) and ":" in entry:
+            key, value = entry.split(":", 1)
+            key = key.strip()
+            value = value.strip()
+            if key and value and key not in result:
+                result[key] = value
+    return result
 
 
 def _extract_keyed_numbers(metadata: Mapping[str, object] | None) -> dict[str, str]:
@@ -533,6 +636,7 @@ def _address_components(
 def _components_from_address_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]:
     traces = _metadata_values(metadata, "address_component_trace")
     resolved: dict[str, str] = {}
+    poi_values: list[str] = []
     for item in traces:
         if ":" not in item:
             continue
@@ -541,10 +645,27 @@ def _components_from_address_metadata(metadata: Mapping[str, object] | None) -> 
         normalized_value = value.strip()
         if key not in _ADDRESS_COMPONENT_KEYS or not normalized_value:
             continue
+        # POI 支持列表：多个 POI trace 去重后合并为 "|" 分隔。
+        if key == "poi":
+            poi_values.append(normalized_value)
+            continue
         previous = resolved.get(key, "")
         if len(normalized_value) > len(previous):
             resolved[key] = normalized_value
+    if poi_values:
+        deduped_pois = _dedupe_poi_values(poi_values)
+        resolved["poi"] = "|".join(deduped_pois)
     return resolved
+
+
+def _dedupe_poi_values(values: list[str]) -> list[str]:
+    """POI 列表去重：被更长值包含的短值剔除。"""
+    sorted_vals = sorted(set(values), key=len, reverse=True)
+    result: list[str] = []
+    for v in sorted_vals:
+        if not any(v in kept and v != kept for kept in result):
+            result.append(v)
+    return result
 
 
 def _metadata_values(metadata: Mapping[str, object] | None, key: str) -> tuple[str, ...]:

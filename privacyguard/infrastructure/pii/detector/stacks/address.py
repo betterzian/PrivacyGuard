@@ -1,18 +1,28 @@
-"""地址 stack 与地址专属 helper。"""
+"""地址 stack：基于 clue 状态机的地址解析。
+
+核心流程：seed → 主循环（deferred_chain + segment_admit）→ fixup_suspected → digit_tail → build_run。
+参见 docs/address.md。
+"""
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from functools import lru_cache
+from dataclasses import dataclass, field
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value, has_address_signal, trim_candidate
-from privacyguard.infrastructure.pii.detector.models import AddressComponentType, CandidateDraft, ClaimStrength, Clue, ClueRole
+from privacyguard.infrastructure.pii.detector.models import (
+    AddressComponentType,
+    CandidateDraft,
+    ClaimStrength,
+    Clue,
+    ClueFamily,
+    ClueRole,
+    StreamInput,
+)
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_en_address_keyword_groups,
-    load_zh_address_keyword_groups,
- )
+)
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
@@ -27,20 +37,32 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     is_negative_clue,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import (
-    _OCR_INLINE_GAP_TOKEN,
-    OCR_BREAK,
     is_any_break,
     is_hard_break,
-    is_soft_break,
 )
+
+# ---------------------------------------------------------------------------
+# 常量
+# ---------------------------------------------------------------------------
+
+# 单占位类型：同一地址实例内最多出现一次。
+SINGLE_OCCUPY = frozenset({
+    AddressComponentType.PROVINCE,
+    AddressComponentType.CITY,
+    AddressComponentType.DISTRICT,
+    AddressComponentType.SUBDISTRICT,
+    AddressComponentType.ROAD,
+    AddressComponentType.NUMBER,
+})
 
 _ADMIN_TYPES = frozenset({
     AddressComponentType.PROVINCE,
-    AddressComponentType.CITY, AddressComponentType.DISTRICT,
+    AddressComponentType.CITY,
+    AddressComponentType.DISTRICT,
     AddressComponentType.SUBDISTRICT,
 })
 
-# 精简后的后继图（9 节点）。
+# 后继图（段内正向检查用）。
 _VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] = {
     AddressComponentType.PROVINCE:    frozenset({AddressComponentType.CITY, AddressComponentType.DISTRICT,
                                                  AddressComponentType.SUBDISTRICT, AddressComponentType.ROAD,
@@ -61,31 +83,34 @@ _VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] =
     AddressComponentType.DETAIL:      frozenset({AddressComponentType.DETAIL}),
 }
 
-# 可在地址末尾逆序追加的顶层 ADMIN（仅省/市/区），且必须此前未出现过。
-_TRAILING_ADMIN_TYPES = frozenset({
-    AddressComponentType.PROVINCE,
-    AddressComponentType.CITY, AddressComponentType.DISTRICT,
-})
-
-# POI 延迟提交时，这些后续 KEY 类型视为「可组合」——丢弃 POI 语义，用后续 KEY 的类型构建。
+# 链式吸收时，这些 KEY 类型可作为链的终端消费者。
 _POI_COMBINABLE_TYPES = frozenset({
-    AddressComponentType.ROAD, AddressComponentType.BUILDING,
-    AddressComponentType.DETAIL, AddressComponentType.SUBDISTRICT,
+    AddressComponentType.ROAD,
+    AddressComponentType.BUILDING,
+    AddressComponentType.DETAIL,
+    AddressComponentType.SUBDISTRICT,
     AddressComponentType.POI,
 })
 
-# 省/市 VALUE 出现在这些层级后面时，降级为路名前缀文字而非独立 admin 组件。
-_ADMIN_DEMOTABLE_AFTER = frozenset({
+_DETAIL_COMPONENTS = frozenset({
+    AddressComponentType.BUILDING,
+    AddressComponentType.DETAIL,
+})
+
+_SINGLE_EVIDENCE_ADMIN = frozenset({
     AddressComponentType.PROVINCE,
     AddressComponentType.CITY,
-    AddressComponentType.DISTRICT,
 })
+
+_ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM})
+
+_SENTINEL_STOP = object()
 
 
 def _compute_reachable(
     successors: dict[AddressComponentType, frozenset[AddressComponentType]],
 ) -> dict[AddressComponentType, frozenset[AddressComponentType]]:
-    """计算传递闭包：从每个节点出发可多步到达的所有节点集合。"""
+    """传递闭包：从每个节点出发可多步到达的所有节点集合。"""
     reachable: dict[AddressComponentType, set[AddressComponentType]] = {}
     for node in successors:
         visited: set[AddressComponentType] = set()
@@ -103,14 +128,78 @@ def _compute_reachable(
 _REACHABLE = _compute_reachable(_VALID_SUCCESSORS)
 _ALL_TYPES = frozenset(AddressComponentType)
 
-_DETAIL_COMPONENTS = {
-    AddressComponentType.BUILDING,
-    AddressComponentType.DETAIL,
-}
+# ---------------------------------------------------------------------------
+# 内部数据结构
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _DraftComponent:
+    """主循环产出的草稿 component。fixup 阶段可写入 suspected。"""
+
+    component_type: AddressComponentType
+    start: int
+    end: int
+    value: str | list[str]
+    key: str | list[str]
+    is_detail: bool = False
+    raw_chain: list[Clue] = field(default_factory=list)
+    suspected: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class _ForwardSegmentState:
+    """段内正向状态；逗号重置。"""
+
+    last_type: AddressComponentType | None = None
+
+    def reset(self) -> None:
+        self.last_type = None
+
+
+@dataclass(slots=True)
+class _ParseState:
+    """run_with_clues 的可变解析状态。"""
+
+    components: list[_DraftComponent] = field(default_factory=list)
+    occupancy: dict[AddressComponentType, int] = field(default_factory=dict)
+    deferred_chain: list[Clue] = field(default_factory=list)
+    chain_left_anchor: int | None = None
+    segment_state: _ForwardSegmentState = field(default_factory=_ForwardSegmentState)
+    last_consumed: Clue | None = None
+    last_value: Clue | None = None
+    evidence_count: int = 0
+    last_end: int = 0
+    split_at: int | None = None
+    absorbed_digit_unit_end: int = 0
+    last_component_type: AddressComponentType | None = None
+
+
+# ---------------------------------------------------------------------------
+# 工具函数
+# ---------------------------------------------------------------------------
+
+def _is_absorbable_digit_clue(clue: Clue) -> bool:
+    if clue.attr_type not in _ABSORBABLE_DIGIT_ATTR_TYPES:
+        return False
+    digits = (clue.source_metadata.get("pure_digits") or [""])[0]
+    return len(digits) <= 5
+
+
+def _clue_unit_gap(left: Clue, right: Clue, stream: StreamInput | None = None) -> int:
+    """两个 clue 之间的有效（非空白）unit 数。"""
+    if stream is not None and stream.units:
+        gap_start = left.unit_end
+        gap_end = right.unit_start
+        count = 0
+        for ui in range(gap_start, min(gap_end, len(stream.units))):
+            if stream.units[ui].kind != "space":
+                count += 1
+        return count
+    return max(0, right.unit_start - left.unit_end)
 
 
 def _en_prefix_keywords() -> set[str]:
-    """从外部 lexicon 派生英文前缀关键字集合（detail 类如 apt/suite/unit/floor/room/# 等）。"""
     keywords: set[str] = set()
     for group in load_en_address_keyword_groups():
         if group.component_type != AddressComponentType.DETAIL:
@@ -125,27 +214,368 @@ def _en_prefix_keywords() -> set[str]:
 
 _PREFIX_EN_KEYWORDS = _en_prefix_keywords()
 _EN_VALUE_KEY_GAP_RE = re.compile(r"^[ ]*$")
-_SINGLE_EVIDENCE_ADMIN = {
-    AddressComponentType.PROVINCE,
-    AddressComponentType.CITY,
-}
 
-# 地址内可吸收的非 ADDRESS attr_type——数字片段和字母数字片段。
-_ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM})
+# ---------------------------------------------------------------------------
+# 链式吸收
+# ---------------------------------------------------------------------------
 
 
-def _is_absorbable_digit_clue(clue: Clue) -> bool:
-    """判断非 ADDRESS clue 是否为可被地址栈吸收的数字片段（≤5 位）。"""
-    if clue.attr_type not in _ABSORBABLE_DIGIT_ATTR_TYPES:
+def _chain_can_accept(state: _ParseState, clue: Clue, stream: StreamInput) -> bool:
+    """判断 clue 能否加入当前 deferred_chain。
+
+    VALUE→VALUE / VALUE→KEY: gap ≤ 1 non-space unit。
+    KEY→KEY: gap 必须为 0（严格相邻）。
+    """
+    if not state.deferred_chain:
         return False
-    digits = (clue.source_metadata.get("pure_digits") or [""])[0]
-    return len(digits) <= 5
+    last = state.deferred_chain[-1]
+    gap = _clue_unit_gap(last, clue, stream)
+    if last.role == ClueRole.KEY and clue.role == ClueRole.KEY:
+        return gap == 0
+    return gap <= 1
 
+
+def _flush_chain(
+    state: _ParseState,
+    raw_text: str,
+    stream: StreamInput,
+    locale: str,
+    *,
+    clues: tuple[Clue, ...] | None = None,
+    clue_index: int = 0,
+) -> None:
+    """冲洗 deferred_chain。
+
+    若链中含 KEY，用最后一个 KEY 消费链（build_chain_component）。
+    否则逐个 standalone（flush_chain_as_standalone）。
+    """
+    if not state.deferred_chain:
+        return
+
+    last_key_idx: int | None = None
+    for i in range(len(state.deferred_chain) - 1, -1, -1):
+        if state.deferred_chain[i].role == ClueRole.KEY:
+            last_key_idx = i
+            break
+
+    if last_key_idx is not None:
+        key_clue = state.deferred_chain[last_key_idx]
+        comp_type = key_clue.component_type or AddressComponentType.POI
+        # NUMBER 上下文重映射。
+        if comp_type == AddressComponentType.NUMBER and state.last_component_type in _DETAIL_COMPONENTS:
+            comp_type = AddressComponentType.DETAIL
+
+        raw_chain_clues = list(state.deferred_chain[:last_key_idx])
+        expand_start = state.chain_left_anchor if state.chain_left_anchor is not None else key_clue.start
+        # 从 chain anchor 额外左扩展。
+        floor = _left_address_floor(clues or (), clue_index) if clues else 0
+        if locale.startswith("en"):
+            expand_start = _left_expand_en_word(raw_text, expand_start, floor)
+        else:
+            expand_start = _left_expand_zh(raw_text, expand_start, floor, stream, comp_type)
+
+        value_text = raw_text[expand_start:key_clue.start]
+        value = _normalize_address_value(comp_type, value_text)
+
+        if value:
+            component = _DraftComponent(
+                component_type=comp_type,
+                start=expand_start,
+                end=key_clue.end,
+                value=value,
+                key=key_clue.text,
+                is_detail=comp_type in _DETAIL_COMPONENTS,
+                raw_chain=raw_chain_clues,
+            )
+            _commit(state, component)
+        else:
+            # value 为空 → 丢弃此组件。穿透的中间 KEY 也丢弃。
+            pass
+    else:
+        _flush_chain_as_standalone(state)
+
+    state.deferred_chain.clear()
+    state.chain_left_anchor = None
+
+
+def _flush_chain_as_standalone(state: _ParseState) -> None:
+    """链中无 KEY 时，逐个 VALUE 作为独立 component 提交。"""
+    for clue in state.deferred_chain:
+        comp_type = clue.component_type
+        if comp_type is None:
+            continue
+        if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
+            state.split_at = clue.start
+            break
+        value = _normalize_address_value(comp_type, clue.text)
+        if not value:
+            continue
+        component = _DraftComponent(
+            component_type=comp_type,
+            start=clue.start,
+            end=clue.end,
+            value=value,
+            key="",
+            is_detail=comp_type in _DETAIL_COMPONENTS,
+            raw_chain=[clue],
+        )
+        _commit(state, component)
+
+
+def _commit(state: _ParseState, component: _DraftComponent) -> None:
+    """提交 component 到 state，更新 occupancy / segment / evidence。"""
+    comp_type = component.component_type
+    if comp_type == AddressComponentType.POI:
+        _commit_poi(state, component)
+    else:
+        state.components.append(component)
+    idx = len(state.components) - 1
+    if comp_type in SINGLE_OCCUPY:
+        state.occupancy[comp_type] = idx
+    state.segment_state.last_type = comp_type
+    state.last_component_type = comp_type
+    state.last_end = max(state.last_end, component.end)
+    state.evidence_count += 1
+
+
+def _commit_poi(state: _ParseState, component: _DraftComponent) -> None:
+    """POI 列表化：同一地址内多个 POI 合并到一个 component。"""
+    for existing in state.components:
+        if existing.component_type == AddressComponentType.POI:
+            if not isinstance(existing.value, list):
+                existing.value = [existing.value]
+            if not isinstance(existing.key, list):
+                existing.key = [existing.key]
+            val = component.value[0] if isinstance(component.value, list) else component.value
+            key = component.key[0] if isinstance(component.key, list) else component.key
+            existing.value.append(val)
+            existing.key.append(key)
+            existing.end = max(existing.end, component.end)
+            return
+    state.components.append(component)
+
+
+# ---------------------------------------------------------------------------
+# 段内检查
+# ---------------------------------------------------------------------------
+
+def _segment_admit(
+    state: _ParseState,
+    clue: Clue,
+    comp_type: AddressComponentType,
+    raw_text: str,
+) -> bool:
+    """逗号分段 + 占位检查。返回 False 时外层应 STOP。"""
+    gap_text = raw_text[state.last_end:clue.start]
+    has_comma = "," in gap_text or "，" in gap_text
+
+    if has_comma:
+        state.segment_state.reset()
+        if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
+            return False
+        return True
+
+    # 无逗号 → 段内严格正向。
+    if state.segment_state.last_type is None:
+        if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
+            return False
+        return True
+    if comp_type in _REACHABLE.get(state.segment_state.last_type, _ALL_TYPES):
+        if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
+            return False
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# fixup: suspected 信息
+# ---------------------------------------------------------------------------
+
+def _fixup_suspected_info(state: _ParseState, raw_text: str) -> None:
+    """后处理：为链式 component 计算 suspected admin 信息。"""
+    occupancy_levels = {
+        comp.component_type
+        for comp in state.components
+        if comp.component_type in SINGLE_OCCUPY
+    }
+
+    for comp_idx, component in enumerate(state.components):
+        admin_clues = _leading_admin_value_clues(component.raw_chain)
+        if not admin_clues:
+            continue
+
+        suspected: dict[str, str] = {}
+        broken = False
+
+        for clue in admin_clues:
+            level = clue.component_type
+            if level is None:
+                continue
+            if broken:
+                continue
+            if level in occupancy_levels and state.occupancy.get(level) != comp_idx:
+                broken = True
+                continue
+            level_key = level.value
+            if level_key not in suspected:
+                suspected[level_key] = clue.text
+
+        component.suspected = suspected
+        if suspected:
+            component.value = _recompute_text(component, suspected, raw_text)
+
+
+def _leading_admin_value_clues(raw_chain: list[Clue]) -> list[Clue]:
+    """取 raw_chain 中 KEY 之前的 admin VALUE clue。"""
+    result: list[Clue] = []
+    for clue in raw_chain:
+        if clue.role == ClueRole.KEY:
+            break
+        if clue.role == ClueRole.VALUE and clue.component_type in _ADMIN_TYPES:
+            result.append(clue)
+    return result
+
+
+def _recompute_text(
+    component: _DraftComponent,
+    suspected: dict[str, str],
+    raw_text: str,
+) -> str:
+    """从 component.value 中删除 suspected 文字，保留剩余。"""
+    if isinstance(component.value, list):
+        return component.value
+    value = component.value
+    suspected_texts = set(suspected.values())
+    for text in suspected_texts:
+        value = value.replace(text, "", 1)
+    return value.strip() or component.value
+
+
+# ---------------------------------------------------------------------------
+# HARD sub-tokenize
+# ---------------------------------------------------------------------------
+
+def _sub_tokenize(
+    stream: StreamInput,
+    hard_clue: Clue,
+    locale: str,
+) -> list[Clue]:
+    """在 HARD clue span 内扫描地址关键词，产出 sub-clue 列表。"""
+    from privacyguard.infrastructure.pii.detector.scanner import (
+        _zh_address_key_matcher,
+        _zh_address_value_matcher,
+        _en_address_key_matcher,
+        _en_address_value_matcher,
+    )
+
+    span_start = hard_clue.start
+    span_end = hard_clue.end
+    text = stream.text[span_start:span_end]
+    if not text.strip():
+        return []
+
+    folded = text.lower()
+    sub_clues: list[Clue] = []
+    clue_counter = 0
+
+    def _make_id() -> str:
+        nonlocal clue_counter
+        clue_counter += 1
+        return f"sub_{hard_clue.clue_id}_{clue_counter}"
+
+    matchers_value = []
+    matchers_key = []
+    if locale in ("zh", "zh_cn", "mixed") or not locale.startswith("en"):
+        matchers_value.append(_zh_address_value_matcher())
+        matchers_key.append(_zh_address_key_matcher())
+    if locale.startswith("en") or locale == "mixed":
+        matchers_value.append(_en_address_value_matcher())
+        matchers_key.append(_en_address_key_matcher())
+
+    for matcher in matchers_value:
+        for match in matcher.find_matches(text, folded_text=folded):
+            abs_start = span_start + match.start
+            abs_end = span_start + match.end
+            payload = match.payload
+            us, ue = _char_span_to_unit_span(stream, abs_start, abs_end)
+            sub_clues.append(Clue(
+                clue_id=_make_id(),
+                family=ClueFamily.ADDRESS,
+                role=ClueRole.VALUE,
+                attr_type=PIIAttributeType.ADDRESS,
+                strength=ClaimStrength.SOFT,
+                start=abs_start,
+                end=abs_end,
+                text=payload.canonical_text,
+                unit_start=us,
+                unit_end=ue,
+                source_kind="sub_tokenize_value",
+                component_type=payload.component_type,
+            ))
+
+    for matcher in matchers_key:
+        for match in matcher.find_matches(text, folded_text=folded):
+            abs_start = span_start + match.start
+            abs_end = span_start + match.end
+            payload = match.payload
+            us, ue = _char_span_to_unit_span(stream, abs_start, abs_end)
+            sub_clues.append(Clue(
+                clue_id=_make_id(),
+                family=ClueFamily.ADDRESS,
+                role=ClueRole.KEY,
+                attr_type=PIIAttributeType.ADDRESS,
+                strength=ClaimStrength.SOFT,
+                start=abs_start,
+                end=abs_end,
+                text=payload.canonical_text,
+                unit_start=us,
+                unit_end=ue,
+                source_kind="sub_tokenize_key",
+                component_type=payload.component_type,
+            ))
+
+    if not sub_clues:
+        us, ue = _char_span_to_unit_span(stream, span_start, span_end)
+        return [Clue(
+            clue_id=_make_id(),
+            family=ClueFamily.ADDRESS,
+            role=ClueRole.VALUE,
+            attr_type=PIIAttributeType.ADDRESS,
+            strength=ClaimStrength.SOFT,
+            start=span_start,
+            end=span_end,
+            text=text,
+            unit_start=us,
+            unit_end=ue,
+            source_kind="sub_tokenize_fallback_poi",
+            component_type=AddressComponentType.POI,
+        )]
+
+    # 去重：长匹配覆盖短匹配（同 role+component_type）。
+    sub_clues.sort(key=lambda c: (c.start, -(c.end - c.start)))
+    deduped: list[Clue] = []
+    for clue in sub_clues:
+        if any(
+            kept.start <= clue.start and clue.end <= kept.end
+            and kept.role == clue.role
+            and kept.component_type == clue.component_type
+            for kept in deduped
+        ):
+            continue
+        deduped.append(clue)
+
+    deduped.sort(key=lambda c: (c.start, c.end))
+    return deduped
+
+
+# ---------------------------------------------------------------------------
+# AddressStack
+# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class AddressStack(BaseStack):
+
     def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
-        """地址回缩：截断后若失去地址信号则放弃。"""
         candidate = run.candidate
         stream = self.context.stream
         if blocker_start <= candidate.unit_start:
@@ -174,10 +604,11 @@ class AddressStack(BaseStack):
             next_index=run.next_index,
         )
 
+    # ------------------------------------------------------------------ run
     def run(self) -> StackRun | None:
         """地址 stack 主入口。"""
         if self.clue.strength == ClaimStrength.HARD:
-            return self._build_direct_run()
+            return self._run_hard()
 
         raw_text = self.context.stream.text
         stream = self.context.stream
@@ -195,7 +626,7 @@ class AddressStack(BaseStack):
             handled_labels: set[str] = {self.clue.clue_id}
             evidence_count = 1
         else:
-            address_start = self._seed_left_boundary()
+            address_start = self.clue.start if self.clue.role in {ClueRole.VALUE, ClueRole.KEY} else None
             scan_index = self.clue_index
             consumed_ids = set()
             handled_labels = set()
@@ -203,25 +634,103 @@ class AddressStack(BaseStack):
         if address_start is None:
             return None
 
-        components: list[dict[str, object]] = []
-        last_end = address_start
-        last_component_type: AddressComponentType | None = None
-        seen_types: set[AddressComponentType] = set()
-        in_trailing_admin = False
-        pending_value: dict[AddressComponentType, Clue] = {}
-        index = scan_index
-        negative_spans: list[tuple[int, int]] = []
-        last_consumed_address_clue: Clue | None = None
-        last_value_clue: Clue | None = None
-        absorbed_digit_unit_end: int = 0
-        # POI 延迟提交状态。
-        deferred_poi: Clue | None = None
-        deferred_poi_index: int = -1
-        # 省/市 VALUE 降级为路名前缀时，记录首个降级 VALUE 的 start 位置。
-        demoted_value_start: int | None = None
+        return self._run_with_clues(
+            clues=self.context.clues,
+            mode="normal",
+            scan_index=scan_index,
+            address_start=address_start,
+            consumed_ids=consumed_ids,
+            handled_labels=handled_labels,
+            evidence_count=evidence_count,
+            locale=locale,
+        )
 
-        while index < len(self.context.clues):
-            clue = self.context.clues[index]
+    def _run_hard(self) -> StackRun | None:
+        """HARD clue：子分词后走 run_with_clues。"""
+        stream = self.context.stream
+        locale = self._value_locale()
+        sub_clues = _sub_tokenize(stream, self.clue, locale)
+        if not sub_clues:
+            return self._build_direct_run()
+
+        sub_tuple = tuple(sub_clues)
+        result = self._run_with_sub_clues(sub_tuple, locale)
+        if result is not None:
+            return result
+        return self._build_direct_run()
+
+    def _run_with_sub_clues(
+        self,
+        sub_clues: tuple[Clue, ...],
+        locale: str,
+    ) -> StackRun | None:
+        """hard_local 模式：用 sub_clues 走主循环。"""
+        if not sub_clues:
+            return None
+        raw_text = self.context.stream.text
+        stream = self.context.stream
+
+        state = _ParseState()
+        state.last_end = sub_clues[0].start
+
+        negative_spans: list[tuple[int, int]] = []
+        index = 0
+
+        while index < len(sub_clues):
+            clue = sub_clues[index]
+            if clue.start >= self.clue.end:
+                break
+            if is_break_clue(clue) or is_negative_clue(clue):
+                break
+
+            if clue.attr_type != PIIAttributeType.ADDRESS:
+                index += 1
+                continue
+
+            # 6-unit gap。
+            if state.last_consumed is not None:
+                gap_anchor = max(state.last_consumed.unit_end, state.absorbed_digit_unit_end)
+                if clue.unit_start - gap_anchor > 6:
+                    break
+
+            result = self._handle_address_clue(state, clue, raw_text, stream, locale, sub_clues, index)
+            if result is _SENTINEL_STOP:
+                break
+            state.last_consumed = clue
+            index += 1
+
+        _flush_chain(state, raw_text, stream, locale, clues=sub_clues, clue_index=index)
+
+        if not state.components:
+            return None
+
+        _fixup_suspected_info(state, raw_text)
+        return self._build_address_run_from_state(state, set(), set(), locale, self.clue_index + 1)
+
+    # -------------------------------------------------------- run_with_clues
+    def _run_with_clues(
+        self,
+        clues: tuple[Clue, ...],
+        mode: str,
+        scan_index: int,
+        address_start: int,
+        consumed_ids: set[str],
+        handled_labels: set[str],
+        evidence_count: int,
+        locale: str,
+    ) -> StackRun | None:
+        raw_text = self.context.stream.text
+        stream = self.context.stream
+
+        state = _ParseState()
+        state.last_end = address_start
+        state.evidence_count = evidence_count
+
+        negative_spans: list[tuple[int, int]] = []
+        index = scan_index
+
+        while index < len(clues):
+            clue = clues[index]
 
             if is_break_clue(clue):
                 break
@@ -234,13 +743,12 @@ class AddressStack(BaseStack):
                 continue
             if clue.attr_type != PIIAttributeType.ADDRESS:
                 if _is_absorbable_digit_clue(clue):
-                    absorbed_digit_unit_end = max(absorbed_digit_unit_end, clue.unit_end)
+                    state.absorbed_digit_unit_end = max(state.absorbed_digit_unit_end, clue.unit_end)
                     index += 1
                     continue
                 if clue.attr_type in {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
-                    if _has_nearby_address_clue(self.context.clues, index + 1, clue.end,
-                                                locale=locale, raw_text=raw_text):
-                        absorbed_digit_unit_end = max(absorbed_digit_unit_end, clue.unit_end)
+                    if _has_nearby_address_clue(clues, index + 1, clue.end, locale=locale, raw_text=raw_text):
+                        state.absorbed_digit_unit_end = max(state.absorbed_digit_unit_end, clue.unit_end)
                         index += 1
                         continue
                     break
@@ -252,224 +760,58 @@ class AddressStack(BaseStack):
                 index += 1
                 continue
 
-            # gap 检查：6 unit 以内没有新 clue 则截止。
-            if last_consumed_address_clue is not None:
-                gap_anchor = max(last_consumed_address_clue.unit_end, absorbed_digit_unit_end)
+            # 6-unit gap。
+            if state.last_consumed is not None:
+                gap_anchor = max(state.last_consumed.unit_end, state.absorbed_digit_unit_end)
                 if clue.unit_start - gap_anchor > 6:
                     break
 
-            comp_type = clue.component_type
-            if comp_type is None:
-                index += 1
-                continue
+            result = self._handle_address_clue(state, clue, raw_text, stream, locale, clues, index)
+            if result is _SENTINEL_STOP:
+                break
 
-            # "号"上下文重映射：NUMBER 出现在 BUILDING/DETAIL 后面时重映射为 DETAIL。
-            if comp_type == AddressComponentType.NUMBER:
-                if last_component_type in {AddressComponentType.BUILDING, AddressComponentType.DETAIL}:
-                    comp_type = AddressComponentType.DETAIL
-
-            # ---- 邻接表检查 ----
-            if last_component_type is not None:
-                if in_trailing_admin:
-                    if comp_type not in _TRAILING_ADMIN_TYPES or comp_type in seen_types:
-                        break
-                elif comp_type not in _REACHABLE.get(last_component_type, _ALL_TYPES):
-                    if comp_type in _TRAILING_ADMIN_TYPES and comp_type not in seen_types:
-                        # 逆序必须有逗号。
-                        gap_text = raw_text[last_end:clue.start]
-                        if ',' not in gap_text and '，' not in gap_text:
-                            break
-                        in_trailing_admin = True
-                    elif (comp_type in {AddressComponentType.PROVINCE, AddressComponentType.CITY}
-                          and clue.role == ClueRole.VALUE
-                          and last_component_type in _ADMIN_DEMOTABLE_AFTER):
-                        # 省/市 VALUE 出现在区以上层级后面 → 降级为路名前缀文字。
-                        if demoted_value_start is None:
-                            demoted_value_start = clue.start
-                        consumed_ids.add(clue.clue_id)
-                        last_consumed_address_clue = clue
-                        last_end = max(last_end, clue.end)
-                        index += 1
-                        continue
-                    else:
-                        break
-
-            # ---- POI 延迟提交（KEY 和 VALUE 统一） ----
-            if comp_type == AddressComponentType.POI and clue.role in {ClueRole.KEY, ClueRole.VALUE}:
-                # 先处理前一个 deferred_poi（如果有）。
-                if deferred_poi is not None:
-                    poi_adjacent = _is_adjacent(raw_text, deferred_poi, clue)
-                    if poi_adjacent:
-                        pass  # POI 叠 POI 且相邻 → 替换，旧 deferred 文字保留在跨度内。
-                    else:
-                        poi_comp = self._submit_deferred_poi(raw_text, deferred_poi, deferred_poi_index, locale)
-                        if poi_comp is not None:
-                            components.append(poi_comp)
-                            evidence_count += 1
-                            last_end = max(last_end, int(poi_comp["end"]))
-                            last_component_type = AddressComponentType.POI
-                # 存为新的 deferred。
-                seen_types.add(comp_type)
-                consumed_ids.add(clue.clue_id)
-                last_consumed_address_clue = clue
-                last_end = max(last_end, clue.end)
-                deferred_poi = clue
-                deferred_poi_index = index
-                index += 1
-                continue
-
-            # 非 POI clue 到达时，解决已有的 deferred_poi。
-            if deferred_poi is not None:
-                if clue.role == ClueRole.KEY:
-                    adjacent = _is_adjacent(raw_text, deferred_poi, clue)
-                    if adjacent and comp_type in _POI_COMBINABLE_TYPES:
-                        combo = self._build_deferred_poi_combo(raw_text, deferred_poi, deferred_poi_index,
-                                                               clue, comp_type, index, locale)
-                        deferred_poi = None
-                        deferred_poi_index = -1
-                        seen_types.add(comp_type)
-                        consumed_ids.add(clue.clue_id)
-                        last_consumed_address_clue = clue
-                        if combo is not None:
-                            components.append(combo)
-                            evidence_count += 1
-                            last_end = max(last_end, int(combo["end"]))
-                            last_component_type = comp_type
-                        index += 1
-                        continue
-                # 不可组合 / 不相邻 / 当前是 VALUE → 独立提交 deferred_poi。
-                poi_comp = self._submit_deferred_poi(raw_text, deferred_poi, deferred_poi_index, locale)
-                if poi_comp is not None:
-                    components.append(poi_comp)
-                    evidence_count += 1
-                    last_end = max(last_end, int(poi_comp["end"]))
-                    last_component_type = AddressComponentType.POI
-                deferred_poi = None
-                deferred_poi_index = -1
-                # 继续正常处理当前 clue（不 continue）。
-
-            seen_types.add(comp_type)
             consumed_ids.add(clue.clue_id)
-            last_consumed_address_clue = clue
-
-            if clue.role == ClueRole.VALUE:
-                # 正常 VALUE 到达，清除之前的降级记录。
-                demoted_value_start = None
-                if comp_type in pending_value:
-                    previous = pending_value[comp_type]
-                    default_key = _default_key_for_component_type(comp_type, locale)
-                    standalone = _build_standalone_address_component_with_key(previous, comp_type, key=default_key)
-                    if standalone is not None:
-                        components.append(standalone)
-                        evidence_count += 1
-                        last_end = max(last_end, int(standalone["end"]))
-                    del pending_value[comp_type]
-                self._flush_pending_values(pending_value, comp_type, components)
-                pending_value[comp_type] = clue
-                last_value_clue = clue
-                last_end = max(last_end, clue.end)
-                last_component_type = comp_type
-                index += 1
-                continue
-
-            same_tier_value = pending_value.pop(comp_type, None)
-            flushed = self._flush_pending_values(pending_value, comp_type, components)
-            evidence_count += flushed
-
-            if same_tier_value is not None:
-                demoted_value_start = None  # 同层合并优先，清除降级记录。
-                component, merged = _build_value_key_component(
-                    raw_text,
-                    same_tier_value,
-                    clue,
-                    comp_type,
-                    locale=locale,
-                )
-                if merged:
-                    if component is not None:
-                        components.append(component)
-                        evidence_count += 1
-                        last_end = max(last_end, int(component["end"]))
-                        last_component_type = comp_type
-                else:
-                    standalone = _build_standalone_address_component(same_tier_value, comp_type)
-                    if standalone is not None:
-                        components.append(standalone)
-                        evidence_count += 1
-                        last_end = max(last_end, int(standalone["end"]))
-                    key_comp = self._build_key_component(raw_text, clue, comp_type, index, locale)
-                    if key_comp is not None:
-                        components.append(key_comp)
-                        evidence_count += 1
-                        last_end = max(last_end, int(key_comp["end"]))
-                    last_component_type = comp_type
-            else:
-                component = None
-                # 有被降级的省/市 VALUE → 用其 start 作为 value 左边界。
-                if demoted_value_start is not None:
-                    dv_start = demoted_value_start
-                    demoted_value_start = None
-                    value_text = raw_text[dv_start:clue.start]
-                    value = _normalize_address_value(comp_type, value_text)
-                    if value:
-                        component = {
-                            "component_type": comp_type,
-                            "start": dv_start,
-                            "end": clue.end,
-                            "value": value,
-                            "key": clue.text,
-                            "is_detail": comp_type in _DETAIL_COMPONENTS,
-                        }
-                elif last_value_clue is not None and clue.unit_start - last_value_clue.unit_end <= 1:
-                    component = _build_cross_tier_value_key_component(raw_text, last_value_clue, clue, comp_type)
-                if component is None:
-                    component = self._build_key_component(raw_text, clue, comp_type, index, locale)
-                if component is not None:
-                    components.append(component)
-                    evidence_count += 1
-                    last_end = max(last_end, int(component["end"]))
-                    last_component_type = comp_type
+            state.last_consumed = clue
             index += 1
 
-        # 循环结束后提交残留的 deferred_poi。
-        if deferred_poi is not None:
-            poi_comp = self._submit_deferred_poi(raw_text, deferred_poi, deferred_poi_index, locale)
-            if poi_comp is not None:
-                components.append(poi_comp)
-                evidence_count += 1
-                last_end = max(last_end, int(poi_comp["end"]))
-            deferred_poi = None
+        # 循环结束 → flush 残留 chain。
+        _flush_chain(state, raw_text, stream, locale, clues=clues, clue_index=index)
 
-        evidence_count += self._flush_all_pending(pending_value, components)
+        if state.split_at is not None:
+            pass
 
-        if not components:
+        if not state.components:
             return None
         if negative_spans:
-            components = _pop_components_overlapping_negative(components, negative_spans)
-            if not components:
+            state.components = _pop_components_overlapping_negative(state.components, negative_spans)
+            if not state.components:
                 return None
 
-        # digit_tail 三路分支：不扩展 / 直接扩展 / 挑战 StructuredStack。
-        tail = _analyze_digit_tail(components, stream, self.context.clues, index)
+        _fixup_suspected_info(state, raw_text)
+
+        # digit_tail 三路分支。
+        tail = _analyze_digit_tail(state.components, stream, clues, index)
         if tail is None:
             pass
         elif tail.followed_by_address_key:
-            components = [*components, *tail.new_components]
+            for tc in tail.new_components:
+                state.components.append(tc)
         else:
-            conservative_run = self._build_address_run(
-                components, consumed_ids, handled_labels,
-                evidence_count, locale, index,
+            conservative_run = self._build_address_run_from_state(
+                state, consumed_ids, handled_labels, locale, index,
             )
             if conservative_run is None:
                 return None
-            extended_run = self._build_address_run(
-                [*components, *tail.new_components], consumed_ids, handled_labels,
-                evidence_count, locale, index,
+            extended_components = list(state.components) + tail.new_components
+            state_ext = _ParseState()
+            state_ext.components = extended_components
+            state_ext.evidence_count = state.evidence_count
+            extended_run = self._build_address_run_from_state(
+                state_ext, consumed_ids, handled_labels, locale, index,
             )
             if extended_run is None:
                 return conservative_run
             if tail.challenge_clue_index is None:
-                # 没有对应的 NUMERIC/ALNUM clue，无竞争，直接用扩展候选。
                 return extended_run
             conservative_run.pending_challenge = PendingChallenge(
                 clue_index=tail.challenge_clue_index,
@@ -481,31 +823,149 @@ class AddressStack(BaseStack):
             )
             return conservative_run
 
-        return self._build_address_run(
-            components, consumed_ids, handled_labels,
-            evidence_count, locale, index,
+        return self._build_address_run_from_state(
+            state, consumed_ids, handled_labels, locale, index,
         )
 
-    def _build_address_run(
+    # ------------------------------------------------- handle_address_clue
+    def _handle_address_clue(
         self,
-        components: list[dict[str, object]],
+        state: _ParseState,
+        clue: Clue,
+        raw_text: str,
+        stream: StreamInput,
+        locale: str,
+        clues: tuple[Clue, ...],
+        clue_index: int,
+    ) -> object | None:
+        comp_type = clue.component_type
+        if comp_type is None:
+            return None
+
+        # NUMBER 上下文重映射。
+        if comp_type == AddressComponentType.NUMBER:
+            if state.last_component_type in _DETAIL_COMPONENTS:
+                comp_type = AddressComponentType.DETAIL
+
+        # ---- 段内/段间检查 ----
+        # 只有已提交过 component 时才检查段规则。
+        if state.components or state.deferred_chain:
+            if not _segment_admit(state, clue, comp_type, raw_text):
+                _flush_chain(state, raw_text, stream, locale, clues=clues, clue_index=clue_index)
+                state.split_at = clue.start
+                return _SENTINEL_STOP
+
+        # ---- VALUE ----
+        if clue.role == ClueRole.VALUE:
+            if state.deferred_chain:
+                last_chain = state.deferred_chain[-1]
+                gap = _clue_unit_gap(last_chain, clue, stream)
+                if gap > 1:
+                    _flush_chain(state, raw_text, stream, locale, clues=clues, clue_index=clue_index)
+                    if state.split_at is not None:
+                        return _SENTINEL_STOP
+            state.deferred_chain.append(clue)
+            if state.chain_left_anchor is None:
+                state.chain_left_anchor = clue.start
+            state.last_value = clue
+            state.last_end = max(state.last_end, clue.end)
+            return None
+
+        # ---- KEY ----
+        if clue.role == ClueRole.KEY:
+            if state.deferred_chain and _chain_can_accept(state, clue, stream):
+                state.deferred_chain.append(clue)
+                state.last_end = max(state.last_end, clue.end)
+                return None
+
+            # 链非空但不能接受此 KEY → flush 现有 chain。
+            if state.deferred_chain:
+                _flush_chain(state, raw_text, stream, locale, clues=clues, clue_index=clue_index)
+                if state.split_at is not None:
+                    return _SENTINEL_STOP
+
+            # 链空 → 尝试构建独立 KEY component。
+            component = self._build_key_component(raw_text, clue, comp_type, clue_index, locale)
+            if component is not None:
+                _commit(state, component)
+            else:
+                # 空 value → KEY 作为新 chain 的种子。
+                state.deferred_chain.append(clue)
+                if state.chain_left_anchor is None:
+                    state.chain_left_anchor = clue.start
+            state.last_end = max(state.last_end, clue.end)
+            return None
+
+        return None
+
+    # ------------------------------------------------- build helpers
+
+    def _build_key_component(
+        self,
+        raw_text: str,
+        clue: Clue,
+        comp_type: AddressComponentType,
+        clue_index: int,
+        locale: str,
+    ) -> _DraftComponent | None:
+        key_text = clue.text
+        if key_text.lower() in _PREFIX_EN_KEYWORDS:
+            value_start = _skip_separators(raw_text, clue.end)
+            value_end = _scan_forward_value_end(
+                raw_text, value_start, upper_bound=min(len(raw_text), clue.end + 30),
+            )
+            if value_end <= value_start:
+                return None
+            value = _normalize_address_value(comp_type, raw_text[value_start:value_end])
+            if not value:
+                return None
+            return _DraftComponent(
+                component_type=comp_type,
+                start=clue.start,
+                end=value_end,
+                value=value,
+                key=key_text,
+                is_detail=comp_type in _DETAIL_COMPONENTS,
+            )
+
+        floor = _left_address_floor(self.context.clues, clue_index)
+        if locale.startswith("en"):
+            expand_start = _left_expand_en_word(raw_text, clue.start, floor)
+        else:
+            stream = self.context.stream
+            expand_start = _left_expand_zh(raw_text, clue.start, floor, stream, comp_type)
+
+        value = _normalize_address_value(comp_type, raw_text[expand_start:clue.start])
+        if not value:
+            return None
+        return _DraftComponent(
+            component_type=comp_type,
+            start=expand_start,
+            end=clue.end,
+            value=value,
+            key=key_text,
+            is_detail=comp_type in _DETAIL_COMPONENTS,
+        )
+
+    def _build_address_run_from_state(
+        self,
+        state: _ParseState,
         consumed_ids: set[str],
         handled_labels: set[str],
-        evidence_count: int,
         locale: str,
         next_index: int,
     ) -> StackRun | None:
-        """从 components 构建地址候选并包装为 StackRun。"""
+        components = state.components
         if not _meets_commit_threshold(
-            evidence_count,
+            state.evidence_count,
             components,
             locale,
             protection_level=self.context.protection_level,
         ):
             return None
         raw_text = self.context.stream.text
-        final_start = min(int(c["start"]) for c in components)
-        final_end = max(int(c["end"]) for c in components)
+        final_start = min(c.start for c in components)
+        final_end = max(c.end for c in components)
         text = clean_value(raw_text[final_start:final_end])
         if not text:
             return None
@@ -538,187 +998,24 @@ class AddressStack(BaseStack):
             next_index=next_index,
         )
 
-    def _flush_pending_values(
-        self,
-        pending: dict[AddressComponentType, Clue],
-        current_type: AddressComponentType,
-        components: list[dict[str, object]],
-    ) -> int:
-        """将 pending 中与 current_type 不同类型的 VALUE flush 为独立 component。"""
-        flushed = 0
-        to_remove: list[AddressComponentType] = []
-        for comp_type, value_clue in pending.items():
-            if comp_type == current_type:
-                continue
-            component = _build_standalone_address_component(value_clue, comp_type)
-            if component is not None:
-                components.append(component)
-                flushed += 1
-            to_remove.append(comp_type)
-        for comp_type in to_remove:
-            del pending[comp_type]
-        return flushed
 
-    def _flush_all_pending(
-        self,
-        pending: dict[AddressComponentType, Clue],
-        components: list[dict[str, object]],
-    ) -> int:
-        flushed = 0
-        for comp_type, value_clue in pending.items():
-            component = _build_standalone_address_component(value_clue, comp_type)
-            if component is not None:
-                components.append(component)
-                flushed += 1
-        pending.clear()
-        return flushed
+# ---------------------------------------------------------------------------
+# 独立 helper 函数（大部分沿用旧版，适配 _DraftComponent）
+# ---------------------------------------------------------------------------
 
-    def _build_key_component(
-        self,
-        raw_text: str,
-        clue: Clue,
-        comp_type: AddressComponentType,
-        clue_index: int,
-        locale: str,
-    ) -> dict[str, object] | None:
-        key_text = clue.text
-        if key_text.lower() in _PREFIX_EN_KEYWORDS:
-            value_start = _skip_separators(raw_text, clue.end)
-            value_end = _scan_forward_value_end(
-                raw_text,
-                value_start,
-                upper_bound=min(len(raw_text), clue.end + 30),
-            )
-            if value_end <= value_start:
-                return None
-            value = _normalize_address_value(comp_type, raw_text[value_start:value_end])
-            if not value:
-                return None
-            return {
-                "component_type": comp_type,
-                "start": clue.start,
-                "end": value_end,
-                "value": value,
-                "key": key_text,
-                "is_detail": comp_type in _DETAIL_COMPONENTS,
-            }
-
-        floor = _left_address_floor(self.context.clues, clue_index)
-        if locale.startswith("en"):
-            expand_start = _left_expand_en_word(raw_text, clue.start, floor)
-        else:
-            # 中文 key：优先吸收 key 左侧紧邻的 digit_run unit（如 “100号”“3楼”“201室”）。
-            stream = self.context.stream
-            left_ui = _unit_index_left_of(stream, clue.start)
-            if 0 <= left_ui < len(stream.units) and stream.units[left_ui].kind == "digit_run":
-                expand_start = stream.units[left_ui].char_start
-            else:
-                expand_start = _left_expand_zh_chars(raw_text, clue.start, floor, max_chars=2)
-
-        value = _normalize_address_value(comp_type, raw_text[expand_start:clue.start])
-        if not value:
-            return None
-        return {
-            "component_type": comp_type,
-            "start": expand_start,
-            "end": clue.end,
-            "value": value,
-            "key": key_text,
-            "is_detail": comp_type in _DETAIL_COMPONENTS,
-        }
-
-    def _submit_deferred_poi(
-        self,
-        raw_text: str,
-        poi_clue: Clue,
-        poi_index: int,
-        locale: str,
-    ) -> dict[str, object] | None:
-        """将 deferred_poi 作为独立 POI 提交。KEY 走 _build_key_component，VALUE 走 standalone。"""
-        if poi_clue.role == ClueRole.KEY:
-            return self._build_key_component(raw_text, poi_clue,
-                                             AddressComponentType.POI, poi_index, locale)
-        return _build_standalone_address_component(poi_clue, AddressComponentType.POI)
-
-    def _build_deferred_poi_combo(
-        self,
-        raw_text: str,
-        poi_clue: Clue,
-        poi_index: int,
-        next_key: Clue,
-        next_comp_type: AddressComponentType,
-        next_index: int,
-        locale: str,
-    ) -> dict[str, object] | None:
-        """POI 延迟提交的组合构建：用 deferred_poi 的位置取 value，next_key 的类型构建 component。"""
-        if poi_clue.role == ClueRole.VALUE:
-            # VALUE 自身就是完整文字，不需要左扩展。
-            expand_start = poi_clue.start
-        else:
-            # KEY：左扩展找 value。
-            floor = _left_address_floor(self.context.clues, poi_index)
-            if locale.startswith("en"):
-                expand_start = _left_expand_en_word(raw_text, poi_clue.start, floor)
-            else:
-                stream = self.context.stream
-                left_ui = _unit_index_left_of(stream, poi_clue.start)
-                if 0 <= left_ui < len(stream.units) and stream.units[left_ui].kind == "digit_run":
-                    expand_start = stream.units[left_ui].char_start
-                else:
-                    expand_start = _left_expand_zh_chars(raw_text, poi_clue.start, floor, max_chars=2)
-        value_text = raw_text[expand_start:next_key.start]
-        value = _normalize_address_value(next_comp_type, value_text)
-        if not value:
-            return None
-        return {
-            "component_type": next_comp_type,
-            "start": expand_start,
-            "end": next_key.end,
-            "value": value,
-            "key": next_key.text,
-            "is_detail": next_comp_type in _DETAIL_COMPONENTS,
-        }
-
-    def _seed_left_boundary(self) -> int | None:
-        if self.clue.role in {ClueRole.VALUE, ClueRole.KEY}:
-            return self.clue.start
-        return None
-
-
-def _is_adjacent(raw_text: str, left_clue: Clue, right_clue: Clue) -> bool:
-    """判断两个 clue 是否紧邻（中间无有效字符，仅允许空白）。"""
-    if left_clue.end > right_clue.start:
-        return False
-    gap = raw_text[left_clue.end:right_clue.start]
-    return not gap or gap.isspace()
-
-
-def _next_address_index(
-    clues: tuple[Clue, ...],
-    start_index: int,
-    *,
-    locale: str,
-    raw_text: str,
-) -> int | None:
-    last_pos = clues[start_index - 1].end if start_index > 0 else 0
-    for index in range(start_index, len(clues)):
-        clue = clues[index]
-        if is_break_clue(clue) or is_negative_clue(clue):
-            return None
-        if clue.attr_type == PIIAttributeType.ADDRESS and clue.role == ClueRole.LABEL:
+def _label_seed_address_index(clues: tuple[Clue, ...], start_unit: int, *, max_units: int) -> int | None:
+    key_index: int | None = None
+    for idx, clue in enumerate(clues):
+        if clue.attr_type != PIIAttributeType.ADDRESS:
             continue
-        if clue.attr_type == PIIAttributeType.ADDRESS and clue.role != ClueRole.LABEL:
-            return index
-        if is_control_clue(clue):
+        if clue.role == ClueRole.LABEL:
             continue
-        gap_text = raw_text[last_pos:clue.start]
-        if locale.startswith("en"):
-            if len(gap_text.split()) > 5:
-                return None
-        else:
-            if len(gap_text) > 10:
-                return None
-    return None
+        if clue.role == ClueRole.VALUE and clue.unit_start <= start_unit < clue.unit_end:
+            return idx
+        if clue.role == ClueRole.KEY and clue.unit_start >= start_unit and clue.unit_start - start_unit <= max_units:
+            if key_index is None or clue.unit_start < clues[key_index].unit_start:
+                key_index = idx
+    return key_index
 
 
 def _has_nearby_address_clue(
@@ -747,341 +1044,33 @@ def _has_nearby_address_clue(
     return False
 
 
-def _address_gap_too_wide(gap_text: str, locale: str) -> bool:
-    if not gap_text:
-        return False
-    if OCR_BREAK in gap_text or _OCR_INLINE_GAP_TOKEN in gap_text:
-        return True
-    if any(is_hard_break(ch) for ch in gap_text):
-        return True
-    punct_count = sum(1 for ch in gap_text if is_soft_break(ch))
-    if punct_count > 1:
-        return True
-    if locale.startswith("en"):
-        return len(gap_text.split()) > 3
-    return len(gap_text) > 6
-
-
-def _build_value_key_component(
-    raw_text: str,
-    value_clue: Clue,
-    key_clue: Clue,
-    comp_type: AddressComponentType,
-    locale: str,
-) -> tuple[dict[str, object] | None, bool]:
-    if value_clue.end <= key_clue.start:
-        gap = raw_text[value_clue.end:key_clue.start]
-    elif key_clue.end <= value_clue.start:
-        gap = raw_text[key_clue.end:value_clue.start]
-    else:
-        gap = ""
-
-    if gap:
-        if locale.startswith("en"):
-            if not _EN_VALUE_KEY_GAP_RE.fullmatch(gap):
-                return None, False
-        else:
-            return None, False
-
-    start = min(value_clue.start, key_clue.start)
-    end = max(value_clue.end, key_clue.end)
-    value = _normalize_address_value(comp_type, value_clue.text)
-    if not value:
-        return None, True
-    return {
-        "component_type": comp_type,
-        "start": start,
-        "end": end,
-        "value": value,
-        "key": key_clue.text,
-        "is_detail": comp_type in _DETAIL_COMPONENTS,
-    }, True
-
-
-def _label_seed_address_index(clues: tuple[Clue, ...], start_unit: int, *, max_units: int) -> int | None:
-    """label 起栈：start_unit 覆盖的 VALUE 优先，否则 max_units 内必须有 KEY。"""
-    key_index: int | None = None
-    for idx, clue in enumerate(clues):
+def _left_address_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
+    for index in range(clue_index - 1, -1, -1):
+        clue = clues[index]
+        if _is_stop_control_clue(clue):
+            return clue.end
+        if is_control_clue(clue):
+            continue
         if clue.attr_type != PIIAttributeType.ADDRESS:
-            continue
-        if clue.role == ClueRole.LABEL:
-            continue
-        if clue.role == ClueRole.VALUE and clue.unit_start <= start_unit < clue.unit_end:
-            return idx
-        if clue.role == ClueRole.KEY and clue.unit_start >= start_unit and clue.unit_start - start_unit <= max_units:
-            if key_index is None or clue.unit_start < clues[key_index].unit_start:
-                key_index = idx
-    return key_index
-
-
-def _build_cross_tier_value_key_component(
-    raw_text: str,
-    value_clue: Clue,
-    key_clue: Clue,
-    comp_type: AddressComponentType,
-) -> dict[str, object] | None:
-    del raw_text
-    start = min(value_clue.start, key_clue.start)
-    end = max(value_clue.end, key_clue.end)
-    value = _normalize_address_value(comp_type, value_clue.text)
-    if not value:
-        return None
-    return {
-        "component_type": comp_type,
-        "start": start,
-        "end": end,
-        "value": value,
-        "key": key_clue.text,
-        "is_detail": comp_type in _DETAIL_COMPONENTS,
-    }
-
-
-def _overlaps_any_span(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
-    return any(not (end <= s or start >= e) for s, e in spans)
-
-
-def _pop_components_overlapping_negative(
-    components: list[dict[str, object]],
-    negative_spans: list[tuple[int, int]],
-) -> list[dict[str, object]]:
-    """仅按最右组件判断 negative，避免中间命中连坐整个右尾。"""
-    ordered = sorted(components, key=lambda c: (int(c["end"]), int(c["start"])))
-    while ordered:
-        last = ordered[-1]
-        if not _overlaps_any_span(int(last["start"]), int(last["end"]), negative_spans):
-            return ordered
-        ordered.pop()
-    return []
-
-
-# digit_tail 每个层级的长度上限：(含字母时, 纯数字时)。
-_DIGIT_TAIL_MAX_LEN: dict[AddressComponentType, tuple[int, int]] = {
-    AddressComponentType.BUILDING: (5, 4),
-    AddressComponentType.DETAIL: (5, 4),
-}
-
-_DIGIT_TAIL_SEGMENT_RE = re.compile(r"^[A-Za-z0-9]+$")
-
-
-def _max_dashes_for_prev_type(prev_type: AddressComponentType) -> int:
-    """根据前驱 component 类型返回 digit_tail 允许的最大 dash 数。"""
-    if prev_type in {AddressComponentType.ROAD, AddressComponentType.POI, AddressComponentType.NUMBER}:
-        return 3
-    if prev_type == AddressComponentType.BUILDING:
-        return 2
-    if prev_type == AddressComponentType.DETAIL:
-        return 1
+            return clue.end
     return 0
 
 
-def _parse_digit_tail(text: str, max_dashes: int) -> tuple[str, ...] | None:
-    """解析 digit_run unit.text，按 '-' 分段，dash 数不超过 max_dashes。"""
-    cleaned = str(text or "").strip()
-    if not cleaned:
-        return None
-    dash_count = cleaned.count("-")
-    if dash_count > max_dashes:
-        return None
-    if dash_count == 0:
-        if not _DIGIT_TAIL_SEGMENT_RE.fullmatch(cleaned):
-            return None
-        return (cleaned,)
-    segments: list[str] = []
-    for part in cleaned.split("-"):
-        seg = part.strip()
-        if not seg or not _DIGIT_TAIL_SEGMENT_RE.fullmatch(seg):
-            return None
-        segments.append(seg)
-    return tuple(segments) if segments else None
-
-
-def _digit_tail_segment_valid(seg: str, comp_type: AddressComponentType) -> bool:
-    """检查 digit_tail 段长度是否符合对应层级上限（纯数字上限 - 1）。"""
-    limits = _DIGIT_TAIL_MAX_LEN.get(comp_type)
-    if limits is None:
-        return False
-    alnum_max, digit_max = limits
-    max_len = digit_max if seg.isdigit() else alnum_max
-    return len(seg) <= max_len
-
-
-_DETAIL_HIERARCHY = (
-    AddressComponentType.BUILDING,
-    AddressComponentType.DETAIL,
-)
-
-
-def _available_types_after(prev: AddressComponentType) -> list[AddressComponentType]:
-    """由前驱 component 返回 digit_tail 可用的有序类型列表（贪心匹配用）。"""
-    if prev in {AddressComponentType.ROAD, AddressComponentType.POI, AddressComponentType.NUMBER}:
-        return list(_DETAIL_HIERARCHY)
-    if prev == AddressComponentType.BUILDING:
-        return [AddressComponentType.DETAIL]
-    if prev == AddressComponentType.DETAIL:
-        return [AddressComponentType.DETAIL]
-    return list(_DETAIL_HIERARCHY)
-
-
-def _greedy_assign_types(
-    segments: tuple[str, ...],
-    available: list[AddressComponentType],
-) -> list[AddressComponentType] | None:
-    """贪心为每段分配类型：依次尝试可用类型，第一个通过长度验证的即采用。
-
-    返回与 segments 等长的类型列表；若某段无可用类型则返回 None。
-    """
-    result: list[AddressComponentType] = []
-    avail = list(available)
-    for seg in segments:
-        assigned = False
-        while avail:
-            candidate_type = avail[0]
-            if _digit_tail_segment_valid(seg, candidate_type):
-                result.append(candidate_type)
-                avail.pop(0)
-                assigned = True
-                break
-            avail.pop(0)
-        if not assigned:
-            return None
-    return result
-
-
-def _digit_tail_step_down(comp_type: AddressComponentType) -> AddressComponentType:
-    """严格层级下降：BUILDING → DETAIL。"""
-    if comp_type == AddressComponentType.BUILDING:
-        return AddressComponentType.DETAIL
-    return AddressComponentType.DETAIL
-
-
-@dataclass(slots=True)
-class DigitTailResult:
-    """digit_tail 分析结果。"""
-    new_components: list[dict[str, object]]
-    unit_text: str
-    pure_digits: str
-    followed_by_address_key: bool
-    challenge_clue_index: int | None
-
-
-def _find_clue_for_digit_run(
-    clues: tuple[Clue, ...],
-    unit_char_start: int,
-    unit_char_end: int,
-    from_index: int = 0,
-) -> int | None:
-    """在 clues 中查找覆盖指定 digit_run 区间的 NUMERIC/ALNUM clue 索引。"""
-    for i in range(from_index, len(clues)):
-        c = clues[i]
-        if c.start > unit_char_end:
-            break
-        if c.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}:
-            if c.start <= unit_char_start and c.end >= unit_char_end:
-                return i
-    return None
-
-
-def _has_following_address_key(
-    clues: tuple[Clue, ...],
-    digit_char_end: int,
+def _left_expand_zh(
     raw_text: str,
-    from_index: int = 0,
-) -> bool:
-    """digit_run 后紧邻是否存在地址 KEY clue（gap 内无 hard break）。"""
-    gap = raw_text[digit_char_end:digit_char_end + 6] if digit_char_end < len(raw_text) else ""
-    if any(is_hard_break(ch) for ch in gap):
-        return False
-    for i in range(from_index, len(clues)):
-        c = clues[i]
-        if c.start > digit_char_end + 6:
-            break
-        if c.start < digit_char_end:
-            continue
-        if c.attr_type == PIIAttributeType.ADDRESS and c.role == ClueRole.KEY:
-            return True
-    return False
-
-
-def _analyze_digit_tail(
-    components: list[dict[str, object]],
-    stream,
-    clues: tuple[Clue, ...],
-    clue_scan_index: int,
-) -> DigitTailResult | None:
-    """分析地址尾部 digit_run，返回 DigitTailResult 或 None（不扩展）。
-
-    三路分支：
-    1. 段不符合长度限制 -> None。
-    2. 段符合 + 后接 KEY -> followed_by_address_key=True。
-    3. 段符合 + 无 KEY -> followed_by_address_key=False，填 challenge_clue_index。
-    """
-    if not components or not getattr(stream, "units", None):
-        return None
-    last = max(components, key=lambda c: (int(c["end"]), int(c["start"])))
-    end_char = int(last["end"])
-    if end_char >= len(stream.text):
-        return None
-    next_ui = _unit_index_at_or_after(stream, end_char)
-    if next_ui >= len(stream.units):
-        return None
-    next_unit = stream.units[next_ui]
-    if next_unit.kind != "digit_run":
-        return None
-    prev_type = last.get("component_type")
-    if not isinstance(prev_type, AddressComponentType):
-        return None
-
-    max_dashes = _max_dashes_for_prev_type(prev_type)
-    parts = _parse_digit_tail(next_unit.text, max_dashes)
-    if parts is None:
-        return None
-
-    available = _available_types_after(prev_type)
-    assigned_types = _greedy_assign_types(parts, available)
-    if assigned_types is None:
-        return None
-
-    # 防御性缓存 digit_run 原文和纯数字。
-    cached_text = next_unit.text
-    cached_digits = re.sub(r"\D", "", cached_text)
-
-    new_components: list[dict[str, object]] = []
-    cursor = next_unit.char_start
-    for seg, comp_type in zip(parts, assigned_types):
-        seg_start = stream.text.find(seg, cursor, next_unit.char_end)
-        if seg_start < 0:
-            seg_start = cursor
-        seg_end = seg_start + len(seg)
-        new_components.append({
-            "component_type": comp_type,
-            "start": seg_start,
-            "end": seg_end,
-            "value": seg,
-            "key": "",
-            "is_detail": comp_type in _DETAIL_COMPONENTS,
-        })
-        cursor = seg_end
-
-    raw_text = stream.text
-    if _has_following_address_key(clues, next_unit.char_end, raw_text, clue_scan_index):
-        return DigitTailResult(
-            new_components=new_components,
-            unit_text=cached_text,
-            pure_digits=cached_digits,
-            followed_by_address_key=True,
-            challenge_clue_index=None,
-        )
-
-    clue_idx = _find_clue_for_digit_run(
-        clues, next_unit.char_start, next_unit.char_end, clue_scan_index,
-    )
-    return DigitTailResult(
-        new_components=new_components,
-        unit_text=cached_text,
-        pure_digits=cached_digits,
-        followed_by_address_key=False,
-        challenge_clue_index=clue_idx,
-    )
+    pos: int,
+    floor: int,
+    stream: StreamInput,
+    comp_type: AddressComponentType,
+) -> int:
+    """中文左扩展：先检查左邻 unit 是否是 digit_run 或 alpha_run，再回退到 CJK 扩展。"""
+    left_ui = _unit_index_left_of(stream, pos)
+    if 0 <= left_ui < len(stream.units):
+        kind = stream.units[left_ui].kind
+        # digit_run 或 alpha_run 直接吸收。
+        if kind in ("digit_run", "alpha_run", "ascii_word"):
+            return stream.units[left_ui].char_start
+    return _left_expand_zh_chars(raw_text, pos, floor, max_chars=2)
 
 
 def _left_expand_en_word(raw_text: str, pos: int, floor: int) -> int:
@@ -1106,92 +1095,6 @@ def _left_expand_zh_chars(raw_text: str, pos: int, floor: int, *, max_chars: int
     return cursor
 
 
-def _meets_commit_threshold(
-    evidence_count: int,
-    components: list[dict[str, object]],
-    locale: str,
-    protection_level: ProtectionLevel = ProtectionLevel.STRONG,
-) -> bool:
-    del locale
-    if evidence_count <= 0:
-        return False
-    if protection_level == ProtectionLevel.STRONG:
-        return True
-    if protection_level == ProtectionLevel.BALANCED:
-        if evidence_count >= 2:
-            return True
-        return any(component["component_type"] in _SINGLE_EVIDENCE_ADMIN for component in components)
-    return evidence_count >= 2
-
-
-def _build_standalone_address_component(clue: Clue, component_type: AddressComponentType) -> dict[str, object] | None:
-    value = _normalize_address_value(component_type, clue.text)
-    if not value:
-        return None
-    return {
-        "component_type": component_type,
-        "start": clue.start,
-        "end": clue.end,
-        "value": value,
-        "key": "",
-        "is_detail": component_type in _DETAIL_COMPONENTS,
-    }
-
-
-def _build_standalone_address_component_with_key(
-    clue: Clue,
-    component_type: AddressComponentType,
-    *,
-    key: str,
-) -> dict[str, object] | None:
-    component = _build_standalone_address_component(clue, component_type)
-    if component is None:
-        return None
-    component["key"] = str(key or "")
-    return component
-
-
-@lru_cache(maxsize=1)
-def _default_zh_address_keys() -> dict[AddressComponentType, str]:
-    """从 `zh_address_keywords.json` 推导每个 component_type 的默认 key（用于 value-only 的自动补全）。"""
-    keys: dict[AddressComponentType, str] = {}
-    for group in load_zh_address_keyword_groups():
-        if not group.keywords:
-            continue
-        # 选择更通用的短 key（如 “区”“路”“号”），避免 “新区/大道/街道” 这类更具体后缀。
-        keys[group.component_type] = min(group.keywords, key=len)
-    return keys
-
-
-@lru_cache(maxsize=1)
-def _default_en_address_keys() -> dict[AddressComponentType, str]:
-    """从 `en_address_keywords.json` 推导每个 component_type 的默认 key。"""
-    keys: dict[AddressComponentType, str] = {}
-    for group in load_en_address_keyword_groups():
-        if not group.keywords:
-            continue
-        keys[group.component_type] = min(group.keywords, key=len)
-    return keys
-
-
-def _default_key_for_component_type(component_type: AddressComponentType, locale: str) -> str:
-    if locale.startswith("en"):
-        return _default_en_address_keys().get(component_type, "")
-    return _default_zh_address_keys().get(component_type, "")
-
-
-def _left_address_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
-    for index in range(clue_index - 1, -1, -1):
-        clue = clues[index]
-        if _is_stop_control_clue(clue):
-            return clue.end
-        if is_control_clue(clue):
-            continue
-        if clue.attr_type != PIIAttributeType.ADDRESS:
-            return clue.end
-    return 0
-
-
 def _scan_forward_value_end(raw_text: str, start: int, upper_bound: int) -> int:
     index = start
     while index < upper_bound:
@@ -1199,43 +1102,6 @@ def _scan_forward_value_end(raw_text: str, start: int, upper_bound: int) -> int:
             break
         index += 1
     return index
-
-
-def _extend_street_tail(raw_text: str, end: int) -> int:
-    tail = raw_text[end:]
-    match = re.match(r"\s*[甲乙丙丁]?\d{1,6}(?:[之\-]\d{1,4})?(?:号|號)?", tail)
-    if match is None:
-        return end
-    return end + match.end()
-
-
-def _address_metadata(origin_clue: Clue, components: list[dict[str, object]]) -> dict[str, list[str]]:
-    component_types: list[str] = []
-    component_trace: list[str] = []
-    component_key_trace: list[str] = []
-    detail_types: list[str] = []
-    detail_values: list[str] = []
-    for component in components:
-        component_type = component["component_type"].value
-        value = str(component["value"])
-        key = str(component["key"])
-        component_types.append(component_type)
-        component_trace.append(f"{component_type}:{value}")
-        if key:
-            component_key_trace.append(f"{component_type}:{key}")
-        if bool(component["is_detail"]):
-            detail_types.append(component_type)
-            detail_values.append(value)
-    return {
-        "matched_by": [origin_clue.source_kind],
-        "address_kind": ["private_address"],
-        "address_match_origin": [origin_clue.text if origin_clue.role == ClueRole.LABEL else origin_clue.source_kind],
-        "address_component_type": component_types,
-        "address_component_trace": component_trace,
-        "address_component_key_trace": component_key_trace,
-        "address_details_type": detail_types,
-        "address_details_text": detail_values,
-    }
 
 
 def _normalize_address_value(component_type: AddressComponentType, raw_value: str) -> str:
@@ -1247,4 +1113,281 @@ def _normalize_address_value(component_type: AddressComponentType, raw_value: st
         digits = "".join(re.findall(r"\d+", cleaned))
         if digits:
             return digits
+        return ""
     return cleaned
+
+
+def _meets_commit_threshold(
+    evidence_count: int,
+    components: list[_DraftComponent],
+    locale: str,
+    protection_level: ProtectionLevel = ProtectionLevel.STRONG,
+) -> bool:
+    del locale
+    if evidence_count <= 0:
+        return False
+    if protection_level == ProtectionLevel.STRONG:
+        return True
+    if protection_level == ProtectionLevel.BALANCED:
+        if evidence_count >= 2:
+            return True
+        return any(c.component_type in _SINGLE_EVIDENCE_ADMIN for c in components)
+    return evidence_count >= 2
+
+
+def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> dict[str, list[str]]:
+    component_types: list[str] = []
+    component_trace: list[str] = []
+    component_key_trace: list[str] = []
+    detail_types: list[str] = []
+    detail_values: list[str] = []
+    suspected_trace: list[str] = []
+
+    for component in components:
+        ct = component.component_type.value
+        values = component.value if isinstance(component.value, list) else [component.value]
+        keys = component.key if isinstance(component.key, list) else [component.key]
+
+        for v in values:
+            component_types.append(ct)
+            component_trace.append(f"{ct}:{v}")
+        for k in keys:
+            if k:
+                component_key_trace.append(f"{ct}:{k}")
+        if component.is_detail:
+            for v in values:
+                detail_types.append(ct)
+                detail_values.append(v)
+        if component.suspected:
+            for level, text in component.suspected.items():
+                suspected_trace.append(f"{level}:{text}")
+
+    metadata: dict[str, list[str]] = {
+        "matched_by": [origin_clue.source_kind],
+        "address_kind": ["private_address"],
+        "address_match_origin": [origin_clue.text if origin_clue.role == ClueRole.LABEL else origin_clue.source_kind],
+        "address_component_type": component_types,
+        "address_component_trace": component_trace,
+        "address_component_key_trace": component_key_trace,
+        "address_details_type": detail_types,
+        "address_details_text": detail_values,
+    }
+    if suspected_trace:
+        metadata["address_suspected_trace"] = suspected_trace
+    return metadata
+
+
+def _overlaps_any_span(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
+    return any(not (end <= s or start >= e) for s, e in spans)
+
+
+def _pop_components_overlapping_negative(
+    components: list[_DraftComponent],
+    negative_spans: list[tuple[int, int]],
+) -> list[_DraftComponent]:
+    ordered = sorted(components, key=lambda c: (c.end, c.start))
+    while ordered:
+        last = ordered[-1]
+        if not _overlaps_any_span(last.start, last.end, negative_spans):
+            return ordered
+        ordered.pop()
+    return []
+
+
+# ---------------------------------------------------------------------------
+# digit_tail（沿用旧版逻辑，适配 _DraftComponent）
+# ---------------------------------------------------------------------------
+
+_DIGIT_TAIL_MAX_LEN: dict[AddressComponentType, tuple[int, int]] = {
+    AddressComponentType.BUILDING: (5, 4),
+    AddressComponentType.DETAIL: (5, 4),
+}
+_DIGIT_TAIL_SEGMENT_RE = re.compile(r"^[A-Za-z0-9]+$")
+_DETAIL_HIERARCHY = (AddressComponentType.BUILDING, AddressComponentType.DETAIL)
+
+
+@dataclass(slots=True)
+class DigitTailResult:
+    new_components: list[_DraftComponent]
+    unit_text: str
+    pure_digits: str
+    followed_by_address_key: bool
+    challenge_clue_index: int | None
+
+
+def _max_dashes_for_prev_type(prev_type: AddressComponentType) -> int:
+    if prev_type in {AddressComponentType.ROAD, AddressComponentType.POI, AddressComponentType.NUMBER}:
+        return 3
+    if prev_type == AddressComponentType.BUILDING:
+        return 2
+    if prev_type == AddressComponentType.DETAIL:
+        return 1
+    return 0
+
+
+def _parse_digit_tail(text: str, max_dashes: int) -> tuple[str, ...] | None:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return None
+    dash_count = cleaned.count("-")
+    if dash_count > max_dashes:
+        return None
+    if dash_count == 0:
+        if not _DIGIT_TAIL_SEGMENT_RE.fullmatch(cleaned):
+            return None
+        return (cleaned,)
+    segments: list[str] = []
+    for part in cleaned.split("-"):
+        seg = part.strip()
+        if not seg or not _DIGIT_TAIL_SEGMENT_RE.fullmatch(seg):
+            return None
+        segments.append(seg)
+    return tuple(segments) if segments else None
+
+
+def _digit_tail_segment_valid(seg: str, comp_type: AddressComponentType) -> bool:
+    limits = _DIGIT_TAIL_MAX_LEN.get(comp_type)
+    if limits is None:
+        return False
+    alnum_max, digit_max = limits
+    max_len = digit_max if seg.isdigit() else alnum_max
+    return len(seg) <= max_len
+
+
+def _available_types_after(prev: AddressComponentType) -> list[AddressComponentType]:
+    if prev in {AddressComponentType.ROAD, AddressComponentType.POI, AddressComponentType.NUMBER}:
+        return list(_DETAIL_HIERARCHY)
+    if prev == AddressComponentType.BUILDING:
+        return [AddressComponentType.DETAIL]
+    if prev == AddressComponentType.DETAIL:
+        return [AddressComponentType.DETAIL]
+    return list(_DETAIL_HIERARCHY)
+
+
+def _greedy_assign_types(
+    segments: tuple[str, ...],
+    available: list[AddressComponentType],
+) -> list[AddressComponentType] | None:
+    result: list[AddressComponentType] = []
+    avail = list(available)
+    for seg in segments:
+        assigned = False
+        while avail:
+            candidate_type = avail[0]
+            if _digit_tail_segment_valid(seg, candidate_type):
+                result.append(candidate_type)
+                avail.pop(0)
+                assigned = True
+                break
+            avail.pop(0)
+        if not assigned:
+            return None
+    return result
+
+
+def _find_clue_for_digit_run(
+    clues: tuple[Clue, ...],
+    unit_char_start: int,
+    unit_char_end: int,
+    from_index: int = 0,
+) -> int | None:
+    for i in range(from_index, len(clues)):
+        c = clues[i]
+        if c.start > unit_char_end:
+            break
+        if c.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}:
+            if c.start <= unit_char_start and c.end >= unit_char_end:
+                return i
+    return None
+
+
+def _has_following_address_key(
+    clues: tuple[Clue, ...],
+    digit_char_end: int,
+    raw_text: str,
+    from_index: int = 0,
+) -> bool:
+    gap = raw_text[digit_char_end:digit_char_end + 6] if digit_char_end < len(raw_text) else ""
+    if any(is_hard_break(ch) for ch in gap):
+        return False
+    for i in range(from_index, len(clues)):
+        c = clues[i]
+        if c.start > digit_char_end + 6:
+            break
+        if c.start < digit_char_end:
+            continue
+        if c.attr_type == PIIAttributeType.ADDRESS and c.role == ClueRole.KEY:
+            return True
+    return False
+
+
+def _analyze_digit_tail(
+    components: list[_DraftComponent],
+    stream: StreamInput,
+    clues: tuple[Clue, ...],
+    clue_scan_index: int,
+) -> DigitTailResult | None:
+    if not components or not getattr(stream, "units", None):
+        return None
+    last = max(components, key=lambda c: (c.end, c.start))
+    end_char = last.end
+    if end_char >= len(stream.text):
+        return None
+    next_ui = _unit_index_at_or_after(stream, end_char)
+    if next_ui >= len(stream.units):
+        return None
+    next_unit = stream.units[next_ui]
+    if next_unit.kind != "digit_run":
+        return None
+    prev_type = last.component_type
+
+    max_dashes = _max_dashes_for_prev_type(prev_type)
+    parts = _parse_digit_tail(next_unit.text, max_dashes)
+    if parts is None:
+        return None
+
+    available = _available_types_after(prev_type)
+    assigned_types = _greedy_assign_types(parts, available)
+    if assigned_types is None:
+        return None
+
+    cached_text = next_unit.text
+    cached_digits = re.sub(r"\D", "", cached_text)
+
+    new_components: list[_DraftComponent] = []
+    cursor = next_unit.char_start
+    for seg, comp_type in zip(parts, assigned_types):
+        seg_start = stream.text.find(seg, cursor, next_unit.char_end)
+        if seg_start < 0:
+            seg_start = cursor
+        seg_end = seg_start + len(seg)
+        new_components.append(_DraftComponent(
+            component_type=comp_type,
+            start=seg_start,
+            end=seg_end,
+            value=seg,
+            key="",
+            is_detail=comp_type in _DETAIL_COMPONENTS,
+        ))
+        cursor = seg_end
+
+    raw_text = stream.text
+    if _has_following_address_key(clues, next_unit.char_end, raw_text, clue_scan_index):
+        return DigitTailResult(
+            new_components=new_components,
+            unit_text=cached_text,
+            pure_digits=cached_digits,
+            followed_by_address_key=True,
+            challenge_clue_index=None,
+        )
+
+    clue_idx = _find_clue_for_digit_run(
+        clues, next_unit.char_start, next_unit.char_end, clue_scan_index,
+    )
+    return DigitTailResult(
+        new_components=new_components,
+        unit_text=cached_text,
+        pure_digits=cached_digits,
+        followed_by_address_key=False,
+        challenge_clue_index=clue_idx,
+    )

@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from privacyguard.infrastructure.pii.detector.models import AddressComponentType, Clue
 
 
 @dataclass(frozen=True, slots=True)
 class AddressComponent:
-    component_type: str
-    text: str
+    """地址组件。
+
+    - value / key 对 POI 类型可能为 list[str]。
+    - raw_chain 保存主循环中被链式吸收的原始 clue。
+    - suspected 由 fixup 阶段填充的疑似行政层级信息。
+    """
+
+    component_type: AddressComponentType
     start: int
     end: int
-    value_text: str
-    value_start: int
-    value_end: int
-    key_text: str
-    key_start: int
-    key_end: int
+    value: str | list[str]
+    key: str | list[str]
     is_detail: bool = False
+    raw_chain: tuple[Clue, ...] = ()
+    suspected: dict[str, str] = field(default_factory=dict)
