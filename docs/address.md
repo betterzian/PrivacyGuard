@@ -38,7 +38,7 @@ occupancy: dict[AddressComponentType, ComponentRef]
 
 - key 为单占位类型；value 为已写入的 component 引用。
 - 由 main loop 实时维护；fixup pass 中作为只读快照使用。
-- **suspected 信息也占用 occupancy 槽位**。理由：避免同一槽位被多份疑似信息重复填充（例如"上海北京中山路"两个 city 候选），冲突时按"先到先占"，后到者作为新地址边界。
+- **suspected 信息不占用 occupancy 槽位**。suspected 仅记录被链式吸收后降级的行政层级信息，不影响 occupancy 的判定。同一链内出现两个相同 admin 层级（如"上海北京中山路"两个 city）时，先到者写入 suspected，后到者降级为普通文本（留在 value 中）。
 
 ### 2.3 unit 与 1-unit gap
 
@@ -381,6 +381,7 @@ function fixup_suspected_info(state):
 - `leading_admin_value_clues` 只取 component **自身的** raw_chain 上 KEY 之前的 admin VALUE clue。
 - "降级"指 clue 自身的层级槽位已被 occupancy 占用，且占位者不是当前 component。
 - 一旦某个 clue 被降级 → 后续链上 clue 全部降级（不再写 suspected）。
+- **同层级去重**：同一链内出现两个相同 admin 层级时，先到者写入 suspected，后到者降级为普通文本（不写 suspected、不触发 broken）。
 - `recompute_text` 把 surviving suspected 的文字从 component.value 中删除（按 char 区间），让 value 只包含残留 + 真正的核心文字。
 
 #### 用例对照
@@ -473,38 +474,41 @@ function compare_single(left, right, level):
 
 ```text
 function compare_component_with_suspected(A, B):
-    # 1. 文本必须互为子集
+    # 1. 当前层级的 identity 文本必须互为子集
     if not subset_either(A.text, B.text):
         return FAIL
 
-    # 2. 若任一含 suspected → 走 fallback
     a_susp = A.suspected or {}
     b_susp = B.suspected or {}
     if not a_susp and not b_susp:
         return PASS
 
+    # 2. 对 A 每条 suspected（level -> a_val），按顺序尝试：
     for level, a_val in a_susp.items():
-        # a) 同 key 直接相等
-        if level in b_susp and a_val == b_susp[level]:
-            return PASS
-        # b) key 文字出现在对方 text 中
+        if level in b_susp:
+            if a_val == b_susp[level]:
+                return PASS
+            return FAIL   # 双方 suspected 同级 key 均存在但值不一致 → 冲突
         if a_val in B.text:
             return PASS
-        # c) key 与对方实际 component 比较
-        if level in B.components and a_val == B.components[level]:
+        if level in B.components and subset_either(a_val, B.components[level]):
             return PASS
 
-    # 反向再走一次
+    # 3. 对 B 每条 suspected 同理（反向）
     for level, b_val in b_susp.items():
-        if level in A.components and b_val == A.components[level]:
-            return PASS
+        if level in a_susp:
+            if b_val == a_susp[level]:
+                return PASS
+            return FAIL
         if b_val in A.text:
             return PASS
+        if level in A.components and subset_either(b_val, A.components[level]):
+            return PASS
 
-    return PASS  # 文本子集 + suspected 无冲突 → 默认通过
+    return FAIL
 ```
 
-> 决议：suspected 走 OR 链，任一通过即 PASS；若 suspected 全部不通过且 text 已是子集，仍 **PASS**（不主动否决，疑似信息只能加分不能扣分）。
+> 决议：OR 链按序尝试；任一步满足即 PASS；双方 suspected 同级 key 值不一致则 FAIL；全部尝试结束仍未 PASS 则 **FAIL**（不再默认通过）。
 
 ### 6.4 numbers
 
@@ -519,14 +523,17 @@ function compare_poi_list(A, B):
         return CONTINUE
     if not A or not B:
         return CONTINUE
-    for a in A:
-        for b in B:
-            if subset_either(a, b) and min(len(a), len(b)) >= MIN_POI_LEN:
+    for a, a_key in zip(A.values, A.last_keys):   # last_keys 与 value 同序，来自 trace
+        a' = strip_suffix_if_endswith(a, a_key)    # 仅去掉「最后一个 key」，不剥穿透在中间的 key
+        for b, b_key in zip(B.values, B.last_keys):
+            b' = strip_suffix_if_endswith(b, b_key)
+            if subset_either(a', b') and min(len(a'), len(b')) >= MIN_POI_LEN:
                 return PASS
     return FAIL
 ```
 
-`MIN_POI_LEN`：中文 ≥ 2 字符，英文 ≥ 4 字符（防止"中心"这种短词误匹配）。
+- **strip_suffix_if_endswith**：仅当 `a` 以 `a_key` 结尾时去掉该后缀；不得用「广场 / 小区 / Plaza」等通用类别词表批量剥词（否则会把链上已穿透的中间 key 误剥掉）。
+- `MIN_POI_LEN`：中文 ≥ 2 字符，英文 ≥ 4 字符（防止"中心"这种短词误匹配）。（实现侧可暂统一阈值，以代码为准。）
 
 ---
 
@@ -551,6 +558,8 @@ class AddressComponent:
 
 - `_normalize_address`：识别 POI 是 list，分别 normalize 每个元素。
 - `_address_components`：POI 字段输出 list。
+- **suspected**：metadata 使用 `address_component_suspected`（与 detector 组件顺序一一对应，每项为 `level:value` 用 `;` 拼接，无则空串）；归一结果为 `NormalizedPII.component_suspected: tuple[dict[str, str], ...]`，并合并得到 `suspected` 供兼容与 `same_entity`。
+- 旧数据仅有 `address_suspected_trace`（扁平）时仍解析为 `suspected`，`component_suspected` 为空。
 - `_same_address`：按 §6 重写。
 - `_KEYED_NUMBER_TYPES`：保持含 `"number"`。
 - 新增 `_compare_component_with_suspected` helper。
@@ -631,7 +640,7 @@ class AddressComponent:
 ### 9.7 canonical（PR7）
 
 - `北京朝阳中山路1号` vs `朝阳区中山路1号` → suspected city=北京 与对方 district 子集 → PASS
-- `万科广场` vs `万科城广场` → POI 子集 → PASS
+- `万科广场` vs `万科城广场` → 纯子串非包含 → POI 比较 **FAIL**（不得用后缀表凑子集）
 - `中山路1号` vs `中山路2号` → numbers 不匹配 → FAIL（早退）
 
 ### 9.8 通用回归
@@ -645,7 +654,7 @@ class AddressComponent:
 
 > 落地前已与用户对齐的开放点：
 
-1. **suspected 占用 occupancy 槽位**。"上海北京中山路" 第一个上海写 suspected city 后，北京就触发占位冲突 → 切分新地址。
+1. **suspected 不占用 occupancy 槽位**。"上海北京中山路" 两个 city 候选中，先到者"上海"写入 suspected，后到者"北京"降级为普通文本（留在 value 中），不触发地址边界切分。
 2. **suspected 的 chain break 方向**：从左到右，遇到第一个被降级的 clue → 后续全部降级。与"高层级在前"的中文地址书写习惯一致。
 3. **HARD clue 子分词失败的 fallback**：把整段当作 fallback POI，保留 HARD recall。
 4. **POI list 元素之间的顺序**：按出现顺序保留。canonical 比较时双向子集匹配，顺序不影响结果。

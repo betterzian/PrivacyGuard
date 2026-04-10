@@ -109,15 +109,9 @@ class BaseStack:
         )
 
     def _value_locale(self) -> str:
-        """按 seed 即将处理的值判断语言。"""
-        raw_text = self.context.stream.text
-        if self.clue.role in {ClueRole.LABEL, ClueRole.START, ClueRole.KEY}:
-            pos = _skip_separators(raw_text, self.clue.end)
-            if pos < len(raw_text) and "\u4e00" <= raw_text[pos] <= "\u9fff":
-                return "zh"
-            return "en"
-        text = self.clue.text
-        if text and "\u4e00" <= text[0] <= "\u9fff":
+        """按当前 clue 自身文字判断语言。"""
+        text = self.clue.text or self.context.stream.text[self.clue.start:self.clue.end]
+        if any("\u4e00" <= ch <= "\u9fff" for ch in text):
             return "zh"
         return "en"
 

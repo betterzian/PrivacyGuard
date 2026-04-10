@@ -24,8 +24,9 @@ class NormalizedPII(BaseModel):
     # 地址专属：有明确 key 的数字，如 {"building": "10", "floor": "3", "room": "201"}。
     # 用于 keyed 比对路径——双方共有的 key 值必须相等，缺失的 key 忽略。
     keyed_numbers: dict[str, str] = Field(default_factory=dict)
-    # 地址专属：suspected admin 信息，如 {"city": "南京", "district": "浦东"}。
-    # 链式 component 的前置行政 VALUE 被 fixup 降级后填充。
+    # 地址专属：各组件各自的疑似行政信息（与 detector 提交组件顺序一致，每项对应一个组件）。
+    component_suspected: tuple[dict[str, str], ...] = Field(default_factory=tuple)
+    # 由 component_suspected 合并得到，供兼容旧 metadata 与 same_entity 内部使用。
     suspected: dict[str, str] = Field(default_factory=dict)
 
 

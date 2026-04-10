@@ -1539,7 +1539,7 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
         )
         if key in seen:
             continue
-        # 同类型线索覆盖：若 clue 完全包含于已保留线索，且 role/attr/component_type 相同，则子 clue 被覆盖丢弃。
+        # 同 role 线索覆盖：若 clue 完全包含于已保留线索，且 role/attr 相同，则子 clue 被覆盖丢弃。
         # 典型：district KEY “新区” 覆盖 “区”。
         covered = False
         for kept in reversed(ordered):
@@ -1547,7 +1547,6 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
                 if (
                     kept.role == clue.role
                     and kept.attr_type == clue.attr_type
-                    and kept.component_type == clue.component_type
                     and kept.strength == clue.strength
                 ):
                     covered = True

@@ -108,7 +108,7 @@ class StreamParser:
                 continue
 
             # 有重叠 → 按类型优先级 + shrink 裁决。
-            self._resolve_with_priority(
+            winner_next_index = self._resolve_with_priority(
                 context, consumed_ids,
                 current_run, current_stack,
                 challenger_run, challenger_stack,
@@ -116,7 +116,7 @@ class StreamParser:
 
             index = self._next_unconsumed_index(
                 context.clues,
-                max(current_run.next_index, challenger_run.next_index),
+                winner_next_index,
                 consumed_ids,
             ) or len(context.clues)
 
@@ -136,13 +136,16 @@ class StreamParser:
         consumed_ids: set[str],
         run_a: StackRun, stack_a: BaseStack | None,
         run_b: StackRun, stack_b: BaseStack | None,
-    ) -> None:
+    ) -> int:
         """按类型优先级裁决两个重叠的 StackRun。
 
         1. 比较 hard / soft：hard 一方直接胜出，soft 一方 shrink。
         2. 同为 soft：按 ATTR_TYPE_PRIORITY 裁决。
         3. 优先级相同或同类型：fallback 到 score 比分。
         4. 败方尝试 shrink，成功则双方都 commit。
+
+        parser 主循环只使用胜方 stack 返回的 next_index。
+        败方即使 shrink 成功，也不能把主循环游标整体推到自己的 next_index。
         """
         ca, cb = run_a.candidate, run_b.candidate
         hard_a = ca.claim_strength == ClaimStrength.HARD
@@ -150,30 +153,25 @@ class StreamParser:
 
         # hard vs soft：hard 胜，soft 做 shrink。
         if hard_a and not hard_b:
-            self._commit_winner_and_shrink_loser(context, consumed_ids, run_a, None, run_b, stack_b)
-            return
+            return self._commit_winner_and_shrink_loser(context, consumed_ids, run_a, None, run_b, stack_b)
         if hard_b and not hard_a:
-            self._commit_winner_and_shrink_loser(context, consumed_ids, run_b, None, run_a, stack_a)
-            return
+            return self._commit_winner_and_shrink_loser(context, consumed_ids, run_b, None, run_a, stack_a)
 
         # 都是 hard：旧逻辑 fallback。
         if hard_a and hard_b:
-            self._fallback_conflict(context, consumed_ids, run_a, run_b)
-            return
+            return self._fallback_conflict(context, consumed_ids, run_a, run_b)
 
         # 都是 soft：按注册表优先级。
         prio_a = self._soft_priority(ca.attr_type)
         prio_b = self._soft_priority(cb.attr_type)
 
         if prio_a > prio_b:
-            self._commit_winner_and_shrink_loser(context, consumed_ids, run_a, stack_a, run_b, stack_b)
-            return
+            return self._commit_winner_and_shrink_loser(context, consumed_ids, run_a, stack_a, run_b, stack_b)
         if prio_b > prio_a:
-            self._commit_winner_and_shrink_loser(context, consumed_ids, run_b, stack_b, run_a, stack_a)
-            return
+            return self._commit_winner_and_shrink_loser(context, consumed_ids, run_b, stack_b, run_a, stack_a)
 
         # 优先级相同（含同类型）→ score 比分。
-        self._fallback_conflict(context, consumed_ids, run_a, run_b)
+        return self._fallback_conflict(context, consumed_ids, run_a, run_b)
 
     def _commit_winner_and_shrink_loser(
         self,
@@ -183,7 +181,7 @@ class StreamParser:
         winner_stack: BaseStack | None,
         loser_run: StackRun,
         loser_stack: BaseStack | None,
-    ) -> None:
+    ) -> int:
         """commit winner，然后让 loser 尝试 shrink；shrink 成功也 commit。
 
         consumed_ids 仅在实际 commit 时追加——shrink 失败则败方 clue 不被锁死。
@@ -192,7 +190,7 @@ class StreamParser:
 
         if loser_stack is None:
             context.handled_label_clue_ids |= loser_run.handled_label_clue_ids
-            return
+            return winner_run.next_index
 
         wc = winner_run.candidate
         shrunk = loser_stack.shrink(loser_run, wc.unit_start, wc.unit_end)
@@ -201,6 +199,7 @@ class StreamParser:
         else:
             # shrink 失败：只标记 label，不锁死 clue。
             context.handled_label_clue_ids |= loser_run.handled_label_clue_ids
+        return winner_run.next_index
 
     def _fallback_conflict(
         self,
@@ -208,9 +207,10 @@ class StreamParser:
         consumed_ids: set[str],
         run_a: StackRun,
         run_b: StackRun,
-    ) -> None:
+    ) -> int:
         """同优先级 / 同类型冲突 fallback：score 高者胜，败者丢弃。"""
         outcome = self.stack_manager.resolve_conflict(context, run_a.candidate, run_b.candidate)
+        next_index = run_a.next_index
         if not outcome.drop_existing:
             if outcome.replace_existing is not None:
                 self._commit_candidate(context, outcome.replace_existing)
@@ -218,11 +218,14 @@ class StreamParser:
                 self._commit_candidate(context, run_a.candidate)
         if outcome.incoming is not None:
             self._commit_candidate(context, outcome.incoming)
+            if outcome.drop_existing:
+                next_index = run_b.next_index
         # fallback 场景下两方的 clue 都标记消费（胜败都已裁决完毕）。
         consumed_ids |= run_a.consumed_ids
         consumed_ids |= run_b.consumed_ids
         context.handled_label_clue_ids |= run_a.handled_label_clue_ids
         context.handled_label_clue_ids |= run_b.handled_label_clue_ids
+        return next_index
 
     # ------------------------------------------------------------------
     # Stack 运行
