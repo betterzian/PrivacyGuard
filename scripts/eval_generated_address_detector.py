@@ -8,7 +8,6 @@ import re
 import time
 from collections import defaultdict
 from pathlib import Path
-
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_en_address_keyword_groups,
@@ -35,31 +34,45 @@ COMPONENT_KEYS = (
     "detail",
 )
 
+ComponentValue = str | list[str]
+
 ZH_SUFFIX_STRIPPERS = load_zh_address_suffix_strippers()
 EN_SUFFIX_STRIPPERS = load_en_address_suffix_strippers()
 ALNUM_RE = re.compile(r"[A-Za-z0-9]+")
 DIGIT_RE = re.compile(r"\d+")
 EN_SUFFIX_KEYWORDS: dict[str, list[str]] = defaultdict(list)
-EN_PREFIX_DETAIL_KEYWORDS: list[str] = []
-
 for group in load_en_address_keyword_groups():
     key = group.component_type.value
     keywords = [str(keyword or "").strip().lower() for keyword in group.keywords if str(keyword or "").strip()]
     EN_SUFFIX_KEYWORDS[key].extend(sorted(keywords, key=len, reverse=True))
-    if key == "detail":
-        EN_PREFIX_DETAIL_KEYWORDS.extend(sorted(keywords, key=len, reverse=True))
 
 
 def _compact_text(text: str) -> str:
     return re.sub(r"[\s,，。;；:：/\\|()（）【】\[\]#._-]+", "", str(text or "")).strip()
 
 
-def _normalize_component_value(component_key: str, value: str, locale: str) -> str:
+def _extract_number_tokens(value: str) -> list[str]:
+    """把 detail/building/number 文本拆成顺序 token，规则与 numbers 展示保持一致。"""
+    text = str(value or "").strip()
+    if not text:
+        return []
+    raw_tokens = [match.group(0).upper() for match in ALNUM_RE.finditer(text)]
+    if not raw_tokens:
+        return []
+    with_digits = [token for token in raw_tokens if any(ch.isdigit() for ch in token)]
+    if with_digits:
+        return with_digits
+    return [token for token in raw_tokens if len(token) == 1 and token.isalpha()]
+
+
+def _normalize_component_value(component_key: str, value: str, locale: str) -> ComponentValue:
     raw = str(value or "").strip()
     if not raw:
-        return ""
+        return [] if component_key == "detail" else ""
     if component_key == "number":
         return "".join(ch for ch in raw if ch.isdigit())
+    if component_key == "detail":
+        return _extract_number_tokens(raw)
     if locale == "zh_cn" and component_key in {"building", "detail"}:
         alnum = "".join(ALNUM_RE.findall(raw)).upper()
         if any(ch.isalpha() for ch in alnum):
@@ -78,13 +91,6 @@ def _normalize_component_value(component_key: str, value: str, locale: str) -> s
     lowered = compact.lower()
     if component_key == "province":
         return lowered.upper()
-    if component_key == "detail":
-        for prefix in EN_PREFIX_DETAIL_KEYWORDS:
-            if lowered.startswith(prefix) and len(lowered) > len(prefix):
-                tail = compact[len(prefix):]
-                normalized_tail = "".join(ALNUM_RE.findall(tail)).upper()
-                return normalized_tail or compact.upper()
-        return compact.upper()
     if component_key in {"road", "poi", "building"}:
         for suffix in EN_SUFFIX_KEYWORDS.get(component_key, []):
             if lowered.endswith(suffix) and len(lowered) > len(suffix):
@@ -96,12 +102,47 @@ def _normalize_component_value(component_key: str, value: str, locale: str) -> s
     return compact.upper()
 
 
-def _component_match(expected: str, actual: str) -> tuple[bool, bool]:
+def _component_match(expected: ComponentValue, actual: ComponentValue) -> tuple[bool, bool]:
+    if isinstance(expected, list) or isinstance(actual, list):
+        expected_list = [str(item).strip() for item in expected] if isinstance(expected, list) else []
+        actual_list = [str(item).strip() for item in actual] if isinstance(actual, list) else []
+        if not expected_list or not actual_list:
+            return False, False
+        if expected_list == actual_list:
+            return True, True
+        shorter, longer = (
+            (expected_list, actual_list)
+            if len(expected_list) <= len(actual_list)
+            else (actual_list, expected_list)
+        )
+        pointer = 0
+        for token in longer:
+            if pointer < len(shorter) and token == shorter[pointer]:
+                pointer += 1
+                if pointer == len(shorter):
+                    break
+        return False, pointer == len(shorter)
     if not expected or not actual:
         return False, False
     if expected == actual:
         return True, True
     return False, expected in actual or actual in expected
+
+
+def _candidate_detail_tokens(candidate) -> list[str]:
+    normalized = candidate.normalized_source
+    if normalized is None:
+        return []
+    tokens: list[str] = []
+    for component in normalized.ordered_components:
+        if component.component_type != "detail":
+            continue
+        values = component.value if isinstance(component.value, tuple) else (component.value,)
+        for value in values:
+            tokens.extend(_extract_number_tokens(str(value)))
+    if tokens:
+        return tokens
+    return _extract_number_tokens(str(normalized.components.get("detail", "")))
 
 
 def _load_records(locale: str) -> list[dict[str, object]]:
@@ -123,18 +164,64 @@ def _load_records(locale: str) -> list[dict[str, object]]:
     return records
 
 
-def _candidate_components(candidate, locale: str) -> dict[str, str]:
+def _candidate_metric_components(candidate, locale: str) -> dict[str, ComponentValue]:
     normalized = candidate.normalized_source
     if normalized is None:
         return {}
-    return {
+    components = {
         key: _normalize_component_value(key, value, locale)
         for key, value in normalized.components.items()
         if key in COMPONENT_KEYS and str(value or "").strip()
     }
+    if detail_tokens := _candidate_detail_tokens(candidate):
+        components["detail"] = detail_tokens
+    return components
 
 
-def _expected_components(record: dict[str, object], locale: str) -> dict[str, str]:
+def _candidate_numbers(candidate) -> list[str]:
+    normalized = candidate.normalized_source
+    if normalized is None:
+        return []
+    return [str(token).strip().upper() for token in normalized.numbers if str(token).strip()]
+
+
+def _expected_numbers(record: dict[str, object]) -> list[str]:
+    source = record.get("components", {})
+    if not isinstance(source, dict):
+        return []
+    tokens: list[str] = []
+    for key in ("number", "building", "detail"):
+        value = source.get(key)
+        if value is not None:
+            tokens.extend(_extract_number_tokens(str(value)))
+    return tokens
+
+
+def _display_component_key(key: str) -> str:
+    return "details" if key == "detail" else key
+
+
+def _build_display_components(
+    metric_components: dict[str, ComponentValue],
+    numbers: list[str],
+) -> dict[str, ComponentValue]:
+    display: dict[str, ComponentValue] = {}
+    for key in COMPONENT_KEYS:
+        if key not in metric_components:
+            continue
+        value = metric_components[key]
+        if isinstance(value, list):
+            if not value:
+                continue
+        elif not str(value or "").strip():
+            continue
+        display[_display_component_key(key)] = value
+    if numbers:
+        display["numbers"] = numbers
+    return display
+
+
+def _expected_metric_components(record: dict[str, object], locale: str) -> dict[str, ComponentValue]:
     source = record.get("components", {})
     if not isinstance(source, dict):
         return {}
@@ -145,7 +232,10 @@ def _expected_components(record: dict[str, object], locale: str) -> dict[str, st
     }
 
 
-def _score_candidate(expected: dict[str, str], actual: dict[str, str]) -> tuple[int, int]:
+def _score_candidate(
+    expected: dict[str, ComponentValue],
+    actual: dict[str, ComponentValue],
+) -> tuple[int, int]:
     exact_hits = 0
     partial_hits = 0
     for key, exp_value in expected.items():
@@ -182,8 +272,9 @@ def _evaluate_locale(locale: str, detector: RuleBasedPIIDetector) -> tuple[dict[
 
     for record in records:
         text = str(record["text"])
-        expected = _expected_components(record, locale)
-        for key in expected:
+        expected_metrics = _expected_metric_components(record, locale)
+        expected_display = _build_display_components(expected_metrics, _expected_numbers(record))
+        for key in expected_metrics:
             aggregates["component_expected_counts"][key] += 1
 
         started = time.perf_counter()
@@ -206,13 +297,17 @@ def _evaluate_locale(locale: str, detector: RuleBasedPIIDetector) -> tuple[dict[
         else:
             aggregates["multi_address"] += 1
 
-        candidate_components = [_candidate_components(candidate, locale) for candidate in detected_addresses]
+        candidate_metrics = [_candidate_metric_components(candidate, locale) for candidate in detected_addresses]
+        candidate_components = [
+            _build_display_components(metric_components, _candidate_numbers(candidate))
+            for candidate, metric_components in zip(detected_addresses, candidate_metrics, strict=True)
+        ]
         best_index = -1
         best_exact = -1
         best_partial = -1
         best_extra = 10**9
-        for index, actual in enumerate(candidate_components):
-            exact_hits, partial_hits = _score_candidate(expected, actual)
+        for index, actual in enumerate(candidate_metrics):
+            exact_hits, partial_hits = _score_candidate(expected_metrics, actual)
             extra = len(actual)
             if (exact_hits, partial_hits, -extra) > (best_exact, best_partial, -best_extra):
                 best_index = index
@@ -233,14 +328,15 @@ def _evaluate_locale(locale: str, detector: RuleBasedPIIDetector) -> tuple[dict[
         union_partial_keys: set[str] = set()
         best_exact_keys: set[str] = set()
         best_partial_keys: set[str] = set()
-        for key, exp_value in expected.items():
-            is_exact, is_partial = _component_match(exp_value, best_components.get(key, ""))
+        for key, exp_value in expected_metrics.items():
+            actual_value = candidate_metrics[best_index].get(key, "") if 0 <= best_index < len(candidate_metrics) else ""
+            is_exact, is_partial = _component_match(exp_value, actual_value)
             if is_exact:
                 best_exact_keys.add(key)
             elif is_partial:
                 best_partial_keys.add(key)
 
-            for actual in candidate_components:
+            for actual in candidate_metrics:
                 current_exact, current_partial = _component_match(exp_value, actual.get(key, ""))
                 if current_exact:
                     union_exact_keys.add(key)
@@ -258,13 +354,13 @@ def _evaluate_locale(locale: str, detector: RuleBasedPIIDetector) -> tuple[dict[
             if key not in union_exact_keys:
                 aggregates["component_union_partial_hits"][key] += 1
 
-        if expected and len(best_exact_keys) == len(expected) and len(detected_addresses) == 1:
+        if expected_metrics and len(best_exact_keys) == len(expected_metrics) and len(detected_addresses) == 1:
             aggregates["single_full_exact"] += 1
-        if expected and len(union_exact_keys) == len(expected):
+        if expected_metrics and len(union_exact_keys) == len(expected_metrics):
             aggregates["union_full_exact"] += 1
-        if expected and len(best_exact_keys | best_partial_keys) == len(expected) and len(detected_addresses) == 1:
+        if expected_metrics and len(best_exact_keys | best_partial_keys) == len(expected_metrics) and len(detected_addresses) == 1:
             aggregates["single_full_partial"] += 1
-        if expected and len(union_exact_keys | union_partial_keys) == len(expected):
+        if expected_metrics and len(union_exact_keys | union_partial_keys) == len(expected_metrics):
             aggregates["union_full_partial"] += 1
 
         cases.append(
@@ -273,7 +369,7 @@ def _evaluate_locale(locale: str, detector: RuleBasedPIIDetector) -> tuple[dict[
                 "id": record["id"],
                 "format": record["format"],
                 "text": text,
-                "expected_components": expected,
+                "expected_components": expected_display,
                 "address_pii_count": len(detected_addresses),
                 "elapsed_ms": round(elapsed_ms, 3),
                 "best_text": best_text,
@@ -284,8 +380,12 @@ def _evaluate_locale(locale: str, detector: RuleBasedPIIDetector) -> tuple[dict[
                 "union_partial_keys": sorted(union_partial_keys),
                 "all_texts": [candidate.text for candidate in detected_addresses],
                 "all_components": candidate_components,
-                "missing_exact": sorted(key for key in expected if key not in union_exact_keys),
-                "missing_partial": sorted(key for key in expected if key not in union_exact_keys | union_partial_keys),
+                "missing_exact": sorted(_display_component_key(key) for key in expected_metrics if key not in union_exact_keys),
+                "missing_partial": sorted(
+                    _display_component_key(key)
+                    for key in expected_metrics
+                    if key not in union_exact_keys | union_partial_keys
+                ),
                 "error": error_text,
             }
         )
@@ -313,7 +413,8 @@ def _write_summary(path: Path, summaries: list[dict[str, object]], cases: list[d
     lines.append("- 输入来自 `data/generate_data.py` 生成的 `chinese_addresses.txt` / `english_addresses.txt`。")
     lines.append("- 中文地址不含空格；英文地址保留正常单词间单个空格。")
     lines.append("- 中文逆序模板一律带 `,` 或 `，`。")
-    lines.append("- 组件正确性按当前 detector 的 `normalized_source.components` 对比生成器真值。")
+    lines.append("- 组件正确性按当前 detector 的 `normalized_source.components`、`ordered_components` 与 `numbers` 对比生成器真值。")
+    lines.append("- `details` 按顺序数组展示，并要求与同顺序 token 数组比较；`numbers` 仅用于辅助观察，不单独计入组件命中。")
     lines.append("- 同一输入若返回多个 `address` 候选，既统计“最佳单候选”，也统计“多候选并集”。")
     lines.append("")
 
@@ -346,7 +447,7 @@ def _write_summary(path: Path, summaries: list[dict[str, object]], cases: list[d
             union_exact = int(summary["component_union_exact_hits"].get(key, 0))
             union_partial = int(summary["component_union_partial_hits"].get(key, 0))
             lines.append(
-                f"| `{key}` | {total} | {best_exact} ({_rate(best_exact, total)}) | "
+                f"| `{_display_component_key(key)}` | {total} | {best_exact} ({_rate(best_exact, total)}) | "
                 f"{best_exact + best_partial} ({_rate(best_exact + best_partial, total)}) | "
                 f"{union_exact} ({_rate(union_exact, total)}) | "
                 f"{union_exact + union_partial} ({_rate(union_exact + union_partial, total)}) |"

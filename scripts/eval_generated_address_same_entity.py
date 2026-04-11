@@ -50,18 +50,16 @@ COMPONENT_KEYS = (
     "building",
     "detail",
 )
+ComponentValue = str | list[str]
 
 ZH_SUFFIX_STRIPPERS = load_zh_address_suffix_strippers()
 EN_SUFFIX_STRIPPERS = load_en_address_suffix_strippers()
 EN_SUFFIX_KEYWORDS: dict[str, list[str]] = defaultdict(list)
-EN_PREFIX_DETAIL_KEYWORDS: list[str] = []
 
 for group in load_en_address_keyword_groups():
     key = group.component_type.value
     keywords = [str(keyword or "").strip().lower() for keyword in group.keywords if str(keyword or "").strip()]
     EN_SUFFIX_KEYWORDS[key].extend(sorted(keywords, key=len, reverse=True))
-    if key == "detail":
-        EN_PREFIX_DETAIL_KEYWORDS.extend(sorted(keywords, key=len, reverse=True))
 
 EN_ROAD_ABBREVIATIONS = {
     "street": "St",
@@ -133,12 +131,28 @@ def _compact_text(text: str) -> str:
     return re.sub(r"[\s,，。;；:：/\\|()（）【】\[\]#._-]+", "", str(text or "")).strip()
 
 
-def _normalize_component_value(component_key: str, value: str, locale: str) -> str:
+def _extract_number_tokens(value: str) -> list[str]:
+    """把 detail/building/number 文本拆成顺序 token，规则与 numbers 展示保持一致。"""
+    text = str(value or "").strip()
+    if not text:
+        return []
+    raw_tokens = [match.group(0).upper() for match in ALNUM_RE.finditer(text)]
+    if not raw_tokens:
+        return []
+    with_digits = [token for token in raw_tokens if any(ch.isdigit() for ch in token)]
+    if with_digits:
+        return with_digits
+    return [token for token in raw_tokens if len(token) == 1 and token.isalpha()]
+
+
+def _normalize_component_value(component_key: str, value: str, locale: str) -> ComponentValue:
     raw = str(value or "").strip()
     if not raw:
-        return ""
+        return [] if component_key == "detail" else ""
     if component_key == "number":
         return "".join(ch for ch in raw if ch.isdigit())
+    if component_key == "detail":
+        return _extract_number_tokens(raw)
     if locale == "zh_cn" and component_key in {"building", "detail"}:
         alnum = "".join(ALNUM_RE.findall(raw)).upper()
         if any(ch.isalpha() for ch in alnum):
@@ -157,13 +171,6 @@ def _normalize_component_value(component_key: str, value: str, locale: str) -> s
     lowered = compact.lower()
     if component_key == "province":
         return lowered.upper()
-    if component_key == "detail":
-        for prefix in EN_PREFIX_DETAIL_KEYWORDS:
-            if lowered.startswith(prefix) and len(lowered) > len(prefix):
-                tail = compact[len(prefix):]
-                normalized_tail = "".join(ALNUM_RE.findall(tail)).upper()
-                return normalized_tail or compact.upper()
-        return compact.upper()
     if component_key in {"road", "poi", "building"}:
         for suffix in EN_SUFFIX_KEYWORDS.get(component_key, []):
             if lowered.endswith(suffix) and len(lowered) > len(suffix):
@@ -175,7 +182,26 @@ def _normalize_component_value(component_key: str, value: str, locale: str) -> s
     return compact.upper()
 
 
-def _component_match(expected: str, actual: str) -> tuple[bool, bool]:
+def _component_match(expected: ComponentValue, actual: ComponentValue) -> tuple[bool, bool]:
+    if isinstance(expected, list) or isinstance(actual, list):
+        expected_list = [str(item).strip() for item in expected] if isinstance(expected, list) else []
+        actual_list = [str(item).strip() for item in actual] if isinstance(actual, list) else []
+        if not expected_list or not actual_list:
+            return False, False
+        if expected_list == actual_list:
+            return True, True
+        shorter, longer = (
+            (expected_list, actual_list)
+            if len(expected_list) <= len(actual_list)
+            else (actual_list, expected_list)
+        )
+        pointer = 0
+        for token in longer:
+            if pointer < len(shorter) and token == shorter[pointer]:
+                pointer += 1
+                if pointer == len(shorter):
+                    break
+        return False, pointer == len(shorter)
     if not expected or not actual:
         return False, False
     if expected == actual:
@@ -183,18 +209,77 @@ def _component_match(expected: str, actual: str) -> tuple[bool, bool]:
     return False, expected in actual or actual in expected
 
 
-def _candidate_components(candidate, locale: str) -> dict[str, str]:
+def _candidate_detail_tokens(candidate) -> list[str]:
+    normalized = candidate.normalized_source
+    if normalized is None:
+        return []
+    tokens: list[str] = []
+    for component in normalized.ordered_components:
+        if component.component_type != "detail":
+            continue
+        values = component.value if isinstance(component.value, tuple) else (component.value,)
+        for value in values:
+            tokens.extend(_extract_number_tokens(str(value)))
+    if tokens:
+        return tokens
+    return _extract_number_tokens(str(normalized.components.get("detail", "")))
+
+
+def _candidate_metric_components(candidate, locale: str) -> dict[str, ComponentValue]:
     normalized = candidate.normalized_source
     if normalized is None:
         return {}
-    return {
+    components = {
         key: _normalize_component_value(key, value, locale)
         for key, value in normalized.components.items()
         if key in COMPONENT_KEYS and str(value or "").strip()
     }
+    if detail_tokens := _candidate_detail_tokens(candidate):
+        components["detail"] = detail_tokens
+    return components
 
 
-def _normalize_expected_components(components: dict[str, Any], locale: str) -> dict[str, str]:
+def _candidate_numbers(candidate) -> list[str]:
+    normalized = candidate.normalized_source
+    if normalized is None:
+        return []
+    return [str(token).strip().upper() for token in normalized.numbers if str(token).strip()]
+
+
+def _expected_numbers(components: dict[str, Any]) -> list[str]:
+    tokens: list[str] = []
+    for key in ("number", "building", "detail"):
+        value = components.get(key)
+        if value is not None:
+            tokens.extend(_extract_number_tokens(str(value)))
+    return tokens
+
+
+def _display_component_key(key: str) -> str:
+    return "details" if key == "detail" else key
+
+
+def _build_display_components(
+    metric_components: dict[str, ComponentValue],
+    numbers: list[str],
+) -> dict[str, ComponentValue]:
+    display: dict[str, ComponentValue] = {}
+    for key in COMPONENT_KEYS:
+        if key not in metric_components:
+            continue
+        value = metric_components[key]
+        if isinstance(value, list):
+            if not value:
+                continue
+        elif not str(value or "").strip():
+            continue
+        display[_display_component_key(key)] = value
+    if numbers:
+        display["numbers"] = numbers
+    return display
+
+
+def _normalize_expected_components(components: dict[str, Any], locale: str) -> dict[str, ComponentValue]:
     return {
         key: _normalize_component_value(key, str(value), locale)
         for key, value in components.items()
@@ -202,7 +287,10 @@ def _normalize_expected_components(components: dict[str, Any], locale: str) -> d
     }
 
 
-def _score_candidate(expected: dict[str, str], actual: dict[str, str]) -> tuple[int, int]:
+def _score_candidate(
+    expected: dict[str, ComponentValue],
+    actual: dict[str, ComponentValue],
+) -> tuple[int, int]:
     exact_hits = 0
     partial_hits = 0
     for key, exp_value in expected.items():
@@ -443,16 +531,20 @@ def _compose_context(locale: str, address_text: str) -> str:
 
 def _analyze_detector_candidates(
     candidates: list[Any],
-    expected_components: dict[str, str],
+    expected_components: dict[str, ComponentValue],
     locale: str,
 ) -> dict[str, Any]:
-    candidate_components = [_candidate_components(candidate, locale) for candidate in candidates]
+    candidate_metrics = [_candidate_metric_components(candidate, locale) for candidate in candidates]
+    candidate_components = [
+        _build_display_components(metric_components, _candidate_numbers(candidate))
+        for candidate, metric_components in zip(candidates, candidate_metrics, strict=True)
+    ]
     best_index = -1
     best_exact = -1
     best_partial = -1
     best_extra = 10**9
 
-    for index, actual in enumerate(candidate_components):
+    for index, actual in enumerate(candidate_metrics):
         exact_hits, partial_hits = _score_candidate(expected_components, actual)
         extra = len(actual)
         if (exact_hits, partial_hits, -extra) > (best_exact, best_partial, -best_extra):
@@ -476,13 +568,14 @@ def _analyze_detector_candidates(
     best_partial_keys: set[str] = set()
 
     for key, exp_value in expected_components.items():
-        is_exact, is_partial = _component_match(exp_value, best_components.get(key, ""))
+        actual_value = candidate_metrics[best_index].get(key, "") if 0 <= best_index < len(candidate_metrics) else ""
+        is_exact, is_partial = _component_match(exp_value, actual_value)
         if is_exact:
             best_exact_keys.add(key)
         elif is_partial:
             best_partial_keys.add(key)
 
-        for actual in candidate_components:
+        for actual in candidate_metrics:
             current_exact, current_partial = _component_match(exp_value, actual.get(key, ""))
             if current_exact:
                 union_exact_keys.add(key)
@@ -584,7 +677,7 @@ def _init_detector_summary(locale: str) -> dict[str, Any]:
 def _update_component_stats(
     summary: dict[str, Any],
     kind: str,
-    expected_components: dict[str, str],
+    expected_components: dict[str, ComponentValue],
     analysis: dict[str, Any],
 ) -> None:
     stats = summary[f"{kind}_component"]
@@ -648,8 +741,8 @@ def _evaluate_detector_case(
     locale: str,
     full_context: str,
     variant_context: str,
-    full_expected: dict[str, str],
-    variant_expected: dict[str, str],
+    full_expected: dict[str, ComponentValue],
+    variant_expected: dict[str, ComponentValue],
 ) -> dict[str, Any]:
     full_candidates = [candidate for candidate in detector.detect(full_context, []) if candidate.attr_type == PIIAttributeType.ADDRESS]
     variant_candidates = [candidate for candidate in detector.detect(variant_context, []) if candidate.attr_type == PIIAttributeType.ADDRESS]
@@ -752,6 +845,7 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
     lines.append("- 变体地址由同一条地址的组件重组得到；本实验只输入地址，不拼接其他类型 PII。")
     lines.append("- `detector` 的“同址”使用 `privacyguard.utils.normalized_pii.same_entity()` 判断。")
     lines.append("- `AndLab_protected` 的“同址”使用先注册完整地址、再检测变体时是否复用同一 token 判断。")
+    lines.append("- `details` 按顺序数组展示，并要求与同顺序 token 数组比较；`numbers` 仅用于辅助观察，不单独计入组件命中。")
     lines.append("")
 
     for locale in ("zh_cn", "en_us"):
@@ -802,7 +896,7 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
             variant_best = detector_summary["variant_component"]["best_exact"].get(key, 0)
             variant_union = detector_summary["variant_component"]["union_exact"].get(key, 0)
             lines.append(
-                f"| `{key}` | {full_total} | {full_best} ({_rate(full_best, full_total)}) | "
+                f"| `{_display_component_key(key)}` | {full_total} | {full_best} ({_rate(full_best, full_total)}) | "
                 f"{full_union} ({_rate(full_union, full_total)}) | {variant_total} | "
                 f"{variant_best} ({_rate(variant_best, variant_total)}) | "
                 f"{variant_union} ({_rate(variant_union, variant_total)}) |"
@@ -883,11 +977,15 @@ def _write_cases_csv(path: Path, cases: list[dict[str, Any]]) -> None:
                 "variant_address",
                 "full_context",
                 "variant_context",
+                "full_expected",
+                "variant_expected",
                 "detector_same_entity",
                 "detector_full_count",
                 "detector_variant_count",
                 "detector_full_best_text",
                 "detector_variant_best_text",
+                "detector_full_best_components",
+                "detector_variant_best_components",
                 "detector_full_all_texts",
                 "detector_variant_all_texts",
                 "andlab_full_count",
@@ -911,11 +1009,15 @@ def _write_cases_csv(path: Path, cases: list[dict[str, Any]]) -> None:
                     "variant_address": case["variant_address"],
                     "full_context": case["full_context"],
                     "variant_context": case["variant_context"],
+                    "full_expected": json.dumps(case["full_expected"], ensure_ascii=False),
+                    "variant_expected": json.dumps(case["variant_expected"], ensure_ascii=False),
                     "detector_same_entity": case["detector"]["same_entity"],
                     "detector_full_count": case["detector"]["full"]["count"],
                     "detector_variant_count": case["detector"]["variant"]["count"],
                     "detector_full_best_text": case["detector"]["full"]["best_text"],
                     "detector_variant_best_text": case["detector"]["variant"]["best_text"],
+                    "detector_full_best_components": json.dumps(case["detector"]["full"]["best_components"], ensure_ascii=False),
+                    "detector_variant_best_components": json.dumps(case["detector"]["variant"]["best_components"], ensure_ascii=False),
                     "detector_full_all_texts": json.dumps(case["detector"]["full"]["all_texts"], ensure_ascii=False),
                     "detector_variant_all_texts": json.dumps(case["detector"]["variant"]["all_texts"], ensure_ascii=False),
                     "andlab_full_count": case["andlab"]["full_context"]["count"],
@@ -977,8 +1079,13 @@ def main() -> None:
             variant_address = str(variant["text"])
             full_context = _compose_context(locale, full_address)
             variant_context = _compose_context(locale, variant_address)
-            full_expected = _normalize_expected_components(dict(record["components"]), locale)
-            variant_expected = _normalize_expected_components(dict(variant["components"]), locale)
+            full_expected_metrics = _normalize_expected_components(dict(record["components"]), locale)
+            variant_expected_metrics = _normalize_expected_components(dict(variant["components"]), locale)
+            full_expected = _build_display_components(full_expected_metrics, _expected_numbers(dict(record["components"])))
+            variant_expected = _build_display_components(
+                variant_expected_metrics,
+                _expected_numbers(dict(variant["components"])),
+            )
 
             started = time.perf_counter()
             detector_result = _evaluate_detector_case(
@@ -986,8 +1093,8 @@ def main() -> None:
                 locale,
                 full_context,
                 variant_context,
-                full_expected,
-                variant_expected,
+                full_expected_metrics,
+                variant_expected_metrics,
             )
             detector_elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
 
@@ -1011,8 +1118,8 @@ def main() -> None:
             detector_summary["full_complete_union_exact"] += int(detector_result["full"]["complete_union_exact"])
             detector_summary["variant_complete_best_exact"] += int(detector_result["variant"]["complete_best_exact"])
             detector_summary["variant_complete_union_exact"] += int(detector_result["variant"]["complete_union_exact"])
-            _update_component_stats(detector_summary, "full", full_expected, detector_result["full"])
-            _update_component_stats(detector_summary, "variant", variant_expected, detector_result["variant"])
+            _update_component_stats(detector_summary, "full", full_expected_metrics, detector_result["full"])
+            _update_component_stats(detector_summary, "variant", variant_expected_metrics, detector_result["variant"])
 
             andlab_summary["cases"] += 1
             andlab_summary["full_bucket"][_bucket_key(andlab_result["full_context"]["count"])] += 1

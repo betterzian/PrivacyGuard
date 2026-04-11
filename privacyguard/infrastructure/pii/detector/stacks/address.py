@@ -693,16 +693,15 @@ def _routing_left_value_start_for_state(
     if state.deferred_chain:
         return state.deferred_chain[-1][1].end
     if state.components:
-        floor = state.last_end
-    else:
-        floor = _left_address_floor(clues, clue_index)
-        prev_key_end = _left_prev_address_key_end(
-            clues,
-            clue_index,
-            ignored_key_indices=state.ignored_address_key_indices,
-        )
-        if prev_key_end is not None:
-            floor = max(floor, prev_key_end)
+        return _skip_separators(raw_text, state.last_end)
+    floor = _left_address_floor(clues, clue_index)
+    prev_key_end = _left_prev_address_key_end(
+        clues,
+        clue_index,
+        ignored_key_indices=state.ignored_address_key_indices,
+    )
+    if prev_key_end is not None:
+        floor = max(floor, prev_key_end)
     target_type = comp_type or clue.component_type or AddressComponentType.DETAIL
     if locale.startswith("en"):
         return _left_expand_en_word(raw_text, clue.start, floor)
@@ -719,10 +718,13 @@ def _routing_left_value_start_for_preview(
     locale: str,
     comp_type: AddressComponentType | None = None,
     ignored_key_indices: set[int] | None = None,
+    previous_component_end: int | None = None,
 ) -> int:
     """按逗号尾预演状态推导动态路由要看的左侧 value 片段起点。"""
     if chain:
         return chain[-1].end
+    if previous_component_end is not None:
+        return _skip_separators(raw_text, previous_component_end)
     floor = _left_address_floor(clues, clue_index)
     prev_key_end = _left_prev_address_key_end(
         clues,
@@ -776,6 +778,7 @@ def _preview_key_has_left_value(
     locale: str,
     comp_type: AddressComponentType,
     ignored_key_indices: set[int] | None = None,
+    previous_component_end: int | None = None,
 ) -> bool:
     """预演时判断 KEY 是否真的有左值；无则按普通文字忽略。"""
     if clue.text.lower() in _PREFIX_EN_KEYWORDS:
@@ -790,6 +793,7 @@ def _preview_key_has_left_value(
         locale,
         comp_type,
         ignored_key_indices,
+        previous_component_end,
     )
     return bool(_normalize_address_value(comp_type, raw_text[expand_start:clue.start]))
 
@@ -855,13 +859,23 @@ def _routed_key_clue_for_preview(
     locale: str,
     previous_component_type: AddressComponentType | None,
     ignored_key_indices: set[int] | None = None,
+    previous_component_end: int | None = None,
 ) -> Clue:
     """把逗号尾预演中的 KEY clue 按预演上下文重映射。"""
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
     context_type = _preview_routing_context_type(chain, previous_component_type)
     left_start = _routing_left_value_start_for_preview(
-        chain, clues, clue_index, clue, raw_text, stream, locale, clue.component_type, ignored_key_indices,
+        chain,
+        clues,
+        clue_index,
+        clue,
+        raw_text,
+        stream,
+        locale,
+        clue.component_type,
+        ignored_key_indices,
+        previous_component_end,
     )
     left_value_text = clean_value(raw_text[left_start:clue.start])
     routed_type = _route_dynamic_key_type(
@@ -1115,6 +1129,7 @@ def _has_reasonable_successor_key(
     preview_chain: list[Clue] = []
     previous_component_type = _state_routing_context_type(state)
     ignored_key_indices = set(state.ignored_address_key_indices)
+    previous_component_end = state.last_end if state.components else None
     for i in range(index + 1, len(clues)):
         nxt = clues[i]
         if is_break_clue(nxt):
@@ -1141,6 +1156,7 @@ def _has_reasonable_successor_key(
                 locale,
                 previous_component_type,
                 ignored_key_indices,
+                previous_component_end,
             )
             eff_type = effective.component_type
             if (
@@ -1156,6 +1172,7 @@ def _has_reasonable_successor_key(
                     locale,
                     eff_type,
                     ignored_key_indices,
+                    previous_component_end,
                 )
             ):
                 ignored_key_indices.add(i)
@@ -1967,30 +1984,6 @@ def _non_space_units_to_unit_start(
     return count
 
 
-def _first_address_clue_index_from_char_within_units(
-    clues: tuple[Clue, ...],
-    stream: StreamInput,
-    char_pos: int,
-    *,
-    max_units: int,
-) -> int | None:
-    """逗号后在 max_units 个非空白 unit 内查找第一个 ADDRESS 非 LABEL。"""
-    for j, c in enumerate(clues):
-        if c.start < char_pos:
-            continue
-        if _non_space_units_to_unit_start(stream, char_pos, c.unit_start) > max_units:
-            return None
-        if is_break_clue(c):
-            return None
-        if is_negative_clue(c):
-            continue
-        if c.attr_type is None:
-            continue
-        if c.attr_type == PIIAttributeType.ADDRESS and c.role != ClueRole.LABEL:
-            return j
-    return None
-
-
 def _comma_char_index_in_gap(raw_text: str, last_end: int, clue_start: int) -> int | None:
     """gap [last_end, clue_start) 内第一个逗号下标；无则 None。"""
     gap = raw_text[last_end:clue_start]
@@ -2073,6 +2066,7 @@ def _preview_comma_tail_first_component_type(
     start_index: int,
     stream: StreamInput,
     previous_component_type: AddressComponentType | None,
+    previous_component_end: int | None,
     raw_text: str,
     locale: str,
 ) -> tuple[AddressComponentType | None, bool]:
@@ -2103,6 +2097,7 @@ def _preview_comma_tail_first_component_type(
                 locale,
                 previous_component_type,
                 ignored_key_indices,
+                previous_component_end,
             )
             eff_type = effective.component_type
             if (
@@ -2118,6 +2113,7 @@ def _preview_comma_tail_first_component_type(
                     locale,
                     eff_type,
                     ignored_key_indices,
+                    previous_component_end,
                 )
             ):
                 ignored_key_indices.add(index)
@@ -2161,16 +2157,7 @@ def _comma_tail_prehandle(
         return None
 
     after_comma = comma_pos + 1
-    first_idx = _first_address_clue_index_from_char_within_units(
-        clues,
-        stream,
-        after_comma,
-        max_units=6,
-    )
-    if first_idx is None:
-        state.split_at = comma_pos
-        return _SENTINEL_STOP
-    if first_idx != clue_index:
+    if _non_space_units_to_unit_start(stream, after_comma, clue.unit_start) > 6:
         state.split_at = comma_pos
         return _SENTINEL_STOP
 
@@ -2179,6 +2166,7 @@ def _comma_tail_prehandle(
         clue_index,
         stream,
         state.last_component_type,
+        state.last_end if state.components else None,
         raw_text,
         locale,
     )
