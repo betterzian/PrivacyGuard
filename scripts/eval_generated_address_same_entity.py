@@ -1,4 +1,4 @@
-"""评测生成地址在 detector 与 AndLab_protected 中的同址变体识别表现。"""
+"""评测生成地址在 detector 与 AndLab_protected 中的地址-only 同址变体识别表现。"""
 
 from __future__ import annotations
 
@@ -63,34 +63,6 @@ for group in load_en_address_keyword_groups():
     if key == "detail":
         EN_PREFIX_DETAIL_KEYWORDS.extend(sorted(keywords, key=len, reverse=True))
 
-ZH_IDENTITIES = (
-    ("林舟", "linzhou"),
-    ("苏瑶", "suyao"),
-    ("程野", "chengye"),
-    ("许宁", "xuning"),
-    ("沈澄", "shencheng"),
-    ("顾安", "guan"),
-)
-ZH_ORGS = (
-    "星河数据科技有限公司",
-    "云栖智联研发中心",
-    "远帆生活服务集团",
-    "澜桥供应链管理有限公司",
-)
-EN_IDENTITIES = (
-    ("Emma Lee", "emmalee"),
-    ("Noah Carter", "noahcarter"),
-    ("Ava Brooks", "avabrooks"),
-    ("Lucas Reed", "lucasreed"),
-    ("Mia Turner", "miaturner"),
-    ("Ethan Walker", "ethanwalker"),
-)
-EN_ORGS = (
-    "North Harbor Labs",
-    "Maple Transit Group",
-    "Blue Ridge Systems",
-    "Sunline Retail Ops",
-)
 EN_ROAD_ABBREVIATIONS = {
     "street": "St",
     "avenue": "Ave",
@@ -462,34 +434,11 @@ def _build_variant_case(record: dict[str, Any], rng: random.Random) -> dict[str,
     return {"style": "identity_fallback", "text": original_text, "components": dict(record["components"])}
 
 
-def _random_phone(locale: str, rng: random.Random) -> str:
+def _compose_context(locale: str, address_text: str) -> str:
+    """地址-only 实验不再拼接其他 PII。"""
     if locale == "zh_cn":
-        return f"1{rng.randint(30, 99)}{rng.randint(1000, 9999)}{rng.randint(1000, 9999)}"
-    return f"{rng.choice((206, 312, 512, 617, 425))}-555-{rng.randint(1000, 9999)}"
-
-
-def _build_extra_pii(locale: str, rng: random.Random) -> dict[str, str]:
-    if locale == "zh_cn":
-        name, stem = rng.choice(ZH_IDENTITIES)
-        return {
-            "name": name,
-            "phone": _random_phone(locale, rng),
-            "email": f"{stem}{rng.randint(10, 99)}@mail.cn",
-            "organization": rng.choice(ZH_ORGS),
-        }
-    name, stem = rng.choice(EN_IDENTITIES)
-    return {
-        "name": name,
-        "phone": _random_phone(locale, rng),
-        "email": f"{stem}{rng.randint(10, 99)}@example.com",
-        "organization": rng.choice(EN_ORGS),
-    }
-
-
-def _compose_context(locale: str, extras: dict[str, str], address_text: str) -> str:
-    if locale == "zh_cn":
-        return "，".join([extras["name"], extras["phone"], extras["email"], extras["organization"], address_text])
-    return _normalize_en_text(", ".join([extras["name"], extras["phone"], extras["email"], extras["organization"], address_text]))
+        return str(address_text).strip()
+    return _normalize_en_text(address_text)
 
 
 def _analyze_detector_candidates(
@@ -800,7 +749,7 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
     lines.append(f"- 每个 locale 抽样：`{payload['sample_size_per_locale']}` 条。")
     lines.append("- 样本来自 `data/generate_data.py` 生成的 txt/jsonl。")
     lines.append("- 中文地址保持无空格；英文地址保持正常单词间单个空格。")
-    lines.append("- 变体地址由同一条地址的组件重组得到，再拼接同 locale 的随机姓名/电话/邮箱/组织。")
+    lines.append("- 变体地址由同一条地址的组件重组得到；本实验只输入地址，不拼接其他类型 PII。")
     lines.append("- `detector` 的“同址”使用 `privacyguard.utils.normalized_pii.same_entity()` 判断。")
     lines.append("- `AndLab_protected` 的“同址”使用先注册完整地址、再检测变体时是否复用同一 token 判断。")
     lines.append("")
@@ -821,11 +770,11 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
             f"`{detector_summary['full_bucket'].get('one', 0)}` / `{detector_summary['full_bucket'].get('multi', 0)}`"
         )
         lines.append(
-            f"- 变体拼接输入返回 `0/1/>1` 个地址实体：`{detector_summary['variant_bucket'].get('zero', 0)}` / "
+            f"- 变体地址输入返回 `0/1/>1` 个地址实体：`{detector_summary['variant_bucket'].get('zero', 0)}` / "
             f"`{detector_summary['variant_bucket'].get('one', 0)}` / `{detector_summary['variant_bucket'].get('multi', 0)}`"
         )
         lines.append(f"- 完整地址平均地址实体数：`{detector_summary['full_avg_count']}`")
-        lines.append(f"- 变体拼接平均地址实体数：`{detector_summary['variant_avg_count']}`")
+        lines.append(f"- 变体地址平均地址实体数：`{detector_summary['variant_avg_count']}`")
         lines.append(f"- 同址判定命中：`{detector_summary['same_entity']}` / `{detector_summary['cases']}`")
         lines.append(f"- 双方都检测到地址时的同址判定命中率：`{detector_summary['same_entity_when_both_detected_rate'] * 100:.1f}%`")
         lines.append(
@@ -833,7 +782,7 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
             f"多候选并集完整精确命中：`{detector_summary['full_complete_union_exact']}` / `{detector_summary['cases']}`"
         )
         lines.append(
-            f"- 变体拼接单候选完整精确命中：`{detector_summary['variant_complete_best_exact']}` / `{detector_summary['cases']}`，"
+            f"- 变体地址单候选完整精确命中：`{detector_summary['variant_complete_best_exact']}` / `{detector_summary['cases']}`，"
             f"多候选并集完整精确命中：`{detector_summary['variant_complete_union_exact']}` / `{detector_summary['cases']}`"
         )
         lines.append(
@@ -863,11 +812,11 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
         lines.append("### AndLab_protected")
         lines.append("")
         lines.append(
-            f"- 完整地址拼接输入返回 `0/1/>1` 个地址实体：`{andlab_summary['full_bucket'].get('zero', 0)}` / "
+            f"- 完整地址输入返回 `0/1/>1` 个地址实体：`{andlab_summary['full_bucket'].get('zero', 0)}` / "
             f"`{andlab_summary['full_bucket'].get('one', 0)}` / `{andlab_summary['full_bucket'].get('multi', 0)}`"
         )
         lines.append(
-            f"- 变体拼接输入返回 `0/1/>1` 个地址实体：`{andlab_summary['variant_bucket'].get('zero', 0)}` / "
+            f"- 变体地址输入返回 `0/1/>1` 个地址实体：`{andlab_summary['variant_bucket'].get('zero', 0)}` / "
             f"`{andlab_summary['variant_bucket'].get('one', 0)}` / `{andlab_summary['variant_bucket'].get('multi', 0)}`"
         )
         lines.append(f"- 完整地址精确命中率：`{andlab_summary['full_exact_hit_rate'] * 100:.1f}%`")
@@ -1024,11 +973,10 @@ def main() -> None:
 
         for record in selected_records[locale]:
             variant = _build_variant_case(record, rng)
-            extras = _build_extra_pii(locale, rng)
             full_address = str(record["text"])
             variant_address = str(variant["text"])
-            full_context = _compose_context(locale, extras, full_address)
-            variant_context = _compose_context(locale, extras, variant_address)
+            full_context = _compose_context(locale, full_address)
+            variant_context = _compose_context(locale, variant_address)
             full_expected = _normalize_expected_components(dict(record["components"]), locale)
             variant_expected = _normalize_expected_components(dict(variant["components"]), locale)
 
@@ -1086,7 +1034,6 @@ def main() -> None:
                     "id": record["id"],
                     "format": record["format"],
                     "variant_style": variant["style"],
-                    "extras": extras,
                     "full_address": full_address,
                     "variant_address": variant_address,
                     "full_context": full_context,

@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
@@ -26,6 +28,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     StreamInput,
 )
 from privacyguard.infrastructure.pii.detector.stacks import BaseStack, StackManager, StackRun, get_stack_spec
+from privacyguard.utils.normalized_pii import normalize_pii, normalized_primary_text, same_entity
 
 
 def _is_control_clue(clue: Clue) -> bool:
@@ -35,6 +38,79 @@ def _is_control_clue(clue: Clue) -> bool:
 
 def _candidates_overlap(a: CandidateDraft, b: CandidateDraft) -> bool:
     return a.unit_start < b.unit_end and b.unit_start < a.unit_end
+
+
+_ADDRESS_STRUCTURAL_METADATA_KEYS = frozenset({
+    "address_component_trace",
+    "address_component_key_trace",
+    "address_component_suspected",
+    "address_component_type",
+})
+
+
+def _metadata_values(value: object) -> list[str]:
+    """统一把 metadata 值转成稳定字符串列表。"""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set, frozenset)):
+        values = [str(item) for item in value if str(item)]
+        return values
+    text = str(value)
+    return [text] if text else []
+
+
+def _copy_metadata(metadata: Mapping[str, object]) -> dict[str, list[str]]:
+    """复制 metadata，避免在候选吸收时共享可变列表。"""
+    copied: dict[str, list[str]] = {}
+    for key, value in metadata.items():
+        copied[key] = list(_metadata_values(value))
+    return copied
+
+
+def _merge_address_absorb_metadata(
+    longer_metadata: Mapping[str, object],
+    shorter_metadata: Mapping[str, object],
+) -> dict[str, list[str]]:
+    """地址子集吸收时保留长地址结构字段，只并入短地址的非结构信息。"""
+    merged = _copy_metadata(longer_metadata)
+    for key, value in shorter_metadata.items():
+        if key in _ADDRESS_STRUCTURAL_METADATA_KEYS:
+            continue
+        values = _metadata_values(value)
+        if not values:
+            continue
+        bucket = merged.setdefault(key, [])
+        for item in values:
+            if item not in bucket:
+                bucket.append(item)
+    return merged
+
+
+def _is_punct_or_space_only(text: str) -> bool:
+    """相邻候选之间只允许空白或 Unicode 标点。"""
+    for char in text:
+        if char.isspace():
+            continue
+        if unicodedata.category(char).startswith("P"):
+            continue
+        return False
+    return True
+
+
+def _address_components_subset(shorter_primary: Mapping[str, object], longer_primary: Mapping[str, object]) -> bool:
+    """同地址前缀吸收时，短地址已有组件必须都能在长地址对应组件中命中。"""
+    comparable = {
+        key: str(value or "").strip()
+        for key, value in shorter_primary.items()
+        if key != "poi_key" and str(value or "").strip()
+    }
+    if not comparable:
+        return False
+    for key, shorter_value in comparable.items():
+        longer_value = str(longer_primary.get(key) or "").strip()
+        if not longer_value or shorter_value not in longer_value:
+            return False
+    return True
 
 
 @dataclass(slots=True)
@@ -301,6 +377,8 @@ class StreamParser:
             existing.label_clue_ids |= candidate.label_clue_ids
             context.handled_label_clue_ids |= candidate.label_clue_ids
             return
+        if self._try_absorb_adjacent_address_candidate(context, candidate):
+            return
         context.candidates.append(candidate)
         context.claims.append(
             Claim(
@@ -330,6 +408,83 @@ class StreamParser:
             ):
                 return existing
         return None
+
+    def _try_absorb_adjacent_address_candidate(
+        self,
+        context: StackContext,
+        candidate: CandidateDraft,
+    ) -> bool:
+        """紧邻同源地址若是同一实体的真子集，则把短地址吸收到长地址里。"""
+        if candidate.attr_type != PIIAttributeType.ADDRESS or not context.candidates:
+            return False
+        previous = context.candidates[-1]
+        if previous.attr_type != PIIAttributeType.ADDRESS:
+            return False
+        if previous.source != candidate.source:
+            return False
+        if candidate.start < previous.end:
+            return False
+        gap_text = context.stream.text[previous.end:candidate.start]
+        if not _is_punct_or_space_only(gap_text):
+            return False
+
+        previous_normalized = normalize_pii(
+            PIIAttributeType.ADDRESS,
+            previous.text,
+            metadata=previous.metadata,
+        )
+        candidate_normalized = normalize_pii(
+            PIIAttributeType.ADDRESS,
+            candidate.text,
+            metadata=candidate.metadata,
+        )
+        previous_primary = normalized_primary_text(previous_normalized)
+        candidate_primary = normalized_primary_text(candidate_normalized)
+        if not previous_primary or not candidate_primary or previous_primary == candidate_primary:
+            return False
+        if previous_primary in candidate_primary:
+            longer = candidate
+            shorter = previous
+            longer_normalized = candidate_normalized
+            shorter_normalized = previous_normalized
+        elif candidate_primary in previous_primary:
+            longer = previous
+            shorter = candidate
+            longer_normalized = previous_normalized
+            shorter_normalized = candidate_normalized
+        else:
+            return False
+        if not same_entity(previous_normalized, candidate_normalized):
+            if not _address_components_subset(shorter_normalized.components, longer_normalized.components):
+                return False
+
+        previous.start = min(previous.start, candidate.start)
+        previous.end = max(previous.end, candidate.end)
+        previous.unit_start = min(previous.unit_start, candidate.unit_start)
+        previous.unit_end = max(previous.unit_end, candidate.unit_end)
+        previous.text = context.stream.text[previous.start:previous.end]
+        previous.source_kind = longer.source_kind
+        previous.canonical_text = longer.canonical_text
+        previous.claim_strength = longer.claim_strength
+        previous.metadata = _merge_address_absorb_metadata(longer.metadata, shorter.metadata)
+        previous.label_clue_ids |= candidate.label_clue_ids
+        previous.label_driven = previous.label_driven or candidate.label_driven
+        previous.block_ids = longer.block_ids
+        previous.block_id = longer.block_id
+        previous.bbox = longer.bbox
+        span_starts = [value for value in (previous.span_start, candidate.span_start) if value is not None]
+        previous.span_start = min(span_starts) if span_starts else None
+        span_ends = [value for value in (previous.span_end, candidate.span_end) if value is not None]
+        previous.span_end = max(span_ends) if span_ends else None
+
+        claim = context.claims[-1]
+        claim.start = previous.start
+        claim.end = previous.end
+        claim.strength = previous.claim_strength
+        claim.owner_stack_id = f"{previous.attr_type.value}:{previous.start}:{previous.end}"
+        context.handled_label_clue_ids |= candidate.label_clue_ids
+        context.committed_until = max(context.committed_until, previous.unit_end)
+        return True
 
     def _next_unconsumed_index(self, clues: tuple[Clue, ...], start_index: int, consumed_ids: set[str]) -> int | None:
         for index in range(start_index, len(clues)):

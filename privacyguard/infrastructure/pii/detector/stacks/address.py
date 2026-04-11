@@ -274,19 +274,46 @@ def _clue_unit_gap(left: Clue, right: Clue, stream: StreamInput | None = None) -
     return max(0, right.unit_start - left.unit_end)
 
 
-def _gap_unit_is_digit_primary(unit: StreamUnit) -> bool:
-    """KEY→KEY 间距判断：digit_run 与纯数字的 alnum_run 视为 digit 类 unit。"""
-    if unit.kind == "digit_run":
+def _is_key_key_gap_text_unit_allowed(unit: StreamUnit) -> bool:
+    """判断 gap=1 时中间正文 unit 是否允许触发 KEY→KEY 传导。
+
+    规则：
+    1. 中文 `cjk_char` 允许。
+    2. 英文 `ascii_word` 仅当长度至少为 3 时允许。
+    """
+    if unit.kind == "cjk_char":
         return True
-    if unit.kind == "alnum_run":
-        return bool(unit.text) and unit.text.isdigit()
+    if unit.kind == "ascii_word":
+        return len(unit.text) >= 3
     return False
 
 
-def _key_key_chain_gap_allowed(left: Clue, right: Clue, stream: StreamInput | None) -> bool:
-    """KEY→KEY 是否允许挂链：gap=0；或 gap=1 且中间唯一的非 space unit 非 digit 类。
+def _last_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit | None:
+    """返回 clue 覆盖范围内最后一个非空白 unit。"""
+    for ui in range(min(clue.unit_end, len(stream.units)) - 1, clue.unit_start - 1, -1):
+        unit = stream.units[ui]
+        if unit.kind != "space":
+            return unit
+    return None
 
-    无 stream.units 时无法按字符 unit 判定 digit，gap=1 一律不允许。
+
+def _first_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit | None:
+    """返回 clue 覆盖范围内第一个非空白 unit。"""
+    for ui in range(clue.unit_start, min(clue.unit_end, len(stream.units))):
+        unit = stream.units[ui]
+        if unit.kind != "space":
+            return unit
+    return None
+
+
+def _key_key_chain_gap_allowed(left: Clue, right: Clue, stream: StreamInput | None) -> bool:
+    """KEY→KEY 是否允许挂链：gap=0；或 gap=1 且只允许指定正文穿透。
+
+    gap=1 时：
+    1. 中间 unit 若是中文 `cjk_char`，允许。
+    2. 中间 unit 若是英文 `ascii_word`，仅长度至少为 3 时允许。
+    3. 若左右边界都是英文 `ascii_word`，中间 unit 不允许是中文。
+    4. 若左右边界都是中文 `cjk_char`，中间 unit 可以是中文或长英文。
     """
     gap = _clue_unit_gap(left, right, stream)
     if gap == 0:
@@ -304,7 +331,18 @@ def _key_key_chain_gap_allowed(left: Clue, right: Clue, stream: StreamInput | No
     ]
     if len(non_space) != 1:
         return False
-    return not _gap_unit_is_digit_primary(non_space[0])
+    gap_unit = non_space[0]
+    if not _is_key_key_gap_text_unit_allowed(gap_unit):
+        return False
+    left_tail = _last_non_space_unit_in_span(left, stream)
+    right_head = _first_non_space_unit_in_span(right, stream)
+    if left_tail is None or right_head is None:
+        return False
+    if left_tail.kind == right_head.kind == "ascii_word":
+        return gap_unit.kind == "ascii_word"
+    if left_tail.kind == right_head.kind == "cjk_char":
+        return gap_unit.kind in {"cjk_char", "ascii_word"}
+    return False
 
 
 def _clone_component_value(value: str | list[str]) -> str | list[str]:
@@ -893,9 +931,9 @@ def _apply_comma_tail_segment_after_commit(
         if ct == first:
             seg.group_last_type = ct
             return
-        if ct in _REACHABLE.get(first, _ALL_TYPES):
+        if ct in _VALID_SUCCESSORS.get(first, _ALL_TYPES):
             seg.direction = "forward"
-        elif first in _REACHABLE.get(ct, _ALL_TYPES):
+        elif first in _VALID_SUCCESSORS.get(ct, _ALL_TYPES):
             seg.direction = "reverse"
         seg.group_last_type = ct
         return
@@ -904,6 +942,9 @@ def _apply_comma_tail_segment_after_commit(
 
 def _commit(state: _ParseState, component: _DraftComponent) -> bool:
     """提交 component 到 state，更新 occupancy / segment / evidence。"""
+    if not _segment_admit(state, component.component_type):
+        state.split_at = component.start
+        return False
     if _rollback_invalid_comma_tail_component(state, component):
         return False
     comp_type = component.component_type
@@ -970,12 +1011,9 @@ def _commit_poi(state: _ParseState, component: _DraftComponent) -> _DraftCompone
 
 def _segment_admit(
     state: _ParseState,
-    clue: Clue,
     comp_type: AddressComponentType,
-    raw_text: str,
 ) -> bool:
-    """占位与段内后继；逗号尾在 component 粒度定方向（见 _apply_comma_tail_segment_after_commit）。"""
-    del raw_text
+    """按最终 component 类型判断占位与直接后继合法性。"""
     if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
         return False
 
@@ -988,20 +1026,20 @@ def _segment_admit(
             first_type = segment.group_first_type
             if comp_type == first_type:
                 return True
-            ok_fwd = comp_type in _REACHABLE.get(first_type, _ALL_TYPES)
-            ok_rev = first_type in _REACHABLE.get(comp_type, _ALL_TYPES)
+            ok_fwd = comp_type in _VALID_SUCCESSORS.get(first_type, _ALL_TYPES)
+            ok_rev = first_type in _VALID_SUCCESSORS.get(comp_type, _ALL_TYPES)
             return ok_fwd or ok_rev
         last_type = segment.group_last_type
         if last_type is None:
             return True
         if segment.direction == "forward":
-            return comp_type in _REACHABLE.get(last_type, _ALL_TYPES)
-        return last_type in _REACHABLE.get(comp_type, _ALL_TYPES)
+            return comp_type in _VALID_SUCCESSORS.get(last_type, _ALL_TYPES)
+        return last_type in _VALID_SUCCESSORS.get(comp_type, _ALL_TYPES)
 
     # 非逗号尾：正序链（group_first 仅用于 comma_tail_active 段内）。
     if segment.group_last_type is None:
         return True
-    return comp_type in _REACHABLE.get(segment.group_last_type, _ALL_TYPES)
+    return comp_type in _VALID_SUCCESSORS.get(segment.group_last_type, _ALL_TYPES)
 
 
 def _has_reasonable_successor_key(
@@ -1577,7 +1615,8 @@ class AddressStack(BaseStack):
             if state.components or state.deferred_chain:
                 if (
                     not state.pending_comma_first_component
-                    and not _segment_admit(state, clue, comp_type, raw_text)
+                    and not state.segment_state.comma_tail_active
+                    and not _segment_admit(state, comp_type)
                 ):
                     if (
                         comp_type in _ADMIN_TYPES
@@ -1621,7 +1660,8 @@ class AddressStack(BaseStack):
             if state.components or state.deferred_chain:
                 if (
                     not state.pending_comma_first_component
-                    and not _segment_admit(state, effective_clue, comp_type, raw_text)
+                    and not state.segment_state.comma_tail_active
+                    and not _segment_admit(state, comp_type)
                 ):
                     _flush_chain(state, raw_text, stream, locale, clues=clues, clue_index=clue_index)
                     state.split_at = effective_clue.start
@@ -1647,7 +1687,8 @@ class AddressStack(BaseStack):
                 if (
                     state.components
                     and not state.pending_comma_first_component
-                    and not _segment_admit(state, effective_clue, comp_type, raw_text)
+                    and not state.segment_state.comma_tail_active
+                    and not _segment_admit(state, comp_type)
                 ):
                     state.split_at = effective_clue.start
                     return _SENTINEL_STOP
