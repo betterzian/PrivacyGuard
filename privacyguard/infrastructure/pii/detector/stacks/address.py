@@ -926,6 +926,65 @@ def _route_dynamic_key_type(
     return comp_type
 
 
+def _single_adjacent_value_level_in_state(
+    state: _ParseState,
+    clue: Clue,
+) -> AddressComponentType | None:
+    """返回 key 左侧是否刚好只有一个紧邻的地址 VALUE clue。"""
+    if clue.component_type not in {
+        AddressComponentType.PROVINCE,
+        AddressComponentType.CITY,
+        AddressComponentType.DISTRICT,
+    }:
+        return None
+    if len(state.deferred_chain) != 1:
+        return None
+    last_clue = state.deferred_chain[-1][1]
+    if (
+        last_clue.role == ClueRole.VALUE
+        and last_clue.attr_type == PIIAttributeType.ADDRESS
+        and last_clue.component_type is not None
+        and last_clue.end == clue.start
+    ):
+        return last_clue.component_type
+    return None
+
+
+def _single_adjacent_value_level_in_preview(
+    chain: list[Clue],
+    clue: Clue,
+) -> AddressComponentType | None:
+    """逗号尾预演里复用同一条单 value 判定。"""
+    if clue.component_type not in {
+        AddressComponentType.PROVINCE,
+        AddressComponentType.CITY,
+        AddressComponentType.DISTRICT,
+    }:
+        return None
+    if len(chain) != 1:
+        return None
+    last_clue = chain[-1]
+    if (
+        last_clue.role == ClueRole.VALUE
+        and last_clue.attr_type == PIIAttributeType.ADDRESS
+        and last_clue.component_type is not None
+        and last_clue.end == clue.start
+    ):
+        return last_clue.component_type
+    return None
+
+
+def _key_should_degrade_from_non_pure_value(
+    clue: Clue,
+) -> AddressComponentType | None:
+    """非纯 value 场景下的 key 降级规则。"""
+    if clue.text == "省" and clue.component_type == AddressComponentType.PROVINCE:
+        return None
+    if clue.text == "市" and clue.component_type == AddressComponentType.CITY:
+        return AddressComponentType.DISTRICT
+    return clue.component_type
+
+
 def _routing_left_value_start_for_state(
     state: _ParseState,
     clues: tuple[Clue, ...],
@@ -937,7 +996,8 @@ def _routing_left_value_start_for_state(
     comp_type: AddressComponentType | None = None,
 ) -> int:
     """按当前状态推导动态路由要看的左侧 value 片段起点。"""
-    if state.deferred_chain:
+    target_type = comp_type or clue.component_type or AddressComponentType.DETAIL
+    if state.deferred_chain and target_type != AddressComponentType.DISTRICT:
         return state.deferred_chain[-1][1].end
     if state.components:
         return _skip_separators(raw_text, state.last_end)
@@ -947,9 +1007,8 @@ def _routing_left_value_start_for_state(
         clue_index,
         ignored_key_indices=state.ignored_address_key_indices,
     )
-    if prev_key_end is not None:
+    if prev_key_end is not None and target_type != AddressComponentType.DISTRICT:
         floor = max(floor, prev_key_end)
-    target_type = comp_type or clue.component_type or AddressComponentType.DETAIL
     if locale.startswith("en"):
         return _left_expand_en_word(raw_text, clue.start, floor)
     expand_start = _left_expand_zh(raw_text, clue.start, floor, stream, target_type)
@@ -974,7 +1033,8 @@ def _routing_left_value_start_for_preview(
     previous_component_end: int | None = None,
 ) -> int:
     """按逗号尾预演状态推导动态路由要看的左侧 value 片段起点。"""
-    if chain:
+    target_type = comp_type or clue.component_type or AddressComponentType.DETAIL
+    if chain and target_type != AddressComponentType.DISTRICT:
         return chain[-1].end
     if previous_component_end is not None:
         return _skip_separators(raw_text, previous_component_end)
@@ -984,9 +1044,8 @@ def _routing_left_value_start_for_preview(
         clue_index,
         ignored_key_indices=ignored_key_indices,
     )
-    if prev_key_end is not None:
+    if prev_key_end is not None and target_type != AddressComponentType.DISTRICT:
         floor = max(floor, prev_key_end)
-    target_type = comp_type or clue.component_type or AddressComponentType.DETAIL
     if locale.startswith("en"):
         return _left_expand_en_word(raw_text, clue.start, floor)
     expand_start = _left_expand_zh(raw_text, clue.start, floor, stream, target_type)
@@ -1088,10 +1147,20 @@ def _routed_key_clue_for_state(
     raw_text: str,
     stream: StreamInput,
     locale: str,
-) -> Clue:
+) -> Clue | None:
     """把当前 KEY clue 按地址上下文重映射到实际参与状态机的类型。"""
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
+    single_value_level = _single_adjacent_value_level_in_state(state, clue)
+    if single_value_level is not None:
+        if single_value_level != clue.component_type:
+            return None
+    elif clue.component_type is not None:
+        downgraded_type = _key_should_degrade_from_non_pure_value(clue)
+        if downgraded_type is None:
+            return None
+        if downgraded_type != clue.component_type:
+            clue = replace(clue, component_type=downgraded_type)
     previous_component_type = _state_routing_context_type(state)
     left_start = _routing_left_value_start_for_state(
         state, clues, clue_index, clue, raw_text, stream, locale, clue.component_type,
@@ -1119,10 +1188,20 @@ def _routed_key_clue_for_preview(
     previous_component_type: AddressComponentType | None,
     ignored_key_indices: set[int] | None = None,
     previous_component_end: int | None = None,
-) -> Clue:
+) -> Clue | None:
     """把逗号尾预演中的 KEY clue 按预演上下文重映射。"""
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
+    single_value_level = _single_adjacent_value_level_in_preview(chain, clue)
+    if single_value_level is not None:
+        if single_value_level != clue.component_type:
+            return None
+    elif clue.component_type is not None:
+        downgraded_type = _key_should_degrade_from_non_pure_value(clue)
+        if downgraded_type is None:
+            return None
+        if downgraded_type != clue.component_type:
+            clue = replace(clue, component_type=downgraded_type)
     context_type = _preview_routing_context_type(chain, previous_component_type)
     left_start = _routing_left_value_start_for_preview(
         chain,
@@ -1419,7 +1498,7 @@ def _has_reasonable_successor_key(
             continue
         effective = nxt
         if nxt.role == ClueRole.KEY:
-            effective = _routed_key_clue_for_preview(
+            routed_key = _routed_key_clue_for_preview(
                 preview_chain,
                 clues,
                 i,
@@ -1431,6 +1510,10 @@ def _has_reasonable_successor_key(
                 ignored_key_indices,
                 previous_component_end,
             )
+            if routed_key is None:
+                ignored_key_indices.add(i)
+                continue
+            effective = routed_key
             eff_type = effective.component_type
             if (
                 eff_type is not None
@@ -1806,7 +1889,7 @@ class AddressStack(BaseStack):
         )
         while ordered:
             last = ordered[-1]
-            if not _overlaps_any_span(last.start, last.end, negative_spans):
+            if not _rightmost_component_key_overlaps_negative(last, clues, negative_spans):
                 return ordered
             repaired = self._repair_rightmost_component_prefix(
                 prefix_components=ordered[:-1],
@@ -1861,9 +1944,9 @@ class AddressStack(BaseStack):
             )
             if replay_state is None or not replay_state.components:
                 continue
-            if _overlaps_any_span(
-                replay_state.components[-1].start,
-                replay_state.components[-1].end,
+            if _rightmost_component_key_overlaps_negative(
+                replay_state.components[-1],
+                clues,
                 negative_spans,
             ):
                 continue
@@ -2072,7 +2155,7 @@ class AddressStack(BaseStack):
     ) -> object | None:
         effective_clue = clue
         if clue.role == ClueRole.KEY:
-            effective_clue = _routed_key_clue_for_state(
+            routed_key = _routed_key_clue_for_state(
                 state,
                 clues,
                 clue_index,
@@ -2081,6 +2164,10 @@ class AddressStack(BaseStack):
                 stream,
                 locale,
             )
+            if routed_key is None:
+                state.ignored_address_key_indices.add(clue_index)
+                return _SENTINEL_IGNORE
+            effective_clue = routed_key
         comp_type = effective_clue.component_type
         if comp_type is None:
             return None
@@ -2533,7 +2620,7 @@ def _preview_comma_tail_first_component_type(
             continue
         effective = clue
         if clue.role == ClueRole.KEY:
-            effective = _routed_key_clue_for_preview(
+            routed_key = _routed_key_clue_for_preview(
                 chain,
                 clues,
                 index,
@@ -2545,6 +2632,10 @@ def _preview_comma_tail_first_component_type(
                 ignored_key_indices,
                 previous_component_end,
             )
+            if routed_key is None:
+                ignored_key_indices.add(index)
+                continue
+            effective = routed_key
             eff_type = effective.component_type
             if (
                 eff_type is not None
@@ -2817,6 +2908,20 @@ def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> d
 
 def _overlaps_any_span(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
     return any(not (end <= s or start >= e) for s, e in spans)
+
+
+def _rightmost_component_key_overlaps_negative(
+    component: _DraftComponent,
+    clues: tuple[Clue, ...],
+    negative_spans: list[tuple[int, int]],
+) -> bool:
+    """仅当最右组件的最终 key clue 与负向 span 重叠时，才触发尾修复。"""
+    clue_entries = _ordered_component_clue_entries(component, clues)
+    for _, clue in reversed(clue_entries):
+        if clue.role != ClueRole.KEY:
+            continue
+        return _overlaps_any_span(clue.start, clue.end, negative_spans)
+    return False
 
 
 def _ordered_component_clue_entries(
