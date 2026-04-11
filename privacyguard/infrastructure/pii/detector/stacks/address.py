@@ -1480,13 +1480,14 @@ class AddressStack(BaseStack):
         if not state.components:
             return None
         if negative_spans:
-            state.components, removed_clue_ids, removed_clue_indices = _pop_components_overlapping_negative(
-                state.components,
+            self._repair_negative_tail_components(
+                state,
                 negative_spans,
+                raw_text,
+                stream,
+                locale,
+                sub_clues,
             )
-            state.committed_clue_ids -= removed_clue_ids
-            state.consumed_clue_indices -= removed_clue_indices
-            _recompute_last_consumed_index(state)
             if not state.components:
                 return None
 
@@ -1500,6 +1501,165 @@ class AddressStack(BaseStack):
             self.clue_index + 1,
             use_precise_next_index=False,
         )
+
+    def _repair_negative_tail_components(
+        self,
+        state: _ParseState,
+        negative_spans: list[tuple[int, int]],
+        raw_text: str,
+        stream: StreamInput,
+        locale: str,
+        clues: tuple[Clue, ...],
+    ) -> None:
+        """按 clue 级别修复最右侧 negative 命中的尾部组件。"""
+        if not negative_spans or not state.components:
+            return
+        base_evidence_count = max(0, state.evidence_count - len(state.components))
+        state.components = self._repair_components_overlapping_negative(
+            state.components,
+            negative_spans,
+            raw_text,
+            stream,
+            locale,
+            clues,
+            ignored_address_key_indices=state.ignored_address_key_indices,
+        )
+        _rebuild_component_derived_state(
+            state,
+            clues,
+            base_evidence_count=base_evidence_count,
+        )
+
+    def _repair_components_overlapping_negative(
+        self,
+        components: list[_DraftComponent],
+        negative_spans: list[tuple[int, int]],
+        raw_text: str,
+        stream: StreamInput,
+        locale: str,
+        clues: tuple[Clue, ...],
+        *,
+        ignored_address_key_indices: set[int],
+    ) -> list[_DraftComponent]:
+        """修复最右负向尾；若无法修复，则逐级回退到更左的稳定前缀。"""
+        ordered = sorted(
+            (_clone_draft_component(component) for component in components),
+            key=lambda component: (component.end, component.start),
+        )
+        while ordered:
+            last = ordered[-1]
+            if not _overlaps_any_span(last.start, last.end, negative_spans):
+                return ordered
+            repaired = self._repair_rightmost_component_prefix(
+                prefix_components=ordered[:-1],
+                component=last,
+                negative_spans=negative_spans,
+                raw_text=raw_text,
+                stream=stream,
+                locale=locale,
+                clues=clues,
+                ignored_address_key_indices=ignored_address_key_indices,
+            )
+            if repaired is not None:
+                ordered = repaired
+                continue
+            ordered.pop()
+        return []
+
+    def _repair_rightmost_component_prefix(
+        self,
+        *,
+        prefix_components: list[_DraftComponent],
+        component: _DraftComponent,
+        negative_spans: list[tuple[int, int]],
+        raw_text: str,
+        stream: StreamInput,
+        locale: str,
+        clues: tuple[Clue, ...],
+        ignored_address_key_indices: set[int],
+    ) -> list[_DraftComponent] | None:
+        """删除受影响 clue 及其右侧 suffix，并用现有逻辑重放剩余前缀。"""
+        clue_entries = _ordered_component_clue_entries(component, clues)
+        if not clue_entries:
+            return None
+
+        last_affected_index = -1
+        for index, (_, clue) in enumerate(clue_entries):
+            if _overlaps_any_span(clue.start, clue.end, negative_spans):
+                last_affected_index = index
+        if last_affected_index <= 0:
+            return None
+
+        for cut in range(last_affected_index, 0, -1):
+            replay_entries = clue_entries[:cut]
+            replay_state = self._replay_component_clue_prefix(
+                prefix_components=prefix_components,
+                clue_entries=replay_entries,
+                raw_text=raw_text,
+                stream=stream,
+                locale=locale,
+                clues=clues,
+                ignored_address_key_indices=ignored_address_key_indices,
+            )
+            if replay_state is None or not replay_state.components:
+                continue
+            if _overlaps_any_span(
+                replay_state.components[-1].start,
+                replay_state.components[-1].end,
+                negative_spans,
+            ):
+                continue
+            return replay_state.components
+        return None
+
+    def _replay_component_clue_prefix(
+        self,
+        *,
+        prefix_components: list[_DraftComponent],
+        clue_entries: list[_IndexedClue],
+        raw_text: str,
+        stream: StreamInput,
+        locale: str,
+        clues: tuple[Clue, ...],
+        ignored_address_key_indices: set[int],
+    ) -> _ParseState | None:
+        """在临时 state 中重放 component 的 clue 前缀。"""
+        if not clue_entries:
+            return None
+        replay_state = _ParseState()
+        replay_state.components = [
+            _clone_draft_component(component) for component in prefix_components
+        ]
+        replay_state.ignored_address_key_indices = set(ignored_address_key_indices)
+        _rebuild_component_derived_state(replay_state, clues)
+
+        for clue_index, clue in clue_entries:
+            result = self._handle_address_clue(
+                replay_state,
+                clue,
+                raw_text,
+                stream,
+                locale,
+                clues,
+                clue_index,
+            )
+            if result is _SENTINEL_STOP:
+                return None
+            if result is _SENTINEL_IGNORE:
+                continue
+            replay_state.last_consumed = clue
+
+        _flush_chain(
+            replay_state,
+            raw_text,
+            stream,
+            locale,
+            clues=clues,
+            clue_index=clue_entries[-1][0] + 1,
+        )
+        if replay_state.split_at is not None:
+            return None
+        return replay_state
 
     # -------------------------------------------------------- run_with_clues
     def _run_with_clues(
@@ -1587,13 +1747,14 @@ class AddressStack(BaseStack):
         if not state.components:
             return None
         if negative_spans:
-            state.components, removed_clue_ids, removed_clue_indices = _pop_components_overlapping_negative(
-                state.components,
+            self._repair_negative_tail_components(
+                state,
                 negative_spans,
+                raw_text,
+                stream,
+                locale,
+                clues,
             )
-            state.committed_clue_ids -= removed_clue_ids
-            state.consumed_clue_indices -= removed_clue_indices
-            _recompute_last_consumed_index(state)
             if not state.components:
                 return None
 
@@ -2380,21 +2541,72 @@ def _overlaps_any_span(start: int, end: int, spans: list[tuple[int, int]]) -> bo
     return any(not (end <= s or start >= e) for s, e in spans)
 
 
-def _pop_components_overlapping_negative(
-    components: list[_DraftComponent],
-    negative_spans: list[tuple[int, int]],
-) -> tuple[list[_DraftComponent], set[str], set[int]]:
-    ordered = sorted(components, key=lambda c: (c.end, c.start))
-    removed_clue_ids: set[str] = set()
-    removed_clue_indices: set[int] = set()
-    while ordered:
-        last = ordered[-1]
-        if not _overlaps_any_span(last.start, last.end, negative_spans):
-            return ordered, removed_clue_ids, removed_clue_indices
-        removed = ordered.pop()
-        removed_clue_ids |= removed.clue_ids
-        removed_clue_indices |= removed.clue_indices
-    return [], removed_clue_ids, removed_clue_indices
+def _ordered_component_clue_entries(
+    component: _DraftComponent,
+    clues: tuple[Clue, ...],
+) -> list[_IndexedClue]:
+    """返回 component 对应的有序 clue 列表。"""
+    entries: list[_IndexedClue] = []
+    for clue_index in sorted(index for index in component.clue_indices if index >= 0):
+        if clue_index >= len(clues):
+            continue
+        clue = clues[clue_index]
+        if clue.attr_type != PIIAttributeType.ADDRESS or clue.role == ClueRole.LABEL:
+            continue
+        entries.append((clue_index, clue))
+    return entries
+
+
+def _rebuild_component_derived_state(
+    state: _ParseState,
+    clues: tuple[Clue, ...],
+    *,
+    base_evidence_count: int = 0,
+) -> None:
+    """按 surviving components 重建组件派生状态。"""
+    ordered = sorted(state.components, key=lambda component: (component.end, component.start))
+    state.components = ordered
+    state.occupancy = {}
+    state.deferred_chain.clear()
+    state.suspect_chain.clear()
+    state.chain_left_anchor = None
+    state.segment_state = _CommaSegmentState()
+    state.last_consumed = None
+    state.last_value = None
+    state.evidence_count = max(0, base_evidence_count)
+    state.last_end = 0
+    state.last_component_type = None
+    state.committed_clue_ids = set()
+    state.consumed_clue_indices = set()
+    state.last_consumed_clue_index = -1
+    state.value_char_end_override.clear()
+    state.pending_comma_value_right_scan = False
+    state.pending_comma_first_component = False
+    state.component_counts = {}
+    state.pending_community_poi_index = None
+    state.comma_tail_checkpoint = None
+
+    for index, component in enumerate(state.components):
+        component_type = component.component_type
+        _increment_component_count(state, component_type)
+        if component_type in SINGLE_OCCUPY:
+            state.occupancy[component_type] = index
+        if (
+            component_type == AddressComponentType.POI
+            and not isinstance(component.key, list)
+            and component.key == "社区"
+        ):
+            state.pending_community_poi_index = index
+        state.evidence_count += 1
+        state.committed_clue_ids |= component.clue_ids
+        state.consumed_clue_indices |= component.clue_indices
+        state.last_component_type = component_type
+        state.last_end = max(state.last_end, component.end)
+        state.segment_state.group_last_type = component_type
+
+    _recompute_last_consumed_index(state)
+    if 0 <= state.last_consumed_clue_index < len(clues):
+        state.last_consumed = clues[state.last_consumed_clue_index]
 
 
 # ---------------------------------------------------------------------------
