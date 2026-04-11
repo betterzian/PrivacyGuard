@@ -130,27 +130,7 @@ _SINGLE_EVIDENCE_ADMIN = frozenset({
 _ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM})
 
 _SENTINEL_STOP = object()
-
-
-def _compute_reachable(
-    successors: dict[AddressComponentType, frozenset[AddressComponentType]],
-) -> dict[AddressComponentType, frozenset[AddressComponentType]]:
-    """传递闭包：从每个节点出发可多步到达的所有节点集合。"""
-    reachable: dict[AddressComponentType, set[AddressComponentType]] = {}
-    for node in successors:
-        visited: set[AddressComponentType] = set()
-        stack = list(successors.get(node, frozenset()))
-        while stack:
-            cur = stack.pop()
-            if cur in visited:
-                continue
-            visited.add(cur)
-            stack.extend(successors.get(cur, frozenset()))
-        reachable[node] = visited
-    return {k: frozenset(v) for k, v in reachable.items()}
-
-
-_REACHABLE = _compute_reachable(_VALID_SUCCESSORS)
+_SENTINEL_IGNORE = object()
 _ALL_TYPES = frozenset(AddressComponentType)
 _IndexedClue = tuple[int, Clue]
 
@@ -212,6 +192,7 @@ class _CommaTailCheckpoint:
     suppress_challenger_clue_ids: set[str]
     extra_consumed_clue_ids: set[str]
     absorbed_digit_unit_end: int
+    ignored_address_key_indices: set[int]
 
 
 @dataclass(slots=True)
@@ -248,6 +229,8 @@ class _ParseState:
     pending_community_poi_index: int | None = None
     #: 最近一个逗号左侧的回滚快照；仅在逗号尾行政链中使用。
     comma_tail_checkpoint: _CommaTailCheckpoint | None = None
+    #: 已降级为普通文字的 ADDRESS KEY 索引；后续左吸收时不应再被它们阻挡。
+    ignored_address_key_indices: set[int] = field(default_factory=set)
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +298,8 @@ def _key_key_chain_gap_allowed(left: Clue, right: Clue, stream: StreamInput | No
     3. 若左右边界都是英文 `ascii_word`，中间 unit 不允许是中文。
     4. 若左右边界都是中文 `cjk_char`，中间 unit 可以是中文或长英文。
     """
+    if left.text == right.text:
+        return False
     gap = _clue_unit_gap(left, right, stream)
     if gap == 0:
         return True
@@ -395,6 +380,7 @@ def _make_comma_tail_checkpoint(
         suppress_challenger_clue_ids=set(state.suppress_challenger_clue_ids),
         extra_consumed_clue_ids=set(state.extra_consumed_clue_ids),
         absorbed_digit_unit_end=state.absorbed_digit_unit_end,
+        ignored_address_key_indices=set(state.ignored_address_key_indices),
     )
 
 
@@ -423,6 +409,7 @@ def _restore_comma_tail_checkpoint(
     state.pending_community_poi_index = checkpoint.pending_community_poi_index
     state.evidence_count = checkpoint.evidence_count
     state.absorbed_digit_unit_end = checkpoint.absorbed_digit_unit_end
+    state.ignored_address_key_indices = set(checkpoint.ignored_address_key_indices)
     state.comma_tail_checkpoint = None
 
 
@@ -479,7 +466,7 @@ def _chain_can_accept(state: _ParseState, clue: Clue, stream: StreamInput) -> bo
     只允许三种链接：
     1. VALUE→VALUE: gap ≤ 1 non-space unit。
     2. VALUE→KEY: gap ≤ 1 non-space unit。
-    3. KEY→KEY: gap=0；或 gap=1 且中间唯一的非 space unit 非 digit 类。
+    3. KEY→KEY: gap=0，或 gap=1 且满足正文穿透规则；同文本 KEY 不允许继续传导。
 
     KEY→VALUE 不允许继续挂链。
     """
@@ -700,19 +687,26 @@ def _routing_left_value_start_for_state(
     raw_text: str,
     stream: StreamInput,
     locale: str,
+    comp_type: AddressComponentType | None = None,
 ) -> int:
     """按当前状态推导动态路由要看的左侧 value 片段起点。"""
     if state.deferred_chain:
         return state.deferred_chain[-1][1].end
     if state.components:
-        return state.last_end
-    floor = _left_address_floor(clues, clue_index)
-    prev_key_end = _left_prev_address_key_end(clues, clue_index)
-    if prev_key_end is not None:
-        floor = max(floor, prev_key_end)
+        floor = state.last_end
+    else:
+        floor = _left_address_floor(clues, clue_index)
+        prev_key_end = _left_prev_address_key_end(
+            clues,
+            clue_index,
+            ignored_key_indices=state.ignored_address_key_indices,
+        )
+        if prev_key_end is not None:
+            floor = max(floor, prev_key_end)
+    target_type = comp_type or clue.component_type or AddressComponentType.DETAIL
     if locale.startswith("en"):
         return _left_expand_en_word(raw_text, clue.start, floor)
-    return _left_expand_zh(raw_text, clue.start, floor, stream, clue.component_type or AddressComponentType.DETAIL)
+    return _left_expand_zh(raw_text, clue.start, floor, stream, target_type)
 
 
 def _routing_left_value_start_for_preview(
@@ -723,17 +717,81 @@ def _routing_left_value_start_for_preview(
     raw_text: str,
     stream: StreamInput,
     locale: str,
+    comp_type: AddressComponentType | None = None,
+    ignored_key_indices: set[int] | None = None,
 ) -> int:
     """按逗号尾预演状态推导动态路由要看的左侧 value 片段起点。"""
     if chain:
         return chain[-1].end
     floor = _left_address_floor(clues, clue_index)
-    prev_key_end = _left_prev_address_key_end(clues, clue_index)
+    prev_key_end = _left_prev_address_key_end(
+        clues,
+        clue_index,
+        ignored_key_indices=ignored_key_indices,
+    )
     if prev_key_end is not None:
         floor = max(floor, prev_key_end)
+    target_type = comp_type or clue.component_type or AddressComponentType.DETAIL
     if locale.startswith("en"):
         return _left_expand_en_word(raw_text, clue.start, floor)
-    return _left_expand_zh(raw_text, clue.start, floor, stream, clue.component_type or AddressComponentType.DETAIL)
+    return _left_expand_zh(raw_text, clue.start, floor, stream, target_type)
+
+
+def _state_key_left_expand_start_if_deferrable(
+    state: _ParseState,
+    clues: tuple[Clue, ...],
+    clue_index: int,
+    clue: Clue,
+    raw_text: str,
+    stream: StreamInput,
+    locale: str,
+    comp_type: AddressComponentType,
+) -> int | None:
+    """按当前解析状态判断 KEY 左侧是否存在可延迟提交的 value。"""
+    if clue.text.lower() in _PREFIX_EN_KEYWORDS:
+        return None
+    expand_start = _routing_left_value_start_for_state(
+        state,
+        clues,
+        clue_index,
+        clue,
+        raw_text,
+        stream,
+        locale,
+        comp_type,
+    )
+    value = _normalize_address_value(comp_type, raw_text[expand_start:clue.start])
+    if not value:
+        return None
+    return expand_start
+
+
+def _preview_key_has_left_value(
+    chain: list[Clue],
+    clues: tuple[Clue, ...],
+    clue_index: int,
+    clue: Clue,
+    raw_text: str,
+    stream: StreamInput,
+    locale: str,
+    comp_type: AddressComponentType,
+    ignored_key_indices: set[int] | None = None,
+) -> bool:
+    """预演时判断 KEY 是否真的有左值；无则按普通文字忽略。"""
+    if clue.text.lower() in _PREFIX_EN_KEYWORDS:
+        return True
+    expand_start = _routing_left_value_start_for_preview(
+        chain,
+        clues,
+        clue_index,
+        clue,
+        raw_text,
+        stream,
+        locale,
+        comp_type,
+        ignored_key_indices,
+    )
+    return bool(_normalize_address_value(comp_type, raw_text[expand_start:clue.start]))
 
 
 def _has_following_detail_key(
@@ -773,7 +831,7 @@ def _routed_key_clue_for_state(
         return clue
     previous_component_type = _state_routing_context_type(state)
     left_start = _routing_left_value_start_for_state(
-        state, clues, clue_index, clue, raw_text, stream, locale,
+        state, clues, clue_index, clue, raw_text, stream, locale, clue.component_type,
     )
     left_value_text = clean_value(raw_text[left_start:clue.start])
     routed_type = _route_dynamic_key_type(
@@ -796,13 +854,14 @@ def _routed_key_clue_for_preview(
     stream: StreamInput,
     locale: str,
     previous_component_type: AddressComponentType | None,
+    ignored_key_indices: set[int] | None = None,
 ) -> Clue:
     """把逗号尾预演中的 KEY clue 按预演上下文重映射。"""
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
     context_type = _preview_routing_context_type(chain, previous_component_type)
     left_start = _routing_left_value_start_for_preview(
-        chain, clues, clue_index, clue, raw_text, stream, locale,
+        chain, clues, clue_index, clue, raw_text, stream, locale, clue.component_type, ignored_key_indices,
     )
     left_value_text = clean_value(raw_text[left_start:clue.start])
     routed_type = _route_dynamic_key_type(
@@ -1051,24 +1110,21 @@ def _has_reasonable_successor_key(
     raw_text: str,
     locale: str,
 ) -> bool:
-    """后置 admin VALUE 的前瞻：仅检查右侧是否存在可连接的后继 KEY。
-
-    这里不做右边界裁决，也不在此处让 negative / NAME / ORGANIZATION 直接截断地址。
-    这些 clue 只影响最终 address 提交阶段，不影响“后面是否还存在一个可连接 KEY”的判断。
-    """
+    """后置 admin VALUE 的前瞻：按最终链路落成的 component 判断是否有合理后继。"""
     anchor = clues[index]
     preview_chain: list[Clue] = []
+    previous_component_type = _state_routing_context_type(state)
+    ignored_key_indices = set(state.ignored_address_key_indices)
     for i in range(index + 1, len(clues)):
         nxt = clues[i]
         if is_break_clue(nxt):
-            return False
+            break
         if is_negative_clue(nxt):
             continue
         if nxt.role == ClueRole.LABEL:
             continue
-        # 前瞻窗口上限：6 unit。
         if _clue_unit_gap(anchor, nxt, stream) > 6:
-            return False
+            break
         if nxt.attr_type != PIIAttributeType.ADDRESS:
             continue
         if nxt.component_type is None:
@@ -1083,15 +1139,36 @@ def _has_reasonable_successor_key(
                 raw_text,
                 stream,
                 locale,
-                _state_routing_context_type(state),
+                previous_component_type,
+                ignored_key_indices,
             )
-        if effective.role == ClueRole.KEY and effective.component_type is not None:
-            if effective.component_type == admin_type:
-                return True
-            if effective.component_type in _REACHABLE.get(admin_type, _ALL_TYPES):
-                return True
+            eff_type = effective.component_type
+            if (
+                eff_type is not None
+                and not preview_chain
+                and not _preview_key_has_left_value(
+                    preview_chain,
+                    clues,
+                    i,
+                    effective,
+                    raw_text,
+                    stream,
+                    locale,
+                    eff_type,
+                    ignored_key_indices,
+                )
+            ):
+                ignored_key_indices.add(i)
+                continue
+        if preview_chain and not _preview_chain_can_accept(preview_chain, effective, stream):
+            break
         preview_chain.append(effective)
-    return False
+    component_type = _preview_first_component_type_from_chain(preview_chain, previous_component_type)
+    if component_type is None:
+        return False
+    if component_type == admin_type:
+        return True
+    return component_type in _VALID_SUCCESSORS.get(admin_type, _ALL_TYPES)
 
 
 # ---------------------------------------------------------------------------
@@ -1375,6 +1452,9 @@ class AddressStack(BaseStack):
             result = self._handle_address_clue(state, clue, raw_text, stream, locale, sub_clues, index)
             if result is _SENTINEL_STOP:
                 break
+            if result is _SENTINEL_IGNORE:
+                index += 1
+                continue
             state.last_consumed = clue
             index += 1
 
@@ -1474,6 +1554,9 @@ class AddressStack(BaseStack):
             result = self._handle_address_clue(state, clue, raw_text, stream, locale, clues, index)
             if result is _SENTINEL_STOP:
                 break
+            if result is _SENTINEL_IGNORE:
+                index += 1
+                continue
 
             state.last_consumed = clue
             index += 1
@@ -1503,13 +1586,8 @@ class AddressStack(BaseStack):
 
         # digit_tail 三路分支。
         tail = _analyze_digit_tail(state.components, stream, clues, index)
-        if tail is None:
+        if tail is None or tail.followed_by_address_key:
             pass
-        elif tail.followed_by_address_key:
-            for tc in tail.new_components:
-                state.components.append(tc)
-            consumed_ids |= tail.consumed_clue_ids
-            _mark_consumed_indices(state, tail.consumed_clue_indices)
         else:
             conservative_run = self._build_address_run_from_state(
                 state, consumed_ids, handled_labels, locale, index,
@@ -1656,16 +1734,6 @@ class AddressStack(BaseStack):
         # ---- KEY ----
         if effective_clue.role == ClueRole.KEY:
             state.pending_comma_value_right_scan = False
-            # KEY 仍走段规则（admin 后置前瞻仅作用于 VALUE 分支）。
-            if state.components or state.deferred_chain:
-                if (
-                    not state.pending_comma_first_component
-                    and not state.segment_state.comma_tail_active
-                    and not _segment_admit(state, comp_type)
-                ):
-                    _flush_chain(state, raw_text, stream, locale, clues=clues, clue_index=clue_index)
-                    state.split_at = effective_clue.start
-                    return _SENTINEL_STOP
             if state.deferred_chain and _chain_can_accept(state, effective_clue, stream):
                 _remove_last_value_suspect(state, effective_clue, stream)
                 _append_deferred(state, clue_index, effective_clue, record_suspect=False)
@@ -1684,82 +1752,47 @@ class AddressStack(BaseStack):
                     state.split_at = effective_clue.start
                     return _SENTINEL_STOP
                 _reroute_pending_community_poi_to_subdistrict(state)
-                if (
-                    state.components
-                    and not state.pending_comma_first_component
-                    and not state.segment_state.comma_tail_active
-                    and not _segment_admit(state, comp_type)
-                ):
-                    state.split_at = effective_clue.start
-                    return _SENTINEL_STOP
 
-            # 链空 → 尝试构建独立 KEY component。
-            # 栈上尚无已提交组件时：左扩得到的前缀 value 只入 deferred_chain，不立刻 commit，
-            # 以便右侧严格相邻的 KEY 走 KEY→KEY 传导（flush 时由最后一个 KEY 定 comp_type）。
-            expand_defer: int | None = None
-            if not state.components:
-                expand_defer = self._key_left_expand_start_if_deferrable(
-                    raw_text,
-                    effective_clue,
-                    clue_index,
-                    locale,
-                    comp_type,
-                )
+            # KEY 一律先尝试走链式传导；只有整条 VALUE→VALUE→KEY→KEY 结束后才提交 component。
+            expand_defer = _state_key_left_expand_start_if_deferrable(
+                state,
+                clues,
+                clue_index,
+                effective_clue,
+                raw_text,
+                stream,
+                locale,
+                comp_type,
+            )
             if expand_defer is not None:
                 state.chain_left_anchor = expand_defer
                 _append_deferred(state, clue_index, effective_clue, record_suspect=False)
                 state.last_end = max(state.last_end, effective_clue.end)
                 return None
 
-            component = self._build_key_component(
-                raw_text,
-                effective_clue,
-                comp_type,
-                clue_index,
-                locale,
-                component_start=state.last_end,
-                allow_left_expand=not state.components,
-            )
-            if component is not None:
-                if not _commit(state, component):
-                    return _SENTINEL_STOP
-            else:
-                # 空 value → KEY 作为新 chain 的种子。
-                _append_deferred(state, clue_index, effective_clue, record_suspect=False)
-            state.last_end = max(state.last_end, effective_clue.end)
-            return None
+            if effective_clue.text.lower() in _PREFIX_EN_KEYWORDS:
+                component = self._build_key_component(
+                    raw_text,
+                    effective_clue,
+                    comp_type,
+                    clue_index,
+                    locale,
+                    component_start=state.last_end,
+                    allow_left_expand=False,
+                )
+                if component is not None:
+                    if not _commit(state, component):
+                        return _SENTINEL_STOP
+                state.last_end = max(state.last_end, effective_clue.end)
+                return None
+
+            # 左侧无值的 KEY 退化为普通文本，不参与地址状态机。
+            state.ignored_address_key_indices.add(clue_index)
+            return _SENTINEL_IGNORE
 
         return None
 
     # ------------------------------------------------- build helpers
-
-    def _key_left_expand_start_if_deferrable(
-        self,
-        raw_text: str,
-        clue: Clue,
-        clue_index: int,
-        locale: str,
-        comp_type: AddressComponentType,
-    ) -> int | None:
-        """若 KEY 的 value 在左侧且可规范化非空，返回左扩起点供先入链 defer；否则 None。
-
-        仅用于栈起始（调用方保证尚无已提交组件）。英文前缀类（value 在 KEY 右侧）不参与 defer。"""
-        if clue.text.lower() in _PREFIX_EN_KEYWORDS:
-            return None
-        floor = _left_address_floor(self.context.clues, clue_index)
-        prev_key_end = _left_prev_address_key_end(self.context.clues, clue_index)
-        if prev_key_end is not None:
-            floor = max(floor, prev_key_end)
-        if locale.startswith("en"):
-            expand_start = _left_expand_en_word(raw_text, clue.start, floor)
-        else:
-            expand_start = _left_expand_zh(
-                raw_text, clue.start, floor, self.context.stream, comp_type
-            )
-        value = _normalize_address_value(comp_type, raw_text[expand_start : clue.start])
-        if not value:
-            return None
-        return expand_start
 
     def _build_key_component(
         self,
@@ -2045,6 +2078,7 @@ def _preview_comma_tail_first_component_type(
 ) -> tuple[AddressComponentType | None, bool]:
     """预演逗号尾首段，返回首个 component 类型及是否需要保持链打开等待 KEY。"""
     chain: list[Clue] = []
+    ignored_key_indices: set[int] = set()
     for index in range(start_index, len(clues)):
         clue = clues[index]
         if is_break_clue(clue):
@@ -2068,7 +2102,26 @@ def _preview_comma_tail_first_component_type(
                 stream,
                 locale,
                 previous_component_type,
+                ignored_key_indices,
             )
+            eff_type = effective.component_type
+            if (
+                eff_type is not None
+                and not chain
+                and not _preview_key_has_left_value(
+                    chain,
+                    clues,
+                    index,
+                    effective,
+                    raw_text,
+                    stream,
+                    locale,
+                    eff_type,
+                    ignored_key_indices,
+                )
+            ):
+                ignored_key_indices.add(index)
+                continue
         if chain and not _preview_chain_can_accept(chain, effective, stream):
             break
         chain.append(effective)
@@ -2192,10 +2245,18 @@ def _left_address_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
     return 0
 
 
-def _left_prev_address_key_end(clues: tuple[Clue, ...], clue_index: int) -> int | None:
+def _left_prev_address_key_end(
+    clues: tuple[Clue, ...],
+    clue_index: int,
+    *,
+    ignored_key_indices: set[int] | None = None,
+) -> int | None:
     """返回当前 clue 左侧最近 ADDRESS KEY 的 end。"""
+    ignored = ignored_key_indices or set()
     for index in range(clue_index - 1, -1, -1):
         clue = clues[index]
+        if index in ignored:
+            continue
         if clue.attr_type == PIIAttributeType.ADDRESS and clue.role == ClueRole.KEY:
             return clue.end
     return None
