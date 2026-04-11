@@ -8,6 +8,16 @@ from privacyguard.infrastructure.pii.detector.models import AddressComponentType
 
 
 @dataclass(frozen=True, slots=True)
+class AddressSuspectEntry:
+    """地址组件上的疑似行政子组件。"""
+
+    level: str
+    value: str
+    key: str = ""
+    origin: str = "value"
+
+
+@dataclass(frozen=True, slots=True)
 class AddressComponent:
     """地址组件。
 
@@ -23,4 +33,4 @@ class AddressComponent:
     key: str | list[str]
     is_detail: bool = False
     raw_chain: tuple[Clue, ...] = ()
-    suspected: dict[str, str] = field(default_factory=dict)
+    suspected: tuple[AddressSuspectEntry, ...] = field(default_factory=tuple)

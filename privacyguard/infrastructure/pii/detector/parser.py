@@ -30,6 +30,10 @@ from privacyguard.infrastructure.pii.detector.models import (
 from privacyguard.infrastructure.pii.detector.stacks import BaseStack, StackManager, StackRun, get_stack_spec
 from privacyguard.utils.normalized_pii import normalize_pii, normalized_primary_text, same_entity
 
+_CandidateIdentityKey = tuple[PIIAttributeType, int, int, int, int, str]
+_FrozenMetadataItems = tuple[tuple[str, tuple[str, ...]], ...]
+_AddressNormalizedCacheSignature = tuple[str, _FrozenMetadataItems]
+
 
 def _is_control_clue(clue: Clue) -> bool:
     """控制 clue 不建 stack，只供 stack 扩张时观察。"""
@@ -65,6 +69,31 @@ def _copy_metadata(metadata: Mapping[str, object]) -> dict[str, list[str]]:
     for key, value in metadata.items():
         copied[key] = list(_metadata_values(value))
     return copied
+
+
+def _freeze_metadata_items(metadata: Mapping[str, object]) -> _FrozenMetadataItems:
+    """将 metadata 冻结为稳定键，便于本轮 parse 内复用结果。"""
+    return tuple(
+        (key, tuple(_metadata_values(metadata[key])))
+        for key in sorted(metadata)
+    )
+
+
+def _candidate_identity_key(candidate: CandidateDraft) -> _CandidateIdentityKey:
+    """构造候选查重键。"""
+    return (
+        candidate.attr_type,
+        candidate.unit_start,
+        candidate.unit_end,
+        candidate.start,
+        candidate.end,
+        candidate.text,
+    )
+
+
+def _address_normalized_cache_signature(candidate: CandidateDraft) -> _AddressNormalizedCacheSignature:
+    """构造地址归一化缓存签名。"""
+    return (candidate.text, _freeze_metadata_items(candidate.metadata))
 
 
 def _merge_address_absorb_metadata(
@@ -124,6 +153,8 @@ class StackContext:
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     handled_label_clue_ids: set[str] = field(default_factory=set)
+    candidate_identity_index: dict[_CandidateIdentityKey, CandidateDraft] = field(default_factory=dict)
+    address_normalized_cache: dict[int, tuple[_AddressNormalizedCacheSignature, object]] = field(default_factory=dict)
 
 
 class StreamParser:
@@ -371,7 +402,7 @@ class StreamParser:
         context.handled_label_clue_ids |= run.handled_label_clue_ids
 
     def _commit_candidate(self, context: StackContext, candidate: CandidateDraft) -> None:
-        existing = self._find_identical(context.candidates, candidate)
+        existing = self._find_identical(context, candidate)
         if existing is not None:
             existing.metadata = merge_metadata(existing.metadata, candidate.metadata)
             existing.label_clue_ids |= candidate.label_clue_ids
@@ -380,6 +411,7 @@ class StreamParser:
         if self._try_absorb_adjacent_address_candidate(context, candidate):
             return
         context.candidates.append(candidate)
+        context.candidate_identity_index[_candidate_identity_key(candidate)] = candidate
         context.claims.append(
             Claim(
                 start=candidate.start,
@@ -396,18 +428,21 @@ class StreamParser:
     # 工具方法
     # ------------------------------------------------------------------
 
-    def _find_identical(self, candidates: list[CandidateDraft], candidate: CandidateDraft) -> CandidateDraft | None:
-        for existing in candidates:
-            if (
-                existing.attr_type == candidate.attr_type
-                and existing.unit_start == candidate.unit_start
-                and existing.unit_end == candidate.unit_end
-                and existing.start == candidate.start
-                and existing.end == candidate.end
-                and existing.text == candidate.text
-            ):
-                return existing
-        return None
+    def _find_identical(self, context: StackContext, candidate: CandidateDraft) -> CandidateDraft | None:
+        return context.candidate_identity_index.get(_candidate_identity_key(candidate))
+
+    def _get_cached_address_normalized(self, context: StackContext, candidate: CandidateDraft) -> object:
+        signature = _address_normalized_cache_signature(candidate)
+        cached = context.address_normalized_cache.get(id(candidate))
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        normalized = normalize_pii(
+            PIIAttributeType.ADDRESS,
+            candidate.text,
+            metadata=candidate.metadata,
+        )
+        context.address_normalized_cache[id(candidate)] = (signature, normalized)
+        return normalized
 
     def _try_absorb_adjacent_address_candidate(
         self,
@@ -428,16 +463,9 @@ class StreamParser:
         if not _is_punct_or_space_only(gap_text):
             return False
 
-        previous_normalized = normalize_pii(
-            PIIAttributeType.ADDRESS,
-            previous.text,
-            metadata=previous.metadata,
-        )
-        candidate_normalized = normalize_pii(
-            PIIAttributeType.ADDRESS,
-            candidate.text,
-            metadata=candidate.metadata,
-        )
+        previous_key = _candidate_identity_key(previous)
+        previous_normalized = self._get_cached_address_normalized(context, previous)
+        candidate_normalized = self._get_cached_address_normalized(context, candidate)
         previous_primary = normalized_primary_text(previous_normalized)
         candidate_primary = normalized_primary_text(candidate_normalized)
         if not previous_primary or not candidate_primary or previous_primary == candidate_primary:
@@ -467,6 +495,7 @@ class StreamParser:
         previous.canonical_text = longer.canonical_text
         previous.claim_strength = longer.claim_strength
         previous.metadata = _merge_address_absorb_metadata(longer.metadata, shorter.metadata)
+        context.address_normalized_cache.pop(id(previous), None)
         previous.label_clue_ids |= candidate.label_clue_ids
         previous.label_driven = previous.label_driven or candidate.label_driven
         previous.block_ids = longer.block_ids
@@ -482,6 +511,8 @@ class StreamParser:
         claim.end = previous.end
         claim.strength = previous.claim_strength
         claim.owner_stack_id = f"{previous.attr_type.value}:{previous.start}:{previous.end}"
+        context.candidate_identity_index.pop(previous_key, None)
+        context.candidate_identity_index[_candidate_identity_key(previous)] = previous
         context.handled_label_clue_ids |= candidate.label_clue_ids
         context.committed_until = max(context.committed_until, previous.unit_end)
         return True

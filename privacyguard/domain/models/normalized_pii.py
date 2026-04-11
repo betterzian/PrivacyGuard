@@ -7,6 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from privacyguard.domain.enums import PIIAttributeType
 
 
+class NormalizedAddressSuspectEntry(BaseModel):
+    """地址组件上的疑似行政子组件。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    level: str
+    value: str
+    key: str = ""
+    origin: str
+
+
 class NormalizedAddressComponent(BaseModel):
     """地址组件级归一结果。"""
 
@@ -15,7 +26,7 @@ class NormalizedAddressComponent(BaseModel):
     component_type: str
     value: str | tuple[str, ...]
     key: str | tuple[str, ...] = ""
-    suspected: dict[str, str] = Field(default_factory=dict)
+    suspected: tuple[NormalizedAddressSuspectEntry, ...] = Field(default_factory=tuple)
 
 
 class NormalizedPII(BaseModel):
@@ -39,4 +50,8 @@ class NormalizedPII(BaseModel):
     ordered_components: tuple[NormalizedAddressComponent, ...] = Field(default_factory=tuple)
 
 
-__all__ = ["NormalizedAddressComponent", "NormalizedPII"]
+__all__ = [
+    "NormalizedAddressComponent",
+    "NormalizedAddressSuspectEntry",
+    "NormalizedPII",
+]

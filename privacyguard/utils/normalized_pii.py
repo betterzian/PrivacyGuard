@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.domain.models.normalized_pii import NormalizedAddressComponent, NormalizedPII
+from privacyguard.domain.models.normalized_pii import (
+    NormalizedAddressComponent,
+    NormalizedAddressSuspectEntry,
+    NormalizedPII,
+)
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_company_suffixes,
     load_en_address_suffix_strippers,
@@ -356,6 +361,37 @@ def _component_value_text(component: NormalizedAddressComponent | None) -> str:
     return str(component.value or "").strip()
 
 
+def _component_surface_text(component: NormalizedAddressComponent | None) -> str:
+    """返回组件的整体文本。"""
+    if component is None:
+        return ""
+    value_text = _component_value_text(component)
+    if isinstance(component.key, tuple):
+        key_text = "".join(str(item).strip() for item in component.key if str(item).strip())
+    else:
+        key_text = str(component.key or "").strip()
+    return f"{value_text}{key_text}".strip()
+
+
+def _suspect_surface_text(entry: NormalizedAddressSuspectEntry) -> str:
+    """返回 suspect 的比较文本。"""
+    if entry.origin == "key":
+        return f"{entry.value}{entry.key}".strip()
+    return entry.value.strip()
+
+
+def _suspect_entry_by_level(
+    component: NormalizedAddressComponent | None,
+    level: str,
+) -> NormalizedAddressSuspectEntry | None:
+    if component is None:
+        return None
+    for entry in component.suspected:
+        if entry.level == level:
+            return entry
+    return None
+
+
 def _component_suspected_matches(
     component: NormalizedAddressComponent,
     other_component: NormalizedAddressComponent,
@@ -365,18 +401,27 @@ def _component_suspected_matches(
     if not component.suspected:
         return True
 
-    other_value = _component_value_text(other_component)
-    for level, value in component.suspected.items():
-        peer_suspected = other_component.suspected.get(level)
-        if peer_suspected:
-            return peer_suspected == value
-        if value in other_value:
-            return True
-        other_level_component = _ordered_component_by_type(other_normalized, level)
+    other_surface = _component_surface_text(other_component)
+    matched = False
+    for entry in component.suspected:
+        surface = _suspect_surface_text(entry)
+        peer_suspected = _suspect_entry_by_level(other_component, entry.level)
+        if peer_suspected is not None:
+            if _suspect_surface_text(peer_suspected) != surface:
+                return False
+            matched = True
+            continue
+        if surface and surface in other_normalized.raw_text:
+            matched = True
+            continue
+        if surface and surface in other_surface:
+            matched = True
+            continue
+        other_level_component = _ordered_component_by_type(other_normalized, entry.level)
         other_level_value = _component_value_text(other_level_component)
-        if other_level_value and _admin_text_subset_either(value, other_level_value):
-            return True
-    return False
+        if other_level_value and _admin_text_subset_either(entry.value, other_level_value):
+            matched = True
+    return matched
 
 
 def _admin_text_subset_either(a: str, b: str) -> bool:
@@ -471,23 +516,39 @@ def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bo
 _KEYED_NUMBER_TYPES = {"building", "detail", "number"}
 
 
-def _parse_one_component_suspected(segment: str) -> dict[str, str]:
-    """解析单组件 suspected 串：「level:value」以分号分隔。"""
-    d: dict[str, str] = {}
-    for part in str(segment or "").split(";"):
-        part = part.strip()
-        if ":" not in part:
+def _parse_one_component_suspected(segment: str) -> tuple[NormalizedAddressSuspectEntry, ...]:
+    """解析单组件 suspected JSON 串。"""
+    text = str(segment or "").strip()
+    if not text:
+        return ()
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(raw, list):
+        return ()
+    parsed: list[NormalizedAddressSuspectEntry] = []
+    for item in raw:
+        if not isinstance(item, dict):
             continue
-        key, value = part.split(":", 1)
-        key, value = key.strip(), value.strip()
-        if key and value:
-            d[key] = value
-    return d
+        level = str(item.get("level") or "").strip()
+        value = str(item.get("value") or "").strip()
+        key = str(item.get("key") or "").strip()
+        origin = str(item.get("origin") or "").strip()
+        if not level or not value or origin not in {"value", "key"}:
+            continue
+        parsed.append(NormalizedAddressSuspectEntry(
+            level=level,
+            value=value,
+            key=key,
+            origin=origin,
+        ))
+    return tuple(parsed)
 
 
 def _component_suspected_tuple_from_metadata(
     metadata: Mapping[str, object] | None,
-) -> tuple[dict[str, str], ...]:
+) -> tuple[tuple[NormalizedAddressSuspectEntry, ...], ...]:
     """从 address_component_suspected 列表解析，顺序与 detector 组件顺序一致。"""
     if not metadata:
         return ()
@@ -538,7 +599,7 @@ def _ordered_components_from_direct_components(
             component_type=component_type,
             value=value,
             key=key,
-            suspected={},
+            suspected=(),
         ))
     return tuple(ordered)
 
@@ -577,7 +638,7 @@ def _ordered_components_from_metadata(
                 component_type="poi",
                 value=tuple(values) if len(values) > 1 else values[0],
                 key=tuple(keys) if len(keys) > 1 else (keys[0] if keys else ""),
-                suspected=dict(suspected),
+                suspected=tuple(suspected),
             ))
             continue
 
@@ -589,7 +650,7 @@ def _ordered_components_from_metadata(
             component_type=component_type,
             value=value,
             key=key_value,
-            suspected=dict(suspected),
+            suspected=tuple(suspected),
         ))
         trace_index += 1
 

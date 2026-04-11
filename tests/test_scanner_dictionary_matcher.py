@@ -448,3 +448,43 @@ def test_local_dictionary_matcher_cache_rebuilds_when_content_changes():
     assert info.misses == 2
     assert info.hits == 0
 
+
+def test_session_name_dictionary_clues_stay_within_ocr_segment_bounds():
+    session_entry = _entry(
+        text="张明",
+        matched_by="dictionary_session",
+        metadata={"name_component": ["full"]},
+    )
+    prepared = build_ocr_stream(
+        [
+            _ocr_block("联系人 张明", block_id="b1", line_id=0, x=24, y=18),
+            _ocr_block("联系电话 13800138000", block_id="b2", line_id=0, x=244, y=18),
+            _ocr_block("备用邮箱 zhangming@example.com", block_id="b3", line_id=0, x=464, y=18),
+            _ocr_block("收货地址 上海市闵行区", block_id="b4", line_id=0, x=684, y=18),
+            _ocr_block("申长路88号 A座1203", block_id="b5", line_id=1, x=24, y=46),
+            _ocr_block("发票抬头 星云科技有限公司", block_id="b6", line_id=1, x=244, y=46),
+            _ocr_block("历史联系人 张明", block_id="b7", line_id=1, x=464, y=46),
+            _ocr_block("备用号码 13912341234", block_id="b8", line_id=1, x=684, y=46),
+        ]
+    )
+
+    bundle = build_clue_bundle(
+        prepared.stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(session_entry,),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    session_name_clues = [
+        clue
+        for clue in bundle.all_clues
+        if clue.source_kind == "dictionary_session"
+        and clue.attr_type == PIIAttributeType.NAME
+    ]
+    assert [clue.text for clue in session_name_clues] == ["张明", "张明"]
+    for clue in session_name_clues:
+        assert clue.start >= 0
+        assert clue.end <= len(prepared.stream.text)
+        assert prepared.stream.text[clue.start : clue.end] == "张明"
+

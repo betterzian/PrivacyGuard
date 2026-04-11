@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left, bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -192,6 +193,8 @@ class _ScanSegment:
     raw_start: int
     folded_text: str
     gap_offsets: tuple[tuple[int, int], ...] = ()
+    gap_positions: tuple[int, ...] = ()
+    gap_prefix_lengths: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -516,12 +519,20 @@ def _scan_name_dictionary_clues(
     if isinstance(stream, str):
         normalized_stream = build_prompt_stream(stream)
         segment: _ScanSegment | None = None
+        match_text = normalized_stream.text
+        folded_text = normalized_stream.text.lower()
     elif isinstance(stream, _ScanSegment):
         normalized_stream = stream.stream
         segment = stream
+        # segment 模式下必须只在段内文本上匹配；否则得到的是整条流的绝对坐标，
+        # 再交给 `_normalize_segment_ascii_match` 会把 `raw_start` 重复叠加，产生错位甚至越界 span。
+        match_text = stream.text
+        folded_text = stream.folded_text
     else:
         normalized_stream = stream
         segment = None
+        match_text = normalized_stream.text
+        folded_text = normalized_stream.text.lower()
     name_entries = tuple(entry for entry in entries if entry.attr_type == PIIAttributeType.NAME)
     if not name_entries:
         return []
@@ -529,7 +540,7 @@ def _scan_name_dictionary_clues(
     clues: list[Clue] = []
     signature = _dictionary_matcher_signature(name_entries)
     matcher = _session_dictionary_matcher(signature) if source_kind == "session" else _local_dictionary_matcher(signature)
-    matches = matcher.find_matches(normalized_stream.text, folded_text=normalized_stream.text.lower())
+    matches = matcher.find_matches(match_text, folded_text=folded_text)
     matches.sort(key=lambda item: (item.payload.emission_order, item.start, item.end))
     for match in matches:
         if segment is not None:
@@ -1091,14 +1102,21 @@ def _build_segment_with_gap_removal(
 
     pieces: list[str] = []
     gap_offsets: list[tuple[int, int]] = []
+    gap_positions: list[int] = []
+    gap_prefix_lengths: list[int] = []
     piece_cursor = raw_start
     cleaned_pos = 0
+    cumulative_gap_length = 0
     for gs, ge in sorted(gaps_in_range):
         if piece_cursor < gs:
             piece = stream.text[piece_cursor:gs]
             pieces.append(piece)
             cleaned_pos += len(piece)
-        gap_offsets.append((cleaned_pos, ge - gs))
+        gap_length = ge - gs
+        gap_offsets.append((cleaned_pos, gap_length))
+        gap_positions.append(cleaned_pos)
+        cumulative_gap_length += gap_length
+        gap_prefix_lengths.append(cumulative_gap_length)
         piece_cursor = ge
     if piece_cursor < raw_end:
         pieces.append(stream.text[piece_cursor:raw_end])
@@ -1110,13 +1128,28 @@ def _build_segment_with_gap_removal(
         raw_start=raw_start,
         folded_text=seg_text.lower(),
         gap_offsets=tuple(gap_offsets),
+        gap_positions=tuple(gap_positions),
+        gap_prefix_lengths=tuple(gap_prefix_lengths),
     )
+
+
+def _segment_gap_prefix_total(segment: _ScanSegment, cleaned_pos: int, *, include_equal: bool) -> int:
+    """查询 cleaned 位置前累计移除的 gap 长度。"""
+    if not segment.gap_positions:
+        return 0
+    if include_equal:
+        index = bisect_right(segment.gap_positions, cleaned_pos) - 1
+    else:
+        index = bisect_left(segment.gap_positions, cleaned_pos) - 1
+    if index < 0:
+        return 0
+    return segment.gap_prefix_lengths[index]
 
 
 def _segment_span_to_raw(segment: _ScanSegment, start: int, end: int) -> tuple[int, int]:
     """将 segment cleaned text 的 [start, end) 映射回 stream 原始位置。"""
-    start_offset = sum(gl for gp, gl in segment.gap_offsets if gp <= start)
-    end_offset = sum(gl for gp, gl in segment.gap_offsets if gp < end)
+    start_offset = _segment_gap_prefix_total(segment, start, include_equal=True)
+    end_offset = _segment_gap_prefix_total(segment, end, include_equal=False)
     return (segment.raw_start + start + start_offset, segment.raw_start + end + end_offset)
 
 
