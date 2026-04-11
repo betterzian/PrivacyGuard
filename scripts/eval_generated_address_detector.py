@@ -311,7 +311,7 @@ def _write_summary(path: Path, summaries: list[dict[str, object]], cases: list[d
     lines.append("## 数据口径")
     lines.append("")
     lines.append("- 输入来自 `data/generate_data.py` 生成的 `chinese_addresses.txt` / `english_addresses.txt`。")
-    lines.append("- 地址文本不含空格。")
+    lines.append("- 中文地址不含空格；英文地址保留正常单词间单个空格。")
     lines.append("- 中文逆序模板一律带 `,` 或 `，`。")
     lines.append("- 组件正确性按当前 detector 的 `normalized_source.components` 对比生成器真值。")
     lines.append("- 同一输入若返回多个 `address` 候选，既统计“最佳单候选”，也统计“多候选并集”。")

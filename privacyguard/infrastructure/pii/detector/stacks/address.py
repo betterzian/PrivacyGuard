@@ -20,6 +20,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueFamily,
     ClueRole,
     StreamInput,
+    StreamUnit,
 )
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_en_address_keyword_groups,
@@ -61,6 +62,13 @@ _ADMIN_TYPES = frozenset({
     AddressComponentType.CITY,
     AddressComponentType.DISTRICT,
     AddressComponentType.SUBDISTRICT,
+})
+
+# 逗号尾只允许区及以上行政层参与；街道、道路、POI 等一律视为非法回滚。
+_COMMA_TAIL_ADMIN_TYPES = frozenset({
+    AddressComponentType.PROVINCE,
+    AddressComponentType.CITY,
+    AddressComponentType.DISTRICT,
 })
 
 # 行政层级全序：逗号逆序判定时「高于」用（数值大表示层级高）。
@@ -186,6 +194,27 @@ class _CommaSegmentState:
 
 
 @dataclass(slots=True)
+class _CommaTailCheckpoint:
+    """最近一个逗号左侧的可回滚快照。"""
+
+    comma_pos: int
+    components: list[_DraftComponent]
+    occupancy: dict[AddressComponentType, int]
+    component_counts: dict[AddressComponentType, int]
+    segment_state: _CommaSegmentState
+    last_component_type: AddressComponentType | None
+    last_end: int
+    committed_clue_ids: set[str]
+    consumed_clue_indices: set[int]
+    last_consumed_clue_index: int
+    pending_community_poi_index: int | None
+    evidence_count: int
+    suppress_challenger_clue_ids: set[str]
+    extra_consumed_clue_ids: set[str]
+    absorbed_digit_unit_end: int
+
+
+@dataclass(slots=True)
 class _ParseState:
     """run_with_clues 的可变解析状态。"""
 
@@ -203,6 +232,7 @@ class _ParseState:
     absorbed_digit_unit_end: int = 0
     last_component_type: AddressComponentType | None = None
     committed_clue_ids: set[str] = field(default_factory=set)
+    extra_consumed_clue_ids: set[str] = field(default_factory=set)
     consumed_clue_indices: set[int] = field(default_factory=set)
     last_consumed_clue_index: int = -1
     #: NAME/ORG 在「上一 ADDRESS clue 与下一 ADDRESS clue」unit 间距 ≤6 内被跨过时登记，供 StackRun 告知 parser 勿作挑战栈。
@@ -216,6 +246,8 @@ class _ParseState:
     component_counts: dict[AddressComponentType, int] = field(default_factory=dict)
     #: 最近一个被临时当成 poi 的“社区”组件索引；等 road 到来时再判是否回退为 subdistrict。
     pending_community_poi_index: int | None = None
+    #: 最近一个逗号左侧的回滚快照；仅在逗号尾行政链中使用。
+    comma_tail_checkpoint: _CommaTailCheckpoint | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +272,145 @@ def _clue_unit_gap(left: Clue, right: Clue, stream: StreamInput | None = None) -
                 count += 1
         return count
     return max(0, right.unit_start - left.unit_end)
+
+
+def _gap_unit_is_digit_primary(unit: StreamUnit) -> bool:
+    """KEY→KEY 间距判断：digit_run 与纯数字的 alnum_run 视为 digit 类 unit。"""
+    if unit.kind == "digit_run":
+        return True
+    if unit.kind == "alnum_run":
+        return bool(unit.text) and unit.text.isdigit()
+    return False
+
+
+def _key_key_chain_gap_allowed(left: Clue, right: Clue, stream: StreamInput | None) -> bool:
+    """KEY→KEY 是否允许挂链：gap=0；或 gap=1 且中间唯一的非 space unit 非 digit 类。
+
+    无 stream.units 时无法按字符 unit 判定 digit，gap=1 一律不允许。
+    """
+    gap = _clue_unit_gap(left, right, stream)
+    if gap == 0:
+        return True
+    if gap != 1:
+        return False
+    if stream is None or not stream.units:
+        return False
+    gap_start = left.unit_end
+    gap_end = right.unit_start
+    non_space = [
+        stream.units[ui]
+        for ui in range(gap_start, min(gap_end, len(stream.units)))
+        if stream.units[ui].kind != "space"
+    ]
+    if len(non_space) != 1:
+        return False
+    return not _gap_unit_is_digit_primary(non_space[0])
+
+
+def _clone_component_value(value: str | list[str]) -> str | list[str]:
+    if isinstance(value, list):
+        return list(value)
+    return value
+
+
+def _clone_component_key(key: str | list[str]) -> str | list[str]:
+    if isinstance(key, list):
+        return list(key)
+    return key
+
+
+def _clone_draft_component(component: _DraftComponent) -> _DraftComponent:
+    """复制组件，避免回滚快照与实时状态共享可变容器。"""
+    return _DraftComponent(
+        component_type=component.component_type,
+        start=component.start,
+        end=component.end,
+        value=_clone_component_value(component.value),
+        key=_clone_component_key(component.key),
+        is_detail=component.is_detail,
+        raw_chain=list(component.raw_chain),
+        suspected=dict(component.suspected),
+        clue_ids=set(component.clue_ids),
+        clue_indices=set(component.clue_indices),
+        suspect_demoted=component.suspect_demoted,
+    )
+
+
+def _make_comma_tail_checkpoint(
+    state: _ParseState,
+    comma_pos: int,
+) -> _CommaTailCheckpoint:
+    """记录最近一个逗号左侧的解析快照。"""
+    return _CommaTailCheckpoint(
+        comma_pos=comma_pos,
+        components=[_clone_draft_component(component) for component in state.components],
+        occupancy=dict(state.occupancy),
+        component_counts=dict(state.component_counts),
+        segment_state=replace(state.segment_state),
+        last_component_type=state.last_component_type,
+        last_end=state.last_end,
+        committed_clue_ids=set(state.committed_clue_ids),
+        consumed_clue_indices=set(state.consumed_clue_indices),
+        last_consumed_clue_index=state.last_consumed_clue_index,
+        pending_community_poi_index=state.pending_community_poi_index,
+        evidence_count=state.evidence_count,
+        suppress_challenger_clue_ids=set(state.suppress_challenger_clue_ids),
+        extra_consumed_clue_ids=set(state.extra_consumed_clue_ids),
+        absorbed_digit_unit_end=state.absorbed_digit_unit_end,
+    )
+
+
+def _restore_comma_tail_checkpoint(
+    state: _ParseState,
+    checkpoint: _CommaTailCheckpoint,
+) -> None:
+    """回滚到最近一个逗号左侧状态。"""
+    state.components = [_clone_draft_component(component) for component in checkpoint.components]
+    state.occupancy = dict(checkpoint.occupancy)
+    state.component_counts = dict(checkpoint.component_counts)
+    state.deferred_chain.clear()
+    state.suspect_chain.clear()
+    state.chain_left_anchor = None
+    state.segment_state = replace(checkpoint.segment_state)
+    state.last_component_type = checkpoint.last_component_type
+    state.last_end = checkpoint.last_end
+    state.committed_clue_ids = set(checkpoint.committed_clue_ids)
+    state.extra_consumed_clue_ids = set(checkpoint.extra_consumed_clue_ids)
+    state.consumed_clue_indices = set(checkpoint.consumed_clue_indices)
+    state.last_consumed_clue_index = checkpoint.last_consumed_clue_index
+    state.suppress_challenger_clue_ids = set(checkpoint.suppress_challenger_clue_ids)
+    state.value_char_end_override.clear()
+    state.pending_comma_value_right_scan = False
+    state.pending_comma_first_component = False
+    state.pending_community_poi_index = checkpoint.pending_community_poi_index
+    state.evidence_count = checkpoint.evidence_count
+    state.absorbed_digit_unit_end = checkpoint.absorbed_digit_unit_end
+    state.comma_tail_checkpoint = None
+
+
+def _rollback_invalid_comma_tail_component(
+    state: _ParseState,
+    component: _DraftComponent,
+) -> bool:
+    """逗号尾一旦落到区以下层级，就回滚到最近逗号左侧并停止。"""
+    if not state.segment_state.comma_tail_active:
+        return False
+    if component.component_type in _COMMA_TAIL_ADMIN_TYPES:
+        return False
+    checkpoint = state.comma_tail_checkpoint
+    if checkpoint is None:
+        state.deferred_chain.clear()
+        state.suspect_chain.clear()
+        state.chain_left_anchor = None
+        state.value_char_end_override.clear()
+        state.pending_comma_value_right_scan = False
+        state.pending_comma_first_component = False
+        state.segment_state.reset()
+        state.split_at = component.start
+        return True
+    _restore_comma_tail_checkpoint(state, checkpoint)
+    state.split_at = checkpoint.comma_pos
+    return True
 
 
 def _en_prefix_keywords() -> set[str]:
@@ -270,7 +441,7 @@ def _chain_can_accept(state: _ParseState, clue: Clue, stream: StreamInput) -> bo
     只允许三种链接：
     1. VALUE→VALUE: gap ≤ 1 non-space unit。
     2. VALUE→KEY: gap ≤ 1 non-space unit。
-    3. KEY→KEY: gap 必须为 0（严格相邻）。
+    3. KEY→KEY: gap=0；或 gap=1 且中间唯一的非 space unit 非 digit 类。
 
     KEY→VALUE 不允许继续挂链。
     """
@@ -281,7 +452,7 @@ def _chain_can_accept(state: _ParseState, clue: Clue, stream: StreamInput) -> bo
     if last.role == ClueRole.KEY and clue.role == ClueRole.VALUE:
         return False
     if last.role == ClueRole.KEY and clue.role == ClueRole.KEY:
-        return gap == 0
+        return _key_key_chain_gap_allowed(last, clue, stream)
     if last.role == ClueRole.VALUE and clue.role == ClueRole.KEY:
         return gap <= 6
     return gap <= 1
@@ -699,7 +870,8 @@ def _flush_chain_as_standalone(state: _ParseState, raw_text: str) -> None:
             clue_ids={clue.clue_id},
             clue_indices={clue_index},
         )
-        _commit(state, component)
+        if not _commit(state, component):
+            break
 
 
 def _apply_comma_tail_segment_after_commit(
@@ -730,8 +902,10 @@ def _apply_comma_tail_segment_after_commit(
     seg.group_last_type = ct
 
 
-def _commit(state: _ParseState, component: _DraftComponent) -> None:
+def _commit(state: _ParseState, component: _DraftComponent) -> bool:
     """提交 component 到 state，更新 occupancy / segment / evidence。"""
+    if _rollback_invalid_comma_tail_component(state, component):
+        return False
     comp_type = component.component_type
     if comp_type == AddressComponentType.POI:
         committed = _commit_poi(state, component)
@@ -759,6 +933,7 @@ def _commit(state: _ParseState, component: _DraftComponent) -> None:
     _prune_prior_component_suspects(state, committed)
     if is_fresh_component:
         _mark_pending_community_poi(state, committed)
+    return True
 
 
 def _commit_poi(state: _ParseState, component: _DraftComponent) -> _DraftComponent:
@@ -1228,7 +1403,7 @@ class AddressStack(BaseStack):
             if clue.attr_type != PIIAttributeType.ADDRESS:
                 if _is_absorbable_digit_clue(clue):
                     state.absorbed_digit_unit_end = max(state.absorbed_digit_unit_end, clue.unit_end)
-                    consumed_ids.add(clue.clue_id)
+                    state.extra_consumed_clue_ids.add(clue.clue_id)
                     _mark_consumed_indices(state, {index})
                     index += 1
                     continue
@@ -1284,6 +1459,7 @@ class AddressStack(BaseStack):
             if not state.components:
                 return None
 
+        consumed_ids |= state.extra_consumed_clue_ids
         consumed_ids |= state.committed_clue_ids
         _fixup_suspected_info(state, raw_text)
 
@@ -1504,7 +1680,8 @@ class AddressStack(BaseStack):
                 allow_left_expand=not state.components,
             )
             if component is not None:
-                _commit(state, component)
+                if not _commit(state, component):
+                    return _SENTINEL_STOP
             else:
                 # 空 value → KEY 作为新 chain 的种子。
                 _append_deferred(state, clue_index, effective_clue, record_suspect=False)
@@ -1771,9 +1948,9 @@ def _comma_tail_first_admits(
     prior_max: AddressComponentType | None,
     first_component_type: AddressComponentType,
 ) -> bool:
-    """逗号后首个真正 component 若是行政层，则必须高于逗号前最高行政层。"""
-    if first_component_type not in _ADMIN_RANK:
-        return True
+    """逗号后首个真正 component 必须是区及以上行政层，且要高于左侧最高 admin。"""
+    if first_component_type not in _COMMA_TAIL_ADMIN_TYPES:
+        return False
     if prior_max is None:
         return True
     return _ADMIN_RANK[first_component_type] > _ADMIN_RANK[prior_max]
@@ -1792,7 +1969,7 @@ def _preview_chain_can_accept(
     if last.role == ClueRole.KEY and clue.role == ClueRole.VALUE:
         return False
     if last.role == ClueRole.KEY and clue.role == ClueRole.KEY:
-        return gap == 0
+        return _key_key_chain_gap_allowed(last, clue, stream)
     if last.role == ClueRole.VALUE and clue.role == ClueRole.KEY:
         return gap <= 6
     return gap <= 1
@@ -1920,6 +2097,7 @@ def _comma_tail_prehandle(
         state.split_at = comma_pos
         return _SENTINEL_STOP
 
+    state.comma_tail_checkpoint = _make_comma_tail_checkpoint(state, comma_pos)
     state.segment_state.reset()
     state.segment_state.comma_tail_active = True
     state.pending_comma_value_right_scan = True
@@ -2274,7 +2452,8 @@ def _materialize_digit_tail_before_comma(
     if tail is None or tail.followed_by_address_key:
         return
     for component in tail.new_components:
-        _commit(state, component)
+        if not _commit(state, component):
+            return
 
 
 def _analyze_digit_tail(

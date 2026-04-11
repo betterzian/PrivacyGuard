@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from pathlib import Path
 
 
@@ -79,36 +80,43 @@ EN_LOCATIONS = [
 ]
 
 EN_ROADS = [
-    "MainStreet",
-    "OakAvenue",
-    "PineRoad",
-    "MapleLane",
-    "ElmStreet",
-    "LakeDrive",
-    "RiverRoad",
-    "ParkAvenue",
-    "LincolnAvenue",
-    "OceanDrive",
-    "NorthLakeWay",
-    "QueenAnneAvenue",
+    "Main Street",
+    "Oak Avenue",
+    "Pine Road",
+    "Maple Lane",
+    "Elm Street",
+    "Lake Drive",
+    "River Road",
+    "Park Avenue",
+    "Lincoln Avenue",
+    "Ocean Drive",
+    "North Lake Way",
+    "Queen Anne Avenue",
 ]
 
 EN_POIS = [
-    "SunsetPlaza",
-    "HarborCenter",
-    "LakeViewResidence",
-    "RiverPark",
-    "OakHeights",
-    "MapleEstate",
+    "Sunset Plaza",
+    "Harbor Center",
+    "Lake View Residence",
+    "River Park",
+    "Oak Heights",
+    "Maple Estate",
 ]
 
-EN_BUILDINGS = ["7Building", "BTower", "CBlock", "9House"]
-EN_DETAILS = ["Apt205", "Unit18", "Suite300", "Room1203", "Floor8"]
+EN_BUILDINGS = ["Building 7", "Tower B", "Block C", "House 9"]
+EN_DETAILS = ["Apt 205", "Unit 18", "Suite 300", "Room 1203", "Floor 8"]
 
 
 def _compact(text: str) -> str:
     """移除所有空白，确保生成地址不含空格。"""
     return "".join(str(text).split())
+
+
+def _normalize_en_text(text: str) -> str:
+    """压实英文地址空白，只保留单词间单个空格。"""
+    normalized = re.sub(r"\s+", " ", str(text or "").strip())
+    normalized = re.sub(r"\s*,\s*", ", ", normalized)
+    return normalized.strip()
 
 
 def _cn_record(index: int) -> dict[str, object]:
@@ -230,7 +238,7 @@ def _en_record(index: int) -> dict[str, object]:
     )
 
     if style == "forward_basic":
-        text = f"{number}{road},{location['city']},{location['state']},{zip_code}"
+        text = f"{number} {road}, {location['city']}, {location['state']} {zip_code}"
         components = {
             "city": location["city"],
             "province": location["state"],
@@ -239,7 +247,7 @@ def _en_record(index: int) -> dict[str, object]:
             "detail": zip_code,
         }
     elif style == "forward_with_detail":
-        text = f"{detail},{number}{road},{location['city']},{location['state']},{zip_code}"
+        text = f"{detail}, {number} {road}, {location['city']}, {location['state']} {zip_code}"
         components = {
             "city": location["city"],
             "province": location["state"],
@@ -248,7 +256,7 @@ def _en_record(index: int) -> dict[str, object]:
             "detail": detail,
         }
     elif style == "forward_with_poi":
-        text = f"{number}{road},{poi},{location['city']},{location['state']},{zip_code}"
+        text = f"{number} {road}, {poi}, {location['city']}, {location['state']} {zip_code}"
         components = {
             "city": location["city"],
             "province": location["state"],
@@ -258,7 +266,7 @@ def _en_record(index: int) -> dict[str, object]:
             "detail": zip_code,
         }
     elif style == "forward_with_building":
-        text = f"{number}{road},{building},{location['city']},{location['state']},{zip_code}"
+        text = f"{number} {road}, {building}, {location['city']}, {location['state']} {zip_code}"
         components = {
             "city": location["city"],
             "province": location["state"],
@@ -268,7 +276,7 @@ def _en_record(index: int) -> dict[str, object]:
             "detail": zip_code,
         }
     else:
-        text = f"{detail},{number}{road},{building},{poi},{location['city']},{location['state']},{zip_code}"
+        text = f"{detail}, {number} {road}, {building}, {poi}, {location['city']}, {location['state']} {zip_code}"
         components = {
             "city": location["city"],
             "province": location["state"],
@@ -282,7 +290,7 @@ def _en_record(index: int) -> dict[str, object]:
     return {
         "id": index,
         "locale": "en_us",
-        "text": _compact(text),
+        "text": _normalize_en_text(text),
         "format": style,
         "components": components,
     }
