@@ -1,0 +1,1502 @@
+[
+  {
+    "sample_id": "shard_001_0001",
+    "clean_text": "妈，王伟今天放学后我去接他，地址是北京市朝阳区建国路88号 SOHO现代城，电话18104332181。",
+    "text_with_tags": "妈，【PII:NAME:1】王伟【/PII】今天放学后我去接他，地址是【PII:ADDRESS:1】北京市朝阳区建国路88号 SOHO现代城【/PII】，电话【PII:PHONE:1】18104332181【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0002",
+    "clean_text": "老李，明天见，地址上海市浦东新区世纪大道1号上海中心大厦，我手机号17600133890。",
+    "text_with_tags": "老李，明天见，地址【PII:ADDRESS:1】上海市浦东新区世纪大道1号上海中心大厦【/PII】，我手机号【PII:PHONE:1】17600133890【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0003",
+    "clean_text": "张工，就是林杰上次说的那个项目，地址发给你广东省深圳市南山区高新南一道9号腾讯大厦，电话17386379402。",
+    "text_with_tags": "张工，就是【PII:NAME:1】林杰【/PII】上次说的那个项目，地址发给你【PII:ADDRESS:1】广东省深圳市南山区高新南一道9号腾讯大厦【/PII】，电话【PII:PHONE:1】17386379402【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0004",
+    "clean_text": "客户你好，您的快递送到浙江省杭州市余杭区文一西路969号阿里巴巴总部，收件人王洋，电话18654235116。",
+    "text_with_tags": "客户你好，您的快递送到【PII:ADDRESS:1】浙江省杭州市余杭区文一西路969号阿里巴巴总部【/PII】，收件人【PII:NAME:1】王洋【/PII】，电话【PII:PHONE:1】18654235116【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0005",
+    "clean_text": "师傅，麻烦送到江苏省南京市鼓楼区中山北路101号，收件人是我妈李丽，电话138 4959 3103 记得打这个13849593103。",
+    "text_with_tags": "师傅，麻烦送到【PII:ADDRESS:1】江苏省南京市鼓楼区中山北路101号【/PII】，收件人是我妈【PII:NAME:1】李丽【/PII】，电话138 4959 3103 记得打这个【PII:PHONE:1】13849593103【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0006",
+    "clean_text": "A: 师傅我家在四川省成都市武侯区人民南路四段19号，B: 好的，收件人是谁？A: 陈洋，电话13559407816，别弄错了哦。",
+    "text_with_tags": "A: 师傅我家在【PII:ADDRESS:1】四川省成都市武侯区人民南路四段19号【/PII】，B: 好的，收件人是谁？A: 【PII:NAME:1】陈洋【/PII】，电话【PII:PHONE:1】13559407816【/PII】，别弄错了哦。"
+  },
+  {
+    "sample_id": "shard_001_0007",
+    "clean_text": "客服你好，我的订单号JD123456789，银行卡7393483564208732，身份证后六位是310101197807032182后六位 032182，麻烦退款。",
+    "text_with_tags": "客服你好，我的订单号【PII:ORDER_ID:1】JD123456789【/PII】，银行卡【PII:BANK_CARD:1】7393483564208732【/PII】，身份证后六位是【PII:ID_CARD:1】310101197807032182【/PII】后六位 032182，麻烦退款。"
+  },
+  {
+    "sample_id": "shard_001_0008",
+    "clean_text": "领导，我上周出差去了湖北省武汉市江汉区解放大道688号，用了林娜的卡消费，金额1280元，请帮我报销。",
+    "text_with_tags": "领导，我上周出差去了【PII:ADDRESS:1】湖北省武汉市江汉区解放大道688号【/PII】，用了【PII:NAME:1】林娜【/PII】的卡消费，金额【PII:AMOUNT:1】1280元【/PII】，请帮我报销。"
+  },
+  {
+    "sample_id": "shard_001_0009",
+    "clean_text": "领导，我家孩子生病了，昨天在清华大学附近看病，赵丽就是他妈，得请假去照顾，电话18654235116有事打我。",
+    "text_with_tags": "领导，我家孩子生病了，昨天在【PII:SCHOOL:1】清华大学【/PII】附近看病，【PII:NAME:1】赵丽【/PII】就是他妈，得请假去照顾，电话【PII:PHONE:1】18654235116【/PII】有事打我。"
+  },
+  {
+    "sample_id": "shard_001_0010",
+    "clean_text": "医院预约挂号，我是王芳，身份证440301198205115663，手机17386379402，地址是山东省青岛市市南区香港中路106号。",
+    "text_with_tags": "医院预约挂号，我是【PII:NAME:1】王芳【/PII】，身份证【PII:ID_CARD:1】440301198205115663【/PII】，手机【PII:PHONE:1】17386379402【/PII】，地址是【PII:ADDRESS:1】山东省青岛市市南区香港中路106号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0011",
+    "clean_text": "柜台你好，我要转账到7530011972181144，金额5000，身份证330100199308125874，邮箱lihua73@tencent.com。",
+    "text_with_tags": "柜台你好，我要转账到【PII:BANK_CARD:1】7530011972181144【/PII】，金额5000，身份证【PII:ID_CARD:1】330100199308125874【/PII】，邮箱【PII:EMAIL:1】lihua73@tencent.com【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0012",
+    "clean_text": "房东，合同地址是辽宁省沈阳市和平区和平北大街69号，我叫李丽，电话18654235116，身份证310101198812235632。",
+    "text_with_tags": "房东，合同地址是【PII:ADDRESS:1】辽宁省沈阳市和平区和平北大街69号【/PII】，我叫【PII:NAME:1】李丽【/PII】，电话【PII:PHONE:1】18654235116【/PII】，身份证【PII:ID_CARD:1】310101198812235632【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0013",
+    "clean_text": "师傅你好，我家地址陕西省西安市雁塔区科技二路南段，车牌京A·12345，身份证420100196405029292，银行卡3744701204556110付钱，电话13559407816。",
+    "text_with_tags": "师傅你好，我家地址【PII:ADDRESS:1】陕西省西安市雁塔区科技二路南段【/PII】，车牌【PII:LICENSE_PLATE:1】京A·12345【/PII】，身份证【PII:ID_CARD:1】420100196405029292【/PII】，银行卡【PII:BANK_CARD:1】3744701204556110【/PII】付钱，电话【PII:PHONE:1】13559407816【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0014",
+    "clean_text": "老师好，我是陈洋的爸爸，老陈，孩子在清华大学，地址广东省广州市天河区天河路228号，电话13849593103，请下午接他。",
+    "text_with_tags": "老师好，我是【PII:NAME:1】陈洋【/PII】的爸爸，老陈，孩子在【PII:SCHOOL:1】清华大学【/PII】，地址【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】，电话【PII:PHONE:1】13849593103【/PII】，请下午接他。"
+  },
+  {
+    "sample_id": "shard_001_0015",
+    "clean_text": "明天去福建厦门思明区厦禾路899号附近出差，用刘洋的会员号12345678订票，电话13559407816。",
+    "text_with_tags": "明天去【PII:TRAVEL:1】福建厦门思明区厦禾路899号附近出差【/PII】，用【PII:NAME:1】刘洋【/PII】的会员号【PII:MEMBER_ID:1】12345678【/PII】订票，电话【PII:PHONE:1】13559407816【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0016",
+    "clean_text": "签收单：收件人徐婷，地址湖南省长沙市岳麓区麓谷大道658号，手机号13849593103，快递单号SF987654321。",
+    "text_with_tags": "签收单：收件人【PII:NAME:1】徐婷【/PII】，地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】，手机号【PII:PHONE:1】13849593103【/PII】，快递单号【PII:TRACKING_ID:1】SF987654321【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0017",
+    "clean_text": "小区通知，李浩你的车牌京A·12345停在重庆市渝中区解放碑步行街。",
+    "text_with_tags": "小区通知，【PII:NAME:1】李浩【/PII】你的车牌【PII:LICENSE_PLATE:1】京A·12345【/PII】停在【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0018",
+    "clean_text": "爸，我明天去天津市和平区南京路88号附近，用lihua73@tencent.com订票。",
+    "text_with_tags": "爸，我明天去【PII:TRAVEL:1】天津市和平区南京路88号附近【/PII】，用【PII:EMAIL:1】lihua73@tencent.com【/PII】订票。"
+  },
+  {
+    "sample_id": "shard_001_0019",
+    "clean_text": "A: 借我点钱，B: 好，银行卡0022557941552161，姓名张明。",
+    "text_with_tags": "A: 借我点钱，B: 好，银行卡【PII:BANK_CARD:1】0022557941552161【/PII】，姓名【PII:NAME:1】张明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0020",
+    "clean_text": "工单编号WX987654，我的设备号ABC12345，地址浙江省杭州市西湖区文三路218号，身份证310101198812235632后四位5632。",
+    "text_with_tags": "工单编号【PII:ORDER_ID:1】WX987654【/PII】，我的设备号【PII:MEMBER_ID:1】ABC12345【/PII】，地址【PII:ADDRESS:1】浙江省杭州市西湖区文三路218号【/PII】，身份证【PII:ID_CARD:1】310101198812235632【/PII】后四位5632。"
+  },
+  {
+    "sample_id": "shard_001_0021",
+    "clean_text": "爸，周伟生日是1990-01-01，记得买礼物。",
+    "text_with_tags": "爸，【PII:NAME:1】周伟【/PII】生日是【PII:BIRTHDAY:1】1990-01-01【/PII】，记得买礼物。"
+  },
+  {
+    "sample_id": "shard_001_0022",
+    "clean_text": "老王，聚会地点北京市朝阳区建国路88号 SOHO现代城，联系王明。",
+    "text_with_tags": "老王，聚会地点【PII:ADDRESS:1】北京市朝阳区建国路88号 SOHO现代城【/PII】，联系【PII:NAME:1】王明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0023",
+    "clean_text": "A: 项目文件发你，B: OK，邮箱wangfang497@sina.com，公司阿里巴巴集团。",
+    "text_with_tags": "A: 项目文件发你，B: OK，邮箱【PII:EMAIL:1】wangfang497@sina.com【/PII】，公司【PII:ORG:1】阿里巴巴集团【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0024",
+    "clean_text": "客户你好，您的订单SF987654321已发，地址上海市浦东新区世纪大道1号上海中心大厦，收件赵丽，有问题打17600133890。",
+    "text_with_tags": "客户你好，您的订单【PII:ORDER_ID:1】SF987654321【/PII】已发，地址【PII:ADDRESS:1】上海市浦东新区世纪大道1号上海中心大厦【/PII】，收件【PII:NAME:1】赵丽【/PII】，有问题打【PII:PHONE:1】17600133890【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0025",
+    "clean_text": "我要办卡，身份证440301198205115663，银行卡号7530011972181144，邮箱yangmei89@baidu.com。",
+    "text_with_tags": "我要办卡，身份证【PII:ID_CARD:1】440301198205115663【/PII】，银行卡号【PII:BANK_CARD:1】7530011972181144【/PII】，邮箱【PII:EMAIL:1】yangmei89@baidu.com【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0026",
+    "clean_text": "预约车，地址广东省深圳市南山区高新南一道9号腾讯大厦，老张就是王洋，电话17386379402。",
+    "text_with_tags": "预约车，地址【PII:ADDRESS:1】广东省深圳市南山区高新南一道9号腾讯大厦【/PII】，老张就是【PII:NAME:1】王洋【/PII】，电话【PII:PHONE:1】17386379402【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0027",
+    "clean_text": "注册信息：姓名李丽，地址浙江省杭州市余杭区文一西路969号阿里巴巴总部，身份证330100199308125874，邮箱zhoujie422@bytedance.com。",
+    "text_with_tags": "注册信息：姓名【PII:NAME:1】李丽【/PII】，地址【PII:ADDRESS:1】浙江省杭州市余杭区文一西路969号阿里巴巴总部【/PII】，身份证【PII:ID_CARD:1】330100199308125874【/PII】，邮箱【PII:EMAIL:1】zhoujie422@bytedance.com【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0028",
+    "clean_text": "妈，我在腾讯控股有限公司上班，地址广东省深圳市南山区高新南一道9号腾讯大厦。",
+    "text_with_tags": "妈，我在【PII:COMPANY:1】腾讯控股有限公司【/PII】上班，地址【PII:ADDRESS:1】广东省深圳市南山区高新南一道9号腾讯大厦【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0029",
+    "clean_text": "A: 借你车，B: 好，车牌京A·12345，联系陈静。",
+    "text_with_tags": "A: 借你车，B: 好，车牌【PII:LICENSE_PLATE:1】京A·12345【/PII】，联系【PII:NAME:1】陈静【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0030",
+    "clean_text": "报销单：出差去辽宁省沈阳市和平区和平北大街69号，消费2300元，用6746762120216974。",
+    "text_with_tags": "报销单：出差去【PII:TRAVEL:1】辽宁省沈阳市和平区和平北大街69号【/PII】，消费【PII:AMOUNT:1】2300元【/PII】，用【PII:BANK_CARD:1】6746762120216974【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0031",
+    "clean_text": "快递到陕西省西安市雁塔区科技二路南段，收件杨明，电话135 5940 7816 13559407816。",
+    "text_with_tags": "快递到【PII:ADDRESS:1】陕西省西安市雁塔区科技二路南段【/PII】，收件【PII:NAME:1】杨明【/PII】，电话135 5940 7816【PII:PHONE:1】13559407816【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0032",
+    "clean_text": "班主任，我是赵丽的孩子家长，地址广东省广州市天河区天河路228号，电话13849593103，麻烦接孩子。",
+    "text_with_tags": "班主任，我是【PII:NAME:1】赵丽【/PII】的孩子家长，地址【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】，电话【PII:PHONE:1】13849593103【/PII】，麻烦接孩子。"
+  },
+  {
+    "sample_id": "shard_001_0033",
+    "clean_text": "签收：姓名刘洋，地址福建省厦门市思明区厦禾路899号，单号JD123456789。",
+    "text_with_tags": "签收：姓名【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】，单号【PII:TRACKING_ID:1】JD123456789【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0034",
+    "clean_text": "妈，我公司华为技术有限公司，地址浙江省杭州市余杭区文一西路969号阿里巴巴总部不对，是华为的。",
+    "text_with_tags": "妈，我公司【PII:ORG:1】华为技术有限公司【/PII】，地址【PII:ADDRESS:1】浙江省杭州市余杭区文一西路969号阿里巴巴总部【/PII】不对，是华为的。"
+  },
+  {
+    "sample_id": "shard_001_0035",
+    "clean_text": "A: 项目进度？B: 好了，地址发湖南省长沙市岳麓区麓谷大道658号，联系杨明。",
+    "text_with_tags": "A: 项目进度？B: 好了，地址发【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】，联系【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0036",
+    "clean_text": "这次出差去重庆市渝中区解放碑步行街，用zhoujie422@bytedance.com订票，身份证420100196405029292。",
+    "text_with_tags": "这次出差去【PII:TRAVEL:1】重庆市渝中区解放碑步行街【/PII】，用【PII:EMAIL:1】zhoujie422@bytedance.com【/PII】订票，身份证【PII:ID_CARD:1】420100196405029292【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0037",
+    "clean_text": "转账到0022557941552161，姓名赵浩。",
+    "text_with_tags": "转账到【PII:BANK_CARD:1】0022557941552161【/PII】，姓名【PII:NAME:1】赵浩【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0038",
+    "clean_text": "合同地址是天津市和平区南京路88号，姓名林娜，电话17386379402，身份证310101198812235632。",
+    "text_with_tags": "合同地址是【PII:ADDRESS:1】天津市和平区南京路88号【/PII】，姓名【PII:NAME:1】林娜【/PII】，电话【PII:PHONE:1】17386379402【/PII】，身份证【PII:ID_CARD:1】310101198812235632【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0039",
+    "clean_text": "注册表：姓名赵洋，公司百度在线网络技术有限公司，邮箱wangfang497@sina.com。",
+    "text_with_tags": "注册表：姓名【PII:NAME:1】赵洋【/PII】，公司【PII:ORG:1】百度在线网络技术有限公司【/PII】，邮箱【PII:EMAIL:1】wangfang497@sina.com【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0040",
+    "clean_text": "老朋友，地址发你浙江省杭州市西湖区文三路218号。",
+    "text_with_tags": "老朋友，地址发你【PII:ADDRESS:1】浙江省杭州市西湖区文三路218号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0041",
+    "clean_text": "A: 妈我到了，B: 好，地址是北京市朝阳区建国路88号 SOHO现代城吗？A: 对，姓名王芳。",
+    "text_with_tags": "A: 妈我到了，B: 好，地址是【PII:ADDRESS:1】北京市朝阳区建国路88号 SOHO现代城【/PII】吗？A: 对，姓名【PII:NAME:1】王芳【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0042",
+    "clean_text": "挂号信息，姓名林杰，身份证440301198205115663后四位5663，电话17600133890。",
+    "text_with_tags": "挂号信息，姓名【PII:NAME:1】林杰【/PII】，身份证【PII:ID_CARD:1】440301198205115663【/PII】后四位5663，电话【PII:PHONE:1】17600133890【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0043",
+    "clean_text": "售后，订单JD123456789，银行卡7393483564208732。",
+    "text_with_tags": "售后，订单【PII:ORDER_ID:1】JD123456789【/PII】，银行卡【PII:BANK_CARD:1】7393483564208732【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0044",
+    "clean_text": "师傅，地址上海市浦东新区世纪大道1号上海中心大厦，姓名孙伟，电话17386379402，身份证330100199308125874。",
+    "text_with_tags": "师傅，地址【PII:ADDRESS:1】上海市浦东新区世纪大道1号上海中心大厦【/PII】，姓名【PII:NAME:1】孙伟【/PII】，电话【PII:PHONE:1】17386379402【/PII】，身份证【PII:ID_CARD:1】330100199308125874【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0045",
+    "clean_text": "填表：姓名王洋，学校清华大学，邮箱yangmei89@baidu.com。",
+    "text_with_tags": "填表：姓名【PII:NAME:1】王洋【/PII】，学校【PII:SCHOOL:1】清华大学【/PII】，邮箱【PII:EMAIL:1】yangmei89@baidu.com【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0046",
+    "clean_text": "同事，会议在广东省深圳市南山区高新南一道9号腾讯大厦。",
+    "text_with_tags": "同事，会议在【PII:ADDRESS:1】广东省深圳市南山区高新南一道9号腾讯大厦【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0047",
+    "clean_text": "A: 确认订单，B: 好，姓名李丽，地址浙江省杭州市余杭区文一西路969号阿里巴巴总部。",
+    "text_with_tags": "A: 确认订单，B: 好，姓名【PII:NAME:1】李丽【/PII】，地址【PII:ADDRESS:1】浙江省杭州市余杭区文一西路969号阿里巴巴总部【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0048",
+    "clean_text": "领导，我要请假去接孩子，孩子在清华大学，我是陈洋。",
+    "text_with_tags": "领导，我要请假去接孩子，孩子在【PII:SCHOOL:1】清华大学【/PII】，我是【PII:NAME:1】陈洋【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0049",
+    "clean_text": "转账，银行卡3744701204556110，姓名杨明。",
+    "text_with_tags": "转账，银行卡【PII:BANK_CARD:1】3744701204556110【/PII】，姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0050",
+    "clean_text": "预约，地址江苏省南京市鼓楼区中山北路101号，我是赵丽的孩子家长。",
+    "text_with_tags": "预约，地址【PII:ADDRESS:1】江苏省南京市鼓楼区中山北路101号【/PII】，我是【PII:NAME:1】赵丽【/PII】的孩子家长。"
+  },
+  {
+    "sample_id": "shard_001_0051",
+    "clean_text": "签收信息：收件李丽，地址四川省成都市武侯区人民南路四段19号，单号SF987654321。",
+    "text_with_tags": "签收信息：收件【PII:NAME:1】李丽【/PII】，地址【PII:ADDRESS:1】四川省成都市武侯区人民南路四段19号【/PII】，单号【PII:TRACKING_ID:1】SF987654321【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0052",
+    "clean_text": "妈，公司是京东集团。",
+    "text_with_tags": "妈，公司是【PII:ORG:1】京东集团【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0053",
+    "clean_text": "A: 聚会地址？B: 湖北省武汉市江汉区解放大道688号。",
+    "text_with_tags": "A: 聚会地址？B: 【PII:ADDRESS:1】湖北省武汉市江汉区解放大道688号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0054",
+    "clean_text": "报销，金额4500元，地址山东省青岛市市南区香港中路106号。",
+    "text_with_tags": "报销，金额【PII:AMOUNT:1】4500元【/PII】，地址【PII:ADDRESS:1】山东省青岛市市南区香港中路106号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0055",
+    "clean_text": "配送到辽宁省沈阳市和平区和平北大街69号，收件陈静。",
+    "text_with_tags": "配送到【PII:ADDRESS:1】辽宁省沈阳市和平区和平北大街69号【/PII】，收件【PII:NAME:1】陈静【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0056",
+    "clean_text": "接孩子，家长杨明，地址陕西省西安市雁塔区科技二路南段。",
+    "text_with_tags": "接孩子，家长【PII:NAME:1】杨明【/PII】，地址【PII:ADDRESS:1】陕西省西安市雁塔区科技二路南段【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0057",
+    "clean_text": "姓名赵丽，公司字节跳动有限公司。",
+    "text_with_tags": "姓名【PII:NAME:1】赵丽【/PII】，公司【PII:ORG:1】字节跳动有限公司【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0058",
+    "clean_text": "妈，李娜的电话13559407816。",
+    "text_with_tags": "妈，【PII:NAME:1】李娜【/PII】的电话【PII:PHONE:1】13559407816【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0059",
+    "clean_text": "A: 在哪？B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 在哪？B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0060",
+    "clean_text": "通知，社区活动地址福建省厦门市思明区厦禾路899号，联系人刘洋。",
+    "text_with_tags": "通知，社区活动地址【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】，联系人【PII:NAME:1】刘洋【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0061",
+    "clean_text": "配送，地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "配送，地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0062",
+    "clean_text": "接孩子，杨明家长，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "接孩子，【PII:NAME:1】杨明【/PII】家长，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0063",
+    "clean_text": "姓名赵丽，邮箱zhoujie422@bytedance.com。",
+    "text_with_tags": "姓名【PII:NAME:1】赵丽【/PII】，邮箱【PII:EMAIL:1】zhoujie422@bytedance.com【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0064",
+    "clean_text": "王芳，电话17386379402。",
+    "text_with_tags": "【PII:NAME:1】王芳【/PII】，电话【PII:PHONE:1】17386379402【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0065",
+    "clean_text": "A: 地址？B: 天津市和平区南京路88号。",
+    "text_with_tags": "A: 地址？B: 【PII:ADDRESS:1】天津市和平区南京路88号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0066",
+    "clean_text": "社区活动，地址浙江省杭州市西湖区文三路218号。",
+    "text_with_tags": "社区活动，地址【PII:ADDRESS:1】浙江省杭州市西湖区文三路218号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0067",
+    "clean_text": "地址北京市朝阳区建国路88号 SOHO现代城。",
+    "text_with_tags": "地址【PII:ADDRESS:1】北京市朝阳区建国路88号 SOHO现代城【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0068",
+    "clean_text": "接孙伟，地址上海市浦东新区世纪大道1号上海中心大厦。",
+    "text_with_tags": "接【PII:NAME:1】孙伟【/PII】，地址【PII:ADDRESS:1】上海市浦东新区世纪大道1号上海中心大厦【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0069",
+    "clean_text": "姓名王洋。",
+    "text_with_tags": "姓名【PII:NAME:1】王洋【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0070",
+    "clean_text": "李丽在家。",
+    "text_with_tags": "【PII:NAME:1】李丽【/PII】在家。"
+  },
+  {
+    "sample_id": "shard_001_0071",
+    "clean_text": "A: 地址 B: 广东省深圳市南山区高新南一道9号腾讯大厦。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省深圳市南山区高新南一道9号腾讯大厦【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0072",
+    "clean_text": "活动地址浙江省杭州市余杭区文一西路969号阿里巴巴总部。",
+    "text_with_tags": "活动地址【PII:ADDRESS:1】浙江省杭州市余杭区文一西路969号阿里巴巴总部【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0073",
+    "clean_text": "地址江苏省南京市鼓楼区中山北路101号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】江苏省南京市鼓楼区中山北路101号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0074",
+    "clean_text": "家长陈洋，地址四川省成都市武侯区人民南路四段19号。",
+    "text_with_tags": "家长【PII:NAME:1】陈洋【/PII】，地址【PII:ADDRESS:1】四川省成都市武侯区人民南路四段19号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0075",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0076",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0077",
+    "clean_text": "A: 地址 B: 湖北省武汉市江汉区解放大道688号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】湖北省武汉市江汉区解放大道688号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0078",
+    "clean_text": "活动山东省青岛市市南区香港中路106号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】山东省青岛市市南区香港中路106号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0079",
+    "clean_text": "地址辽宁省沈阳市和平区和平北大街69号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】辽宁省沈阳市和平区和平北大街69号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0080",
+    "clean_text": "家长陈静，地址陕西省西安市雁塔区科技二路南段。",
+    "text_with_tags": "家长【PII:NAME:1】陈静【/PII】，地址【PII:ADDRESS:1】陕西省西安市雁塔区科技二路南段【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0081",
+    "clean_text": "杨明电话13559407816。",
+    "text_with_tags": "【PII:NAME:1】杨明【/PII】电话【PII:PHONE:1】13559407816【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0082",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0083",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0084",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0085",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0086",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0087",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0088",
+    "clean_text": "A: 地址 B: 天津市和平区南京路88号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】天津市和平区南京路88号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0089",
+    "clean_text": "活动浙江省杭州市西湖区文三路218号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】浙江省杭州市西湖区文三路218号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0090",
+    "clean_text": "地址北京市朝阳区建国路88号 SOHO现代城。",
+    "text_with_tags": "地址【PII:ADDRESS:1】北京市朝阳区建国路88号 SOHO现代城【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0091",
+    "clean_text": "家长孙伟，地址上海市浦东新区世纪大道1号上海中心大厦。",
+    "text_with_tags": "家长【PII:NAME:1】孙伟【/PII】，地址【PII:ADDRESS:1】上海市浦东新区世纪大道1号上海中心大厦【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0092",
+    "clean_text": "姓名王洋。",
+    "text_with_tags": "姓名【PII:NAME:1】王洋【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0093",
+    "clean_text": "李丽回家。",
+    "text_with_tags": "【PII:NAME:1】李丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0094",
+    "clean_text": "A: 地址 B: 广东省深圳市南山区高新南一道9号腾讯大厦。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省深圳市南山区高新南一道9号腾讯大厦【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0095",
+    "clean_text": "活动浙江省杭州市余杭区文一西路969号阿里巴巴总部。",
+    "text_with_tags": "活动【PII:ADDRESS:1】浙江省杭州市余杭区文一西路969号阿里巴巴总部【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0096",
+    "clean_text": "地址江苏省南京市鼓楼区中山北路101号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】江苏省南京市鼓楼区中山北路101号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0097",
+    "clean_text": "家长杨明，地址四川省成都市武侯区人民南路四段19号。",
+    "text_with_tags": "家长【PII:NAME:1】杨明【/PII】，地址【PII:ADDRESS:1】四川省成都市武侯区人民南路四段19号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0098",
+    "clean_text": "姓名赵丽。",
+    "text_with_tags": "姓名【PII:NAME:1】赵丽【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0099",
+    "clean_text": "李娜回家。",
+    "text_with_tags": "【PII:NAME:1】李娜【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0100",
+    "clean_text": "A: 地址 B: 湖北省武汉市江汉区解放大道688号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】湖北省武汉市江汉区解放大道688号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0101",
+    "clean_text": "活动山东省青岛市市南区香港中路106号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】山东省青岛市市南区香港中路106号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0102",
+    "clean_text": "地址辽宁省沈阳市和平区和平北大街69号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】辽宁省沈阳市和平区和平北大街69号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0103",
+    "clean_text": "家长陈静，地址陕西省西安市雁塔区科技二路南段。",
+    "text_with_tags": "家长【PII:NAME:1】陈静【/PII】，地址【PII:ADDRESS:1】陕西省西安市雁塔区科技二路南段【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0104",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0105",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0106",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0107",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0108",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0109",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0110",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0111",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0112",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0113",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0114",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0115",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0116",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0117",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0118",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0119",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0120",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0121",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0122",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0123",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0124",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0125",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0126",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0127",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0128",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0129",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0130",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0131",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0132",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0133",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0134",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0135",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0136",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0137",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0138",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0139",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0140",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0141",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0142",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0143",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0144",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0145",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0146",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0147",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0148",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0149",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0150",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0151",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0152",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0153",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0154",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0155",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0156",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0157",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0158",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0159",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0160",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0161",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0162",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0163",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0164",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0165",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0166",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0167",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0168",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0169",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0170",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0171",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0172",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0173",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0174",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0175",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0176",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0177",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0178",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0179",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0180",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0181",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0182",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0183",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0184",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0185",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0186",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0187",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0188",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0189",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0190",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0191",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0192",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0193",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0194",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0195",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0196",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0197",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0198",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0199",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0200",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0201",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0202",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0203",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0204",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0205",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0206",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0207",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0208",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0209",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0210",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0211",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0212",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0213",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0214",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0215",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0216",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0217",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0218",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0219",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0220",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0221",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0222",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0223",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0224",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0225",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0226",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0227",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0228",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0229",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0230",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0231",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0232",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0233",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0234",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0235",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0236",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0237",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0238",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0239",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0240",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0241",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0242",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0243",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0244",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0245",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0246",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0247",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0248",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0249",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0250",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0251",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0252",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0253",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0254",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0255",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0256",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0257",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0258",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0259",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0260",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0261",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0262",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0263",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0264",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0265",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0266",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0267",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0268",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0269",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0270",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0271",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0272",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0273",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0274",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0275",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0276",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0277",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0278",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0279",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0280",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0281",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0282",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0283",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0284",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0285",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0286",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0287",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0288",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0289",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0290",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0291",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0292",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0293",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0294",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0295",
+    "clean_text": "家长刘洋，地址重庆市渝中区解放碑步行街。",
+    "text_with_tags": "家长【PII:NAME:1】刘洋【/PII】，地址【PII:ADDRESS:1】重庆市渝中区解放碑步行街【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0296",
+    "clean_text": "姓名杨明。",
+    "text_with_tags": "姓名【PII:NAME:1】杨明【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0297",
+    "clean_text": "赵丽回家。",
+    "text_with_tags": "【PII:NAME:1】赵丽【/PII】回家。"
+  },
+  {
+    "sample_id": "shard_001_0298",
+    "clean_text": "A: 地址 B: 广东省广州市天河区天河路228号。",
+    "text_with_tags": "A: 地址 B: 【PII:ADDRESS:1】广东省广州市天河区天河路228号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0299",
+    "clean_text": "活动福建省厦门市思明区厦禾路899号。",
+    "text_with_tags": "活动【PII:ADDRESS:1】福建省厦门市思明区厦禾路899号【/PII】。"
+  },
+  {
+    "sample_id": "shard_001_0300",
+    "clean_text": "地址湖南省长沙市岳麓区麓谷大道658号。",
+    "text_with_tags": "地址【PII:ADDRESS:1】湖南省长沙市岳麓区麓谷大道658号【/PII】。"
+  }
+]

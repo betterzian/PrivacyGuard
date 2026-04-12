@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from privacyguard.infrastructure.pii.detector.stacks.address import AddressStack
+from privacyguard.infrastructure.pii.detector.stacks.address import AddressStack, resolve_address_stack_locale
+from privacyguard.infrastructure.pii.detector.stacks.address_base import BaseAddressStack
+from privacyguard.infrastructure.pii.detector.stacks.address_en import EnAddressStack
+from privacyguard.infrastructure.pii.detector.stacks.address_zh import ZhAddressStack
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackContextLike, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.conflict import ConflictOutcome, StackManager
 from privacyguard.infrastructure.pii.detector.stacks.name import NameStack
@@ -12,8 +15,10 @@ from privacyguard.infrastructure.pii.detector.stacks.structured import Structure
 
 __all__ = [
     "AddressStack",
+    "BaseAddressStack",
     "BaseStack",
     "ConflictOutcome",
+    "EnAddressStack",
     "NameStack",
     "OrganizationStack",
     "StackContextLike",
@@ -21,5 +26,7 @@ __all__ = [
     "StackRun",
     "StackSpec",
     "StructuredStack",
+    "ZhAddressStack",
     "get_stack_spec",
+    "resolve_address_stack_locale",
 ]

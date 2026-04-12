@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
@@ -141,6 +141,8 @@ _SINGLE_EVIDENCE_ADMIN = frozenset({
 })
 
 _ALL_TYPES = frozenset(AddressComponentType)
+_SuccessorMap = Mapping[AddressComponentType, frozenset[AddressComponentType]]
+_CommitFn = Callable[["_DraftComponent"], bool]
 _IndexedClue = tuple[int, Clue]
 
 
@@ -546,7 +548,12 @@ def _rollback_invalid_comma_tail_component(state: _ParseState, component: _Draft
     return True
 
 
-def _apply_comma_tail_segment_after_commit(state: _ParseState, committed: _DraftComponent) -> None:
+def _apply_comma_tail_segment_after_commit(
+    state: _ParseState,
+    committed: _DraftComponent,
+    *,
+    valid_successors: _SuccessorMap = _VALID_SUCCESSORS,
+) -> None:
     """逗号尾内：方向在第二个 component 上锁定；非逗号尾只维护 group_last_type。"""
     seg = state.segment_state
     component_type = committed.component_type
@@ -562,16 +569,21 @@ def _apply_comma_tail_segment_after_commit(state: _ParseState, committed: _Draft
         if component_type == first:
             seg.group_last_type = component_type
             return
-        if component_type in _VALID_SUCCESSORS.get(first, _ALL_TYPES):
+        if component_type in valid_successors.get(first, _ALL_TYPES):
             seg.direction = "forward"
-        elif first in _VALID_SUCCESSORS.get(component_type, _ALL_TYPES):
+        elif first in valid_successors.get(component_type, _ALL_TYPES):
             seg.direction = "reverse"
         seg.group_last_type = component_type
         return
     seg.group_last_type = component_type
 
 
-def _segment_admit(state: _ParseState, comp_type: AddressComponentType) -> bool:
+def _segment_admit(
+    state: _ParseState,
+    comp_type: AddressComponentType,
+    *,
+    valid_successors: _SuccessorMap = _VALID_SUCCESSORS,
+) -> bool:
     """按最终 component 类型判断占位与直接后继合法性。"""
     if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
         return False
@@ -584,19 +596,19 @@ def _segment_admit(state: _ParseState, comp_type: AddressComponentType) -> bool:
             first_type = segment.group_first_type
             if comp_type == first_type:
                 return True
-            ok_fwd = comp_type in _VALID_SUCCESSORS.get(first_type, _ALL_TYPES)
-            ok_rev = first_type in _VALID_SUCCESSORS.get(comp_type, _ALL_TYPES)
+            ok_fwd = comp_type in valid_successors.get(first_type, _ALL_TYPES)
+            ok_rev = first_type in valid_successors.get(comp_type, _ALL_TYPES)
             return ok_fwd or ok_rev
         last_type = segment.group_last_type
         if last_type is None:
             return True
         if segment.direction == "forward":
-            return comp_type in _VALID_SUCCESSORS.get(last_type, _ALL_TYPES)
-        return last_type in _VALID_SUCCESSORS.get(comp_type, _ALL_TYPES)
+            return comp_type in valid_successors.get(last_type, _ALL_TYPES)
+        return last_type in valid_successors.get(comp_type, _ALL_TYPES)
 
     if segment.group_last_type is None:
         return True
-    return comp_type in _VALID_SUCCESSORS.get(segment.group_last_type, _ALL_TYPES)
+    return comp_type in valid_successors.get(segment.group_last_type, _ALL_TYPES)
 
 
 def _commit_poi(state: _ParseState, component: _DraftComponent) -> _DraftComponent:
@@ -639,9 +651,14 @@ def _prune_prior_component_suspects(state: _ParseState, new_component: _DraftCom
             prior.suspect_demoted = True
 
 
-def _commit(state: _ParseState, component: _DraftComponent) -> bool:
+def _commit(
+    state: _ParseState,
+    component: _DraftComponent,
+    *,
+    valid_successors: _SuccessorMap = _VALID_SUCCESSORS,
+) -> bool:
     """提交 component 到 state，更新 occupancy / segment / evidence。"""
-    if not _segment_admit(state, component.component_type):
+    if not _segment_admit(state, component.component_type, valid_successors=valid_successors):
         state.split_at = component.start
         return False
     if _rollback_invalid_comma_tail_component(state, component):
@@ -660,7 +677,11 @@ def _commit(state: _ParseState, component: _DraftComponent) -> bool:
     if comp_type in SINGLE_OCCUPY:
         state.occupancy[comp_type] = index
     if is_fresh_component:
-        _apply_comma_tail_segment_after_commit(state, committed)
+        _apply_comma_tail_segment_after_commit(
+            state,
+            committed,
+            valid_successors=valid_successors,
+        )
     else:
         state.segment_state.group_last_type = committed.component_type
     if state.segment_state.comma_tail_active and state.pending_comma_first_component:
@@ -682,10 +703,12 @@ def _flush_chain(
     raw_text: str,
     *,
     normalize_value,
+    commit_component: _CommitFn | None = None,
 ) -> None:
     """冲洗 deferred_chain。若链中含 KEY，用最后一个 KEY 消费；否则逐个 standalone。"""
     if not state.deferred_chain:
         return
+    commit = commit_component or (lambda component: _commit(state, component))
 
     last_key_idx: int | None = None
     for i in range(len(state.deferred_chain) - 1, -1, -1):
@@ -724,9 +747,14 @@ def _flush_chain(
                 clue_ids={clue.clue_id for _, clue in used_entries},
                 clue_indices={index for index, _ in used_entries},
             )
-            _commit(state, component)
+            commit(component)
     else:
-        _flush_chain_as_standalone(state, raw_text, normalize_value=normalize_value)
+        _flush_chain_as_standalone(
+            state,
+            raw_text,
+            normalize_value=normalize_value,
+            commit_component=commit,
+        )
 
     state.deferred_chain.clear()
     state.suspect_chain.clear()
@@ -736,8 +764,15 @@ def _flush_chain(
     _recompute_last_piece_end(state)
 
 
-def _flush_chain_as_standalone(state: _ParseState, raw_text: str, *, normalize_value) -> None:
+def _flush_chain_as_standalone(
+    state: _ParseState,
+    raw_text: str,
+    *,
+    normalize_value,
+    commit_component: _CommitFn | None = None,
+) -> None:
     """链中无 KEY 时，逐个 VALUE 作为独立 component 提交。"""
+    commit = commit_component or (lambda component: _commit(state, component))
     for clue_index, clue in state.deferred_chain:
         comp_type = clue.component_type
         if comp_type is None:
@@ -761,7 +796,7 @@ def _flush_chain_as_standalone(state: _ParseState, raw_text: str, *, normalize_v
             clue_ids={clue.clue_id},
             clue_indices={clue_index},
         )
-        if not _commit(state, component):
+        if not commit(component):
             break
     state.pending_suspects.clear()
     _recompute_last_piece_end(state)
