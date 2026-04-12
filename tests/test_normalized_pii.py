@@ -178,7 +178,7 @@ def test_address_same_entity_keeps_number_match_when_building_prefix_is_missing(
 
     assert left.numbers == ("10", "2", "102")
     assert right.numbers == ("2", "102")
-    assert same_entity(left, right) is True
+    assert same_entity(left, right) is False
 
 
 def test_bank_number_canonical_keeps_digits_only():

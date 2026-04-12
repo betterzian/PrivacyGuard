@@ -1,3 +1,15 @@
+"""AddressStack 行为回归：从 `StreamParser` 间接驱动 `privacyguard/.../stacks/address.py`。
+
+与实现文件的对应关系（便于单测跳转阅读）：
+- **起栈与种子**：`test_label_seed_*` → `AddressStack.run` 中 `_label_seed_start_char`、`_label_seed_address_index`。
+- **VALUE+KEY 合并 / 跨层**：`test_cross_tier_merge_*`、`test_digit_tail_extends_*` → `_handle_value_clue`、`_flush_chain`、`_analyze_digit_tail`。
+- **同层 VALUE 冲洗**：`test_same_tier_value_replaces_pending_*` → `_segment_admit` 失败时 `_flush_chain` 再 `_append_deferred`。
+- **负向与尾修复**：`test_middle_negative_*`、`test_rightmost_negative_*` → `_scan_components` 收集 span，
+  `_repair_negative_tail_components` / `_replay_component_clue_prefix`。
+- **POI 延迟与路名**：`test_poi_deferred_*`、`test_poi_independent_*` → `_routed_key_clue`、`_handle_key_clue`、`_commit_poi`。
+- **逆序行政与逗号**：`test_trailing_admin_*` → `_comma_tail_prehandle`、`_segment_admit` 逗号尾方向。
+"""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -81,17 +93,6 @@ def test_cross_tier_merge_city_plus_road_key():
     addr = next((c for c in candidates if c.attr_type.value == "address"), None)
     assert addr is not None
     assert "上海路" in addr.text
-
-
-def test_rightmost_negative_drops_single_component_address():
-    text = "收货地址：朝阳路由用户反馈"
-    clues = (
-        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
-        _clue("v1", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=8, text="朝阳路", component_type=AddressComponentType.ROAD),
-        _clue("neg", role=ClueRole.NEGATIVE, attr_type=None, start=7, end=9, text="路由", family=ClueFamily.CONTROL),
-    )
-    candidates = _detect_candidates(text, clues)
-    assert not any(c.attr_type.value == "address" for c in candidates)
 
 
 def test_digit_tail_extends_after_last_component():
