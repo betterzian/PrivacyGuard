@@ -252,6 +252,12 @@ class _ParseState:
     last_piece_end: int | None = None
 
 
+_StandaloneAdminResolver = Callable[
+    [_ParseState, tuple[_IndexedClue, ...]],
+    tuple[AddressComponentType, tuple[AddressComponentType, ...]] | None,
+]
+
+
 def _clone_component_value(value: str | list[str]) -> str | list[str]:
     return list(value) if isinstance(value, list) else value
 
@@ -756,6 +762,7 @@ def _flush_chain(
     *,
     normalize_value,
     commit_component: _CommitFn | None = None,
+    resolve_standalone_admin_group: _StandaloneAdminResolver | None = None,
 ) -> None:
     """冲洗 deferred_chain。若链中含 KEY，用最后一个 KEY 消费；否则逐个 standalone。"""
     if not state.deferred_chain:
@@ -806,6 +813,7 @@ def _flush_chain(
             raw_text,
             normalize_value=normalize_value,
             commit_component=commit,
+            resolve_standalone_admin_group=resolve_standalone_admin_group,
         )
 
     state.deferred_chain.clear()
@@ -822,12 +830,81 @@ def _flush_chain_as_standalone(
     *,
     normalize_value,
     commit_component: _CommitFn | None = None,
+    resolve_standalone_admin_group: _StandaloneAdminResolver | None = None,
 ) -> None:
-    """链中无 KEY 时，逐个 VALUE 作为独立 component 提交。"""
+    """链中无 KEY 时，按 standalone 规则提交 VALUE 组件。"""
     commit = commit_component or (lambda component: _commit(state, component))
-    for clue_index, clue in state.deferred_chain:
+    cursor = 0
+    while cursor < len(state.deferred_chain):
+        clue_index, clue = state.deferred_chain[cursor]
         comp_type = clue.component_type
         if comp_type is None:
+            cursor += 1
+            continue
+        if (
+            resolve_standalone_admin_group is not None
+            and clue.role == ClueRole.VALUE
+            and clue.attr_type == PIIAttributeType.ADDRESS
+            and comp_type in _ADMIN_TYPES
+        ):
+            group_end = cursor + 1
+            while (
+                group_end < len(state.deferred_chain)
+                and state.deferred_chain[group_end][1].role == ClueRole.VALUE
+                and state.deferred_chain[group_end][1].attr_type == PIIAttributeType.ADDRESS
+                and state.deferred_chain[group_end][1].component_type in _ADMIN_TYPES
+                and state.deferred_chain[group_end][1].start == clue.start
+                and state.deferred_chain[group_end][1].end == clue.end
+            ):
+                group_end += 1
+            group_entries = tuple(state.deferred_chain[cursor:group_end])
+            resolved_group = resolve_standalone_admin_group(state, group_entries)
+            if resolved_group is None:
+                state.split_at = clue.start
+                break
+            comp_type, available_levels = resolved_group
+            if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
+                state.split_at = clue.start
+                break
+            value_end = max(
+                state.value_char_end_override.get(entry_clue.clue_id, entry_clue.end)
+                for _, entry_clue in group_entries
+            )
+            value = normalize_value(comp_type, raw_text[clue.start:value_end])
+            if value:
+                remaining_levels = {level.value for level in available_levels if level != comp_type}
+                removed_suspects = _remove_pending_suspect_group_by_span(
+                    state,
+                    clue.start,
+                    clue.end,
+                    origin="value",
+                )
+                component = _DraftComponent(
+                    component_type=comp_type,
+                    start=clue.start,
+                    end=value_end,
+                    value=value,
+                    key="",
+                    is_detail=comp_type in _DETAIL_COMPONENTS,
+                    raw_chain=[],
+                    suspected=[
+                        _SuspectEntry(
+                            level=entry.level,
+                            value=entry.value,
+                            key=entry.key,
+                            origin=entry.origin,
+                            start=entry.start,
+                            end=entry.end,
+                        )
+                        for entry in removed_suspects
+                        if entry.level in remaining_levels
+                    ],
+                    clue_ids={entry_clue.clue_id for _, entry_clue in group_entries},
+                    clue_indices={entry_index for entry_index, _ in group_entries},
+                )
+                if not commit(component):
+                    break
+            cursor = group_end
             continue
         if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
             state.split_at = clue.start
@@ -850,6 +927,7 @@ def _flush_chain_as_standalone(
         )
         if not commit(component):
             break
+        cursor += 1
     state.pending_suspects.clear()
     _recompute_last_piece_end(state)
 

@@ -1607,6 +1607,32 @@ def _en_address_key_matcher() -> AhoMatcher:
 def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
     """只去掉完全同义的 clue，不在这里做覆盖裁决。"""
 
+    def _preserve_same_span_zh_admin_value(
+        kept: Clue,
+        current: Clue,
+    ) -> bool:
+        admin_types = {
+            AddressComponentType.PROVINCE,
+            AddressComponentType.CITY,
+            AddressComponentType.DISTRICT,
+            AddressComponentType.SUBDISTRICT,
+        }
+        if (
+            kept.attr_type != PIIAttributeType.ADDRESS
+            or current.attr_type != PIIAttributeType.ADDRESS
+            or kept.role != ClueRole.VALUE
+            or current.role != ClueRole.VALUE
+            or kept.component_type not in admin_types
+            or current.component_type not in admin_types
+            or kept.component_type == current.component_type
+        ):
+            return False
+        if kept.start != current.start or kept.end != current.end:
+            return False
+        if kept.text.lower() != current.text.lower():
+            return False
+        return any("\u4e00" <= char <= "\u9fff" for char in current.text)
+
     seen: set[tuple[object, ...]] = set()
     ordered: list[Clue] = []
     for clue in sorted(
@@ -1638,6 +1664,8 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
         # 典型：district KEY “新区” 覆盖 “区”。
         covered = False
         for kept in reversed(ordered):
+            if _preserve_same_span_zh_admin_value(kept, clue):
+                continue
             if kept.start <= clue.start and clue.end <= kept.end:
                 if (
                     kept.role == clue.role

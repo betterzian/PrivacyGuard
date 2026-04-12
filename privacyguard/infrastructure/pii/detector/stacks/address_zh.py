@@ -23,6 +23,8 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _comma_tail_prehandle,
     _comma_value_scan_upper_bound,
+    _resolve_standalone_admin_value_group,
+    collect_admin_value_span,
     _freeze_key_suspect_from_previous_key,
     _freeze_value_suspect,
     _has_reasonable_successor_key,
@@ -39,6 +41,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _VALID_SUCCESSORS,
     _append_deferred,
     _clear_pending_community_poi,
+    _flush_chain,
     _pending_community_blocks_road,
     _reroute_pending_community_poi_to_subdistrict,
     _segment_admit,
@@ -70,6 +73,15 @@ class ZhAddressStack(BaseAddressStack):
     @property
     def valid_successors(self):
         return _VALID_SUCCESSORS
+
+    def _flush_chain(self, state: _ParseState, *, clue_index: int) -> None:
+        _flush_chain(
+            state,
+            self.context.stream.text,
+            normalize_value=_normalize_address_value,
+            commit_component=lambda component: self._commit_component(state, component),
+            resolve_standalone_admin_group=_resolve_standalone_admin_value_group,
+        )
 
     def _prepare_effective_clue(
         self,
@@ -122,6 +134,17 @@ class ZhAddressStack(BaseAddressStack):
     ) -> object | None:
         raw_text = self.context.stream.text
         stream = self.context.stream
+        admin_span = collect_admin_value_span(clues, clue_index) if comp_type in _ADMIN_TYPES else None
+        trailing_deferred = state.deferred_chain[-1][1] if state.deferred_chain else None
+        same_trailing_admin_span = (
+            admin_span is not None
+            and trailing_deferred is not None
+            and trailing_deferred.role == ClueRole.VALUE
+            and trailing_deferred.attr_type == clue.attr_type
+            and trailing_deferred.component_type in _ADMIN_TYPES
+            and trailing_deferred.start == admin_span.start
+            and trailing_deferred.end == admin_span.end
+        )
 
         if state.pending_comma_value_right_scan:
             state.pending_comma_value_right_scan = False
@@ -137,6 +160,7 @@ class ZhAddressStack(BaseAddressStack):
             and not state.pending_comma_first_component
             and state.deferred_chain
             and state.deferred_chain[-1][1].role == ClueRole.VALUE
+            and not same_trailing_admin_span
         ):
             self._flush_chain(state, clue_index=clue_index)
             if state.split_at is not None:
@@ -147,16 +171,25 @@ class ZhAddressStack(BaseAddressStack):
                 return _SENTINEL_STOP
 
         if state.components or state.deferred_chain:
+            admin_levels = admin_span.levels if admin_span is not None else (comp_type,)
+            admitted_level = comp_type
+            if admin_span is not None:
+                resolved_group = _resolve_standalone_admin_value_group(
+                    state,
+                    tuple((index, clues[index]) for index in range(admin_span.first_index, admin_span.last_index + 1)),
+                )
+                if resolved_group is not None:
+                    admitted_level = resolved_group[0]
             if (
                 not state.pending_comma_first_component
                 and not state.segment_state.comma_tail_active
-                and not _segment_admit(state, comp_type, valid_successors=self.valid_successors)
+                and not _segment_admit(state, admitted_level, valid_successors=self.valid_successors)
             ):
                 if comp_type in _ADMIN_TYPES and _has_reasonable_successor_key(
                     state,
                     clues,
                     clue_index,
-                    comp_type,
+                    admin_levels,
                     stream,
                     raw_text,
                 ):
@@ -182,7 +215,7 @@ class ZhAddressStack(BaseAddressStack):
             anchor_start = _start_after_component_end(stream, anchor_base)
         _append_deferred(state, clue_index, clue, record_suspect=False, anchor_start=anchor_start)
         if comp_type in _ADMIN_TYPES:
-            _freeze_value_suspect(state, clue, stream)
+            _freeze_value_suspect(state, clues, clue_index, stream)
         state.last_value = clue
         state.last_end = max(state.last_end, clue.end)
         return None
