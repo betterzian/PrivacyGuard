@@ -20,6 +20,7 @@ class EnGeoLexicon:
     tier_a_state_names: tuple[str, ...]
     tier_a_state_codes: tuple[str, ...]
     tier_b_places: tuple[str, ...]
+    tier_c_places: tuple[str, ...]
 
 
 @lru_cache(maxsize=1)
@@ -39,4 +40,5 @@ def load_en_geo_lexicon() -> EnGeoLexicon:
         tier_a_state_names=tuple(str(item).strip() for item in payload.get("tier_a_state_names", []) if str(item).strip()),
         tier_a_state_codes=tuple(str(item).strip() for item in payload.get("tier_a_state_codes", []) if str(item).strip()),
         tier_b_places=tuple(str(item).strip() for item in payload.get("tier_b_places", []) if str(item).strip()),
+        tier_c_places=tuple(str(item).strip() for item in payload.get("tier_c_places", []) if str(item).strip()),
     )

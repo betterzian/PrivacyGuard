@@ -4,7 +4,7 @@
 - **起栈与种子**：`test_label_seed_*` → `AddressStack.run` 中 `_label_seed_start_char`、`_label_seed_address_index`。
 - **VALUE+KEY 合并 / 跨层**：`test_cross_tier_merge_*`、`test_digit_tail_extends_*` → `_handle_value_clue`、`_flush_chain`、`_analyze_digit_tail`。
 - **同层 VALUE 冲洗**：`test_same_tier_value_replaces_pending_*` → `_segment_admit` 失败时 `_flush_chain` 再 `_append_deferred`。
-- **负向与尾修复**：`test_middle_negative_*`、`test_rightmost_negative_*` → `_scan_components` 收集 span，
+- **负向与尾修复**：`test_middle_negative_*`、`test_rightmost_negative_trims_*` → `_scan_components` 收集 span，
   `_repair_negative_tail_components` / `_replay_component_clue_prefix`。
 - **POI 延迟与路名**：`test_poi_deferred_*`、`test_poi_independent_*` → `_routed_key_clue`、`_handle_key_clue`、`_commit_poi`。
 - **逆序行政与逗号**：`test_trailing_admin_*` → `_comma_tail_prehandle`、`_segment_admit` 逗号尾方向。
@@ -179,7 +179,8 @@ def test_middle_negative_keeps_open_road_name_when_rightmost_component_is_clean(
     assert addr.text == "上海市浦东新区域名路23号"
 
 
-def test_rightmost_negative_drops_subdistrict_candidate():
+def test_rightmost_negative_trims_subdistrict_tail_leaves_prefix():
+    """负向「街道」与 subdistrict 尾相交时，尾修复后仍可能提交与负向不相交的前缀「长安街道」。"""
     text = "收货地址：长安街道办事处"
     clues = (
         _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
@@ -188,7 +189,9 @@ def test_rightmost_negative_drops_subdistrict_candidate():
     )
 
     candidates = _detect_candidates(text, clues)
-    assert not any(c.attr_type.value == "address" for c in candidates)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+    assert addr is not None
+    assert addr.text == "长安街道"
 
 
 # ---- POI 延迟提交测试 ----

@@ -269,8 +269,9 @@ class BaseAddressStack(BaseStack):
                 return extended_run
             conservative_run.pending_challenge = PendingChallenge(
                 clue_index=tail.challenge_clue_index,
-                cached_digit_text=tail.unit_text,
-                cached_pure_digits=tail.pure_digits,
+                challenge_kind="digit_tail",
+                cached_fragment_text=tail.unit_text,
+                cached_normalized_fragment=tail.pure_digits,
                 extended_candidate=extended_run.candidate,
                 extended_consumed_ids=extended_run.consumed_ids,
                 extended_next_index=extended_run.next_index,

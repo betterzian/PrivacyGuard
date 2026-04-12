@@ -145,6 +145,12 @@ def _start_after_component_end(stream: StreamInput, component_end: int) -> int:
 
 def _normalize_address_value(component_type: AddressComponentType, raw_value: str) -> str:
     cleaned = clean_value(raw_value)
+    if component_type == AddressComponentType.HOUSE_NUMBER:
+        return "".join(char for char in cleaned if char.isalnum())
+    if component_type == AddressComponentType.POSTAL_CODE:
+        return re.sub(r"[^0-9-]", "", cleaned)
+    if component_type == AddressComponentType.COUNTRY:
+        return cleaned
     if component_type in _DETAIL_COMPONENTS:
         alnum = "".join(char for char in cleaned if char.isalnum())
         if any(char.isalpha() for char in alnum):

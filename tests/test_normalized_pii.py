@@ -171,7 +171,7 @@ def test_address_same_entity_only_uses_current_component_suspected():
     assert same_entity(left, right) is False
 
 
-def test_address_same_entity_accepts_multi_level_suspect_group_when_one_level_matches():
+def test_address_same_entity_rejects_multi_level_suspect_group_when_earlier_real_level_conflicts():
     left = normalize_pii(
         PIIAttributeType.ADDRESS,
         "朝阳中山路",
@@ -192,7 +192,140 @@ def test_address_same_entity_accepts_multi_level_suspect_group_when_one_level_ma
         },
     )
 
+    assert same_entity(left, right) is False
+
+
+def test_address_same_entity_accepts_suspect_when_surface_matches_other_component_value():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "南京市中路1号",
+        metadata={
+            "address_component_trace": ["road:中", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["city"], "value": "南京", "key": "市", "origin": "key"}),
+                "",
+            ],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "南京市中路1号",
+        metadata={
+            "address_component_trace": ["road:南京市中", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+        },
+    )
+
     assert same_entity(left, right) is True
+
+
+def test_address_same_entity_accepts_when_same_level_suspect_value_matches():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "朝阳中山路1号",
+        metadata={
+            "address_component_trace": ["road:中山", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["district"], "value": "朝阳", "key": "", "origin": "value"}),
+                "",
+            ],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "朝阳中山路1号",
+        metadata={
+            "address_component_trace": ["road:中山", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["district"], "value": "朝阳", "key": "", "origin": "value"}),
+                "",
+            ],
+        },
+    )
+
+    assert same_entity(left, right) is True
+
+
+def test_address_same_entity_rejects_when_same_level_suspect_value_mismatches():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "朝阳中山路1号",
+        metadata={
+            "address_component_trace": ["road:中山", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["district"], "value": "朝阳", "key": "", "origin": "value"}),
+                "",
+            ],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "海淀中山路1号",
+        metadata={
+            "address_component_trace": ["road:中山", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["district"], "value": "海淀", "key": "", "origin": "value"}),
+                "",
+            ],
+        },
+    )
+
+    assert same_entity(left, right) is False
+
+
+def test_address_same_entity_accepts_when_real_same_level_value_matches():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "朝阳中山路1号",
+        metadata={
+            "address_component_trace": ["road:中山", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["district"], "value": "朝阳", "key": "", "origin": "value"}),
+                "",
+            ],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "朝阳中山路1号",
+        metadata={
+            "address_component_trace": ["district:朝阳", "road:中山", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+        },
+    )
+
+    assert same_entity(left, right) is True
+
+
+def test_address_same_entity_rejects_when_real_same_level_value_mismatches():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "朝阳中山路1号",
+        metadata={
+            "address_component_trace": ["road:中山", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["district"], "value": "朝阳", "key": "", "origin": "value"}),
+                "",
+            ],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "海淀中山路1号",
+        metadata={
+            "address_component_trace": ["district:海淀", "road:中山", "number:1"],
+            "address_component_key_trace": ["road:路", "number:号"],
+        },
+    )
+
+    assert same_entity(left, right) is False
 
 
 def test_address_same_entity_rejects_multi_level_suspect_group_when_all_comparable_levels_fail():

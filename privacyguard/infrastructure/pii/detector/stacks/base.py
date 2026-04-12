@@ -21,22 +21,24 @@ class StackContextLike(Protocol):
 
 @dataclass(slots=True)
 class PendingChallenge:
-    """AddressStack 对某段 digit_run 不确定时，请求 parser 先运行 StructuredStack 判定。
+    """AddressStack 对某段可疑片段不确定时，请求 parser 先运行 StructuredStack 判定。
 
     parser 根据 StructuredStack 返回的 attr_type 决定采用保守候选还是扩展候选。
     """
     clue_index: int
-    """待判定 NUMERIC/ALNUM clue 在 context.clues 中的索引。"""
-    cached_digit_text: str
-    """防御性缓存的 digit_run 原文（含 dash）。"""
-    cached_pure_digits: str
-    """防御性缓存的纯数字串。"""
+    """待判定 clue 在 context.clues 中的索引。"""
     extended_candidate: CandidateDraft
     """若判定为通用数字（NUMERIC/ALNUM）则使用此扩展候选。"""
     extended_consumed_ids: set[str]
     """扩展候选对应的 consumed_ids。"""
     extended_next_index: int
     """扩展候选对应的 next_index。"""
+    challenge_kind: str = "digit_tail"
+    """挑战类型，用于调试与后续扩展。"""
+    cached_fragment_text: str = ""
+    """防御性缓存的原始片段文本。"""
+    cached_normalized_fragment: str = ""
+    """防御性缓存的归一化片段文本。"""
 
 
 @dataclass(slots=True)

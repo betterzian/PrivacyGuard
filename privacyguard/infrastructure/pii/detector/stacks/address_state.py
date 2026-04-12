@@ -43,12 +43,15 @@ from privacyguard.infrastructure.pii.detector.models import (
 from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after
 
 SINGLE_OCCUPY = frozenset({
+    AddressComponentType.COUNTRY,
     AddressComponentType.PROVINCE,
     AddressComponentType.CITY,
     AddressComponentType.DISTRICT,
     AddressComponentType.SUBDISTRICT,
     AddressComponentType.ROAD,
+    AddressComponentType.HOUSE_NUMBER,
     AddressComponentType.NUMBER,
+    AddressComponentType.POSTAL_CODE,
 })
 
 _ADMIN_TYPES = frozenset({

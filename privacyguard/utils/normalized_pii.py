@@ -15,36 +15,44 @@ from privacyguard.domain.models.normalized_pii import (
 )
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_company_suffixes,
+    load_en_address_country_aliases,
     load_en_address_suffix_strippers,
+    load_en_us_states,
     load_zh_address_suffix_strippers,
 )
 from privacyguard.utils.pii_value import parse_name_components
 
 _NAME_COMPONENT_KEYS = ("full", "family", "given", "alias", "middle")
 _ADDRESS_COMPONENT_KEYS = (
+    "country",
     "province",
     "city",
     "district",
     "subdistrict",
     "road",
+    "house_number",
     "number",
     "poi",
     "building",
     "detail",
+    "postal_code",
 )
 _ADDRESS_MATCH_KEYS = ("province", "city", "district", "subdistrict", "road", "poi")
 _ADDRESS_DETAIL_KEYS = ("building", "detail")
 _ADDRESS_COMPONENT_COMPARE_KEYS = ("province", "city", "district", "road", "subdistrict")
 _ORDERED_COMPONENT_KEYS = (
+    "country",
     "province",
     "city",
     "district",
     "road",
+    "house_number",
     "number",
     "subdistrict",
     "poi",
     "building",
     "detail",
+    "postal_code",
 )
 # 与 trace 对齐的 POI 终端 key（仅用于 same_entity 比较时剥末尾 key），可选。
 _ADDRESS_OPTIONAL_KEYS = frozenset({"poi_key"})
@@ -60,6 +68,10 @@ _ADDRESS_COMPONENT_ALIASES = {
     "floor": "detail",
     "room": "detail",
     "street_number": "number",
+    "zip": "postal_code",
+    "zipcode": "postal_code",
+    "postal": "postal_code",
+    "country_region": "country",
 }
 _PUNCT_TRIM_RE = re.compile(r"[\s\-_.,，。:：;；/\\|()（）【】\[\]#]+")
 _DIGIT_RE = re.compile(r"\d+")
@@ -212,7 +224,7 @@ def _normalize_address(
         value = normalized_components.get(key)
         if not value:
             continue
-        normalized_value = _compact_component_text(value)
+        normalized_value = _canonicalize_address_component_value(key, value)
         if not normalized_value:
             continue
         canonical_parts.append(f"{key}={normalized_value}")
@@ -279,6 +291,48 @@ def _looks_like_en_text(text: str) -> bool:
     """粗略判断文本是否更像英文地址片段。"""
     return any(("A" <= ch <= "Z") or ("a" <= ch <= "z") for ch in text)
 
+
+def _canonicalize_address_component_value(component_key: str, value: str) -> str:
+    """按组件类型生成稳定 canonical。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if component_key == "province":
+        return _canonicalize_us_state(text) or _compact_component_text(text)
+    if component_key == "country":
+        return _canonicalize_en_country(text) or _compact_component_text(text)
+    if component_key == "postal_code":
+        return re.sub(r"[^0-9-]", "", unicodedata.normalize("NFKC", text))
+    if component_key in {"house_number", "number"}:
+        return _alnum_only(text).upper()
+    return _compact_component_text(text)
+
+
+def _canonicalize_us_state(value: str) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    if not text:
+        return ""
+    state_map = load_en_us_states()
+    upper = text.upper()
+    if upper in state_map:
+        return upper
+    by_name = {name.lower(): code for code, name in state_map.items()}
+    return by_name.get(text.lower(), "")
+
+
+def _canonicalize_en_country(value: str) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    if not text:
+        return ""
+    aliases = load_en_address_country_aliases()
+    canonical = aliases.get(text.lower())
+    if canonical and canonical.lower() == "united states":
+        return "US"
+    compact = _compact_component_text(text)
+    if compact in {"us", "usa", "unitedstates", "unitedstatesofamerica"}:
+        return "US"
+    return ""
+
 def _same_name(left: NormalizedPII, right: NormalizedPII) -> bool:
     left_given = left.identity.get("given", "")
     right_given = right.identity.get("given", "")
@@ -301,24 +355,80 @@ def _same_organization(left: NormalizedPII, right: NormalizedPII) -> bool:
 
 
 def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
-    """§6 canonical 比较顺序：province → city → district → road → numbers → subdistrict → poi。"""
+    """§6 canonical 比较顺序：province → city → district → road → numbers → subdistrict → poi。
+
+    除任一步失败立即返回 False 外，要求「实质性成功匹配」占比：成功次数除以
+    ``min(len(left.ordered_components), len(right.ordered_components))`` 必须 **严格大于** 0.3；
+    单侧缺失而放行的层级不计入成功次数。分母为 0 时返回 False。
+    """
     # 必须有实质地址信息。
     if not left.identity.get("address_part") or not right.identity.get("address_part"):
         return False
+
+    substantive_hits = 0
+
+    for key in ("country", "province", "house_number", "postal_code"):
+        if not _identity_field_match_if_both_present(left, right, key):
+            return False
+        if left.identity.get(key) and right.identity.get(key):
+            substantive_hits += 1
+
     # 单层级组件按组件自身的 suspected 比较，不再做地址级合并。
-    for key in ("province", "city", "district", "road"):
+    for key in ("city", "district", "road", "poi", "building", "detail"):
+        left_component = _ordered_component_by_type(left, key)
+        right_component = _ordered_component_by_type(right, key)
+        if left_component is None or right_component is None:
+            if not _compare_component_with_suspected(left, right, key):
+                return False
+            continue
         if not _compare_component_with_suspected(left, right, key):
             return False
+        substantive_hits += 1
+
     # numbers —— 逆序子序列 / keyed。
     if not _numbers_match(left.numbers, right.numbers,
                           left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers):
         return False
-    if not _compare_component_with_suspected(left, right, "subdistrict"):
-        return False
+    if _numbers_substantive_pair(left, right):
+        substantive_hits += 1
+
+    left_sd = _ordered_component_by_type(left, "subdistrict")
+    right_sd = _ordered_component_by_type(right, "subdistrict")
+    if left_sd is None or right_sd is None:
+        if not _compare_component_with_suspected(left, right, "subdistrict"):
+            return False
+    else:
+        if not _compare_component_with_suspected(left, right, "subdistrict"):
+            return False
+        substantive_hits += 1
+
     # poi —— 列表双向子集（仅可去掉各 POI 的最后一个 key，不做任意后缀剥离）。
     if not _compare_poi_list(left, right):
         return False
-    return True
+
+    denom = min(len(left.ordered_components), len(right.ordered_components))
+    if denom <= 0:
+        return False
+    return (substantive_hits / denom) > 0.3
+
+
+def _identity_field_match_if_both_present(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    key: str,
+) -> bool:
+    left_value = str(left.identity.get(key) or "").strip()
+    right_value = str(right.identity.get(key) or "").strip()
+    if not left_value or not right_value:
+        return True
+    return left_value == right_value
+
+
+def _numbers_substantive_pair(left: NormalizedPII, right: NormalizedPII) -> bool:
+    """双方是否都带有可比的号码信息（纯数字序列或 keyed 之一非空）。"""
+    left_has = bool(left.numbers) or bool(left.keyed_numbers)
+    right_has = bool(right.numbers) or bool(right.keyed_numbers)
+    return bool(left_has and right_has)
 
 
 _MIN_POI_LEN = 2
@@ -361,25 +471,6 @@ def _component_value_text(component: NormalizedAddressComponent | None) -> str:
     return str(component.value or "").strip()
 
 
-def _component_surface_text(component: NormalizedAddressComponent | None) -> str:
-    """返回组件的整体文本。"""
-    if component is None:
-        return ""
-    value_text = _component_value_text(component)
-    if isinstance(component.key, tuple):
-        key_text = "".join(str(item).strip() for item in component.key if str(item).strip())
-    else:
-        key_text = str(component.key or "").strip()
-    return f"{value_text}{key_text}".strip()
-
-
-def _suspect_surface_text(entry: NormalizedAddressSuspectEntry) -> str:
-    """返回 suspect 的比较文本。"""
-    if entry.origin == "key":
-        return f"{entry.value}{entry.key}".strip()
-    return entry.value.strip()
-
-
 def _suspect_entry_by_level(
     component: NormalizedAddressComponent | None,
     level: str,
@@ -397,36 +488,28 @@ def _suspect_group_matches(
     other_component: NormalizedAddressComponent,
     other_normalized: NormalizedPII,
 ) -> bool | None:
-    """比较一个 suspect group。返回 True/False/None(无可比较层级)。"""
-    surface = _suspect_surface_text(entry)
-    other_surface = _component_surface_text(other_component)
+    """按三步顺序比较一个 suspect group。"""
+    surface = f"{entry.value}{entry.key}".strip()
+    other_value = _component_value_text(other_component)
 
-    if entry.origin == "key" and surface:
-        if surface in other_normalized.raw_text or surface in other_surface:
-            return True
+    if surface and other_value and surface in other_value:
+        return True
 
-    comparable_failed = False
     for level in entry.levels:
         peer_suspected = _suspect_entry_by_level(other_component, level)
         if peer_suspected is not None:
-            if _suspect_surface_text(peer_suspected) == surface:
-                return True
-            comparable_failed = True
-            continue
+            return peer_suspected.value.strip() == entry.value.strip()
 
+    for level in entry.levels:
         other_level_component = _ordered_component_by_type(other_normalized, level)
         if other_level_component is None:
             continue
         other_level_value = _component_value_text(other_level_component)
         if not other_level_value:
             continue
-        if _admin_text_subset_either(entry.value, other_level_value):
-            return True
-        comparable_failed = True
+        return other_level_value == entry.value.strip()
 
-    if comparable_failed:
-        return False
-    return None
+    return True
 
 
 def _component_suspected_matches(

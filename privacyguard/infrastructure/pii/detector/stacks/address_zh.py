@@ -26,7 +26,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _resolve_standalone_admin_value_group,
     collect_admin_value_span,
     _freeze_key_suspect_from_previous_key,
-    _freeze_value_suspect,
+    _freeze_value_suspect_for_mismatched_admin_key,
     _has_reasonable_successor_key,
     _key_left_expand_start_if_deferrable,
     _remove_last_value_suspect,
@@ -100,6 +100,11 @@ class ZhAddressStack(BaseAddressStack):
             clue,
         )
         if routed_key is None:
+            _freeze_value_suspect_for_mismatched_admin_key(
+                state,
+                clue,
+                stream=stream,
+            )
             state.ignored_address_key_indices.add(clue_index)
             return _SENTINEL_IGNORE
         return routed_key
@@ -214,8 +219,6 @@ class ZhAddressStack(BaseAddressStack):
             anchor_base = state.last_piece_end if state.last_piece_end is not None else state.last_end
             anchor_start = _start_after_component_end(stream, anchor_base)
         _append_deferred(state, clue_index, clue, record_suspect=False, anchor_start=anchor_start)
-        if comp_type in _ADMIN_TYPES:
-            _freeze_value_suspect(state, clues, clue_index, stream)
         state.last_value = clue
         state.last_end = max(state.last_end, clue.end)
         return None

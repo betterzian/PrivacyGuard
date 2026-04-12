@@ -355,15 +355,29 @@ def _pending_level_exists_on_other_group(
     )
 
 
-def _freeze_value_suspect(
+def _freeze_value_suspect_for_mismatched_admin_key(
     state: _ParseState,
-    clues: tuple[Clue, ...],
-    clue_index: int,
+    key_clue: Clue,
+    *,
     stream: StreamInput,
 ) -> bool:
-    span = collect_admin_value_span(clues, clue_index)
+    """仅当 admin key 与左侧纯行政 value 层级失配时，冻结 standalone suspect。"""
+    if key_clue.role != ClueRole.KEY or key_clue.component_type not in _SUSPECT_KEY_TYPES:
+        return False
+
+    span = _collect_chain_edge_admin_value_span(
+        [deferred for _, deferred in state.deferred_chain],
+        edge="right",
+        anchor=key_clue,
+        stream=stream,
+        max_gap_units=0,
+        require_entire_chain_same_span=True,
+    )
     if span is None:
         return False
+    if match_admin_levels((key_clue.component_type,), span.levels) is not None:
+        return False
+
     same_group_exists = _pending_group_exists(
         state.pending_suspects,
         start=span.start,
@@ -372,8 +386,9 @@ def _freeze_value_suspect(
         key="",
         origin="value",
     )
-    if not same_group_exists and not _suspect_eligible_after_last_piece(state, clues[clue_index], stream):
+    if not same_group_exists and not _suspect_eligible_after_last_piece(state, key_clue, stream):
         return False
+
     available_levels = _available_admin_levels_for_state(
         state,
         span,

@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import re
+
 from privacyguard.infrastructure.pii.detector.lexicon_loader import load_en_address_keyword_groups
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
@@ -26,27 +28,45 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
 from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span, _unit_index_left_of
 
 EN_VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] = {
+    AddressComponentType.COUNTRY: frozenset(),
     AddressComponentType.PROVINCE: frozenset({
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
         AddressComponentType.DETAIL,
+        AddressComponentType.BUILDING,
     }),
     AddressComponentType.CITY: frozenset({
         AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
         AddressComponentType.DETAIL,
+        AddressComponentType.BUILDING,
     }),
     AddressComponentType.DISTRICT: frozenset({
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
         AddressComponentType.DETAIL,
+        AddressComponentType.BUILDING,
     }),
     AddressComponentType.SUBDISTRICT: frozenset({
         AddressComponentType.ROAD,
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
         AddressComponentType.DETAIL,
+        AddressComponentType.BUILDING,
+    }),
+    AddressComponentType.HOUSE_NUMBER: frozenset({
+        AddressComponentType.ROAD,
     }),
     AddressComponentType.ROAD: frozenset({
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
         AddressComponentType.POI,
         AddressComponentType.BUILDING,
         AddressComponentType.DETAIL,
@@ -58,22 +78,37 @@ EN_VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]]
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.POI: frozenset({
-        AddressComponentType.ROAD,
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
+        AddressComponentType.BUILDING,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.BUILDING: frozenset({
+        AddressComponentType.HOUSE_NUMBER,
+        AddressComponentType.ROAD,
+        AddressComponentType.CITY,
+        AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
         AddressComponentType.ROAD,
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.DETAIL: frozenset({
+        AddressComponentType.HOUSE_NUMBER,
         AddressComponentType.ROAD,
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
+        AddressComponentType.BUILDING,
         AddressComponentType.DETAIL,
+    }),
+    AddressComponentType.POSTAL_CODE: frozenset({
+        AddressComponentType.COUNTRY,
     }),
 }
 
@@ -81,7 +116,7 @@ EN_VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]]
 def _en_prefix_keywords() -> set[str]:
     keywords: set[str] = set()
     for group in load_en_address_keyword_groups():
-        if group.component_type != AddressComponentType.DETAIL:
+        if group.component_type not in {AddressComponentType.DETAIL, AddressComponentType.BUILDING}:
             continue
         for keyword in group.keywords:
             text = str(keyword or "").strip().lower()
@@ -92,11 +127,37 @@ def _en_prefix_keywords() -> set[str]:
 
 
 _PREFIX_EN_KEYWORDS = _en_prefix_keywords()
+_EN_PREFIX_COMPONENTS = frozenset({AddressComponentType.DETAIL, AddressComponentType.BUILDING})
+_EN_SUFFIX_COMPONENTS = frozenset({AddressComponentType.ROAD, AddressComponentType.POI})
+_DIRECTIONAL_TOKENS = frozenset({"n", "s", "e", "w", "ne", "nw", "se", "sw"})
+_ORDINAL_TOKEN_RE = re.compile(r"\d+(?:st|nd|rd|th)$", re.IGNORECASE)
 
 
 def is_prefix_en_key(text: str) -> bool:
     """判断英文 KEY 是否属于 prefix-key。"""
     return str(text or "").strip().lower() in _PREFIX_EN_KEYWORDS
+
+
+def is_prefix_en_component(component_type: AddressComponentType | None) -> bool:
+    return component_type in _EN_PREFIX_COMPONENTS
+
+
+def is_suffix_en_component(component_type: AddressComponentType | None) -> bool:
+    return component_type in _EN_SUFFIX_COMPONENTS
+
+
+def en_key_chain_allowed(
+    previous_type: AddressComponentType | None,
+    current_type: AddressComponentType | None,
+) -> bool:
+    """英文 KEY -> KEY 连缀规则。"""
+    if previous_type is None or current_type is None:
+        return False
+    if is_prefix_en_component(previous_type) and is_prefix_en_component(current_type):
+        return True
+    if is_suffix_en_component(previous_type) and is_suffix_en_component(current_type):
+        return True
+    return False
 
 
 def _left_expand_en_phrase(pos: int, floor: int, stream: StreamInput) -> int:
@@ -118,6 +179,12 @@ def _left_expand_en_phrase(pos: int, floor: int, stream: StreamInput) -> int:
                 continue
             continue
         if unit.kind in {"ascii_word", "digit_run", "alpha_run", "alnum_run"}:
+            token = unit.text.strip().lower()
+            if token in _DIRECTIONAL_TOKENS or _ORDINAL_TOKEN_RE.fullmatch(token):
+                saw_token = True
+                cursor = unit.char_start
+                left_ui -= 1
+                continue
             saw_token = True
             cursor = unit.char_start
             left_ui -= 1
@@ -152,10 +219,12 @@ def key_left_expand_start_if_deferrable_en(
 def sub_tokenize_en(stream: StreamInput, hard_clue: Clue) -> list[Clue]:
     """在 HARD clue span 内扫描英文地址关键词，产出 sub-clue 列表。"""
     from privacyguard.infrastructure.pii.detector.scanner import (
+        _POSTAL_CODE_PATTERN,
         _ScanSegment,
         _en_address_key_matcher,
         _en_address_value_matcher,
         _normalize_segment_ascii_match,
+        _segment_span_to_raw,
     )
 
     span_start = hard_clue.start
@@ -233,6 +302,24 @@ def sub_tokenize_en(stream: StreamInput, hard_clue: Clue) -> list[Clue]:
                 source_kind="sub_tokenize_key",
                 component_type=payload.component_type,
             ))
+
+    for token_match in _POSTAL_CODE_PATTERN.finditer(text):
+        abs_start, abs_end = _segment_span_to_raw(segment, token_match.start(), token_match.end())
+        unit_start, unit_end = _char_span_to_unit_span(stream, abs_start, abs_end)
+        sub_clues.append(Clue(
+            clue_id=_make_id(),
+            family=ClueFamily.ADDRESS,
+            role=ClueRole.VALUE,
+            attr_type=PIIAttributeType.ADDRESS,
+            strength=ClaimStrength.SOFT,
+            start=abs_start,
+            end=abs_end,
+            text=token_match.group(0),
+            unit_start=unit_start,
+            unit_end=unit_end,
+            source_kind="sub_tokenize_postal_value",
+            component_type=AddressComponentType.POSTAL_CODE,
+        ))
 
     sub_clues.sort(key=lambda clue: (clue.start, -(clue.end - clue.start)))
     deduped: list[Clue] = []

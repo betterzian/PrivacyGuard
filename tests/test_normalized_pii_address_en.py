@@ -28,41 +28,81 @@ def test_english_address_normalization_keeps_full_hierarchy_components():
         "detail": "Apt 7B",
     }
     assert normalized.canonical == (
-        "province=ca|city=sandiego|road=harborave|poi=northplaza|"
+        "province=CA|city=sandiego|road=harborave|poi=northplaza|"
         "detail=apt7b|number=[7B]"
     )
     assert normalized.match_terms == ("CA", "San Diego", "Harbor Ave", "North Plaza")
-    assert normalized.identity["address_part"] == "ca|sandiego|harborave|northplaza"
+    assert normalized.identity["address_part"] == "CA|sandiego|harborave|northplaza"
     assert normalized.identity["details_part"] == "7"
 
 
-def test_english_address_same_entity_accepts_hierarchy_subset_and_detail_subsequence():
+def test_english_address_same_entity_accepts_state_and_country_aliases():
     left = normalize_pii(
         PIIAttributeType.ADDRESS,
         "",
         components={
+            "country": "United States",
             "province": "California",
             "city": "San Diego",
             "road": "Harbor Avenue",
-            "poi": "North Plaza",
-            "building": "12",
-            "detail": "1203",
+            "house_number": "1200",
         },
     )
     right = normalize_pii(
         PIIAttributeType.ADDRESS,
         "",
         components={
+            "country": "USA",
             "province": "CA",
             "city": "San Diego",
-            "road": "Harbor",
-            "poi": "North",
-            "building": "12",
-            "detail": "1203",
+            "road": "Harbor Ave",
+            "house_number": "1200",
         },
     )
 
     assert same_entity(left, right) is True
+
+
+def test_english_address_same_entity_rejects_house_number_or_postal_conflict():
+    base = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "",
+        components={
+            "country": "US",
+            "province": "CA",
+            "city": "Mountain View",
+            "road": "Amphitheatre Parkway",
+            "house_number": "1600",
+            "postal_code": "94043",
+        },
+    )
+    different_house_number = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "",
+        components={
+            "country": "USA",
+            "province": "California",
+            "city": "Mountain View",
+            "road": "Amphitheatre Parkway",
+            "house_number": "1601",
+            "postal_code": "94043",
+        },
+    )
+    different_postal = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "",
+        components={
+            "country": "United States",
+            "province": "CA",
+            "city": "Mountain View",
+            "road": "Amphitheatre Parkway",
+            "house_number": "1600",
+            "postal_code": "94044",
+        },
+    )
+
+    assert same_entity(base, different_house_number) is False
+    assert same_entity(base, different_postal) is False
 
 
 def test_ocr_address_component_trace_maps_alias_fields_and_prefers_longest_values():

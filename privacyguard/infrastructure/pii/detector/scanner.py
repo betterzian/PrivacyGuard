@@ -13,6 +13,7 @@ from privacyguard.infrastructure.pii.address.geo_db import load_en_geo_lexicon, 
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_company_suffixes,
+    load_en_address_country_aliases,
     load_en_address_keyword_groups,
     load_en_given_names,
     load_en_surnames,
@@ -59,6 +60,14 @@ _FAMILY_ORDER: dict[ClueFamily, int] = {
 
 def _family_order(family: ClueFamily) -> int:
     return _FAMILY_ORDER.get(family, 99)
+
+
+def _is_address_postal_value_clue(clue: Clue) -> bool:
+    return (
+        clue.family == ClueFamily.ADDRESS
+        and clue.role == ClueRole.VALUE
+        and clue.component_type == AddressComponentType.POSTAL_CODE
+    )
 
 
 def _attr_to_family(attr_type: PIIAttributeType | None) -> ClueFamily:
@@ -280,6 +289,8 @@ def build_clue_bundle(
         soft_clues.extend(_scan_company_suffix_clues(ctx, segment))
         soft_clues.extend(_scan_address_clues(ctx, segment, locale_profile=locale_profile))
         soft_clues.extend(_scan_negative_clues(ctx, segment))
+    if locale_profile in {"en", "mixed"}:
+        soft_clues.extend(_scan_en_address_postal_clues_full_stream(ctx, stream))
 
     # ── 事件扫描线裁决 ──
     all_clues = [*structured_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_only_spans), *soft_clues]
@@ -966,7 +977,28 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=token_match.group(0),
                 source_kind="postal_value",
-                component_type=AddressComponentType.DETAIL,
+                component_type=AddressComponentType.POSTAL_CODE,
+            )
+        )
+    return clues
+
+
+def _scan_en_address_postal_clues_full_stream(ctx: DetectContext, stream: StreamInput) -> list[Clue]:
+    """ZIP code 需要绕开 structured 分段，直接在整条英文流上补扫。"""
+    clues: list[Clue] = []
+    for token_match in _POSTAL_CODE_PATTERN.finditer(stream.text):
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.ADDRESS,
+                role=ClueRole.VALUE,
+                attr_type=PIIAttributeType.ADDRESS,
+                strength=ClaimStrength.SOFT,
+                start=token_match.start(),
+                end=token_match.end(),
+                text=token_match.group(0),
+                source_kind="postal_value",
+                component_type=AddressComponentType.POSTAL_CODE,
             )
         )
     return clues
@@ -1572,9 +1604,24 @@ def _zh_address_key_matcher() -> AhoMatcher:
 @lru_cache(maxsize=1)
 def _en_address_value_matcher() -> AhoMatcher:
     lexicon = load_en_geo_lexicon()
+    country_aliases = load_en_address_country_aliases()
     geo_specs = (
         (AddressComponentType.PROVINCE, tuple([*lexicon.tier_a_state_names, *lexicon.tier_a_state_codes])),
-        (AddressComponentType.CITY, lexicon.tier_b_places),
+        (AddressComponentType.CITY, tuple([*lexicon.tier_b_places, *lexicon.tier_c_places])),
+        (
+            AddressComponentType.COUNTRY,
+            tuple(
+                sorted(
+                    {
+                        canonical.strip()
+                        for canonical in country_aliases.values()
+                        if canonical.strip()
+                    },
+                    key=len,
+                    reverse=True,
+                )
+            ),
+        ),
     )
     patterns: list[AhoPattern] = []
     for component_type, names in geo_specs:
@@ -1586,6 +1633,21 @@ def _en_address_value_matcher() -> AhoMatcher:
                     ascii_boundary=_needs_ascii_keyword_boundary(name),
                 )
             )
+    for alias, canonical in sorted(country_aliases.items(), key=lambda item: len(item[0]), reverse=True):
+        alias_text = alias.strip()
+        canonical_text = canonical.strip()
+        if not alias_text or not canonical_text:
+            continue
+        patterns.append(
+            AhoPattern(
+                text=alias_text,
+                payload=_AddressPatternPayload(
+                    component_type=AddressComponentType.COUNTRY,
+                    canonical_text=canonical_text,
+                ),
+                ascii_boundary=_needs_ascii_keyword_boundary(alias_text),
+            )
+        )
     return AhoMatcher.from_patterns(tuple(patterns))
 
 
@@ -1779,7 +1841,7 @@ def _sweep_pass1(
                 survivors.append(clue)
                 continue
 
-            if active_structured > 0:
+            if active_structured > 0 and not _is_address_postal_value_clue(clue):
                 continue
             if active_break > 0:
                 continue

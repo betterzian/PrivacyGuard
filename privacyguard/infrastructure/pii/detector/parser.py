@@ -50,6 +50,14 @@ _ADDRESS_STRUCTURAL_METADATA_KEYS = frozenset({
     "address_component_suspected",
     "address_component_type",
 })
+_ADDRESS_STRUCTURAL_SEQUENCE_KEYS = frozenset({
+    "address_component_trace",
+    "address_component_key_trace",
+    "address_component_suspected",
+    "address_component_type",
+    "address_details_type",
+    "address_details_text",
+})
 
 
 def _metadata_values(value: object) -> list[str]:
@@ -115,6 +123,35 @@ def _merge_address_absorb_metadata(
     return merged
 
 
+def _merge_address_fragment_metadata(
+    fuller_metadata: Mapping[str, object],
+    fragment_metadata: Mapping[str, object],
+    *,
+    prepend_fragment: bool,
+) -> dict[str, list[str]]:
+    """吸收英文地址碎片时，同时保留组件级结构字段。"""
+    merged = _copy_metadata(fuller_metadata)
+    fragment_copied = _copy_metadata(fragment_metadata)
+    for key in _ADDRESS_STRUCTURAL_SEQUENCE_KEYS:
+        fuller_values = merged.get(key, [])
+        fragment_values = fragment_copied.get(key, [])
+        if prepend_fragment:
+            merged[key] = [*fragment_values, *fuller_values]
+        else:
+            merged[key] = [*fuller_values, *fragment_values]
+    for key, value in fragment_metadata.items():
+        if key in _ADDRESS_STRUCTURAL_SEQUENCE_KEYS:
+            continue
+        values = _metadata_values(value)
+        if not values:
+            continue
+        bucket = merged.setdefault(key, [])
+        for item in values:
+            if item not in bucket:
+                bucket.append(item)
+    return merged
+
+
 def _is_punct_or_space_only(text: str) -> bool:
     """相邻候选之间只允许空白或 Unicode 标点。"""
     for char in text:
@@ -140,6 +177,36 @@ def _address_components_subset(shorter_primary: Mapping[str, object], longer_pri
         if not longer_value or shorter_value not in longer_value:
             return False
     return True
+
+
+def _address_component_keys(normalized: object) -> set[str]:
+    components = getattr(normalized, "components", {})
+    if not isinstance(components, Mapping):
+        return set()
+    return {
+        str(key)
+        for key, value in components.items()
+        if key != "poi_key" and str(value or "").strip()
+    }
+
+
+def _is_prefix_fragment_address(normalized: object) -> bool:
+    keys = _address_component_keys(normalized)
+    return bool(keys) and keys <= {"detail", "building"}
+
+
+def _is_tail_fragment_address(normalized: object) -> bool:
+    keys = _address_component_keys(normalized)
+    return bool(keys) and keys <= {"city", "province", "postal_code", "country"}
+
+
+def _has_main_address_shape(normalized: object) -> bool:
+    keys = _address_component_keys(normalized)
+    return bool(keys & {"road", "house_number", "city", "province", "postal_code", "country", "poi"})
+
+
+def _looks_like_english_address_text(text: str) -> bool:
+    return any(("A" <= char <= "Z") or ("a" <= char <= "z") for char in str(text or ""))
 
 
 @dataclass(slots=True)
@@ -468,23 +535,46 @@ class StreamParser:
         candidate_normalized = self._get_cached_address_normalized(context, candidate)
         previous_primary = normalized_primary_text(previous_normalized)
         candidate_primary = normalized_primary_text(candidate_normalized)
-        if not previous_primary or not candidate_primary or previous_primary == candidate_primary:
-            return False
-        if previous_primary in candidate_primary:
+        absorb_mode: str | None = None
+        english_fragment_merge = _looks_like_english_address_text(previous.text) or _looks_like_english_address_text(candidate.text)
+        if (
+            english_fragment_merge
+            and _is_prefix_fragment_address(previous_normalized)
+            and _has_main_address_shape(candidate_normalized)
+        ):
             longer = candidate
             shorter = previous
             longer_normalized = candidate_normalized
             shorter_normalized = previous_normalized
-        elif candidate_primary in previous_primary:
+            absorb_mode = "prepend_fragment"
+        elif (
+            english_fragment_merge
+            and _is_tail_fragment_address(candidate_normalized)
+            and _has_main_address_shape(previous_normalized)
+        ):
             longer = previous
             shorter = candidate
             longer_normalized = previous_normalized
             shorter_normalized = candidate_normalized
+            absorb_mode = "append_fragment"
         else:
-            return False
-        if not same_entity(previous_normalized, candidate_normalized):
-            if not _address_components_subset(shorter_normalized.components, longer_normalized.components):
+            if not previous_primary or not candidate_primary or previous_primary == candidate_primary:
                 return False
+            if previous_primary in candidate_primary:
+                longer = candidate
+                shorter = previous
+                longer_normalized = candidate_normalized
+                shorter_normalized = previous_normalized
+            elif candidate_primary in previous_primary:
+                longer = previous
+                shorter = candidate
+                longer_normalized = previous_normalized
+                shorter_normalized = candidate_normalized
+            else:
+                return False
+            if not same_entity(previous_normalized, candidate_normalized):
+                if not _address_components_subset(shorter_normalized.components, longer_normalized.components):
+                    return False
 
         previous.start = min(previous.start, candidate.start)
         previous.end = max(previous.end, candidate.end)
@@ -494,7 +584,20 @@ class StreamParser:
         previous.source_kind = longer.source_kind
         previous.canonical_text = longer.canonical_text
         previous.claim_strength = longer.claim_strength
-        previous.metadata = _merge_address_absorb_metadata(longer.metadata, shorter.metadata)
+        if absorb_mode == "prepend_fragment":
+            previous.metadata = _merge_address_fragment_metadata(
+                longer.metadata,
+                shorter.metadata,
+                prepend_fragment=True,
+            )
+        elif absorb_mode == "append_fragment":
+            previous.metadata = _merge_address_fragment_metadata(
+                longer.metadata,
+                shorter.metadata,
+                prepend_fragment=False,
+            )
+        else:
+            previous.metadata = _merge_address_absorb_metadata(longer.metadata, shorter.metadata)
         context.address_normalized_cache.pop(id(previous), None)
         previous.label_clue_ids |= candidate.label_clue_ids
         previous.label_driven = previous.label_driven or candidate.label_driven
