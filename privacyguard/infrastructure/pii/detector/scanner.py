@@ -215,6 +215,13 @@ class _DictionaryMatchPayload:
     emission_order: int
 
 
+@dataclass(frozen=True, slots=True)
+class _ScanUnitSpans:
+    all_ocr_spans: tuple[tuple[int, int], ...] = ()
+    ocr_break_only_spans: tuple[tuple[int, int], ...] = ()
+    inline_gap_spans: tuple[tuple[int, int], ...] = ()
+
+
 def build_clue_bundle(
     stream: StreamInput,
     *,
@@ -228,8 +235,9 @@ def build_clue_bundle(
     Pass 1 — STRUCTURED clue 扫描与裁决，确定屏蔽区间。
     Pass 2 — segment-major 词典/soft clue 扫描，事件扫描线裁决。
     """
-    all_ocr_spans = _find_ocr_break_spans(stream)
-    ocr_break_only_spans = _find_ocr_break_only_spans(stream)
+    scan_unit_spans = _collect_scan_unit_spans(stream)
+    all_ocr_spans = scan_unit_spans.all_ocr_spans
+    ocr_break_only_spans = scan_unit_spans.ocr_break_only_spans
     session_name_entries = tuple(entry for entry in session_entries if entry.attr_type == PIIAttributeType.NAME)
     local_name_entries = tuple(entry for entry in local_entries if entry.attr_type == PIIAttributeType.NAME)
     session_non_structured_entries = tuple(
@@ -250,7 +258,12 @@ def build_clue_bundle(
 
     # ── Pass 2: segment-major clue 扫描 ──
     # 分块依据：STRUCTURED clue span + ocr_break span。段内去除 inline_gap。
-    scan_segments = _build_soft_scan_segments(stream, structured_clues, ocr_break_spans=ocr_break_only_spans)
+    scan_segments = _build_soft_scan_segments(
+        stream,
+        structured_clues,
+        ocr_break_spans=ocr_break_only_spans,
+        inline_gap_spans=scan_unit_spans.inline_gap_spans,
+    )
     soft_clues: list[Clue] = []
     for segment in scan_segments:
         soft_clues.extend(_scan_org_address_dictionary_clues(ctx, segment, session_non_structured_entries, source_kind="session"))
@@ -1061,27 +1074,43 @@ def _build_soft_scan_segments(
     structured_clues: tuple[Clue, ...],
     *,
     ocr_break_spans: tuple[tuple[int, int], ...] = (),
+    inline_gap_spans: tuple[tuple[int, int], ...] | None = None,
 ) -> tuple[_ScanSegment, ...]:
     """构建 pass2 扫描段。
 
     分块依据：STRUCTURED clue span + ocr_break span。
     段内去除 inline_gap token（直接拼接），构建位置回映表。
     """
-    inline_gap_spans = _find_inline_gap_spans(stream)
+    gap_spans = _find_inline_gap_spans(stream) if inline_gap_spans is None else inline_gap_spans
     blocked_spans = sorted(
         [(clue.start, clue.end) for clue in structured_clues] + list(ocr_break_spans),
         key=lambda item: (item[0], item[1]),
     )
     segments: list[_ScanSegment] = []
     cursor = 0
+    gap_cursor = 0
     for start, end in blocked_spans:
         if start < cursor:
             continue
         if cursor < start:
-            segments.append(_build_segment_with_gap_removal(stream, cursor, start, inline_gap_spans))
+            segment, gap_cursor = _build_segment_with_gap_removal_with_cursor(
+                stream,
+                cursor,
+                start,
+                gap_spans,
+                gap_cursor,
+            )
+            segments.append(segment)
         cursor = end
     if cursor < len(stream.text):
-        segments.append(_build_segment_with_gap_removal(stream, cursor, len(stream.text), inline_gap_spans))
+        segment, _ = _build_segment_with_gap_removal_with_cursor(
+            stream,
+            cursor,
+            len(stream.text),
+            gap_spans,
+            gap_cursor,
+        )
+        segments.append(segment)
     return tuple(segments)
 
 
@@ -1092,13 +1121,29 @@ def _build_segment_with_gap_removal(
     inline_gap_spans: tuple[tuple[int, int], ...],
 ) -> _ScanSegment:
     """构建单个扫描段，去除其中的 inline_gap token 并记录偏移。"""
-    gaps_in_range = [
-        (gs, ge) for gs, ge in inline_gap_spans
-        if gs >= raw_start and ge <= raw_end
-    ]
-    if not gaps_in_range:
+    segment, _ = _build_segment_with_gap_removal_with_cursor(
+        stream,
+        raw_start,
+        raw_end,
+        inline_gap_spans,
+        0,
+    )
+    return segment
+
+
+def _build_segment_with_gap_removal_with_cursor(
+    stream: StreamInput,
+    raw_start: int,
+    raw_end: int,
+    inline_gap_spans: tuple[tuple[int, int], ...],
+    gap_cursor: int,
+) -> tuple[_ScanSegment, int]:
+    """按有序 gap 游标构建扫描段，避免每个 segment 重扫全部 inline gap。"""
+    while gap_cursor < len(inline_gap_spans) and inline_gap_spans[gap_cursor][1] <= raw_start:
+        gap_cursor += 1
+    if gap_cursor >= len(inline_gap_spans) or inline_gap_spans[gap_cursor][0] >= raw_end:
         seg_text = stream.text[raw_start:raw_end]
-        return _ScanSegment(stream=stream, text=seg_text, raw_start=raw_start, folded_text=seg_text.lower())
+        return (_ScanSegment(stream=stream, text=seg_text, raw_start=raw_start, folded_text=seg_text.lower()), gap_cursor)
 
     pieces: list[str] = []
     gap_offsets: list[tuple[int, int]] = []
@@ -1107,7 +1152,11 @@ def _build_segment_with_gap_removal(
     piece_cursor = raw_start
     cleaned_pos = 0
     cumulative_gap_length = 0
-    for gs, ge in sorted(gaps_in_range):
+    next_gap_cursor = gap_cursor
+    while next_gap_cursor < len(inline_gap_spans):
+        gs, ge = inline_gap_spans[next_gap_cursor]
+        if gs >= raw_end:
+            break
         if piece_cursor < gs:
             piece = stream.text[piece_cursor:gs]
             pieces.append(piece)
@@ -1118,18 +1167,22 @@ def _build_segment_with_gap_removal(
         cumulative_gap_length += gap_length
         gap_prefix_lengths.append(cumulative_gap_length)
         piece_cursor = ge
+        next_gap_cursor += 1
     if piece_cursor < raw_end:
         pieces.append(stream.text[piece_cursor:raw_end])
 
     seg_text = "".join(pieces)
-    return _ScanSegment(
-        stream=stream,
-        text=seg_text,
-        raw_start=raw_start,
-        folded_text=seg_text.lower(),
-        gap_offsets=tuple(gap_offsets),
-        gap_positions=tuple(gap_positions),
-        gap_prefix_lengths=tuple(gap_prefix_lengths),
+    return (
+        _ScanSegment(
+            stream=stream,
+            text=seg_text,
+            raw_start=raw_start,
+            folded_text=seg_text.lower(),
+            gap_offsets=tuple(gap_offsets),
+            gap_positions=tuple(gap_positions),
+            gap_prefix_lengths=tuple(gap_prefix_lengths),
+        ),
+        next_gap_cursor,
     )
 
 
@@ -1154,10 +1207,11 @@ def _segment_span_to_raw(segment: _ScanSegment, start: int, end: int) -> tuple[i
 
 
 def _attach_unit_spans(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
-    return [
-        replace(clue, unit_start=_char_span_to_unit_span(stream, clue.start, clue.end)[0], unit_end=_char_span_to_unit_span(stream, clue.start, clue.end)[1])
-        for clue in clues
-    ]
+    attached: list[Clue] = []
+    for clue in clues:
+        unit_start, unit_end = _char_span_to_unit_span(stream, clue.start, clue.end)
+        attached.append(replace(clue, unit_start=unit_start, unit_end=unit_end))
+    return attached
 
 
 def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[int, int]:
@@ -1280,32 +1334,40 @@ def _normalize_segment_ascii_match(
     return (raw_start, raw_end, text)
 
 
+def _collect_scan_unit_spans(stream: StreamInput) -> _ScanUnitSpans:
+    """一次遍历提取扫描阶段需要的 break / gap span。"""
+    all_ocr_spans: list[tuple[int, int]] = []
+    ocr_break_only_spans: list[tuple[int, int]] = []
+    inline_gap_spans: list[tuple[int, int]] = []
+    for unit in stream.units:
+        span = (unit.char_start, unit.char_end)
+        if unit.kind == "ocr_break":
+            all_ocr_spans.append(span)
+            ocr_break_only_spans.append(span)
+            continue
+        if unit.kind == "inline_gap":
+            all_ocr_spans.append(span)
+            inline_gap_spans.append(span)
+    return _ScanUnitSpans(
+        all_ocr_spans=tuple(all_ocr_spans),
+        ocr_break_only_spans=tuple(ocr_break_only_spans),
+        inline_gap_spans=tuple(inline_gap_spans),
+    )
+
+
 def _find_ocr_break_spans(stream: StreamInput) -> tuple[tuple[int, int], ...]:
     """返回 ocr_break 和 inline_gap 的 unit span（pass1 排除用）。"""
-    spans = [
-        (unit.char_start, unit.char_end)
-        for unit in stream.units
-        if unit.kind in {"inline_gap", "ocr_break"}
-    ]
-    return tuple(spans)
+    return _collect_scan_unit_spans(stream).all_ocr_spans
 
 
 def _find_ocr_break_only_spans(stream: StreamInput) -> tuple[tuple[int, int], ...]:
     """仅返回 ocr_break span（分块边界、BREAK clue 来源）。"""
-    return tuple(
-        (unit.char_start, unit.char_end)
-        for unit in stream.units
-        if unit.kind == "ocr_break"
-    )
+    return _collect_scan_unit_spans(stream).ocr_break_only_spans
 
 
 def _find_inline_gap_spans(stream: StreamInput) -> tuple[tuple[int, int], ...]:
     """返回 inline_gap span（段内去除用）。"""
-    return tuple(
-        (unit.char_start, unit.char_end)
-        for unit in stream.units
-        if unit.kind == "inline_gap"
-    )
+    return _collect_scan_unit_spans(stream).inline_gap_spans
 
 
 def _needs_ascii_keyword_boundary(keyword: str) -> bool:

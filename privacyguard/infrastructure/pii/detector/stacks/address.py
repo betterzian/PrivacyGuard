@@ -29,19 +29,17 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
-    _is_stop_control_clue,
-    _skip_separators,
     _unit_index_at_or_after,
     _unit_index_left_of,
     _unit_char_end,
     _unit_char_start,
     is_break_clue,
-    is_control_clue,
     is_negative_clue,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import (
+    OCR_BREAK,
     is_any_break,
-    is_hard_break,
+    is_soft_break,
 )
 
 # ---------------------------------------------------------------------------
@@ -269,16 +267,191 @@ def _is_absorbable_digit_clue(clue: Clue) -> bool:
 
 
 def _clue_unit_gap(left: Clue, right: Clue, stream: StreamInput | None = None) -> int:
-    """两个 clue 之间的有效（非空白）unit 数。"""
+    """两个 clue 之间的有效（非空白、非 inline_gap）unit 数。"""
     if stream is not None and stream.units:
         gap_start = left.unit_end
         gap_end = right.unit_start
         count = 0
         for ui in range(gap_start, min(gap_end, len(stream.units))):
-            if stream.units[ui].kind != "space":
+            if stream.units[ui].kind not in {"space", "inline_gap"}:
                 count += 1
         return count
     return max(0, right.unit_start - left.unit_end)
+
+
+def _is_inline_gap_unit(unit: StreamUnit) -> bool:
+    return unit.kind == "inline_gap"
+
+
+def _is_space_unit(unit: StreamUnit) -> bool:
+    return unit.kind == "space"
+
+
+def _is_comma_unit(unit: StreamUnit) -> bool:
+    return unit.text in ",，"
+
+
+def _is_soft_break_unit(unit: StreamUnit) -> bool:
+    return len(unit.text) == 1 and is_soft_break(unit.text)
+
+
+def _is_search_stop_unit(unit: StreamUnit) -> bool:
+    """当前 component 的搜索窗口是否应被该 unit 截断。"""
+    if _is_inline_gap_unit(unit):
+        return False
+    if unit.kind in {"space", "ocr_break"}:
+        return True
+    return any(is_any_break(char) for char in unit.text)
+
+
+def _skip_from_char_by_units(
+    stream: StreamInput,
+    start_char: int,
+    *,
+    allow_space: bool,
+    allow_comma: bool,
+    allow_soft_break: bool,
+    allow_inline_gap: bool,
+) -> int:
+    """从给定字符位置开始，只连续跳过允许的 unit。"""
+    if not stream.units:
+        return max(0, start_char)
+    cursor = max(0, start_char)
+    ui = _unit_index_at_or_after(stream, cursor)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.char_start < cursor:
+            ui += 1
+            continue
+        if allow_inline_gap and _is_inline_gap_unit(unit):
+            cursor = unit.char_end
+            ui += 1
+            continue
+        if allow_space and _is_space_unit(unit):
+            cursor = unit.char_end
+            ui += 1
+            continue
+        if allow_comma and _is_comma_unit(unit):
+            cursor = unit.char_end
+            ui += 1
+            continue
+        if allow_soft_break and _is_soft_break_unit(unit):
+            cursor = unit.char_end
+            ui += 1
+            continue
+        break
+    return cursor
+
+
+def _label_seed_start_char(stream: StreamInput, start_char: int) -> int:
+    """LABEL/START 首次起栈：允许跳过空格、soft break 与 inline_gap。"""
+    return _skip_from_char_by_units(
+        stream,
+        start_char,
+        allow_space=True,
+        allow_comma=True,
+        allow_soft_break=True,
+        allow_inline_gap=True,
+    )
+
+
+def _start_after_component_end(stream: StreamInput, component_end: int) -> int:
+    """已有真实 component 后的新起点：只允许跳过空格、逗号与 inline_gap。"""
+    return _skip_from_char_by_units(
+        stream,
+        component_end,
+        allow_space=True,
+        allow_comma=True,
+        allow_soft_break=False,
+        allow_inline_gap=True,
+    )
+
+
+def _span_has_search_stop_unit(
+    stream: StreamInput,
+    start_char: int,
+    end_char: int,
+) -> bool:
+    """原始文本区间内是否出现会截断 component 搜索的 unit。"""
+    if end_char <= start_char or not stream.units:
+        return False
+    ui = _unit_index_at_or_after(stream, start_char)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.char_start >= end_char:
+            break
+        if _is_search_stop_unit(unit):
+            return True
+        ui += 1
+    return False
+
+
+def _span_has_non_comma_search_stop_unit(
+    stream: StreamInput,
+    start_char: int,
+    end_char: int,
+) -> bool:
+    """区间内是否存在除逗号外、会截断搜索窗口的停止分隔。"""
+    if end_char <= start_char or not stream.units:
+        return False
+    ui = _unit_index_at_or_after(stream, start_char)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.char_start >= end_char:
+            break
+        if _is_inline_gap_unit(unit):
+            ui += 1
+            continue
+        if unit.kind in {"space", "ocr_break"}:
+            return True
+        if _is_comma_unit(unit):
+            ui += 1
+            continue
+        if any(is_any_break(char) for char in unit.text):
+            return True
+        ui += 1
+    return False
+
+
+def _skip_inline_gap_left(stream: StreamInput, pos: int, floor: int) -> tuple[int, int]:
+    """向左穿过 inline_gap，返回新的光标和左侧相邻 unit 下标。"""
+    cursor = pos
+    left_ui = _unit_index_left_of(stream, cursor)
+    while 0 <= left_ui < len(stream.units):
+        unit = stream.units[left_ui]
+        if unit.char_end > cursor:
+            left_ui -= 1
+            continue
+        if unit.char_end <= floor or not _is_inline_gap_unit(unit):
+            break
+        cursor = unit.char_start
+        left_ui -= 1
+    return cursor, left_ui
+
+
+def _clue_gap_has_search_stop(
+    left: Clue,
+    right: Clue,
+    stream: StreamInput | None,
+) -> bool:
+    """两个 clue 的 gap 中是否出现会截断链路的分隔。"""
+    if stream is None:
+        return False
+    return _span_has_search_stop_unit(stream, left.end, right.start)
+
+
+def _state_next_component_start(
+    state: "_ParseState",
+    stream: StreamInput,
+    *,
+    address_start: int | None = None,
+) -> int | None:
+    """返回当前状态下下一个 component 的搜索起点。"""
+    if state.deferred_chain:
+        return state.deferred_chain[-1][1].end
+    if state.components:
+        return _start_after_component_end(stream, state.components[-1].end)
+    return address_start
 
 
 def _is_key_key_gap_text_unit_allowed(unit: StreamUnit) -> bool:
@@ -296,19 +469,19 @@ def _is_key_key_gap_text_unit_allowed(unit: StreamUnit) -> bool:
 
 
 def _last_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit | None:
-    """返回 clue 覆盖范围内最后一个非空白 unit。"""
+    """返回 clue 覆盖范围内最后一个非空白、非 inline_gap unit。"""
     for ui in range(min(clue.unit_end, len(stream.units)) - 1, clue.unit_start - 1, -1):
         unit = stream.units[ui]
-        if unit.kind != "space":
+        if unit.kind not in {"space", "inline_gap"}:
             return unit
     return None
 
 
 def _first_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit | None:
-    """返回 clue 覆盖范围内第一个非空白 unit。"""
+    """返回 clue 覆盖范围内第一个非空白、非 inline_gap unit。"""
     for ui in range(clue.unit_start, min(clue.unit_end, len(stream.units))):
         unit = stream.units[ui]
-        if unit.kind != "space":
+        if unit.kind not in {"space", "inline_gap"}:
             return unit
     return None
 
@@ -323,6 +496,8 @@ def _key_key_chain_gap_allowed(left: Clue, right: Clue, stream: StreamInput | No
     4. 若左右边界都是中文 `cjk_char`，中间 unit 可以是中文或长英文。
     """
     if left.text == right.text:
+        return False
+    if _clue_gap_has_search_stop(left, right, stream):
         return False
     gap = _clue_unit_gap(left, right, stream)
     if gap == 0:
@@ -427,19 +602,6 @@ def _recompute_last_piece_end(state: _ParseState) -> None:
     state.last_piece_end = None
 
 
-def _next_non_space_char_after(stream: StreamInput, char_index: int) -> int | None:
-    """返回给定位置之后首个非空白 unit 的起点。"""
-    if not stream.units:
-        return None
-    ui = _unit_index_at_or_after(stream, max(0, char_index))
-    while ui < len(stream.units):
-        unit = stream.units[ui]
-        if unit.kind != "space":
-            return unit.char_start
-        ui += 1
-    return None
-
-
 def _extend_start_with_adjacent_ignored_keys(
     clues: tuple[Clue, ...],
     clue_index: int,
@@ -511,7 +673,7 @@ def _suspect_eligible_after_last_piece(
     """判断当前 VALUE 是否紧邻最近已提交地址片段。"""
     if state.last_piece_end is None:
         return not state.components
-    next_char = _next_non_space_char_after(stream, state.last_piece_end)
+    next_char = _start_after_component_end(stream, state.last_piece_end)
     return next_char is not None and clue.start == next_char
 
 
@@ -560,7 +722,7 @@ def _freeze_key_suspect_from_previous_key(
         return False
     value_start = state.chain_left_anchor
     if state.pending_suspects:
-        next_char = _next_non_space_char_after(stream, state.pending_suspects[-1].end)
+        next_char = _start_after_component_end(stream, state.pending_suspects[-1].end)
         if next_char is None:
             return False
         value_start = next_char
@@ -719,6 +881,8 @@ def _chain_can_accept(state: _ParseState, clue: Clue, stream: StreamInput) -> bo
     if not state.deferred_chain:
         return False
     _, last = state.deferred_chain[-1]
+    if _clue_gap_has_search_stop(last, clue, stream):
+        return False
     gap = _clue_unit_gap(last, clue, stream)
     if last.role == ClueRole.KEY and clue.role == ClueRole.VALUE:
         return False
@@ -929,6 +1093,7 @@ def _route_dynamic_key_type(
 def _single_adjacent_value_level_in_state(
     state: _ParseState,
     clue: Clue,
+    stream: StreamInput,
 ) -> AddressComponentType | None:
     """返回 key 左侧是否刚好只有一个紧邻的地址 VALUE clue。"""
     if clue.component_type not in {
@@ -944,7 +1109,8 @@ def _single_adjacent_value_level_in_state(
         last_clue.role == ClueRole.VALUE
         and last_clue.attr_type == PIIAttributeType.ADDRESS
         and last_clue.component_type is not None
-        and last_clue.end == clue.start
+        and not _clue_gap_has_search_stop(last_clue, clue, stream)
+        and _clue_unit_gap(last_clue, clue, stream) == 0
     ):
         return last_clue.component_type
     return None
@@ -953,6 +1119,7 @@ def _single_adjacent_value_level_in_state(
 def _single_adjacent_value_level_in_preview(
     chain: list[Clue],
     clue: Clue,
+    stream: StreamInput,
 ) -> AddressComponentType | None:
     """逗号尾预演里复用同一条单 value 判定。"""
     if clue.component_type not in {
@@ -968,7 +1135,8 @@ def _single_adjacent_value_level_in_preview(
         last_clue.role == ClueRole.VALUE
         and last_clue.attr_type == PIIAttributeType.ADDRESS
         and last_clue.component_type is not None
-        and last_clue.end == clue.start
+        and not _clue_gap_has_search_stop(last_clue, clue, stream)
+        and _clue_unit_gap(last_clue, clue, stream) == 0
     ):
         return last_clue.component_type
     return None
@@ -997,20 +1165,14 @@ def _routing_left_value_start_for_state(
 ) -> int:
     """按当前状态推导动态路由要看的左侧 value 片段起点。"""
     target_type = comp_type or clue.component_type or AddressComponentType.DETAIL
-    if state.deferred_chain and target_type != AddressComponentType.DISTRICT:
+    if state.deferred_chain:
         return state.deferred_chain[-1][1].end
     if state.components:
-        return _skip_separators(raw_text, state.last_end)
-    floor = _left_address_floor(clues, clue_index)
-    prev_key_end = _left_prev_address_key_end(
-        clues,
-        clue_index,
-        ignored_key_indices=state.ignored_address_key_indices,
-    )
-    if prev_key_end is not None and target_type != AddressComponentType.DISTRICT:
-        floor = max(floor, prev_key_end)
+        return _start_after_component_end(stream, state.components[-1].end)
+    # KEY 起栈后的左扩只看已提交 component，不再让左侧 clue 参与边界裁决。
+    floor = 0
     if locale.startswith("en"):
-        return _left_expand_en_word(raw_text, clue.start, floor)
+        return _left_expand_en_word(raw_text, clue.start, floor, stream)
     expand_start = _left_expand_zh(raw_text, clue.start, floor, stream, target_type)
     return _extend_start_with_adjacent_ignored_keys(
         clues,
@@ -1034,20 +1196,14 @@ def _routing_left_value_start_for_preview(
 ) -> int:
     """按逗号尾预演状态推导动态路由要看的左侧 value 片段起点。"""
     target_type = comp_type or clue.component_type or AddressComponentType.DETAIL
-    if chain and target_type != AddressComponentType.DISTRICT:
+    if chain:
         return chain[-1].end
     if previous_component_end is not None:
-        return _skip_separators(raw_text, previous_component_end)
-    floor = _left_address_floor(clues, clue_index)
-    prev_key_end = _left_prev_address_key_end(
-        clues,
-        clue_index,
-        ignored_key_indices=ignored_key_indices,
-    )
-    if prev_key_end is not None and target_type != AddressComponentType.DISTRICT:
-        floor = max(floor, prev_key_end)
+        return _start_after_component_end(stream, previous_component_end)
+    # 预演与主循环保持一致：KEY 起栈时忽视左侧 clue，只受前一真实组件约束。
+    floor = 0
     if locale.startswith("en"):
-        return _left_expand_en_word(raw_text, clue.start, floor)
+        return _left_expand_en_word(raw_text, clue.start, floor, stream)
     expand_start = _left_expand_zh(raw_text, clue.start, floor, stream, target_type)
     return _extend_start_with_adjacent_ignored_keys(
         clues,
@@ -1129,6 +1285,8 @@ def _has_following_detail_key(
             return False
         if is_negative_clue(clue):
             continue
+        if _clue_gap_has_search_stop(anchor, clue, stream):
+            return False
         if _clue_unit_gap(anchor, clue, stream) > 6:
             return False
         if clue.attr_type != PIIAttributeType.ADDRESS or clue.role == ClueRole.LABEL:
@@ -1151,7 +1309,7 @@ def _routed_key_clue_for_state(
     """把当前 KEY clue 按地址上下文重映射到实际参与状态机的类型。"""
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
-    single_value_level = _single_adjacent_value_level_in_state(state, clue)
+    single_value_level = _single_adjacent_value_level_in_state(state, clue, stream)
     if single_value_level is not None:
         if single_value_level != clue.component_type:
             return None
@@ -1192,7 +1350,7 @@ def _routed_key_clue_for_preview(
     """把逗号尾预演中的 KEY clue 按预演上下文重映射。"""
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
-    single_value_level = _single_adjacent_value_level_in_preview(chain, clue)
+    single_value_level = _single_adjacent_value_level_in_preview(chain, clue, stream)
     if single_value_level is not None:
         if single_value_level != clue.component_type:
             return None
@@ -1481,7 +1639,7 @@ def _has_reasonable_successor_key(
     preview_chain: list[Clue] = []
     previous_component_type = _state_routing_context_type(state)
     ignored_key_indices = set(state.ignored_address_key_indices)
-    previous_component_end = state.last_end if state.components else None
+    previous_component_end = state.components[-1].end if state.components else None
     for i in range(index + 1, len(clues)):
         nxt = clues[i]
         if is_break_clue(nxt):
@@ -1490,7 +1648,10 @@ def _has_reasonable_successor_key(
             continue
         if nxt.role == ClueRole.LABEL:
             continue
-        if _clue_unit_gap(anchor, nxt, stream) > 6:
+        gap_anchor = preview_chain[-1] if preview_chain else anchor
+        if _clue_gap_has_search_stop(gap_anchor, nxt, stream):
+            break
+        if _clue_unit_gap(gap_anchor, nxt, stream) > 6:
             break
         if nxt.attr_type != PIIAttributeType.ADDRESS:
             continue
@@ -1729,9 +1890,11 @@ class AddressStack(BaseStack):
         is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
 
         if is_label_seed:
-            address_start = _skip_separators(raw_text, self.clue.end)
+            address_start = _label_seed_start_char(stream, self.clue.end)
             start_unit = _unit_index_at_or_after(stream, address_start)
-            seed_index = _label_seed_address_index(self.context.clues, start_unit, max_units=6)
+            seed_index = _label_seed_address_index(
+                self.context.clues, stream, address_start, start_unit, max_units=6,
+            )
             if seed_index is None:
                 return None
             scan_index = seed_index
@@ -2027,6 +2190,21 @@ class AddressStack(BaseStack):
         while index < len(clues):
             clue = clues[index]
 
+            search_anchor = _state_next_component_start(state, stream, address_start=address_start)
+            if (
+                search_anchor is not None
+                and clue.start > search_anchor
+                and _span_has_search_stop_unit(stream, search_anchor, clue.start)
+            ):
+                if state.deferred_chain:
+                    _flush_chain(state, raw_text, stream, locale, clues=clues, clue_index=index)
+                    if state.split_at is not None:
+                        break
+                    continue
+                # 纯逗号 gap 交给逗号尾逻辑处理，避免在预演前提前截断。
+                if _span_has_non_comma_search_stop_unit(stream, search_anchor, clue.start):
+                    break
+
             if is_break_clue(clue):
                 break
             if is_negative_clue(clue):
@@ -2046,16 +2224,14 @@ class AddressStack(BaseStack):
                 if clue.attr_type in {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
                     nxt_addr = _next_address_clue_index_after(clues, index)
                     if nxt_addr is not None and _bridge_last_address_to_next_within_units(
-                        state, clues[nxt_addr]
+                        state, clues[nxt_addr], stream
                     ):
                         state.suppress_challenger_clue_ids.add(clue.clue_id)
                         state.absorbed_digit_unit_end = max(
                             state.absorbed_digit_unit_end, clue.unit_end
                         )
-                        index += 1
-                        continue
-                    break
-                break
+                index += 1
+                continue
             if clue.role == ClueRole.LABEL:
                 index += 1
                 continue
@@ -2256,7 +2432,8 @@ class AddressStack(BaseStack):
                 and (state.components or state.last_piece_end is not None)
                 and not _suspect_eligible_after_last_piece(state, effective_clue, stream)
             ):
-                anchor_start = _skip_separators(raw_text, state.last_end)
+                anchor_base = state.last_piece_end if state.last_piece_end is not None else state.last_end
+                anchor_start = _start_after_component_end(stream, anchor_base)
             _append_deferred(
                 state,
                 clue_index,
@@ -2328,7 +2505,6 @@ class AddressStack(BaseStack):
                     clue_index,
                     locale,
                     component_start=state.last_end,
-                    allow_left_expand=False,
                 )
                 if component is not None:
                     if not _commit(state, component):
@@ -2353,13 +2529,15 @@ class AddressStack(BaseStack):
         locale: str,
         *,
         component_start: int,
-        allow_left_expand: bool,
     ) -> _DraftComponent | None:
         key_text = clue.text
         if key_text.lower() in _PREFIX_EN_KEYWORDS:
             value_start = _skip_separators(raw_text, clue.end)
             value_end = _scan_forward_value_end(
-                raw_text, value_start, upper_bound=min(len(raw_text), clue.end + 30),
+                raw_text,
+                value_start,
+                upper_bound=min(len(raw_text), clue.end + 30),
+                stream=self.context.stream,
             )
             if value_end <= value_start:
                 return None
@@ -2377,20 +2555,8 @@ class AddressStack(BaseStack):
                 clue_indices={clue_index},
             )
 
-        if allow_left_expand:
-            # 左扩展只允许在栈起始组件使用。
-            floor = _left_address_floor(self.context.clues, clue_index)
-            prev_key_end = _left_prev_address_key_end(self.context.clues, clue_index)
-            if prev_key_end is not None:
-                floor = max(floor, prev_key_end)
-            if locale.startswith("en"):
-                expand_start = _left_expand_en_word(raw_text, clue.start, floor)
-            else:
-                stream = self.context.stream
-                expand_start = _left_expand_zh(raw_text, clue.start, floor, stream, comp_type)
-        else:
-            expand_start = component_start
-
+        del clue_index, locale
+        expand_start = component_start
         value = _normalize_address_value(comp_type, raw_text[expand_start:clue.start])
         if not value:
             return None
@@ -2468,13 +2634,24 @@ class AddressStack(BaseStack):
 # 独立 helper 函数（大部分沿用旧版，适配 _DraftComponent）
 # ---------------------------------------------------------------------------
 
-def _label_seed_address_index(clues: tuple[Clue, ...], start_unit: int, *, max_units: int) -> int | None:
+def _label_seed_address_index(
+    clues: tuple[Clue, ...],
+    stream: StreamInput,
+    start_char: int,
+    start_unit: int,
+    *,
+    max_units: int,
+) -> int | None:
     key_index: int | None = None
     for idx, clue in enumerate(clues):
         if clue.attr_type != PIIAttributeType.ADDRESS:
             continue
         if clue.role == ClueRole.LABEL:
             continue
+        if clue.start < start_char:
+            continue
+        if _span_has_search_stop_unit(stream, start_char, clue.start):
+            return None
         if clue.role == ClueRole.VALUE and clue.unit_start <= start_unit < clue.unit_end:
             return idx
         if clue.role == ClueRole.KEY and clue.unit_start >= start_unit and clue.unit_start - start_unit <= max_units:
@@ -2506,13 +2683,13 @@ def _non_space_units_to_unit_start(
     char_pos: int,
     unit_start: int,
 ) -> int:
-    """从 char_pos 到目标 unit 起点（含目标 unit）的非空白 unit 数。"""
+    """从 char_pos 到目标 unit 起点（含目标 unit）的非空白、非 inline_gap unit 数。"""
     start_ui = _unit_index_at_or_after(stream, char_pos)
     if start_ui >= len(stream.units):
         return 0
     count = 0
     for ui in range(start_ui, min(unit_start + 1, len(stream.units))):
-        if stream.units[ui].kind != "space":
+        if stream.units[ui].kind not in {"space", "inline_gap"}:
             count += 1
     return count
 
@@ -2565,6 +2742,8 @@ def _preview_chain_can_accept(
     if not chain:
         return True
     last = chain[-1]
+    if _clue_gap_has_search_stop(last, clue, stream):
+        return False
     gap = _clue_unit_gap(last, clue, stream)
     if last.role == ClueRole.KEY and clue.role == ClueRole.VALUE:
         return False
@@ -2606,8 +2785,20 @@ def _preview_comma_tail_first_component_type(
     """预演逗号尾首段，返回首个 component 类型及是否需要保持链打开等待 KEY。"""
     chain: list[Clue] = []
     ignored_key_indices: set[int] = set()
+    search_anchor = (
+        _start_after_component_end(stream, previous_component_end)
+        if previous_component_end is not None
+        else None
+    )
     for index in range(start_index, len(clues)):
         clue = clues[index]
+        if (
+            not chain
+            and search_anchor is not None
+            and clue.start > search_anchor
+            and _span_has_search_stop_unit(stream, search_anchor, clue.start)
+        ):
+            break
         if is_break_clue(clue):
             break
         if is_negative_clue(clue):
@@ -2703,7 +2894,7 @@ def _comma_tail_prehandle(
         clue_index,
         stream,
         state.last_component_type,
-        state.last_end if state.components else None,
+        state.components[-1].end if state.components else None,
         raw_text,
         locale,
     )
@@ -2750,41 +2941,15 @@ def _comma_value_scan_upper_bound(
 def _bridge_last_address_to_next_within_units(
     state: _ParseState,
     next_address_clue: Clue,
+    stream: StreamInput,
 ) -> bool:
     """上一 ADDRESS clue 与下一 ADDRESS clue 的 unit 起点间距是否 ≤6（与主循环 gap 规则一致）。"""
     if state.last_consumed is None:
         return False
+    if _clue_gap_has_search_stop(state.last_consumed, next_address_clue, stream):
+        return False
     gap_anchor = max(state.last_consumed.unit_end, state.absorbed_digit_unit_end)
     return next_address_clue.unit_start - gap_anchor <= 6
-
-
-def _left_address_floor(clues: tuple[Clue, ...], clue_index: int) -> int:
-    for index in range(clue_index - 1, -1, -1):
-        clue = clues[index]
-        if _is_stop_control_clue(clue):
-            return clue.end
-        if is_control_clue(clue):
-            continue
-        if clue.attr_type != PIIAttributeType.ADDRESS:
-            return clue.end
-    return 0
-
-
-def _left_prev_address_key_end(
-    clues: tuple[Clue, ...],
-    clue_index: int,
-    *,
-    ignored_key_indices: set[int] | None = None,
-) -> int | None:
-    """返回当前 clue 左侧最近 ADDRESS KEY 的 end。"""
-    ignored = ignored_key_indices or set()
-    for index in range(clue_index - 1, -1, -1):
-        clue = clues[index]
-        if index in ignored:
-            continue
-        if clue.attr_type == PIIAttributeType.ADDRESS and clue.role == ClueRole.KEY:
-            return clue.end
-    return None
 
 
 def _left_expand_zh(
@@ -2794,45 +2959,106 @@ def _left_expand_zh(
     stream: StreamInput,
     comp_type: AddressComponentType,
 ) -> int:
-    """中文左扩展：先检查左邻 unit 是否是 digit_run 或 alpha_run，再回退到 CJK 扩展。"""
-    left_ui = _unit_index_left_of(stream, pos)
+    """中文左扩展：仅允许跨 inline_gap，先吸收左邻英数块，再最多回退两个汉字。"""
+    del comp_type
+    cursor, left_ui = _skip_inline_gap_left(stream, pos, floor)
     if 0 <= left_ui < len(stream.units):
         kind = stream.units[left_ui].kind
-        # digit_run 或 alpha_run 直接吸收。
         if kind in ("digit_run", "alpha_run", "alnum_run", "ascii_word"):
-            return stream.units[left_ui].char_start
-    return _left_expand_zh_chars(raw_text, pos, floor, max_chars=2)
+            return _left_expand_en_word(raw_text, pos, floor, stream)
+    return _left_expand_zh_chars(raw_text, cursor, floor, stream=stream, max_chars=2)
 
 
-def _left_expand_en_word(raw_text: str, pos: int, floor: int) -> int:
-    cursor = pos
-    while cursor > floor and raw_text[cursor - 1] in " \t":
-        cursor -= 1
-    while cursor > floor and raw_text[cursor - 1].isalnum():
-        cursor -= 1
+def _left_expand_en_word(raw_text: str, pos: int, floor: int, stream: StreamInput) -> int:
+    """英文左扩展：只能跨 inline_gap，不能跨空格或任何分隔。"""
+    del raw_text
+    cursor, left_ui = _skip_inline_gap_left(stream, pos, floor)
+    while 0 <= left_ui < len(stream.units):
+        unit = stream.units[left_ui]
+        if unit.char_end > cursor:
+            left_ui -= 1
+            continue
+        if unit.char_end <= floor:
+            break
+        if _is_inline_gap_unit(unit):
+            cursor = unit.char_start
+            left_ui -= 1
+            continue
+        if unit.text and all(char.isalnum() for char in unit.text):
+            cursor = unit.char_start
+            left_ui -= 1
+            continue
+        break
     return cursor
 
 
-def _left_expand_zh_chars(raw_text: str, pos: int, floor: int, *, max_chars: int) -> int:
+def _left_expand_zh_chars(
+    raw_text: str,
+    pos: int,
+    floor: int,
+    *,
+    stream: StreamInput,
+    max_chars: int,
+) -> int:
+    del raw_text
     cursor = pos
     count = 0
-    while cursor > floor and count < max_chars:
-        ch = raw_text[cursor - 1]
-        if "\u4e00" <= ch <= "\u9fff":
-            cursor -= 1
-            count += 1
-        else:
+    left_ui = _unit_index_left_of(stream, cursor)
+    while 0 <= left_ui < len(stream.units) and count < max_chars:
+        unit = stream.units[left_ui]
+        if unit.char_end > cursor:
+            left_ui -= 1
+            continue
+        if unit.char_end <= floor:
             break
+        if _is_inline_gap_unit(unit):
+            cursor = unit.char_start
+            left_ui -= 1
+            continue
+        if (
+            unit.kind == "cjk_char"
+            and len(unit.text) == 1
+            and "\u4e00" <= unit.text <= "\u9fff"
+            and unit.char_start >= floor
+        ):
+            cursor = unit.char_start
+            count += 1
+            left_ui -= 1
+            continue
+        break
     return cursor
 
 
-def _scan_forward_value_end(raw_text: str, start: int, upper_bound: int) -> int:
-    index = start
-    while index < upper_bound:
-        if is_any_break(raw_text[index]):
+def _scan_forward_value_end(
+    raw_text: str,
+    start: int,
+    upper_bound: int,
+    stream: StreamInput | None = None,
+) -> int:
+    if stream is None or not stream.units:
+        index = start
+        while index < upper_bound:
+            if raw_text.startswith(OCR_BREAK, index):
+                break
+            if raw_text[index].isspace() or is_any_break(raw_text[index]):
+                break
+            index += 1
+        return index
+
+    cursor = start
+    ui = _unit_index_at_or_after(stream, start)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.char_start >= upper_bound:
             break
-        index += 1
-    return index
+        if unit.char_end <= cursor:
+            ui += 1
+            continue
+        if _is_search_stop_unit(unit):
+            break
+        cursor = min(unit.char_end, upper_bound)
+        ui += 1
+    return cursor
 
 
 def _normalize_address_value(component_type: AddressComponentType, raw_value: str) -> str:
@@ -3107,18 +3333,17 @@ def _find_clue_for_digit_run(
 def _has_following_address_key(
     clues: tuple[Clue, ...],
     digit_char_end: int,
-    raw_text: str,
+    stream: StreamInput,
     from_index: int = 0,
 ) -> bool:
-    gap = raw_text[digit_char_end:digit_char_end + 6] if digit_char_end < len(raw_text) else ""
-    if any(is_hard_break(ch) for ch in gap):
-        return False
     for i in range(from_index, len(clues)):
         c = clues[i]
         if c.start > digit_char_end + 6:
             break
         if c.start < digit_char_end:
             continue
+        if _span_has_search_stop_unit(stream, digit_char_end, c.start):
+            return False
         if c.attr_type == PIIAttributeType.ADDRESS and c.role == ClueRole.KEY:
             return True
     return False
@@ -3203,8 +3428,7 @@ def _analyze_digit_tail(
         ))
         cursor = seg_end
 
-    raw_text = stream.text
-    if _has_following_address_key(clues, next_unit.char_end, raw_text, clue_scan_index):
+    if _has_following_address_key(clues, next_unit.char_end, stream, clue_scan_index):
         return DigitTailResult(
             new_components=new_components,
             unit_text=cached_text,
