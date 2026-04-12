@@ -294,18 +294,50 @@ def _suspect_surface_text(entry: _SuspectEntry) -> str:
     return entry.value.strip()
 
 
+def _suspect_group_key(entry: _SuspectEntry) -> tuple[int, int, str, str, str]:
+    """按同一 value 歧义组聚合 suspect。"""
+    return (entry.start, entry.end, entry.value, entry.key, entry.origin)
+
+
+def _suspect_sort_key(entry: _SuspectEntry) -> tuple[int, int, int, str]:
+    """同组内按行政层级从高到低稳定排序。"""
+    level = _pending_suspect_level(entry)
+    rank = _ADMIN_RANK.get(level, 0) if level is not None else 0
+    return (entry.start, entry.end, -rank, entry.level)
+
+
+def _group_suspected_entries(entries: list[_SuspectEntry]) -> list[list[_SuspectEntry]]:
+    """把同一 value、同一来源的多层级 suspect 聚合成组。"""
+    grouped: dict[tuple[int, int, str, str, str], list[_SuspectEntry]] = {}
+    ordered_keys: list[tuple[int, int, str, str, str]] = []
+    for entry in entries:
+        group_key = _suspect_group_key(entry)
+        if group_key not in grouped:
+            grouped[group_key] = []
+            ordered_keys.append(group_key)
+        group = grouped[group_key]
+        if any(existing.level == entry.level for existing in group):
+            continue
+        group.append(entry)
+    return [
+        sorted(grouped[group_key], key=_suspect_sort_key)
+        for group_key in ordered_keys
+    ]
+
+
 def _serialize_suspected_entries(entries: list[_SuspectEntry]) -> str:
     """把一个组件上的 suspect 列表序列化到 metadata。"""
     if not entries:
         return ""
     payload = [
         {
-            "level": entry.level,
-            "value": entry.value,
-            "key": entry.key,
-            "origin": entry.origin,
+            "levels": [group_entry.level for group_entry in group],
+            "value": group[0].value,
+            "key": group[0].key,
+            "origin": group[0].origin,
         }
-        for entry in entries
+        for group in _group_suspected_entries(entries)
+        if group
     ]
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -338,6 +370,26 @@ def _remove_pending_suspect_by_level(
     for entry in state.pending_suspects:
         if _pending_suspect_level(entry) == level:
             removed = entry
+            continue
+        kept.append(entry)
+    state.pending_suspects = kept
+    _recompute_last_piece_end(state)
+    return removed
+
+
+def _remove_pending_suspect_group_by_span(
+    state: _ParseState,
+    start: int,
+    end: int,
+    *,
+    origin: str | None = None,
+) -> list[_SuspectEntry]:
+    """移除同一 span 上的一整组 pending suspect。"""
+    removed: list[_SuspectEntry] = []
+    kept: list[_SuspectEntry] = []
+    for entry in state.pending_suspects:
+        if entry.start == start and entry.end == end and (origin is None or entry.origin == origin):
+            removed.append(entry)
             continue
         kept.append(entry)
     state.pending_suspects = kept
@@ -816,7 +868,7 @@ def _fixup_suspected_info(state: _ParseState) -> None:
                 continue
             seen.add(dedupe_key)
             unique.append(entry)
-        component.suspected = unique
+        component.suspected = sorted(unique, key=_suspect_sort_key)
         component.value = _recompute_text(component)
 
 
@@ -825,8 +877,10 @@ def _recompute_text(component: _DraftComponent) -> str | list[str]:
     if isinstance(component.value, list):
         return component.value
     value = component.value
-    for entry in component.suspected:
-        value = _trim_once(value, _suspect_surface_text(entry))
+    for group in _group_suspected_entries(component.suspected):
+        if not group:
+            continue
+        value = _trim_once(value, _suspect_surface_text(group[0]))
     return value.strip() or component.value
 
 

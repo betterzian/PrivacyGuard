@@ -43,7 +43,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _SuspectEntry,
     _VALID_SUCCESSORS,
     _make_comma_tail_checkpoint,
-    _remove_pending_suspect_by_level,
+    _remove_pending_suspect_group_by_span,
 )
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
@@ -66,8 +66,83 @@ def _suspect_eligible_after_last_piece(
     return clue.start == _start_after_component_end(stream, state.last_piece_end)
 
 
-def _has_pending_suspect_level(entries: list[_SuspectEntry], level: AddressComponentType) -> bool:
-    return any(entry.level == level.value for entry in entries)
+def _same_pending_suspect_group(
+    entry: _SuspectEntry,
+    *,
+    start: int,
+    end: int,
+    value: str,
+    key: str,
+    origin: str,
+) -> bool:
+    return (
+        entry.start == start
+        and entry.end == end
+        and entry.value == value
+        and entry.key == key
+        and entry.origin == origin
+    )
+
+
+def _pending_group_exists(
+    entries: list[_SuspectEntry],
+    *,
+    start: int,
+    end: int,
+    value: str,
+    key: str,
+    origin: str,
+) -> bool:
+    return any(
+        _same_pending_suspect_group(
+            entry,
+            start=start,
+            end=end,
+            value=value,
+            key=key,
+            origin=origin,
+        )
+        for entry in entries
+    )
+
+
+def _same_span_admin_value_clues(state: _ParseState, clue: Clue) -> list[Clue]:
+    """返回 deferred_chain 中与当前 clue 同 span 的行政 VALUE clues。"""
+    same_span: list[Clue] = []
+    for _, deferred in state.deferred_chain:
+        if (
+            deferred.role == ClueRole.VALUE
+            and deferred.attr_type == PIIAttributeType.ADDRESS
+            and deferred.component_type in _ADMIN_TYPES
+            and deferred.start == clue.start
+            and deferred.end == clue.end
+        ):
+            same_span.append(deferred)
+    return same_span
+
+
+def _pending_level_exists_on_other_group(
+    entries: list[_SuspectEntry],
+    level: AddressComponentType,
+    *,
+    start: int,
+    end: int,
+    value: str,
+    key: str,
+    origin: str,
+) -> bool:
+    return any(
+        entry.level == level.value
+        and not _same_pending_suspect_group(
+            entry,
+            start=start,
+            end=end,
+            value=value,
+            key=key,
+            origin=origin,
+        )
+        for entry in entries
+    )
 
 
 def _freeze_value_suspect(
@@ -78,20 +153,82 @@ def _freeze_value_suspect(
     level = clue.component_type
     if level not in _ADMIN_TYPES or level is None:
         return False
-    if level in state.occupancy or _has_pending_suspect_level(state.pending_suspects, level):
-        return False
-    if not _suspect_eligible_after_last_piece(state, clue, stream):
-        return False
-    state.pending_suspects.append(_SuspectEntry(
-        level=level.value,
+    same_span_clues = _same_span_admin_value_clues(state, clue)
+    same_span_levels = {
+        current.component_type
+        for current in same_span_clues
+        if current.component_type is not None
+    }
+    ambiguous_same_span = len(same_span_levels) > 1
+    same_group_exists = _pending_group_exists(
+        state.pending_suspects,
+        start=clue.start,
+        end=clue.end,
         value=clue.text,
         key="",
         origin="value",
-        start=clue.start,
-        end=clue.end,
-    ))
-    state.last_piece_end = clue.end
-    return True
+    )
+    if not same_group_exists and not _suspect_eligible_after_last_piece(state, clue, stream):
+        return False
+    candidates = same_span_clues if ambiguous_same_span else [clue]
+    ordered_candidates = sorted(
+        (
+            candidate
+            for candidate in candidates
+            if candidate.component_type in _ADMIN_TYPES and candidate.component_type is not None
+        ),
+        key=lambda item: _ADMIN_RANK.get(item.component_type, 0),
+        reverse=True,
+    )
+    appended = False
+    for candidate in ordered_candidates:
+        level = candidate.component_type
+        if level is None:
+            continue
+        if level in state.occupancy:
+            continue
+        if _pending_level_exists_on_other_group(
+            state.pending_suspects,
+            level,
+            start=candidate.start,
+            end=candidate.end,
+            value=candidate.text,
+            key="",
+            origin="value",
+        ):
+            continue
+        if _pending_group_exists(
+            state.pending_suspects,
+            start=candidate.start,
+            end=candidate.end,
+            value=candidate.text,
+            key="",
+            origin="value",
+        ) and any(
+            entry.level == candidate.component_type.value
+            and _same_pending_suspect_group(
+                entry,
+                start=candidate.start,
+                end=candidate.end,
+                value=candidate.text,
+                key="",
+                origin="value",
+            )
+            for entry in state.pending_suspects
+        ):
+            continue
+        state.pending_suspects.append(_SuspectEntry(
+            level=level.value,
+            value=candidate.text,
+            key="",
+            origin="value",
+            start=candidate.start,
+            end=candidate.end,
+        ))
+        appended = True
+    if appended:
+        state.last_piece_end = clue.end
+    return appended
 
 
 def _freeze_key_suspect_from_previous_key(
@@ -103,8 +240,6 @@ def _freeze_key_suspect_from_previous_key(
     level = key_clue.component_type
     if level not in _SUSPECT_KEY_TYPES or level is None:
         return False
-    if level in state.occupancy or _has_pending_suspect_level(state.pending_suspects, level):
-        return False
     if state.chain_left_anchor is None:
         return False
     value_start = state.chain_left_anchor
@@ -112,6 +247,39 @@ def _freeze_key_suspect_from_previous_key(
         value_start = _start_after_component_end(stream, state.pending_suspects[-1].end)
     value_text = _normalize_address_value(level, raw_text[value_start:key_clue.start])
     if not value_text:
+        return False
+    same_group_exists = _pending_group_exists(
+        state.pending_suspects,
+        start=value_start,
+        end=key_clue.end,
+        value=value_text,
+        key=key_clue.text,
+        origin="key",
+    )
+    if level in state.occupancy:
+        return False
+    if _pending_level_exists_on_other_group(
+        state.pending_suspects,
+        level,
+        start=value_start,
+        end=key_clue.end,
+        value=value_text,
+        key=key_clue.text,
+        origin="key",
+    ):
+        return False
+    if same_group_exists and any(
+        entry.level == level.value
+        and _same_pending_suspect_group(
+            entry,
+            start=value_start,
+            end=key_clue.end,
+            value=value_text,
+            key=key_clue.text,
+            origin="key",
+        )
+        for entry in state.pending_suspects
+    ):
         return False
     state.pending_suspects.append(_SuspectEntry(
         level=level.value,
@@ -125,21 +293,72 @@ def _freeze_key_suspect_from_previous_key(
     return True
 
 
+def _adjacent_value_span_from_chain(
+    chain: list[Clue],
+    clue: Clue,
+    stream: StreamInput,
+    *,
+    max_gap_units: int = 0,
+    require_entire_chain_same_span: bool = False,
+) -> tuple[int, int, tuple[AddressComponentType, ...]] | None:
+    """提取 key 左侧紧邻 value span 的全部层级。"""
+    if not chain:
+        return None
+    last_clue = chain[-1]
+    if (
+        last_clue.role != ClueRole.VALUE
+        or last_clue.attr_type != PIIAttributeType.ADDRESS
+        or last_clue.component_type is None
+        or _clue_gap_has_search_stop(last_clue, clue, stream)
+        or _clue_unit_gap(last_clue, clue, stream) > max_gap_units
+    ):
+        return None
+    span_start, span_end = last_clue.start, last_clue.end
+    if require_entire_chain_same_span and any(
+        current.role != ClueRole.VALUE
+        or current.attr_type != PIIAttributeType.ADDRESS
+        or current.start != span_start
+        or current.end != span_end
+        or current.component_type is None
+        for current in chain
+    ):
+        return None
+    levels: list[AddressComponentType] = []
+    for current in reversed(chain):
+        if (
+            current.role != ClueRole.VALUE
+            or current.attr_type != PIIAttributeType.ADDRESS
+            or current.start != span_start
+            or current.end != span_end
+            or current.component_type is None
+        ):
+            break
+        if current.component_type not in levels:
+            levels.append(current.component_type)
+    if not levels:
+        return None
+    ordered_levels = tuple(
+        sorted(levels, key=lambda item: _ADMIN_RANK.get(item, 0), reverse=True)
+    )
+    return (span_start, span_end, ordered_levels)
+
+
 def _remove_last_value_suspect(
     state: _ParseState,
     key_clue: Clue,
     stream: StreamInput,
 ) -> None:
-    if not state.deferred_chain:
+    adjacent = _adjacent_value_span_from_chain(
+        [deferred for _, deferred in state.deferred_chain],
+        key_clue,
+        stream,
+        max_gap_units=1,
+    )
+    if adjacent is None or key_clue.component_type is None:
         return
-    _, last = state.deferred_chain[-1]
-    if last.role != ClueRole.VALUE:
-        return
-    if _clue_unit_gap(last, key_clue, stream) > 1:
-        return
-    level = last.component_type
-    if level in _ADMIN_TYPES and level is not None and key_clue.component_type == level:
-        _remove_pending_suspect_by_level(state, level)
+    span_start, span_end, levels = adjacent
+    if key_clue.component_type in levels:
+        _remove_pending_suspect_group_by_span(state, span_start, span_end, origin="value")
 
 
 def _extend_start_with_adjacent_ignored_keys(
@@ -254,26 +473,27 @@ def _routing_context_type(context: _RoutingContext) -> AddressComponentType | No
     return context.previous_component_type
 
 
-def _single_adjacent_value_level(context: _RoutingContext, clue: Clue) -> AddressComponentType | None:
-    """返回 key 左侧是否刚好只有一个紧邻的地址 VALUE clue。"""
+def _adjacent_value_span_levels(
+    context: _RoutingContext,
+    clue: Clue,
+) -> tuple[AddressComponentType, ...] | None:
+    """返回 key 左侧紧邻 value span 的全部层级。"""
     if clue.component_type not in {
         AddressComponentType.PROVINCE,
         AddressComponentType.CITY,
         AddressComponentType.DISTRICT,
     }:
         return None
-    if len(context.chain) != 1:
+    adjacent = _adjacent_value_span_from_chain(
+        context.chain,
+        clue,
+        context.stream,
+        max_gap_units=0,
+        require_entire_chain_same_span=True,
+    )
+    if adjacent is None:
         return None
-    last_clue = context.chain[-1]
-    if (
-        last_clue.role == ClueRole.VALUE
-        and last_clue.attr_type == PIIAttributeType.ADDRESS
-        and last_clue.component_type is not None
-        and not _clue_gap_has_search_stop(last_clue, clue, context.stream)
-        and _clue_unit_gap(last_clue, clue, context.stream) == 0
-    ):
-        return last_clue.component_type
-    return None
+    return adjacent[2]
 
 
 def _key_should_degrade_from_non_pure_value(clue: Clue) -> AddressComponentType | None:
@@ -358,9 +578,9 @@ def _routed_key_clue(context: _RoutingContext, clue_index: int, clue: Clue) -> C
     """把当前 KEY clue 重映射为真正参与中文状态机的类型。"""
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
-    single_value_level = _single_adjacent_value_level(context, clue)
-    if single_value_level is not None:
-        if single_value_level != clue.component_type:
+    adjacent_levels = _adjacent_value_span_levels(context, clue)
+    if adjacent_levels is not None:
+        if clue.component_type not in adjacent_levels:
             return None
     else:
         downgraded_type = _key_should_degrade_from_non_pure_value(clue)

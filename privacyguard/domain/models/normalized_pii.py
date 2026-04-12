@@ -12,7 +12,7 @@ class NormalizedAddressSuspectEntry(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    level: str
+    levels: tuple[str, ...]
     value: str
     key: str = ""
     origin: str

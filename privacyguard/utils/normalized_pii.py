@@ -387,8 +387,45 @@ def _suspect_entry_by_level(
     if component is None:
         return None
     for entry in component.suspected:
-        if entry.level == level:
+        if level in entry.levels:
             return entry
+    return None
+
+
+def _suspect_group_matches(
+    entry: NormalizedAddressSuspectEntry,
+    other_component: NormalizedAddressComponent,
+    other_normalized: NormalizedPII,
+) -> bool | None:
+    """比较一个 suspect group。返回 True/False/None(无可比较层级)。"""
+    surface = _suspect_surface_text(entry)
+    other_surface = _component_surface_text(other_component)
+
+    if entry.origin == "key" and surface:
+        if surface in other_normalized.raw_text or surface in other_surface:
+            return True
+
+    comparable_failed = False
+    for level in entry.levels:
+        peer_suspected = _suspect_entry_by_level(other_component, level)
+        if peer_suspected is not None:
+            if _suspect_surface_text(peer_suspected) == surface:
+                return True
+            comparable_failed = True
+            continue
+
+        other_level_component = _ordered_component_by_type(other_normalized, level)
+        if other_level_component is None:
+            continue
+        other_level_value = _component_value_text(other_level_component)
+        if not other_level_value:
+            continue
+        if _admin_text_subset_either(entry.value, other_level_value):
+            return True
+        comparable_failed = True
+
+    if comparable_failed:
+        return False
     return None
 
 
@@ -397,31 +434,15 @@ def _component_suspected_matches(
     other_component: NormalizedAddressComponent,
     other_normalized: NormalizedPII,
 ) -> bool:
-    """逐条比较当前组件自己的 suspected。"""
+    """逐组比较当前组件自己的 suspected。"""
     if not component.suspected:
         return True
 
-    other_surface = _component_surface_text(other_component)
-    matched = False
     for entry in component.suspected:
-        surface = _suspect_surface_text(entry)
-        peer_suspected = _suspect_entry_by_level(other_component, entry.level)
-        if peer_suspected is not None:
-            if _suspect_surface_text(peer_suspected) != surface:
-                return False
-            matched = True
-            continue
-        if surface and surface in other_normalized.raw_text:
-            matched = True
-            continue
-        if surface and surface in other_surface:
-            matched = True
-            continue
-        other_level_component = _ordered_component_by_type(other_normalized, entry.level)
-        other_level_value = _component_value_text(other_level_component)
-        if other_level_value and _admin_text_subset_either(entry.value, other_level_value):
-            matched = True
-    return matched
+        result = _suspect_group_matches(entry, other_component, other_normalized)
+        if result is False:
+            return False
+    return True
 
 
 def _admin_text_subset_either(a: str, b: str) -> bool:
@@ -495,6 +516,8 @@ def _numbers_match(
 
 def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
     """号码序列判定：从末尾往前做逆序一致的子序列匹配，且至少命中 2 个 token。"""
+    if not left and not right:
+        return True
     if not left or not right:
         return False
     shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
@@ -531,14 +554,21 @@ def _parse_one_component_suspected(segment: str) -> tuple[NormalizedAddressSuspe
     for item in raw:
         if not isinstance(item, dict):
             continue
-        level = str(item.get("level") or "").strip()
+        raw_levels = item.get("levels")
+        if not isinstance(raw_levels, (list, tuple)):
+            continue
+        levels = tuple(
+            str(level or "").strip()
+            for level in raw_levels
+            if str(level or "").strip()
+        )
         value = str(item.get("value") or "").strip()
         key = str(item.get("key") or "").strip()
         origin = str(item.get("origin") or "").strip()
-        if not level or not value or origin not in {"value", "key"}:
+        if not levels or not value or origin not in {"value", "key"}:
             continue
         parsed.append(NormalizedAddressSuspectEntry(
-            level=level,
+            levels=levels,
             value=value,
             key=key,
             origin=origin,
@@ -621,7 +651,7 @@ def _ordered_components_from_metadata(
 
     while trace_index < len(trace_entries):
         component_type, value = trace_entries[trace_index]
-        suspected = suspected_entries[component_index] if component_index < len(suspected_entries) else {}
+        suspected = suspected_entries[component_index] if component_index < len(suspected_entries) else ()
         component_index += 1
 
         if component_type == "poi":

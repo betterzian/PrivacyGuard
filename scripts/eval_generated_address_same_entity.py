@@ -33,7 +33,7 @@ sys.path.insert(0, str(ANDLAB_ROOT))
 from utils_mobile.privacy.layer import PrivacyProtectionLayer  # type: ignore  # noqa: E402
 
 
-SEED = 20260412
+SEED = 20260411
 SAMPLE_SIZE_PER_LOCALE = 60
 TOKEN_RE = re.compile(r"\[?([A-Z][A-Z0-9_]*#[0-9a-z]{5})\]?")
 ALNUM_RE = re.compile(r"[A-Za-z0-9]+")

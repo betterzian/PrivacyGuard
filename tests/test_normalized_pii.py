@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.utils.normalized_pii import normalize_pii, same_entity
+
+
+def _suspected_json(*entries: dict[str, object]) -> str:
+    return json.dumps(list(entries), ensure_ascii=False, separators=(",", ":"))
 
 
 def test_phone_canonical_strips_supported_country_codes_only():
@@ -74,11 +80,11 @@ def test_address_normalization_prefers_metadata_components():
         (component.component_type, component.value, component.key, component.suspected)
         for component in normalized.ordered_components
     ] == [
-        ("city", "上海", "", {}),
-        ("district", "浦东", "", {}),
-        ("poi", "阳光国际", "", {}),
-        ("building", "10", "", {}),
-        ("detail", "102", "", {}),
+        ("city", "上海", "", ()),
+        ("district", "浦东", "", ()),
+        ("poi", "阳光国际", "", ()),
+        ("building", "10", "", ()),
+        ("detail", "102", "", ()),
     ]
 
 
@@ -142,7 +148,10 @@ def test_address_same_entity_only_uses_current_component_suspected():
         metadata={
             "address_component_trace": ["road:中山", "poi:阳光"],
             "address_component_key_trace": ["road:路", "poi:小区"],
-            "address_component_suspected": ["city:北京", ""],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["city"], "value": "北京", "key": "", "origin": "value"}),
+                "",
+            ],
         },
     )
     right = normalize_pii(
@@ -151,11 +160,87 @@ def test_address_same_entity_only_uses_current_component_suspected():
         metadata={
             "address_component_trace": ["city:上海", "road:中山", "poi:阳光"],
             "address_component_key_trace": ["road:路", "poi:小区"],
-            "address_component_suspected": ["", "", "city:北京"],
+            "address_component_suspected": [
+                "",
+                "",
+                _suspected_json({"levels": ["city"], "value": "北京", "key": "", "origin": "value"}),
+            ],
         },
     )
 
     assert same_entity(left, right) is False
+
+
+def test_address_same_entity_accepts_multi_level_suspect_group_when_one_level_matches():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "朝阳中山路",
+        metadata={
+            "address_component_trace": ["road:中山"],
+            "address_component_key_trace": ["road:路"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["city", "district"], "value": "朝阳", "key": "", "origin": "value"}),
+            ],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "北京市朝阳区中山路",
+        metadata={
+            "address_component_trace": ["city:北京", "district:朝阳", "road:中山"],
+            "address_component_key_trace": ["road:路"],
+        },
+    )
+
+    assert same_entity(left, right) is True
+
+
+def test_address_same_entity_rejects_multi_level_suspect_group_when_all_comparable_levels_fail():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "朝阳中山路",
+        metadata={
+            "address_component_trace": ["road:中山"],
+            "address_component_key_trace": ["road:路"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["city", "district"], "value": "朝阳", "key": "", "origin": "value"}),
+            ],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "北京市海淀区中山路",
+        metadata={
+            "address_component_trace": ["city:北京", "district:海淀", "road:中山"],
+            "address_component_key_trace": ["road:路"],
+        },
+    )
+
+    assert same_entity(left, right) is False
+
+
+def test_address_same_entity_skips_multi_level_suspect_group_when_other_side_has_no_levels():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "朝阳中山路",
+        metadata={
+            "address_component_trace": ["road:中山"],
+            "address_component_key_trace": ["road:路"],
+            "address_component_suspected": [
+                _suspected_json({"levels": ["city", "district"], "value": "朝阳", "key": "", "origin": "value"}),
+            ],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "中山路",
+        metadata={
+            "address_component_trace": ["road:中山"],
+            "address_component_key_trace": ["road:路"],
+        },
+    )
+
+    assert same_entity(left, right) is True
 
 
 def test_address_same_entity_keeps_number_match_when_building_prefix_is_missing():
