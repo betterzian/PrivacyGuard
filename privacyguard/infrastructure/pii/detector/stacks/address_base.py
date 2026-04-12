@@ -31,8 +31,8 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     _bridge_last_address_to_next_within_units,
     _clue_gap_has_search_stop,
     _clue_unit_gap,
+    _first_address_clue_index_after,
     _is_absorbable_digit_clue,
-    _label_seed_address_index,
     _label_seed_start_char,
     _materialize_digit_tail_before_comma,
     _next_address_clue_index_after,
@@ -69,7 +69,6 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     _skip_separators,
     _unit_char_end,
     _unit_char_start,
-    _unit_index_at_or_after,
     is_break_clue,
     is_negative_clue,
 )
@@ -174,13 +173,9 @@ class BaseAddressStack(BaseStack):
 
         if is_label_seed:
             address_start = _label_seed_start_char(stream, self.clue.end)
-            start_unit = _unit_index_at_or_after(stream, address_start)
-            seed_index = _label_seed_address_index(
+            seed_index = _first_address_clue_index_after(
                 self.context.clues,
-                stream,
                 address_start,
-                start_unit,
-                max_units=6,
             )
             if seed_index is None:
                 return None

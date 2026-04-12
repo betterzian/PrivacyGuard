@@ -13,8 +13,8 @@ from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue,
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
-    _label_seed_address_index,
     _label_seed_start_char,
+    _label_start_route_locale,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_en import EnAddressStack
 from privacyguard.infrastructure.pii.detector.stacks.address_zh import ZhAddressStack
@@ -44,20 +44,13 @@ def resolve_address_stack_locale(clue: Clue, clue_index: int, context) -> str:
     if clue.role in {ClueRole.LABEL, ClueRole.START}:
         address_start = _label_seed_start_char(stream, clue.end)
         start_unit = _unit_index_at_or_after(stream, address_start)
-        seed_index = _label_seed_address_index(
+        return _label_start_route_locale(
             context.clues,
             stream,
             address_start,
             start_unit,
             max_units=6,
         )
-        if seed_index is not None:
-            seed = context.clues[seed_index]
-            window_start = max(0, seed.start - 8)
-            window_end = min(len(stream.text), seed.end + 8)
-            return _locale_from_text(stream.text[window_start:window_end])
-        window = stream.text[address_start:min(len(stream.text), address_start + 24)]
-        return _locale_from_text(window)
 
     clue_text = clue.text or stream.text[clue.start:clue.end]
     if _has_cjk(clue_text):

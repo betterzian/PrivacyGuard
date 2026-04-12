@@ -16,6 +16,7 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
     Clue,
+    ClueFamily,
     ClueRole,
     PIIAttributeType,
     StreamInput,
@@ -129,6 +130,41 @@ def _label_seed_start_char(stream: StreamInput, start_char: int) -> int:
         allow_soft_break=True,
         allow_inline_gap=True,
     )
+
+
+def _label_start_route_locale(
+    clues: tuple[Clue, ...],
+    stream: StreamInput,
+    start_char: int,
+    start_unit: int,
+    *,
+    max_units: int,
+) -> str:
+    """按固定短窗口路由 LABEL/START 场景的中英文地址栈。"""
+    probe_unit_end = min(len(stream.units), max(0, start_unit) + max_units)
+    for clue in clues:
+        if clue.family != ClueFamily.ADDRESS or clue.role == ClueRole.LABEL:
+            continue
+        if clue.unit_start >= probe_unit_end or clue.unit_end <= start_unit:
+            continue
+        raw_text = stream.text[max(start_char, clue.start):clue.end]
+        clue_text = clue.text or ""
+        if any("\u4e00" <= char <= "\u9fff" for char in raw_text) or any(
+            "\u4e00" <= char <= "\u9fff" for char in clue_text
+        ):
+            return "zh"
+    return "en"
+
+
+def _first_address_clue_index_after(clues: tuple[Clue, ...], start_char: int) -> int | None:
+    """返回给定起点之后第一个地址 clue，下游自行决定如何消费。"""
+    for index, clue in enumerate(clues):
+        if clue.family != ClueFamily.ADDRESS or clue.role == ClueRole.LABEL:
+            continue
+        if clue.end <= start_char:
+            continue
+        return index
+    return None
 
 
 def _start_after_component_end(stream: StreamInput, component_end: int) -> int:
