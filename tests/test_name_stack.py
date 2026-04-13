@@ -116,7 +116,7 @@ def test_start_seed_uses_first_character_after_separator():
     assert run.candidate.text == "张三"
 
 
-def test_zh_given_name_seed_stops_at_self():
+def test_zh_given_name_seed_does_not_submit_without_surname_anchor():
     text = "杨汉文"
     clues = (
         _clue(
@@ -132,8 +132,7 @@ def test_zh_given_name_seed_stops_at_self():
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
-    assert run is not None
-    assert run.candidate.text == "汉文"
+    assert run is None
 
 
 def test_en_given_name_seed_can_expand_left_one_plain_word():
@@ -443,7 +442,7 @@ def test_negative_overlap_blocks_non_privileged_submit_when_not_fully_exited():
     assert run is None
 
 
-def test_start_seed_keeps_exact_negative_name_under_strong():
+def test_start_seed_rejects_blacklisted_exact_negative_name():
     text = "我叫张力"
     clues = (
         _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
@@ -461,8 +460,7 @@ def test_start_seed_keeps_exact_negative_name_under_strong():
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
-    assert run is not None
-    assert run.candidate.text == "张力"
+    assert run is None
 
 
 def test_start_seed_keeps_two_char_negative_word_name_under_strong():
@@ -548,7 +546,7 @@ def test_label_seed_keeps_three_char_name_when_prefix_is_negative():
     assert run.candidate.text == "孟子轩"
 
 
-def test_label_seed_keeps_two_char_negative_word_name_under_strong():
+def test_label_seed_rejects_exact_negative_word_name():
     text = "收件人：高兴"
     clues = (
         _clue(
@@ -574,8 +572,7 @@ def test_label_seed_keeps_two_char_negative_word_name_under_strong():
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
-    assert run is not None
-    assert run.candidate.text == "高兴"
+    assert run is None
 
 
 def test_label_seed_keeps_name_when_prefix_is_negative_and_given_name_exists():
@@ -617,7 +614,7 @@ def test_label_seed_keeps_name_when_prefix_is_negative_and_given_name_exists():
     assert run.candidate.text == "许可欣"
 
 
-def test_parser_keeps_start_seed_name_despite_negative():
+def test_parser_rejects_blacklisted_start_seed_name():
     text = "我叫张力"
     clues = (
         _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
@@ -633,7 +630,7 @@ def test_parser_keeps_start_seed_name_despite_negative():
         _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "张力", source_kind="negative_name_word", attr_type=None),
     )
 
-    assert _parse_name_texts(text, clues) == ["张力"]
+    assert _parse_name_texts(text, clues) == []
 
 
 def test_parser_keeps_label_seed_name_despite_negative():
@@ -672,7 +669,7 @@ def test_parser_keeps_label_seed_name_despite_negative():
     assert _parse_name_texts(text, clues) == ["孟子轩"]
 
 
-def test_parser_keeps_two_char_name_from_label_seed_despite_negative():
+def test_parser_rejects_exact_negative_word_from_label_seed():
     text = "收件人：高兴"
     clues = (
         _clue(
@@ -696,7 +693,120 @@ def test_parser_keeps_two_char_name_from_label_seed_despite_negative():
         _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "高兴", source_kind="negative_name_word", attr_type=None),
     )
 
-    assert _parse_name_texts(text, clues) == ["高兴"]
+    assert _parse_name_texts(text, clues) == []
+
+
+def test_label_seed_accepts_short_common_name():
+    text = "姓名: 张三"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            2,
+            "姓名",
+            source_kind="context_name_field",
+            component_hint=NameComponentHint.FULL,
+            source_metadata={"seed_context_score": ["4"]},
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "张三"
+
+
+def test_label_seed_accepts_weak_surname_with_given_name_evidence():
+    text = "用户姓名：李娜"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            4,
+            "用户姓名",
+            source_kind="context_name_field",
+            component_hint=NameComponentHint.FULL,
+            source_metadata={"seed_context_score": ["4"]},
+        ),
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
+            6,
+            7,
+            "娜",
+            source_kind="zh_given_name",
+            component_hint=NameComponentHint.GIVEN,
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "李娜"
+
+
+def test_start_seed_accepts_compound_surname_name():
+    text = "姓名是 欧阳娜娜"
+    clues = (
+        _clue(
+            "start-1",
+            ClueRole.START,
+            0,
+            3,
+            "姓名是",
+            source_kind="name_start",
+            source_metadata={"seed_context_score": ["4"], "seed_kind": ["start"]},
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "欧阳娜娜"
+
+
+def test_label_seed_rejects_direction_phrase():
+    text = "姓名：方向"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            2,
+            "姓名",
+            source_kind="context_name_field",
+            component_hint=NameComponentHint.FULL,
+            source_metadata={"seed_context_score": ["4"]},
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 3, 5, "方向", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is None
+
+
+def test_label_seed_rejects_title_font_phrase():
+    text = "用户姓名：宋体"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            4,
+            "用户姓名",
+            source_kind="context_name_field",
+            component_hint=NameComponentHint.FULL,
+            source_metadata={"seed_context_score": ["4"]},
+        ),
+        _clue("neg-1", ClueRole.NEGATIVE, 5, 7, "宋体", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is None
 
 
 def test_parser_still_blocks_non_seed_negative_phrase():

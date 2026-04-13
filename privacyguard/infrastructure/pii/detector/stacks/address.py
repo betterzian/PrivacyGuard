@@ -1,63 +1,20 @@
-"""地址 stack 入口。
-
-对外仍然暴露 `AddressStack`，内部根据当前 run 的真实语种分发到：
-- `ZhAddressStack`
-- `EnAddressStack`
-"""
+"""地址 stack 入口。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueRole
+from privacyguard.domain.enums import PIIAttributeType
+from privacyguard.infrastructure.pii.detector.models import Clue
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
-from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after
-from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
-    _label_seed_start_char,
-    _label_start_route_locale,
-)
 from privacyguard.infrastructure.pii.detector.stacks.address_en import EnAddressStack
+from privacyguard.infrastructure.pii.detector.stacks.router import resolve_stack_locale, route_localized_stack
 from privacyguard.infrastructure.pii.detector.stacks.address_zh import ZhAddressStack
-
-
-def _has_cjk(text: str) -> bool:
-    return any("\u4e00" <= ch <= "\u9fff" for ch in text)
-
-
-def _locale_from_text(text: str) -> str:
-    return "zh" if _has_cjk(text) else "en"
 
 
 def resolve_address_stack_locale(clue: Clue, clue_index: int, context) -> str:
     """解析当前地址 run 应使用的语法栈。"""
-    del clue_index
-    profile = str(context.locale_profile or "mixed").strip().lower()
-    if profile == "zh_cn":
-        return "zh"
-    if profile == "en_us":
-        return "en"
-
-    stream = context.stream
-    if clue.strength == ClaimStrength.HARD:
-        return _locale_from_text(stream.text[clue.start:clue.end])
-
-    if clue.role in {ClueRole.LABEL, ClueRole.START}:
-        address_start = _label_seed_start_char(stream, clue.end)
-        start_unit = _unit_index_at_or_after(stream, address_start)
-        return _label_start_route_locale(
-            context.clues,
-            stream,
-            address_start,
-            start_unit,
-            max_units=6,
-        )
-
-    clue_text = clue.text or stream.text[clue.start:clue.end]
-    if _has_cjk(clue_text):
-        return "zh"
-    window_start = max(0, clue.start - 8)
-    window_end = min(len(stream.text), clue.end + 8)
-    return _locale_from_text(stream.text[window_start:window_end])
+    return resolve_stack_locale(PIIAttributeType.ADDRESS, clue, clue_index, context)
 
 
 @dataclass(slots=True)
@@ -65,9 +22,14 @@ class AddressStack(BaseStack):
     """对外兼容的地址 stack 分发器。"""
 
     def _delegate(self) -> BaseStack:
-        locale = resolve_address_stack_locale(self.clue, self.clue_index, self.context)
-        stack_cls = ZhAddressStack if locale == "zh" else EnAddressStack
-        return stack_cls(clue=self.clue, clue_index=self.clue_index, context=self.context)
+        return route_localized_stack(
+            attr_type=PIIAttributeType.ADDRESS,
+            clue=self.clue,
+            clue_index=self.clue_index,
+            context=self.context,
+            zh_stack_cls=ZhAddressStack,
+            en_stack_cls=EnAddressStack,
+        )
 
     def run(self) -> StackRun | None:
         return self._delegate().run()

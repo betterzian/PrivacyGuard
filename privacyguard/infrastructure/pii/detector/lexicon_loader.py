@@ -9,6 +9,7 @@ import re
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.lexicon_store import read_scanner_lexicon_json
 from privacyguard.infrastructure.pii.detector.models import AddressComponentType, LabelSpec
+from privacyguard.infrastructure.pii.detector.zh_name_rules import ZhNameRules, build_zh_name_rules
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,10 +82,9 @@ def load_name_start_keywords() -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=1)
-def load_family_names() -> tuple[str, ...]:
-    # 已重命名为 zh_surnames.json（含单姓与复姓）。
-    payload = _clean_str_list(_read_json("zh_surnames.json"))
-    return tuple(sorted(set(payload), key=len, reverse=True))
+def load_zh_name_rules() -> ZhNameRules:
+    """加载中文姓名统一规则。"""
+    return build_zh_name_rules(_read_json("zh_name_rules.json"))
 
 
 @lru_cache(maxsize=1)
@@ -175,14 +175,6 @@ def load_zh_country_prefix_aliases() -> dict[str, str]:
 
 
 @lru_cache(maxsize=1)
-def load_zh_compound_surnames() -> tuple[str, ...]:
-    """加载中文复姓集合：由 zh_surnames.json 派生（仅保留长度为 2 的中文姓）。"""
-    surnames = load_family_names()
-    compounds = [s for s in surnames if len(s) == 2]
-    return tuple(sorted(set(compounds), key=len, reverse=True))
-
-
-@lru_cache(maxsize=1)
 def load_negative_name_words() -> tuple[str, ...]:
     return _clean_str_list(_read_json("negative_name_words.json"))
 
@@ -213,13 +205,6 @@ def load_en_surnames() -> tuple[str, ...]:
 def load_en_given_names() -> tuple[str, ...]:
     """加载英文名字（given name）词典，按长度降序排列。"""
     payload = _clean_str_list(_read_json("en_given_names.json"))
-    return tuple(sorted(set(payload), key=len, reverse=True))
-
-
-@lru_cache(maxsize=1)
-def load_zh_given_names() -> tuple[str, ...]:
-    """加载中文名字（given name）词典，按长度降序排列。"""
-    payload = _clean_str_list(_read_json("zh_given_names.json"))
     return tuple(sorted(set(payload), key=len, reverse=True))
 
 
@@ -275,7 +260,6 @@ __all__ = [
     "load_en_given_names",
     "load_en_surnames",
     "load_en_us_states",
-    "load_family_names",
     "load_label_specs",
     "load_name_start_keywords",
     "load_negative_address_words",
@@ -286,5 +270,5 @@ __all__ = [
     "load_zh_control_values",
     "load_zh_address_suffix_strippers",
     "load_zh_country_prefix_aliases",
-    "load_zh_given_names",
+    "load_zh_name_rules",
 ]

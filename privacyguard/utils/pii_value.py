@@ -13,7 +13,7 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_en_address_country_aliases,
     load_en_address_keyword_groups,
     load_en_us_states,
-    load_zh_compound_surnames,
+    load_zh_name_rules,
     load_zh_country_prefix_aliases,
 )
 from privacyguard.utils.text import normalize_text
@@ -58,7 +58,7 @@ def _en_us_state_aliases() -> dict[str, str]:
     aliases: dict[str, str] = {code.lower(): code for code in _EN_US_STATE_NAMES}
     aliases.update({name.lower(): code for code, name in _EN_US_STATE_NAMES.items()})
     return aliases
-_COMMON_COMPOUND_SURNAMES = set(load_zh_compound_surnames())
+_COMMON_COMPOUND_SURNAMES = set(load_zh_name_rules().compound_surnames)
 _CITY_PATTERN = re.compile(r"^(?P<city>[^0-9]{1,16}?(?:自治州|地区|盟|市))")
 _DISTRICT_PATTERN = re.compile(r"^(?P<district>[^0-9]{1,16}?(?:新区|自治县|自治旗|区|县|旗|市))")
 _ZH_BUILDING_PATTERN = re.compile(r"(?P<building>[0-9A-Za-z一二三四五六七八九十百零两]+(?:号楼|栋|幢|座|单元))$")

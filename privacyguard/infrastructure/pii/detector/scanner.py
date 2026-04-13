@@ -17,7 +17,6 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_en_address_keyword_groups,
     load_en_given_names,
     load_en_surnames,
-    load_family_names,
     load_label_specs,
     load_name_start_keywords,
     load_negative_address_words,
@@ -26,7 +25,7 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_negative_ui_words,
     load_zh_address_keyword_groups,
     load_zh_control_values,
-    load_zh_given_names,
+    load_zh_name_rules,
 )
 from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern
 from privacyguard.infrastructure.pii.detector.models import (
@@ -42,6 +41,7 @@ from privacyguard.infrastructure.pii.detector.models import (
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
+from privacyguard.infrastructure.pii.detector.zh_name_rules import compact_zh_name_text
 
 _HARD_SOURCE_PRIORITY = {
     "session": 4,
@@ -605,15 +605,21 @@ def _scan_name_dictionary_clues(
         metadata = {key: list(values) for key, values in payload.metadata_items}
         component = _dictionary_name_component(metadata)
         role, hint_value = _dictionary_name_role(component)
-        metadata["hard_source"] = [source_kind]
         metadata["name_component_hint"] = [hint_value]
+        is_zh_family = component == "family" and _is_cjk_text(matched_text)
+        strength = ClaimStrength.HARD
+        if is_zh_family:
+            metadata.update(_zh_surname_metadata(matched_text, from_dictionary=True))
+            strength = ClaimStrength.SOFT
+        else:
+            metadata["hard_source"] = [source_kind]
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
                 family=ClueFamily.NAME,
                 role=role,
                 attr_type=PIIAttributeType.NAME,
-                strength=ClaimStrength.HARD,
+                strength=strength,
                 start=start,
                 end=end,
                 text=matched_text,
@@ -669,6 +675,13 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
         label_metadata: dict[str, list[str]] = {}
         if spec.ocr_source_kind:
             label_metadata["ocr_source_kind"] = [spec.ocr_source_kind]
+        label_metadata = _seed_metadata(
+            segment=segment,
+            raw_start=start,
+            raw_end=end,
+            seed_kind="label",
+            extra_metadata=label_metadata,
+        )
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -739,6 +752,13 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         if normalized is None:
             continue
         raw_start, raw_end, _matched_text = normalized
+        metadata = _seed_metadata(
+            segment=segment,
+            raw_start=raw_start,
+            raw_end=raw_end,
+            seed_kind="start",
+            fixed_score=4,
+        )
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -750,6 +770,7 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=str(match.payload),
                 source_kind="name_start",
+                source_metadata=metadata,
             )
         )
     return _dedupe_clues(clues)
@@ -765,6 +786,7 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
         if any(keyword in tail for keyword in ("省", "市", "区", "县", "旗", "路", "街", "道", "大道", "小区", "单元", "栋", "室", "住址", "地址")):
             continue
         raw_start, raw_end, _matched_text = normalized
+        metadata = _zh_surname_metadata(str(match.payload), from_dictionary=False)
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -776,6 +798,7 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
                 end=raw_end,
                 text=str(match.payload),
                 source_kind="family_name",
+                source_metadata=metadata,
             )
         )
     return _dedupe_clues(clues)
@@ -848,6 +871,7 @@ def _scan_zh_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 end=raw_end,
                 text=str(match.payload),
                 source_kind="zh_given_name",
+                source_metadata={"name_component_hint": ["given"]},
             )
         )
     return _dedupe_clues(clues)
@@ -1284,6 +1308,136 @@ def _segment_span_to_raw(segment: _ScanSegment, start: int, end: int) -> tuple[i
     return (segment.raw_start + start + start_offset, segment.raw_start + end + end_offset)
 
 
+def _segment_raw_end(segment: _ScanSegment) -> int:
+    """返回 segment 在原始流中的右边界。"""
+    _raw_start, raw_end = _segment_span_to_raw(segment, len(segment.text), len(segment.text))
+    return raw_end
+
+
+def _is_cjk_text(text: str) -> bool:
+    compact = compact_zh_name_text(text)
+    return bool(compact) and all("\u4e00" <= char <= "\u9fff" for char in compact)
+
+
+def _zh_surname_metadata(text: str, *, from_dictionary: bool) -> dict[str, list[str]]:
+    """根据统一中文姓名规则为姓氏 clue 补充元数据。"""
+    compact = compact_zh_name_text(text)
+    rules = load_zh_name_rules()
+    metadata: dict[str, list[str]] = {}
+    if compact in rules.compound_surnames:
+        metadata["surname_match_kind"] = ["compound"]
+        metadata["surname_tier"] = ["compound"]
+    elif len(compact) == 1 and compact in rules.surname_tier_by_char:
+        metadata["surname_match_kind"] = ["single"]
+        metadata["surname_tier"] = [rules.surname_tier_by_char[compact]]
+    else:
+        metadata["surname_match_kind"] = ["compound" if len(compact) > 1 else "single"]
+        metadata["surname_tier"] = ["custom"]
+    if compact in rules.boostable_medium_surnames:
+        metadata["boostable_medium"] = ["1"]
+    if from_dictionary:
+        metadata["surname_from_dictionary"] = ["1"]
+    return metadata
+
+
+def _segment_trimmed_unit_bounds(segment: _ScanSegment) -> tuple[int, int] | None:
+    """返回 segment 去掉空白与 inline gap 后的 unit 边界。"""
+    stream = segment.stream
+    raw_end = _segment_raw_end(segment)
+    unit_start, unit_end = _char_span_to_unit_span(stream, segment.raw_start, raw_end)
+    if unit_start >= unit_end:
+        return None
+    left = unit_start
+    while left < unit_end and stream.units[left].kind in {"space", "inline_gap"}:
+        left += 1
+    right = unit_end - 1
+    while right >= left and stream.units[right].kind in {"space", "inline_gap"}:
+        right -= 1
+    if left > right:
+        return None
+    return (left, right + 1)
+
+
+def _seed_side_is_blank_or_boundary(stream: StreamInput, *, unit_index: int, is_left: bool) -> bool:
+    if is_left:
+        if unit_index <= 0:
+            return True
+        prev = stream.units[unit_index - 1]
+        return prev.kind in {"space", *_LABEL_BOUNDARY_UNIT_KINDS}
+    if unit_index >= len(stream.units):
+        return True
+    nxt = stream.units[unit_index]
+    return nxt.kind in {"space", *_LABEL_BOUNDARY_UNIT_KINDS}
+
+
+def _has_label_connector_after(stream: StreamInput, unit_end: int) -> bool:
+    scan = unit_end
+    while scan < len(stream.units) and stream.units[scan].kind in {"space", "inline_gap"}:
+        scan += 1
+    if scan >= len(stream.units):
+        return False
+    unit = stream.units[scan]
+    return unit.kind == "punct" and unit.text in _LABEL_FIELD_SEPARATOR_CHARS
+
+
+def _seed_metadata(
+    *,
+    segment: _ScanSegment,
+    raw_start: int,
+    raw_end: int,
+    seed_kind: str,
+    fixed_score: int | None = None,
+    extra_metadata: dict[str, list[str]] | None = None,
+) -> dict[str, list[str]]:
+    """为 LABEL/START 生成统一的 seed 置信度元数据。"""
+    stream = segment.stream
+    metadata = {key: list(values) for key, values in (extra_metadata or {}).items()}
+    unit_start, unit_end = _char_span_to_unit_span(stream, raw_start, raw_end)
+    trimmed_bounds = _segment_trimmed_unit_bounds(segment)
+    seed_is_left_edge = False
+    seed_is_right_edge = False
+    seed_segment_ratio = 0.0
+    if trimmed_bounds is not None:
+        trimmed_start, trimmed_end = trimmed_bounds
+        seed_is_left_edge = unit_start == trimmed_start
+        seed_is_right_edge = unit_end == trimmed_end
+        trimmed_raw_start = stream.units[trimmed_start].char_start
+        trimmed_raw_end = stream.units[trimmed_end - 1].char_end
+        trimmed_length = max(1, trimmed_raw_end - trimmed_raw_start)
+        seed_segment_ratio = round((raw_end - raw_start) / trimmed_length, 4)
+
+    seed_has_connector_after = _has_label_connector_after(stream, unit_end)
+    seed_surrounded = _seed_side_is_blank_or_boundary(stream, unit_index=unit_start, is_left=True) and _seed_side_is_blank_or_boundary(
+        stream,
+        unit_index=unit_end,
+        is_left=False,
+    )
+    if fixed_score is not None:
+        seed_context_score = fixed_score
+    else:
+        seed_context_score = 1
+        if seed_has_connector_after:
+            seed_context_score += 2
+        if seed_is_left_edge:
+            seed_context_score += 1
+        if seed_is_right_edge:
+            seed_context_score += 1
+        if seed_surrounded:
+            seed_context_score += 1
+        if seed_segment_ratio >= 0.5:
+            seed_context_score += 1
+        seed_context_score = min(seed_context_score, 4)
+
+    metadata["seed_context_score"] = [str(seed_context_score)]
+    metadata["seed_is_left_edge"] = ["1" if seed_is_left_edge else "0"]
+    metadata["seed_is_right_edge"] = ["1" if seed_is_right_edge else "0"]
+    metadata["seed_has_connector_after"] = ["1" if seed_has_connector_after else "0"]
+    metadata["seed_surrounded_by_boundary"] = ["1" if seed_surrounded else "0"]
+    metadata["seed_segment_ratio"] = [f"{seed_segment_ratio:.4f}"]
+    metadata["seed_kind"] = [seed_kind]
+    return metadata
+
+
 def _attach_unit_spans(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
     attached: list[Clue] = []
     for clue in clues:
@@ -1324,32 +1478,31 @@ _LABEL_START_CONNECTOR_SKIPPABLE_UNIT_KINDS = frozenset({"space", "inline_gap"})
 
 def _try_convert_label_to_start(stream: StreamInput, clue: Clue) -> Clue | None:
     """尝试将 LABEL 转为 START：后面紧跟"是"或"is"（英文允许跳过空白 unit）则合并。"""
+    def _as_start(target_unit_index: int) -> Clue:
+        metadata = {key: list(values) for key, values in clue.source_metadata.items()}
+        metadata["seed_context_score"] = ["4"]
+        metadata["seed_kind"] = ["start"]
+        return replace(
+            clue,
+            role=ClueRole.START,
+            end=stream.units[target_unit_index].char_end,
+            unit_end=target_unit_index + 1,
+            text=stream.text[clue.start : stream.units[target_unit_index].char_end],
+            source_metadata=metadata,
+        )
+
     if not stream.units or clue.unit_end >= len(stream.units):
         return None
     next_idx = clue.unit_end
     # 中文：紧邻的下一个 unit 是"是"。
     if stream.units[next_idx].text == "是":
-        target = stream.units[next_idx]
-        return replace(
-            clue,
-            role=ClueRole.START,
-            end=target.char_end,
-            unit_end=next_idx + 1,
-            text=stream.text[clue.start : target.char_end],
-        )
+        return _as_start(next_idx)
     # 英文：跳过空白/gap unit，检查下一个实质 unit 是否为 "is"。
     scan = next_idx
     while scan < len(stream.units) and stream.units[scan].kind in _LABEL_START_CONNECTOR_SKIPPABLE_UNIT_KINDS:
         scan += 1
     if scan < len(stream.units) and stream.units[scan].text.lower() == "is":
-        target = stream.units[scan]
-        return replace(
-            clue,
-            role=ClueRole.START,
-            end=target.char_end,
-            unit_end=scan + 1,
-            text=stream.text[clue.start : target.char_end],
-        )
+        return _as_start(scan)
     return None
 
 
@@ -1542,6 +1695,7 @@ def _name_start_matcher() -> AhoMatcher:
 
 @lru_cache(maxsize=1)
 def _family_name_matcher() -> AhoMatcher:
+    rules = load_zh_name_rules()
     return AhoMatcher.from_patterns(
         tuple(
             AhoPattern(
@@ -1549,7 +1703,7 @@ def _family_name_matcher() -> AhoMatcher:
                 payload=surname,
                 ascii_boundary=_needs_ascii_keyword_boundary(surname),
             )
-            for surname in load_family_names()
+            for surname in sorted(rules.all_surnames, key=len, reverse=True)
         )
     )
 
@@ -1584,6 +1738,7 @@ def _en_given_name_matcher() -> AhoMatcher:
 
 @lru_cache(maxsize=1)
 def _zh_given_name_matcher() -> AhoMatcher:
+    rules = load_zh_name_rules()
     return AhoMatcher.from_patterns(
         tuple(
             AhoPattern(
@@ -1591,7 +1746,7 @@ def _zh_given_name_matcher() -> AhoMatcher:
                 payload=name,
                 ascii_boundary=_needs_ascii_keyword_boundary(name),
             )
-            for name in load_zh_given_names()
+            for name in rules.zh_given_names
         )
     )
 

@@ -49,6 +49,16 @@ def _ocr_block(text: str, *, block_id: str, line_id: int, x: int = 0, y: int = 0
     )
 
 
+def _first_segment(text: str):
+    stream = build_prompt_stream(text)
+    segments = scanner_module._build_soft_scan_segments(
+        stream,
+        (),
+        inline_gap_spans=scanner_module._find_inline_gap_spans(stream),
+    )
+    return stream, segments[0]
+
+
 def test_local_dictionary_hard_clue_fields_match_legacy_contract():
     entry = _entry(
         attr_type=PIIAttributeType.EMAIL,
@@ -373,6 +383,75 @@ def test_name_middle_entry_is_mapped_to_given_name_role():
     assert clues[0].text == "Marie"
     assert clues[0].source_metadata["name_component"] == ["middle"]
     assert clues[0].role == ClueRole.GIVEN_NAME
+
+
+def test_chinese_dictionary_family_entry_is_downgraded_to_soft_surname_clue():
+    entry = _entry(
+        text="王",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"], "name_component": ["family"]},
+    )
+
+    clues = scanner_module._scan_name_dictionary_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        "王伟来了",
+        (entry,),
+        source_kind="local",
+    )
+
+    assert len(clues) == 1
+    clue = clues[0]
+    assert clue.role == ClueRole.FAMILY_NAME
+    assert clue.strength == ClaimStrength.SOFT
+    assert "hard_source" not in clue.source_metadata
+    assert clue.source_metadata["surname_tier"] == ["weak"]
+    assert clue.source_metadata["surname_match_kind"] == ["single"]
+    assert clue.source_metadata["surname_from_dictionary"] == ["1"]
+
+
+def test_chinese_dictionary_custom_family_entry_keeps_soft_custom_tier():
+    entry = _entry(
+        text="第五",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"], "name_component": ["family"]},
+    )
+
+    clues = scanner_module._scan_name_dictionary_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        "第五明提交了申请",
+        (entry,),
+        source_kind="local",
+    )
+
+    assert len(clues) == 1
+    clue = clues[0]
+    assert clue.role == ClueRole.FAMILY_NAME
+    assert clue.strength == ClaimStrength.SOFT
+    assert clue.source_metadata["surname_tier"] == ["custom"]
+    assert clue.source_metadata["surname_from_dictionary"] == ["1"]
+
+
+def test_label_seed_context_metadata_prefers_left_edge_and_connector():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    _stream_a, segment_a = _first_segment("姓名: 张三")
+    _stream_b, segment_b = _first_segment("这里的姓名 张三")
+
+    label_a = scanner_module._scan_label_clues(ctx, segment_a)[0]
+    label_b = scanner_module._scan_label_clues(ctx, segment_b)[0]
+
+    assert int(label_a.source_metadata["seed_context_score"][0]) > int(label_b.source_metadata["seed_context_score"][0])
+    assert label_a.source_metadata["seed_has_connector_after"] == ["1"]
+    assert label_a.source_metadata["seed_is_left_edge"] == ["1"]
+
+
+def test_start_seed_context_metadata_is_fixed_to_four():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    _stream, segment = _first_segment("我叫张三")
+
+    start = scanner_module._scan_name_start_clues(ctx, segment)[0]
+
+    assert start.source_metadata["seed_context_score"] == ["4"]
+    assert start.source_metadata["seed_kind"] == ["start"]
 
 
 def test_parser_keeps_char_span_and_unit_span_for_dictionary_name_candidate():
