@@ -23,15 +23,11 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueBundle,
     ClueFamily,
     ClueRole,
+    build_negative_unit_index,
 )
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
-
-
-def _with_units(stream, clue: Clue) -> Clue:
-    us, ue = _char_span_to_unit_span(stream, clue.start, clue.end)
-    return replace(clue, unit_start=us, unit_end=ue)
 
 
 def _clue(
@@ -63,11 +59,40 @@ def _clue(
     )
 
 
+def _with_units(stream, clue: Clue) -> Clue:
+    unit_start, unit_end = _char_span_to_unit_span(stream, clue.start, clue.end)
+    return replace(clue, unit_start=unit_start, unit_end=unit_end)
+
+
+def _split_negative_clues(
+    stream,
+    clues: tuple[Clue, ...],
+) -> tuple[tuple[Clue, ...], list[int], list[int], int]:
+    fixed_clues: list[Clue] = []
+    negative_spans: list[tuple[int, int]] = []
+    for clue in clues:
+        fixed = _with_units(stream, clue)
+        if fixed.role == ClueRole.NEGATIVE:
+            negative_spans.append((fixed.unit_start, fixed.unit_end))
+            continue
+        fixed_clues.append(fixed)
+    negative_unit_marks, negative_prefix_sum, negative_start_weight = build_negative_unit_index(
+        len(stream.units),
+        negative_spans,
+    )
+    return tuple(fixed_clues), negative_unit_marks, negative_prefix_sum, negative_start_weight
+
+
 def _detect_candidates(text: str, clues: tuple[Clue, ...], *, locale_profile: str = "zh"):
     ctx = DetectContext()
     stream = build_prompt_stream(text)
-    fixed = tuple(_with_units(stream, c) for c in clues)
-    bundle = ClueBundle(all_clues=fixed)
+    fixed, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
+    bundle = ClueBundle(
+        all_clues=fixed,
+        negative_unit_marks=negative_unit_marks,
+        negative_prefix_sum=negative_prefix_sum,
+        negative_start_weight=negative_start_weight,
+    )
     parser = StreamParser(locale_profile=locale_profile, ctx=ctx)
     result = parser.parse(stream, bundle)
     return result.candidates

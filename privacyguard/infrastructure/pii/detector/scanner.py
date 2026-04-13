@@ -38,6 +38,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueRole,
     DictionaryEntry,
     StreamInput,
+    build_negative_unit_index,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
@@ -281,6 +282,7 @@ def build_clue_bundle(
         inline_gap_spans=scan_unit_spans.inline_gap_spans,
     )
     soft_clues: list[Clue] = []
+    negative_clues: list[Clue] = []
     for segment in scan_segments:
         soft_clues.extend(_scan_org_address_dictionary_clues(ctx, segment, session_non_structured_entries, source_kind="session"))
         soft_clues.extend(_scan_org_address_dictionary_clues(ctx, segment, local_non_structured_entries, source_kind="local"))
@@ -296,16 +298,28 @@ def build_clue_bundle(
         soft_clues.extend(_scan_company_suffix_clues(ctx, segment))
         soft_clues.extend(_scan_address_clues(ctx, segment, locale_profile=locale_profile))
         soft_clues.extend(_scan_control_value_clues(ctx, segment, locale_profile=locale_profile))
-        soft_clues.extend(_scan_negative_clues(ctx, segment))
+        negative_clues.extend(_scan_negative_clues(ctx, segment))
     if locale_profile in {"en", "mixed"}:
         soft_clues.extend(_scan_en_address_postal_clues_full_stream(ctx, stream))
+
+    deduped_negative_clues = _dedupe_clues(negative_clues) if negative_clues else []
+    negative_clues_with_units = _attach_unit_spans(stream, deduped_negative_clues)
+    negative_unit_marks, negative_prefix_sum, negative_start_weight = _build_negative_index(
+        stream,
+        negative_clues_with_units,
+    )
 
     # ── 事件扫描线裁决 ──
     all_clues = [*structured_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_only_spans), *soft_clues]
     all_clues_with_units = _attach_unit_spans(stream, all_clues)
     resolved_clues = _sweep_resolve(stream, all_clues_with_units)
     ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, _family_order(item.family), item.end)))
-    return ClueBundle(all_clues=ordered_clues)
+    return ClueBundle(
+        all_clues=ordered_clues,
+        negative_unit_marks=negative_unit_marks,
+        negative_prefix_sum=negative_prefix_sum,
+        negative_start_weight=negative_start_weight,
+    )
 
 
 def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_spans: tuple[tuple[int, int], ...] = ()) -> list[Clue]:
@@ -1444,6 +1458,19 @@ def _attach_unit_spans(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
         unit_start, unit_end = _char_span_to_unit_span(stream, clue.start, clue.end)
         attached.append(replace(clue, unit_start=unit_start, unit_end=unit_end))
     return attached
+
+
+def _build_negative_index(
+    stream: StreamInput,
+    negative_clues: list[Clue],
+) -> tuple[list[int], list[int], int]:
+    """把 negative clue 列表折叠为 unit 级覆盖索引。"""
+    unit_spans = [
+        (clue.unit_start, clue.unit_end)
+        for clue in negative_clues
+        if clue.role == ClueRole.NEGATIVE and clue.unit_start < clue.unit_end
+    ]
+    return build_negative_unit_index(len(stream.units), unit_spans)
 
 
 def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[int, int]:

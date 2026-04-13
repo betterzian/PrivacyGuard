@@ -218,7 +218,7 @@ class BaseAddressStack(BaseStack):
         evidence_count: int,
     ) -> StackRun | None:
         """SOFT 路径：扫描 clue → 可选负向尾修 → suspect 修正 → 数字尾挑战 → 组装 `StackRun`。"""
-        state, negative_spans, index = self._scan_components(
+        state, index = self._scan_components(
             clues=clues,
             scan_index=scan_index,
             address_start=address_start,
@@ -226,10 +226,9 @@ class BaseAddressStack(BaseStack):
         )
         if not state.components:
             return None
-        if negative_spans:
-            self._repair_negative_tail_components(state, negative_spans, clues)
-            if not state.components:
-                return None
+        self._repair_negative_tail_components(state, clues)
+        if not state.components:
+            return None
         consumed_ids |= state.extra_consumed_clue_ids
         consumed_ids |= state.committed_clue_ids
         _fixup_suspected_info(state)
@@ -281,7 +280,7 @@ class BaseAddressStack(BaseStack):
         )
 
     def _run_with_sub_clues(self, sub_clues: tuple[Clue, ...], *, relaxed: bool = False) -> StackRun | None:
-        state, negative_spans, _ = self._scan_components(
+        state, _ = self._scan_components(
             clues=sub_clues,
             scan_index=0,
             address_start=sub_clues[0].start,
@@ -292,10 +291,9 @@ class BaseAddressStack(BaseStack):
         )
         if not state.components:
             return None
-        if negative_spans:
-            self._repair_negative_tail_components(state, negative_spans, sub_clues)
-            if not state.components:
-                return None
+        self._repair_negative_tail_components(state, sub_clues)
+        if not state.components:
+            return None
         _fixup_suspected_info(state)
         return self._build_address_run_from_state(
             state,
@@ -315,14 +313,13 @@ class BaseAddressStack(BaseStack):
         stop_char_end: int | None = None,
         absorb_non_address: bool = True,
         relaxed: bool = False,
-    ) -> tuple[_ParseState, list[tuple[int, int]], int]:
-        """从 `scan_index` 起线性扫描 `clues`，维护 `_ParseState` 并记录负向 span。"""
+    ) -> tuple[_ParseState, int]:
+        """从 `scan_index` 起线性扫描 `clues`，维护 `_ParseState`。"""
         raw_text = self.context.stream.text
         stream = self.context.stream
         state = _ParseState()
         state.last_end = address_start
         state.evidence_count = evidence_count
-        negative_spans: list[tuple[int, int]] = []
         index = scan_index
 
         while index < len(clues):
@@ -344,7 +341,6 @@ class BaseAddressStack(BaseStack):
             if is_break_clue(clue):
                 break
             if is_negative_clue(clue):
-                negative_spans.append((clue.start, clue.end))
                 index += 1
                 continue
             if clue.attr_type is None:
@@ -374,7 +370,7 @@ class BaseAddressStack(BaseStack):
             index += 1
 
         self._flush_chain(state, clue_index=index)
-        return state, negative_spans, index
+        return state, index
 
     def _consume_non_address_clue(
         self,
@@ -437,15 +433,22 @@ class BaseAddressStack(BaseStack):
     def _repair_negative_tail_components(
         self,
         state: _ParseState,
-        negative_spans: list[tuple[int, int]],
         clues: tuple[Clue, ...],
     ) -> None:
-        if not negative_spans or not state.components:
+        if not state.components:
+            return
+        ordered_components = sorted(state.components, key=lambda component: (component.end, component.start))
+        if not ordered_components:
+            return
+        if not _rightmost_component_key_overlaps_negative(
+            ordered_components[-1],
+            clues,
+            self.context.has_negative_cover,
+        ):
             return
         base_evidence_count = max(0, state.evidence_count - len(state.components))
         state.components = self._repair_components_overlapping_negative(
             state.components,
-            negative_spans,
             clues,
             state.ignored_address_key_indices,
         )
@@ -454,7 +457,6 @@ class BaseAddressStack(BaseStack):
     def _repair_components_overlapping_negative(
         self,
         components: list[_DraftComponent],
-        negative_spans: list[tuple[int, int]],
         clues: tuple[Clue, ...],
         ignored_address_key_indices: set[int],
     ) -> list[_DraftComponent]:
@@ -464,12 +466,11 @@ class BaseAddressStack(BaseStack):
         )
         while ordered:
             last = ordered[-1]
-            if not _rightmost_component_key_overlaps_negative(last, clues, negative_spans):
+            if not _rightmost_component_key_overlaps_negative(last, clues, self.context.has_negative_cover):
                 return ordered
             repaired = self._repair_rightmost_component_prefix(
                 prefix_components=ordered[:-1],
                 component=last,
-                negative_spans=negative_spans,
                 clues=clues,
                 ignored_address_key_indices=ignored_address_key_indices,
             )
@@ -484,7 +485,6 @@ class BaseAddressStack(BaseStack):
         *,
         prefix_components: list[_DraftComponent],
         component: _DraftComponent,
-        negative_spans: list[tuple[int, int]],
         clues: tuple[Clue, ...],
         ignored_address_key_indices: set[int],
     ) -> list[_DraftComponent] | None:
@@ -493,7 +493,7 @@ class BaseAddressStack(BaseStack):
             return None
         last_affected_index = -1
         for index, (_, clue) in enumerate(clue_entries):
-            if any(not (clue.end <= s or clue.start >= e) for s, e in negative_spans):
+            if self.context.has_negative_cover(clue.unit_start, clue.unit_end):
                 last_affected_index = index
         if last_affected_index <= 0:
             return None
@@ -506,7 +506,11 @@ class BaseAddressStack(BaseStack):
             )
             if replay_state is None or not replay_state.components:
                 continue
-            if _rightmost_component_key_overlaps_negative(replay_state.components[-1], clues, negative_spans):
+            if _rightmost_component_key_overlaps_negative(
+                replay_state.components[-1],
+                clues,
+                self.context.has_negative_cover,
+            ):
                 continue
             return replay_state.components
         return None

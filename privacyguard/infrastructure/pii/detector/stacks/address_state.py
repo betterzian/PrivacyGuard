@@ -1038,21 +1038,17 @@ def _ordered_component_clue_entries(
     return entries
 
 
-def _overlaps_any_span(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
-    return any(not (end <= s or start >= e) for s, e in spans)
-
-
 def _rightmost_component_key_overlaps_negative(
     component: _DraftComponent,
     clues: tuple[Clue, ...],
-    negative_spans: list[tuple[int, int]],
+    has_negative_cover: Callable[[int, int], bool],
 ) -> bool:
     """仅当最右组件的最终 key clue 与负向 span 重叠时，才触发尾修复。"""
     clue_entries = _ordered_component_clue_entries(component, clues)
     for _, clue in reversed(clue_entries):
         if clue.role != ClueRole.KEY:
             continue
-        return _overlaps_any_span(clue.start, clue.end, negative_spans)
+        return has_negative_cover(clue.unit_start, clue.unit_end)
     return False
 
 

@@ -111,7 +111,7 @@ def _sample_probe_text(context: StackContextLike, *, start: int, max_units: int)
     if start >= len(stream.text) or not stream.units:
         return ""
 
-    blocker_start = _probe_blocker_start(context.clues, start)
+    blocker_start = _probe_blocker_start(context, start)
     ui = _unit_index_at_or_after(stream, start)
     pieces: list[str] = []
     observed_units = 0
@@ -135,12 +135,16 @@ def _sample_probe_text(context: StackContextLike, *, start: int, max_units: int)
     return "".join(pieces)
 
 
-def _probe_blocker_start(clues: tuple[Clue, ...], start: int) -> int:
+def _probe_blocker_start(context: StackContextLike, start: int) -> int:
+    clues = context.clues
+    blocker_start = start if context.has_negative_cover_left_of_char(start) else context.next_negative_start_char(start)
     for clue in clues:
         if clue.end <= start:
             continue
         if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}:
-            return clue.start
+            blocker_start = clue.start if blocker_start is None else min(blocker_start, clue.start)
+            break
         if clue.strength == ClaimStrength.HARD:
-            return clue.start
-    return 1 << 30
+            blocker_start = clue.start if blocker_start is None else min(blocker_start, clue.start)
+            break
+    return blocker_start if blocker_start is not None else (1 << 30)

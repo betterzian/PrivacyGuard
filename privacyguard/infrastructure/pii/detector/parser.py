@@ -26,6 +26,11 @@ from privacyguard.infrastructure.pii.detector.models import (
     ParseResult,
     StructuredLookupIndex,
     StreamInput,
+    negative_has_cover,
+    negative_has_start,
+    negative_is_fully_covered,
+    negative_next_start_unit,
+    negative_prev_covered_end_unit,
 )
 from privacyguard.infrastructure.pii.detector.stacks import BaseStack, StackManager, StackRun, get_stack_spec
 from privacyguard.utils.normalized_pii import normalize_pii, normalized_primary_text, same_entity
@@ -215,6 +220,9 @@ class StackContext:
     locale_profile: str
     protection_level: ProtectionLevel = ProtectionLevel.STRONG
     clues: tuple[Clue, ...] = ()
+    negative_unit_marks: list[int] = field(default_factory=list)
+    negative_prefix_sum: list[int] = field(default_factory=lambda: [0])
+    negative_start_weight: int = 0
     structured_lookup_index: StructuredLookupIndex = field(default_factory=StructuredLookupIndex)
     committed_until: int = 0
     candidates: list[CandidateDraft] = field(default_factory=list)
@@ -222,6 +230,66 @@ class StackContext:
     handled_label_clue_ids: set[str] = field(default_factory=set)
     candidate_identity_index: dict[_CandidateIdentityKey, CandidateDraft] = field(default_factory=dict)
     address_normalized_cache: dict[int, tuple[_AddressNormalizedCacheSignature, object]] = field(default_factory=dict)
+
+    def has_negative_cover(self, unit_start: int, unit_end: int) -> bool:
+        """判断给定 unit 区间是否存在任意 negative 覆盖。"""
+        return negative_has_cover(
+            self.negative_prefix_sum,
+            len(self.negative_unit_marks),
+            unit_start,
+            unit_end,
+        )
+
+    def has_negative_start(self, unit_start: int, unit_end: int) -> bool:
+        """判断给定 unit 区间是否存在 negative 起点。"""
+        return negative_has_start(
+            self.negative_prefix_sum,
+            len(self.negative_unit_marks),
+            unit_start,
+            unit_end,
+        )
+
+    def is_negative_fully_covered(self, unit_start: int, unit_end: int) -> bool:
+        """判断给定 unit 区间是否被 negative 完整覆盖。"""
+        return negative_is_fully_covered(self.negative_unit_marks, unit_start, unit_end)
+
+    def next_negative_start_char(self, char_index: int) -> int | None:
+        """返回当前位置右侧最近的 negative 起点 char，下游可将其作为边界。"""
+        unit_index = self._unit_index_at_or_after(char_index)
+        next_unit = negative_next_start_unit(
+            self.negative_unit_marks,
+            self.negative_start_weight,
+            unit_index,
+        )
+        if next_unit is None or next_unit >= len(self.stream.units):
+            return None
+        return self.stream.units[next_unit].char_start
+
+    def previous_negative_end_char(self, char_index: int) -> int | None:
+        """返回左侧最近一个 negative 覆盖 unit 的结束位置。"""
+        before_unit = self._unit_index_at_or_after(char_index)
+        end_unit = negative_prev_covered_end_unit(self.negative_unit_marks, before_unit)
+        if end_unit is None or end_unit <= 0 or end_unit > len(self.stream.units):
+            return None
+        return self.stream.units[end_unit - 1].char_end
+
+    def has_negative_cover_left_of_char(self, char_index: int) -> bool:
+        """判断 cursor 左侧紧邻位置是否处于 negative 覆盖内部。"""
+        if char_index <= 0 or not self.stream.char_to_unit or not self.negative_unit_marks:
+            return False
+        left_char = min(char_index - 1, len(self.stream.char_to_unit) - 1)
+        unit_index = self.stream.char_to_unit[left_char]
+        if unit_index < 0 or unit_index >= len(self.negative_unit_marks):
+            return False
+        return self.negative_unit_marks[unit_index] > 0
+
+    def _unit_index_at_or_after(self, char_index: int) -> int:
+        if not self.stream.char_to_unit or char_index >= len(self.stream.char_to_unit):
+            return len(self.stream.units)
+        unit_index = self.stream.char_to_unit[max(0, char_index)]
+        while unit_index < len(self.stream.units) and self.stream.units[unit_index].char_end <= char_index:
+            unit_index += 1
+        return unit_index
 
 
 class StreamParser:
@@ -246,6 +314,9 @@ class StreamParser:
             locale_profile=self.locale_profile,
             protection_level=self.ctx.protection_level,
             clues=bundle.all_clues,
+            negative_unit_marks=list(bundle.negative_unit_marks),
+            negative_prefix_sum=list(bundle.negative_prefix_sum),
+            negative_start_weight=bundle.negative_start_weight,
             structured_lookup_index=structured_lookup_index or StructuredLookupIndex(),
         )
         # consumed_ids 仅在 _commit_run 时追加，不在构建 run 时提前标记。

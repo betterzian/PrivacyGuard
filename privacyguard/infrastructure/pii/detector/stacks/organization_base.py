@@ -124,7 +124,7 @@ class BaseOrganizationStack(BaseStack):
         )
 
     def _resolve_suffix_start(self, *, locale: str) -> int:
-        floor = _left_expand_text_boundary(self.context.stream.text, self.context.clues, self.clue.start)
+        floor = _left_expand_text_boundary(self.context, self.clue.start)
         return _extend_organization_left_with_limit(
             self.context.stream,
             floor=floor,
@@ -148,18 +148,21 @@ class BaseOrganizationStack(BaseStack):
         return upper
 
     def _next_label_blocker_start(self, start: int) -> int | None:
+        blocker_start = start if self.context.has_negative_cover_left_of_char(start) else self.context.next_negative_start_char(start)
         for clue in self.context.clues:
             if clue.clue_id == self.clue.clue_id:
                 continue
             if clue.start < start < clue.end and self._is_label_right_blocker(clue):
-                return start
+                return start if blocker_start is None else min(blocker_start, start)
         for index in range(self.clue_index + 1, len(self.context.clues)):
             clue = self.context.clues[index]
             if clue.end <= start:
                 continue
             if self._is_label_right_blocker(clue):
-                return max(start, clue.start)
-        return None
+                candidate = max(start, clue.start)
+                blocker_start = candidate if blocker_start is None else min(blocker_start, candidate)
+                break
+        return blocker_start
 
     def _is_label_right_blocker(self, clue: Clue) -> bool:
         if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}:
@@ -202,9 +205,14 @@ class BaseOrganizationStack(BaseStack):
         return matches
 
 
-def _left_expand_text_boundary(raw_text: str, clues: tuple[Clue, ...], start: int) -> int:
+def _left_expand_text_boundary(context, start: int) -> int:
     """组织名向左扩展文本边界。遇到任何断点符号即停止。"""
+    raw_text = context.stream.text
+    clues = context.clues
     floor = 0
+    negative_floor = context.previous_negative_end_char(start)
+    if negative_floor is not None:
+        floor = max(floor, negative_floor)
     for clue in reversed(clues):
         if clue.end <= start:
             if _is_stop_control_clue(clue):

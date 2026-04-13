@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -165,13 +166,123 @@ class Clue:
     component_type: AddressComponentType | None = None
     break_type: BreakType | None = None
 
+
+def _normalize_negative_unit_range(unit_count: int, unit_start: int, unit_end: int) -> tuple[int, int]:
+    """裁剪 negative 查询区间，统一转成合法的半开区间。"""
+    if unit_count <= 0:
+        return (0, 0)
+    start = max(0, min(unit_count, int(unit_start)))
+    end = max(0, min(unit_count, int(unit_end)))
+    if end <= start:
+        return (start, start)
+    return (start, end)
+
+
+def build_negative_unit_index(
+    unit_count: int,
+    unit_spans: Sequence[tuple[int, int]],
+) -> tuple[list[int], list[int], int]:
+    """按 unit 区间构建 negative 覆盖索引与前缀和。"""
+    safe_unit_count = max(0, int(unit_count))
+    start_weight = safe_unit_count + 1
+    marks = [0] * safe_unit_count
+    for raw_start, raw_end in unit_spans:
+        start, end = _normalize_negative_unit_range(safe_unit_count, raw_start, raw_end)
+        if end <= start:
+            continue
+        marks[start] = max(marks[start], start_weight)
+        for unit_index in range(start + 1, end):
+            if marks[unit_index] < start_weight:
+                marks[unit_index] = 1
+
+    prefix_sum = [0]
+    running = 0
+    for mark in marks:
+        running += mark
+        prefix_sum.append(running)
+    return marks, prefix_sum, start_weight
+
+
+def negative_has_cover(prefix_sum: Sequence[int], unit_count: int, unit_start: int, unit_end: int) -> bool:
+    """判断 unit 区间内是否存在任意 negative 覆盖。"""
+    start, end = _normalize_negative_unit_range(unit_count, unit_start, unit_end)
+    if end <= start or len(prefix_sum) <= end:
+        return False
+    return prefix_sum[end] - prefix_sum[start] > 0
+
+
+def negative_has_start(
+    prefix_sum: Sequence[int],
+    unit_count: int,
+    unit_start: int,
+    unit_end: int,
+) -> bool:
+    """判断 unit 区间内是否存在 negative 起点。"""
+    start, end = _normalize_negative_unit_range(unit_count, unit_start, unit_end)
+    if end <= start or len(prefix_sum) <= end:
+        return False
+    return prefix_sum[end] - prefix_sum[start] > (end - start)
+
+
+def negative_is_fully_covered(marks: Sequence[int], unit_start: int, unit_end: int) -> bool:
+    """判断给定 unit 区间是否被 negative 完整覆盖。"""
+    start, end = _normalize_negative_unit_range(len(marks), unit_start, unit_end)
+    if end <= start:
+        return False
+    return all(mark > 0 for mark in marks[start:end])
+
+
+def negative_next_start_unit(marks: Sequence[int], start_weight: int, unit_start: int) -> int | None:
+    """返回给定 unit 起，首个 negative 起点所在的 unit 下标。"""
+    start, end = _normalize_negative_unit_range(len(marks), unit_start, len(marks))
+    if end <= start or start_weight <= 0:
+        return None
+    for unit_index in range(start, end):
+        if marks[unit_index] >= start_weight:
+            return unit_index
+    return None
+
+
+def negative_prev_covered_end_unit(marks: Sequence[int], before_unit: int) -> int | None:
+    """返回左侧最近一个被 negative 覆盖 unit 的结束下标。"""
+    unit_count = len(marks)
+    if unit_count <= 0:
+        return None
+    end = max(0, min(unit_count, int(before_unit)))
+    for unit_index in range(end - 1, -1, -1):
+        if marks[unit_index] > 0:
+            return unit_index + 1
+    return None
+
+
 @dataclass(slots=True)
 class ClueBundle:
     all_clues: tuple[Clue, ...]
+    negative_unit_marks: list[int] = field(default_factory=list)
+    negative_prefix_sum: list[int] = field(default_factory=lambda: [0])
+    negative_start_weight: int = 0
 
     @property
     def label_clues(self) -> tuple[Clue, ...]:
         return tuple(clue for clue in self.all_clues if clue.role == ClueRole.LABEL)
+
+    def has_negative_cover(self, unit_start: int, unit_end: int) -> bool:
+        """判断给定 unit 区间内是否存在任意 negative 覆盖。"""
+        return negative_has_cover(
+            self.negative_prefix_sum,
+            len(self.negative_unit_marks),
+            unit_start,
+            unit_end,
+        )
+
+    def has_negative_start(self, unit_start: int, unit_end: int) -> bool:
+        """判断给定 unit 区间内是否存在 negative 起点。"""
+        return negative_has_start(
+            self.negative_prefix_sum,
+            len(self.negative_unit_marks),
+            unit_start,
+            unit_end,
+        )
 
 
 @dataclass(frozen=True, slots=True)

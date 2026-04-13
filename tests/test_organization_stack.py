@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, build_negative_unit_index
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
+from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
 from privacyguard.infrastructure.pii.detector.stacks import OrganizationStack
 
 
@@ -27,7 +30,7 @@ def _clue(
         md["hard_source"] = [hard_source]
     return Clue(
         clue_id=clue_id,
-        family=ClueFamily.ORGANIZATION,
+        family=ClueFamily.CONTROL if role == ClueRole.NEGATIVE or attr_type is None else ClueFamily.ORGANIZATION,
         role=role,
         attr_type=attr_type,
         strength=strength,
@@ -47,13 +50,19 @@ def _run_organization_stack(
     protection_level: ProtectionLevel,
 ) -> OrganizationStack:
     stream = build_prompt_stream(text)
+    fixed, index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
+    target = clues[clue_index]
     context = StackContext(
         stream=stream,
         locale_profile="mixed",
         protection_level=protection_level,
-        clues=clues,
+        clues=fixed,
+        negative_unit_marks=negative_unit_marks,
+        negative_prefix_sum=negative_prefix_sum,
+        negative_start_weight=negative_start_weight,
     )
-    return OrganizationStack(clue=clues[clue_index], clue_index=clue_index, context=context)
+    fixed_index = index_by_id[target.clue_id]
+    return OrganizationStack(clue=fixed[fixed_index], clue_index=fixed_index, context=context)
 
 
 def _parse_organization_texts(
@@ -63,12 +72,47 @@ def _parse_organization_texts(
     protection_level: ProtectionLevel,
 ) -> list[str]:
     stream = build_prompt_stream(text)
+    fixed, _, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
     parser = StreamParser(
         locale_profile="mixed",
         ctx=DetectContext(protection_level=protection_level),
     )
-    result = parser.parse(stream, ClueBundle(all_clues=clues))
+    result = parser.parse(
+        stream,
+        ClueBundle(
+            all_clues=fixed,
+            negative_unit_marks=negative_unit_marks,
+            negative_prefix_sum=negative_prefix_sum,
+            negative_start_weight=negative_start_weight,
+        ),
+    )
     return [candidate.text for candidate in result.candidates if candidate.attr_type == PIIAttributeType.ORGANIZATION]
+
+
+def _with_units(stream, clue: Clue) -> Clue:
+    unit_start, unit_end = _char_span_to_unit_span(stream, clue.start, clue.end)
+    return replace(clue, unit_start=unit_start, unit_end=unit_end)
+
+
+def _split_negative_clues(
+    stream,
+    clues: tuple[Clue, ...],
+) -> tuple[tuple[Clue, ...], dict[str, int], list[int], list[int], int]:
+    fixed_clues: list[Clue] = []
+    index_by_id: dict[str, int] = {}
+    negative_spans: list[tuple[int, int]] = []
+    for clue in clues:
+        fixed = _with_units(stream, clue)
+        if fixed.role == ClueRole.NEGATIVE:
+            negative_spans.append((fixed.unit_start, fixed.unit_end))
+            continue
+        index_by_id[fixed.clue_id] = len(fixed_clues)
+        fixed_clues.append(fixed)
+    negative_unit_marks, negative_prefix_sum, negative_start_weight = build_negative_unit_index(
+        len(stream.units),
+        negative_spans,
+    )
+    return tuple(fixed_clues), index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight
 
 
 def test_label_seed_skips_separators_and_starts_from_first_value_char():
@@ -223,6 +267,36 @@ def test_suffix_seed_caps_en_left_expansion():
 
     assert run is not None
     assert run.candidate.text == "Beta Gamma Delta Echo Ltd"
+
+
+def test_suffix_seed_left_expansion_stops_at_negative_boundary():
+    text = "路由科技公司"
+    suffix = "公司"
+    start = text.index(suffix)
+    clues = (
+        _clue(
+            "suffix-1",
+            ClueRole.SUFFIX,
+            start,
+            start + len(suffix),
+            suffix,
+            source_kind="company_suffix",
+        ),
+        _clue(
+            "neg-1",
+            ClueRole.NEGATIVE,
+            0,
+            2,
+            "路由",
+            source_kind="negative_org_word",
+            attr_type=None,
+        ),
+    )
+
+    run = _run_organization_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "科技公司"
 
 
 def test_suffix_only_candidate_is_rejected():

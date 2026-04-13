@@ -7,7 +7,7 @@ from dataclasses import replace
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, build_negative_unit_index
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
@@ -33,9 +33,15 @@ def _clue(
         md.setdefault("hard_source", [hard_source])
     if component_hint is not None:
         md.setdefault("name_component_hint", [component_hint.value])
+    if role == ClueRole.START:
+        md.setdefault("seed_context_score", ["4"])
+        md.setdefault("seed_kind", ["start"])
+    elif role == ClueRole.LABEL:
+        md.setdefault("seed_context_score", ["4"])
+        md.setdefault("seed_kind", ["label"])
     return Clue(
         clue_id=clue_id,
-        family=ClueFamily.NAME if attr_type in (PIIAttributeType.NAME, None) else ClueFamily.CONTROL,
+        family=ClueFamily.CONTROL if role == ClueRole.NEGATIVE or attr_type is None else ClueFamily.NAME,
         role=role,
         attr_type=attr_type,
         strength=strength,
@@ -49,18 +55,47 @@ def _clue(
 
 def _run_name_stack(text: str, clue_index: int, clues: tuple[Clue, ...], *, protection_level: ProtectionLevel) -> NameStack:
     stream = build_prompt_stream(text)
+    fixed, index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
+    target = clues[clue_index]
     context = StackContext(
         stream=stream,
         locale_profile="mixed",
         protection_level=protection_level,
-        clues=clues,
+        clues=fixed,
+        negative_unit_marks=negative_unit_marks,
+        negative_prefix_sum=negative_prefix_sum,
+        negative_start_weight=negative_start_weight,
     )
-    return NameStack(clue=clues[clue_index], clue_index=clue_index, context=context)
+    fixed_index = index_by_id[target.clue_id]
+    return NameStack(clue=fixed[fixed_index], clue_index=fixed_index, context=context)
 
 
 def _with_units(stream, clue: Clue) -> Clue:
     unit_start, unit_end = _char_span_to_unit_span(stream, clue.start, clue.end)
     return replace(clue, unit_start=unit_start, unit_end=unit_end)
+
+
+def _split_negative_clues(
+    stream,
+    clues: tuple[Clue, ...],
+) -> tuple[tuple[Clue, ...], dict[str, int], list[int], list[int], int]:
+    fixed_clues: list[Clue] = []
+    index_by_id: dict[str, int] = {}
+    negative_spans: list[tuple[int, int]] = []
+
+    for clue in clues:
+        fixed = _with_units(stream, clue)
+        if fixed.role == ClueRole.NEGATIVE:
+            negative_spans.append((fixed.unit_start, fixed.unit_end))
+            continue
+        index_by_id[fixed.clue_id] = len(fixed_clues)
+        fixed_clues.append(fixed)
+
+    negative_unit_marks, negative_prefix_sum, negative_start_weight = build_negative_unit_index(
+        len(stream.units),
+        negative_spans,
+    )
+    return tuple(fixed_clues), index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight
 
 
 def _parse_name_texts(
@@ -71,9 +106,17 @@ def _parse_name_texts(
 ) -> list[str]:
     ctx = DetectContext(protection_level=protection_level)
     stream = build_prompt_stream(text)
-    fixed = tuple(_with_units(stream, clue) for clue in clues)
+    fixed, _, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
     parser = StreamParser(locale_profile="mixed", ctx=ctx)
-    result = parser.parse(stream, ClueBundle(all_clues=fixed))
+    result = parser.parse(
+        stream,
+        ClueBundle(
+            all_clues=fixed,
+            negative_unit_marks=negative_unit_marks,
+            negative_prefix_sum=negative_prefix_sum,
+            negative_start_weight=negative_start_weight,
+        ),
+    )
     return [candidate.text for candidate in result.candidates if candidate.attr_type == PIIAttributeType.NAME]
 
 
@@ -463,7 +506,7 @@ def test_start_seed_rejects_blacklisted_exact_negative_name():
     assert run is None
 
 
-def test_start_seed_keeps_two_char_negative_word_name_under_strong():
+def test_start_seed_rejects_two_char_negative_word_name_under_strong():
     text = "我叫高兴"
     clues = (
         _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
@@ -481,8 +524,7 @@ def test_start_seed_keeps_two_char_negative_word_name_under_strong():
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
-    assert run is not None
-    assert run.candidate.text == "高兴"
+    assert run is None
 
 
 def test_start_seed_keeps_three_char_name_when_prefix_is_negative():

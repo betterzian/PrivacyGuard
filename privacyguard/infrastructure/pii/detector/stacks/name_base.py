@@ -95,14 +95,16 @@ class BaseNameStack(BaseStack):
             return None
 
         name_clues = self._name_clues_in_span(start, end)
-        negative_clues = self._negative_clues_in_span(start, end)
+        has_negative_overlap = self.context.has_negative_cover(unit_start, unit_end)
 
         if self.clue.role not in {ClueRole.FULL_NAME, ClueRole.ALIAS} and not self._should_commit_candidate(
             start=start,
             end=end,
+            candidate_unit_start=unit_start,
+            candidate_unit_end=unit_end,
             candidate_text=candidate.text,
             name_clues=name_clues,
-            negative_clues=negative_clues,
+            has_negative_overlap=has_negative_overlap,
         ):
             return None
 
@@ -149,12 +151,15 @@ class BaseNameStack(BaseStack):
                 next_index,
                 ignore_negative=ignore_negative,
             )
+            next_negative_start = self._next_negative_start_char(cursor, ignore_negative=ignore_negative)
 
             plain_limit = len(self.context.stream.text)
             if next_component is not None:
                 plain_limit = next_component[1].start
             if next_blocker is not None and next_blocker[1].start < plain_limit:
                 plain_limit = next_blocker[1].start
+            if next_negative_start is not None and next_negative_start < plain_limit:
+                plain_limit = next_negative_start
 
             scanned = self._scan_plain_right(start=start, cursor=cursor, upper=plain_limit, locale=locale)
             cursor = scanned
@@ -200,12 +205,15 @@ class BaseNameStack(BaseStack):
                 next_index,
                 ignore_negative=ignore_negative,
             )
+            next_negative_start = self._next_negative_start_char(cursor, ignore_negative=ignore_negative)
             if next_component is None:
                 return cursor
             component_index, component = next_component
             if component.role != ClueRole.GIVEN_NAME:
                 return cursor
             if next_blocker is not None and next_blocker[1].start < component.start:
+                return cursor
+            if next_negative_start is not None and next_negative_start < component.start:
                 return cursor
             if not self._gap_allows_single_plain_word(cursor, component.start):
                 return cursor
@@ -329,6 +337,8 @@ class BaseNameStack(BaseStack):
         return None
 
     def _has_active_stop_overlap(self, cursor: int, *, ignore_negative: bool = False) -> bool:
+        if not ignore_negative and self.context.has_negative_cover_left_of_char(cursor):
+            return True
         for clue in self.context.clues:
             if clue.start < cursor < clue.end and self._is_name_blocker(
                 clue,
@@ -336,6 +346,11 @@ class BaseNameStack(BaseStack):
             ):
                 return True
         return False
+
+    def _next_negative_start_char(self, cursor: int, *, ignore_negative: bool = False) -> int | None:
+        if ignore_negative:
+            return None
+        return self.context.next_negative_start_char(cursor)
 
     def _is_name_blocker(self, clue: Clue, *, ignore_negative: bool = False) -> bool:
         if clue.role == ClueRole.NEGATIVE:
@@ -409,33 +424,25 @@ class BaseNameStack(BaseStack):
                 matches.append((index, clue))
         return matches
 
-    def _negative_clue_ids_in_span(self, start: int, end: int) -> set[str]:
-        return {clue.clue_id for clue in self._negative_clues_in_span(start, end)}
-
-    def _negative_clues_in_span(self, start: int, end: int) -> tuple[Clue, ...]:
-        return tuple(
-            clue
-            for clue in self.context.clues
-            if clue.role == ClueRole.NEGATIVE and clue.start < end and clue.end > start
-        )
-
     def _should_commit_candidate(
         self,
         *,
         start: int,
         end: int,
+        candidate_unit_start: int,
+        candidate_unit_end: int,
         candidate_text: str,
         name_clues: list[tuple[int, Clue]],
-        negative_clues: tuple[Clue, ...],
+        has_negative_overlap: bool,
     ) -> bool:
         """默认姓名提交判定，供英文路径复用。"""
+        del start, end, candidate_unit_start, candidate_unit_end
         unique_roles = {clue.role for _index, clue in name_clues}
         if self.clue.role in _NAME_COMPONENT_ROLES:
             unique_roles.discard(self.clue.role)
         clue_count = 1 + len(unique_roles)
-        negative_count = len(negative_clues)
         negative_exempt = self.clue.role in {ClueRole.LABEL, ClueRole.START}
-        if negative_count > 0 and not negative_exempt:
+        if has_negative_overlap and not negative_exempt:
             return False
         if self.context.protection_level == ProtectionLevel.STRONG:
             return clue_count >= 2 or len(candidate_text) > 1

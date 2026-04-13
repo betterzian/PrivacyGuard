@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from privacyguard.domain.enums import ProtectionLevel
@@ -222,10 +223,13 @@ class ZhNameCommitScorer:
         candidate_text: str,
         start: int,
         end: int,
+        candidate_unit_start: int,
+        candidate_unit_end: int,
         seed_clue: Clue,
         protection_level: ProtectionLevel,
         name_clues: list[tuple[int, Clue]],
-        negative_clues: tuple[Clue, ...],
+        negative_unit_marks: Sequence[int],
+        has_negative_start: Callable[[int, int], bool],
     ) -> ZhNameScoreDecision:
         compact_candidate = compact_zh_name_text(candidate_text)
         if len(compact_candidate) < 2 or not all(_is_cjk(char) for char in compact_candidate):
@@ -248,7 +252,12 @@ class ZhNameCommitScorer:
                 reasons=("surname_only_candidate",),
             )
 
-        if any(clue.start > start for clue in negative_clues):
+        surname_unit_len = max(1, len(surname_match.text))
+        tail_unit_start = min(candidate_unit_end, candidate_unit_start + surname_unit_len)
+        if (
+            has_negative_start(candidate_unit_start, candidate_unit_end)
+            and _units_fully_covered(negative_unit_marks, tail_unit_start, candidate_unit_end)
+        ):
             return ZhNameScoreDecision(
                 should_commit=False,
                 total_score=surname_match.base_score,
@@ -278,11 +287,6 @@ class ZhNameCommitScorer:
                 fixed_phrase_penalty = self._rules.scoring.fixed_phrase_blacklist_hit
                 reasons.append("fixed_phrase_exact_hit")
 
-        exact_negative_penalty = 0
-        if seed_clue.role != ClueRole.START and any(compact_zh_name_text(clue.text) == compact_candidate for clue in negative_clues):
-            exact_negative_penalty = self._rules.scoring.fixed_phrase_blacklist_hit
-            reasons.append("exact_negative_match")
-
         seed_context_score = self._seed_context_score(seed_clue)
         if seed_context_score:
             reasons.append(f"seed_context:{seed_context_score}")
@@ -303,7 +307,7 @@ class ZhNameCommitScorer:
             given_name_evidence_score = self._rules.scoring.common_given_name_char_after_surname
             reasons.append("given_name_evidence")
 
-        total_score = surname_score + seed_context_score + shape_score + given_name_evidence_score + fixed_phrase_penalty + exact_negative_penalty
+        total_score = surname_score + seed_context_score + shape_score + given_name_evidence_score + fixed_phrase_penalty
         return ZhNameScoreDecision(
             should_commit=total_score >= threshold,
             total_score=total_score,
@@ -315,7 +319,7 @@ class ZhNameCommitScorer:
             seed_context_score=seed_context_score,
             shape_score=shape_score,
             given_name_evidence_score=given_name_evidence_score,
-            fixed_phrase_penalty=fixed_phrase_penalty + exact_negative_penalty,
+            fixed_phrase_penalty=fixed_phrase_penalty,
             reasons=tuple(reasons),
         )
 
@@ -408,6 +412,15 @@ class ZhNameCommitScorer:
         if tier == "weak":
             return self._rules.scoring.single_weak
         return self._rules.scoring.single_strong
+
+
+def _units_fully_covered(marks: Sequence[int], unit_start: int, unit_end: int) -> bool:
+    """判断姓名尾段是否被 negative 连续完整覆盖。"""
+    safe_start = max(0, min(len(marks), int(unit_start)))
+    safe_end = max(0, min(len(marks), int(unit_end)))
+    if safe_end <= safe_start:
+        return False
+    return all(mark > 0 for mark in marks[safe_start:safe_end])
 
 
 __all__ = [
