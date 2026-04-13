@@ -1,0 +1,612 @@
+[
+  {
+    "text": "一",
+    "normalized": "1",
+    "kind": "zh_number"
+  },
+  {
+    "text": "二",
+    "normalized": "2",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三",
+    "normalized": "3",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四",
+    "normalized": "4",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五",
+    "normalized": "5",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六",
+    "normalized": "6",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七",
+    "normalized": "7",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八",
+    "normalized": "8",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九",
+    "normalized": "9",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十",
+    "normalized": "10",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十一",
+    "normalized": "11",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十二",
+    "normalized": "12",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十三",
+    "normalized": "13",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十四",
+    "normalized": "14",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十五",
+    "normalized": "15",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十六",
+    "normalized": "16",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十七",
+    "normalized": "17",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十八",
+    "normalized": "18",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十九",
+    "normalized": "19",
+    "kind": "zh_number"
+  },
+  {
+    "text": "二十",
+    "normalized": "20",
+    "kind": "zh_number"
+  },
+  {
+    "text": "二十一",
+    "normalized": "21",
+    "kind": "zh_number"
+  },
+  {
+    "text": "二十二",
+    "normalized": "22",
+    "kind": "zh_number"
+  },
+  {
+    "text": "二十三",
+    "normalized": "23",
+    "kind": "zh_number"
+  },
+  {
+    "text": "二十四",
+    "normalized": "24",
+    "kind": "zh_number"
+  },
+  {
+    "text": "二十五",
+    "normalized": "25",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三十六",
+    "normalized": "26",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三十七",
+    "normalized": "27",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三十八",
+    "normalized": "28",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三十九",
+    "normalized": "29",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三十",
+    "normalized": "30",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三十一",
+    "normalized": "31",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三十二",
+    "normalized": "32",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三十三",
+    "normalized": "33",
+    "kind": "zh_number"
+  },
+  {
+    "text": "三十四",
+    "normalized": "34",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十五",
+    "normalized": "35",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十六",
+    "normalized": "36",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十七",
+    "normalized": "37",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十八",
+    "normalized": "38",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十九",
+    "normalized": "39",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十",
+    "normalized": "40",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十一",
+    "normalized": "41",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十二",
+    "normalized": "42",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十三",
+    "normalized": "43",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十四",
+    "normalized": "44",
+    "kind": "zh_number"
+  },
+  {
+    "text": "四十五",
+    "normalized": "45",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五十六",
+    "normalized": "46",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五十七",
+    "normalized": "47",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五十八",
+    "normalized": "48",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五十九",
+    "normalized": "49",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五十",
+    "normalized": "50",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五十一",
+    "normalized": "51",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五十二",
+    "normalized": "52",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五十三",
+    "normalized": "53",
+    "kind": "zh_number"
+  },
+  {
+    "text": "五十四",
+    "normalized": "54",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十五",
+    "normalized": "55",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十六",
+    "normalized": "56",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十七",
+    "normalized": "57",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十八",
+    "normalized": "58",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十九",
+    "normalized": "59",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十",
+    "normalized": "60",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十一",
+    "normalized": "61",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十二",
+    "normalized": "62",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十三",
+    "normalized": "63",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十四",
+    "normalized": "64",
+    "kind": "zh_number"
+  },
+  {
+    "text": "六十五",
+    "normalized": "65",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七十六",
+    "normalized": "66",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七十七",
+    "normalized": "67",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七十八",
+    "normalized": "68",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七十九",
+    "normalized": "69",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七十",
+    "normalized": "70",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七十一",
+    "normalized": "71",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七十二",
+    "normalized": "72",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七十三",
+    "normalized": "73",
+    "kind": "zh_number"
+  },
+  {
+    "text": "七十四",
+    "normalized": "74",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十五",
+    "normalized": "75",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十六",
+    "normalized": "76",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十七",
+    "normalized": "77",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十八",
+    "normalized": "78",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十九",
+    "normalized": "79",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十",
+    "normalized": "80",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十一",
+    "normalized": "81",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十二",
+    "normalized": "82",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十三",
+    "normalized": "83",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十四",
+    "normalized": "84",
+    "kind": "zh_number"
+  },
+  {
+    "text": "八十五",
+    "normalized": "85",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九十六",
+    "normalized": "86",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九十七",
+    "normalized": "87",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九十八",
+    "normalized": "88",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九十九",
+    "normalized": "89",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九十",
+    "normalized": "90",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九十一",
+    "normalized": "91",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九十二",
+    "normalized": "92",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九十三",
+    "normalized": "93",
+    "kind": "zh_number"
+  },
+  {
+    "text": "九十四",
+    "normalized": "94",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十五",
+    "normalized": "95",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十六",
+    "normalized": "96",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十七",
+    "normalized": "97",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十八",
+    "normalized": "98",
+    "kind": "zh_number"
+  },
+  {
+    "text": "十九",
+    "normalized": "99",
+    "kind": "zh_number"
+  },
+  {
+    "text": "一百",
+    "normalized": "100",
+    "kind": "zh_number"
+  },
+  {
+    "text": "甲",
+    "normalized": "甲",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "乙",
+    "normalized": "乙",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "丙",
+    "normalized": "丙",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "丁",
+    "normalized": "丁",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "戊",
+    "normalized": "戊",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "己",
+    "normalized": "己",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "庚",
+    "normalized": "庚",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "辛",
+    "normalized": "辛",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "壬",
+    "normalized": "壬",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "癸",
+    "normalized": "癸",
+    "kind": "heavenly_stem"
+  },
+  {
+    "text": "子",
+    "normalized": "子",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "丑",
+    "normalized": "丑",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "寅",
+    "normalized": "寅",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "卯",
+    "normalized": "卯",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "辰",
+    "normalized": "辰",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "巳",
+    "normalized": "巳",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "午",
+    "normalized": "午",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "未",
+    "normalized": "未",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "申",
+    "normalized": "申",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "酉",
+    "normalized": "酉",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "戌",
+    "normalized": "戌",
+    "kind": "earthly_branch"
+  },
+  {
+    "text": "亥",
+    "normalized": "亥",
+    "kind": "earthly_branch"
+  }
+]

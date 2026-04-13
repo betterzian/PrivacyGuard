@@ -63,6 +63,7 @@ def _state_routing_context(
         clues=clues,
         raw_text=raw_text,
         stream=stream,
+        search_start=state.last_end,
     )
 
 

@@ -42,7 +42,7 @@ VALID_ROLES: dict[ClueFamily, frozenset[ClueRole]] = {
     ClueFamily.ORGANIZATION: _ORGANIZATION_ROLES,
     ClueFamily.ADDRESS: _ADDRESS_ROLES,
     ClueFamily.STRUCTURED: _STRUCTURED_ROLES,
-    ClueFamily.CONTROL: frozenset({ClueRole.BREAK, ClueRole.NEGATIVE}),
+    ClueFamily.CONTROL: frozenset({ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.VALUE}),
 }
 
 # —— 注册表：4 条 ——

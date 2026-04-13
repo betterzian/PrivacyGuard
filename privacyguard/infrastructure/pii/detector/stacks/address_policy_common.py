@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value
+from privacyguard.infrastructure.pii.detector.lexicon_loader import load_zh_control_values
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
     Clue,
@@ -35,6 +37,11 @@ _SENTINEL_STOP = object()
 _SENTINEL_IGNORE = object()
 
 _ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM})
+_NUMBERISH_COMPONENTS = frozenset({
+    AddressComponentType.NUMBER,
+    AddressComponentType.BUILDING,
+    AddressComponentType.DETAIL,
+})
 
 
 def _is_absorbable_digit_clue(clue: Clue) -> bool:
@@ -179,6 +186,50 @@ def _start_after_component_end(stream: StreamInput, component_end: int) -> int:
     )
 
 
+@lru_cache(maxsize=1)
+def _zh_control_value_lookup() -> tuple[dict[str, str], tuple[int, ...]]:
+    mapping = {item.text: item.normalized for item in load_zh_control_values()}
+    lengths = tuple(sorted({len(text) for text in mapping}, reverse=True))
+    return mapping, lengths
+
+
+def _is_ascii_alnum_char(char: str) -> bool:
+    return char.isascii() and char.isalnum()
+
+
+def _normalize_numberish_address_value(raw_value: str) -> str:
+    cleaned = clean_value(raw_value)
+    if not cleaned:
+        return ""
+    mapping, lengths = _zh_control_value_lookup()
+    normalized_parts: list[str] = []
+    index = 0
+    while index < len(cleaned):
+        longest: str | None = None
+        for length in lengths:
+            end = index + length
+            if end > len(cleaned):
+                continue
+            candidate = cleaned[index:end]
+            if candidate in mapping:
+                longest = candidate
+                break
+        if longest is not None:
+            normalized_parts.append(mapping[longest])
+            index += len(longest)
+            continue
+        char = cleaned[index]
+        if _is_ascii_alnum_char(char):
+            end = index + 1
+            while end < len(cleaned) and _is_ascii_alnum_char(cleaned[end]):
+                end += 1
+            normalized_parts.append(cleaned[index:end])
+            index = end
+            continue
+        index += 1
+    return "".join(normalized_parts)
+
+
 def _normalize_address_value(component_type: AddressComponentType, raw_value: str) -> str:
     cleaned = clean_value(raw_value)
     if component_type == AddressComponentType.HOUSE_NUMBER:
@@ -187,6 +238,8 @@ def _normalize_address_value(component_type: AddressComponentType, raw_value: st
         return re.sub(r"[^0-9-]", "", cleaned)
     if component_type == AddressComponentType.COUNTRY:
         return cleaned
+    if component_type in _NUMBERISH_COMPONENTS:
+        return _normalize_numberish_address_value(raw_value)
     if component_type in _DETAIL_COMPONENTS:
         alnum = "".join(char for char in cleaned if char.isalnum())
         if any(char.isalpha() for char in alnum):
@@ -321,6 +374,7 @@ class _RoutingContext:
     clues: tuple[Clue, ...]
     raw_text: str
     stream: StreamInput
+    search_start: int | None = None
 
 
 def _scan_forward_value_end(

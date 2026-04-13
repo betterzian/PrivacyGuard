@@ -488,3 +488,27 @@ def test_session_name_dictionary_clues_stay_within_ocr_segment_bounds():
         assert clue.end <= len(prepared.stream.text)
         assert prepared.stream.text[clue.start : clue.end] == "张明"
 
+
+def test_build_clue_bundle_emits_control_value_number_clues_for_zh_address_tokens():
+    prepared = build_prompt_stream("甲2楼 一百室 子单元")
+
+    bundle = build_clue_bundle(
+        prepared,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="zh_cn",
+    )
+
+    control_values = [
+        clue
+        for clue in bundle.all_clues
+        if clue.source_kind == "control_value_zh"
+    ]
+
+    payloads = {(clue.text, tuple(clue.source_metadata.get("normalized_number", []))) for clue in control_values}
+
+    assert ("甲", ("甲",)) in payloads
+    assert ("一百", ("100",)) in payloads
+    assert ("子", ("子",)) in payloads
+

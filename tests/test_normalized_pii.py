@@ -399,6 +399,64 @@ def test_address_same_entity_keeps_number_match_when_building_prefix_is_missing(
     assert same_entity(left, right) is False
 
 
+def test_address_numbers_normalize_control_value_and_ascii_mix():
+    normalized = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "甲1楼",
+        metadata={
+            "address_component_trace": ["building:甲1"],
+            "address_component_key_trace": ["building:楼"],
+        },
+    )
+
+    assert normalized.numbers == ("甲1",)
+
+
+def test_address_same_entity_matches_zh_number_and_digit_building():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "一楼",
+        metadata={
+            "address_component_trace": ["building:1"],
+            "address_component_key_trace": ["building:楼"],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "1楼",
+        metadata={
+            "address_component_trace": ["building:1"],
+            "address_component_key_trace": ["building:楼"],
+        },
+    )
+
+    assert left.numbers == ("1",)
+    assert right.numbers == ("1",)
+
+
+def test_address_same_entity_distinguishes_heavenly_stem_mixed_number():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "甲1楼",
+        metadata={
+            "address_component_trace": ["building:甲1"],
+            "address_component_key_trace": ["building:楼"],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "乙1楼",
+        metadata={
+            "address_component_trace": ["building:乙1"],
+            "address_component_key_trace": ["building:楼"],
+        },
+    )
+
+    assert left.numbers == ("甲1",)
+    assert right.numbers == ("乙1",)
+    assert same_entity(left, right) is False
+
+
 def test_bank_number_canonical_keeps_digits_only():
     normalized = normalize_pii(PIIAttributeType.BANK_NUMBER, "6222 0000 1234 5678")
 

@@ -25,6 +25,7 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_negative_org_words,
     load_negative_ui_words,
     load_zh_address_keyword_groups,
+    load_zh_control_values,
     load_zh_given_names,
 )
 from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern
@@ -212,6 +213,12 @@ class _AddressPatternPayload:
     canonical_text: str
 
 
+@dataclass(frozen=True, slots=True)
+class _ControlValuePayload:
+    normalized_number: str
+    kind: str
+
+
 _DictionaryMetadataItems = tuple[tuple[str, tuple[str, ...]], ...]
 _DictionaryMatcherSignature = tuple[tuple[PIIAttributeType, tuple[str, ...], str, _DictionaryMetadataItems], ...]
 
@@ -288,6 +295,7 @@ def build_clue_bundle(
         soft_clues.extend(_scan_zh_given_name_clues(ctx, segment))
         soft_clues.extend(_scan_company_suffix_clues(ctx, segment))
         soft_clues.extend(_scan_address_clues(ctx, segment, locale_profile=locale_profile))
+        soft_clues.extend(_scan_control_value_clues(ctx, segment, locale_profile=locale_profile))
         soft_clues.extend(_scan_negative_clues(ctx, segment))
     if locale_profile in {"en", "mixed"}:
         soft_clues.extend(_scan_en_address_postal_clues_full_stream(ctx, stream))
@@ -874,6 +882,44 @@ def _scan_address_clues(ctx: DetectContext, segment: _ScanSegment, *, locale_pro
         clues.extend(_scan_zh_address_clues(ctx, segment))
     if locale_profile in {"en_us", "mixed"}:
         clues.extend(_scan_en_address_clues(ctx, segment))
+    return _dedupe_clues(clues)
+
+
+def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, locale_profile: str) -> list[Clue]:
+    if locale_profile not in {"zh_cn", "mixed"}:
+        return []
+    clues: list[Clue] = []
+    for match in _zh_control_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        normalized = _normalize_segment_ascii_match(
+            segment,
+            match.start,
+            match.end,
+            match.matched_text,
+            match.pattern_text,
+            match.ascii_boundary,
+        )
+        if normalized is None:
+            continue
+        raw_start, raw_end, matched_text = normalized
+        payload = match.payload
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.CONTROL,
+                role=ClueRole.VALUE,
+                attr_type=None,
+                strength=ClaimStrength.SOFT,
+                start=raw_start,
+                end=raw_end,
+                text=matched_text,
+                source_kind="control_value_zh",
+                source_metadata={
+                    "control_kind": ["number"],
+                    "control_value_kind": [payload.kind],
+                    "normalized_number": [payload.normalized_number],
+                },
+            )
+        )
     return _dedupe_clues(clues)
 
 
@@ -1584,6 +1630,23 @@ def _zh_address_value_matcher() -> AhoMatcher:
                 )
             )
     return AhoMatcher.from_patterns(tuple(patterns))
+
+
+@lru_cache(maxsize=1)
+def _zh_control_value_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=item.text,
+                payload=_ControlValuePayload(
+                    normalized_number=item.normalized,
+                    kind=item.kind,
+                ),
+                ascii_boundary=False,
+            )
+            for item in load_zh_control_values()
+        )
+    )
 
 
 @lru_cache(maxsize=1)

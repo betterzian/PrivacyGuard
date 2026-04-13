@@ -6,6 +6,7 @@ import json
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping
+from functools import lru_cache
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.models.normalized_pii import (
@@ -19,6 +20,7 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_en_address_suffix_strippers,
     load_en_us_states,
     load_zh_address_suffix_strippers,
+    load_zh_control_values,
 )
 from privacyguard.utils.pii_value import parse_name_components
 
@@ -838,26 +840,57 @@ def _address_numbers(
     return [t for t in tokens if t]
 
 
+@lru_cache(maxsize=1)
+def _zh_control_value_lookup() -> tuple[dict[str, str], tuple[int, ...]]:
+    mapping = {item.text: item.normalized for item in load_zh_control_values()}
+    lengths = tuple(sorted({len(text) for text in mapping}, reverse=True))
+    return mapping, lengths
+
+
+def _is_ascii_alnum_char(char: str) -> bool:
+    return char.isascii() and char.isalnum()
+
+
 def _extract_number_tokens(value: str) -> list[str]:
-    """从 value 中抽取数字或字母 token。"""
+    """从 value 中抽取数字、天干地支或混合编号 token。"""
     text = str(value or "").strip()
     if not text:
         return []
-    # 若包含中文数字且不含阿拉伯数字，尝试整体转为阿拉伯数字。
-    if any(ch in _ZH_NUMERAL_CHARS for ch in text) and not any(ch.isdigit() for ch in text):
-        parsed = _parse_zh_numeral(text)
-        if parsed is not None:
-            return [str(parsed)]
-    # 其它情况：抽取连续字母/数字段（如 “10A”、“B座”->“B”）。
-    raw_tokens = [m.group(0) for m in re.finditer(r"[A-Za-z0-9]+", text)]
-    if not raw_tokens:
+    mapping, lengths = _zh_control_value_lookup()
+    tokens: list[str] = []
+    current: list[str] = []
+    index = 0
+    while index < len(text):
+        longest: str | None = None
+        for length in lengths:
+            end = index + length
+            if end > len(text):
+                continue
+            candidate = text[index:end]
+            if candidate in mapping:
+                longest = candidate
+                break
+        if longest is not None:
+            current.append(mapping[longest])
+            index += len(longest)
+            continue
+        char = text[index]
+        if _is_ascii_alnum_char(char):
+            current.append(char.upper() if char.isalpha() else char)
+            index += 1
+            continue
+        if current:
+            tokens.append("".join(current))
+            current = []
+        index += 1
+    if current:
+        tokens.append("".join(current))
+    if not tokens:
         return []
-    # 过滤：优先保留含数字的 token（7B/1203/10），丢弃 “Apt/Floor/Room” 这类纯字母描述词。
-    keep: list[str] = [t for t in raw_tokens if any(ch.isdigit() for ch in t)]
-    if keep:
-        return keep
-    # 若没有数字，允许单字母（如 “A座”->“A”），避免把长英文单词误当作号码。
-    return [t for t in raw_tokens if len(t) == 1 and t.isalpha()]
+    with_digits = [token for token in tokens if any(ch.isdigit() for ch in token)]
+    if with_digits:
+        return with_digits + [token for token in tokens if not any(ch.isdigit() for ch in token) and len(token) == 1]
+    return [token for token in tokens if len(token) == 1 or any(not ch.isascii() for ch in token)]
 
 
 def _parse_zh_numeral(text: str) -> int | None:

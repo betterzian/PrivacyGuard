@@ -18,6 +18,23 @@ def is_control_clue(clue: Clue) -> bool:
     return clue.attr_type is None
 
 
+def is_control_value_clue(clue: Clue) -> bool:
+    return clue.attr_type is None and clue.role == ClueRole.VALUE
+
+
+def is_control_number_value_clue(clue: Clue) -> bool:
+    return (
+        is_control_value_clue(clue)
+        and (clue.source_metadata.get("control_kind") or [""])[0] == "number"
+    )
+
+
+def control_value_normalized_number(clue: Clue) -> str:
+    if not is_control_number_value_clue(clue):
+        return ""
+    return str((clue.source_metadata.get("normalized_number") or [""])[0]).strip()
+
+
 def _is_stop_control_clue(clue: Clue) -> bool:
     return clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
 

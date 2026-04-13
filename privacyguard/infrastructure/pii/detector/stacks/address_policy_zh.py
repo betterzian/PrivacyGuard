@@ -52,10 +52,15 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     _unit_index_at_or_after,
     _unit_index_left_of,
     is_break_clue,
+    is_control_number_value_clue,
     is_negative_clue,
 )
 
-_PLAIN_ALNUM_RE = re.compile(r"^[A-Za-z0-9]+$")
+_NUMBERISH_KEY_COMPONENTS = frozenset({
+    AddressComponentType.NUMBER,
+    AddressComponentType.BUILDING,
+    AddressComponentType.DETAIL,
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -567,7 +572,7 @@ def _left_expand_adjacent_alnum_for_zh(pos: int, floor: int, stream: StreamInput
             cursor = unit.char_start
             left_ui -= 1
             continue
-        if unit.text and all(char.isalnum() for char in unit.text):
+        if _is_ascii_alnum_unit_text(unit.text):
             cursor = unit.char_start
             left_ui -= 1
             continue
@@ -625,6 +630,57 @@ def _routing_context_type(context: _RoutingContext) -> AddressComponentType | No
         if clue.component_type is not None:
             return clue.component_type
     return context.previous_component_type
+
+
+def _is_ascii_alnum_unit_text(text: str) -> bool:
+    return bool(text) and all(char.isascii() and char.isalnum() for char in text)
+
+
+def _find_control_value_clue_ending_at(context: _RoutingContext, char_end: int) -> Clue | None:
+    candidate: Clue | None = None
+    for clue in context.clues:
+        if clue.end != char_end or not is_control_number_value_clue(clue):
+            continue
+        if candidate is None or clue.start < candidate.start:
+            candidate = clue
+    return candidate
+
+
+def _numberish_left_expand_start(
+    context: _RoutingContext,
+    clue: Clue,
+) -> int:
+    if context.chain:
+        return context.chain[-1].end
+    floor = 0
+    if context.previous_component_end is not None:
+        floor = _start_after_component_end(context.stream, context.previous_component_end)
+    elif context.search_start is not None and context.search_start < clue.start:
+        return context.search_start
+    cursor, left_ui = _skip_inline_gap_left(context.stream, clue.start, floor)
+    if left_ui < 0 or left_ui >= len(context.stream.units):
+        return clue.start
+    left_unit = context.stream.units[left_ui]
+    if left_unit.kind in {"digit_run", "alpha_run", "alnum_run", "ascii_word"} and _is_ascii_alnum_unit_text(left_unit.text):
+        start = _left_expand_adjacent_alnum_for_zh(clue.start, floor, context.stream)
+    else:
+        control_clue = _find_control_value_clue_ending_at(context, clue.start)
+        if control_clue is None:
+            return clue.start
+        start = control_clue.start
+    while True:
+        control_clue = _find_control_value_clue_ending_at(context, start)
+        if control_clue is None:
+            break
+        start = control_clue.start
+    return start
+
+
+def _left_value_text_for_routing(context: _RoutingContext, clue: Clue, left_start: int) -> tuple[str, str]:
+    raw_left_value_text = clean_value(context.raw_text[left_start:clue.start])
+    if clue.component_type in _NUMBERISH_KEY_COMPONENTS:
+        return raw_left_value_text, _normalize_address_value(clue.component_type, context.raw_text[left_start:clue.start])
+    return raw_left_value_text, raw_left_value_text
 
 
 def _adjacent_value_span(
@@ -689,10 +745,21 @@ def _routing_left_value_start(
     )
 
 
+def _effective_left_value_start(
+    context: _RoutingContext,
+    clue_index: int,
+    clue: Clue,
+) -> int:
+    if clue.component_type in _NUMBERISH_KEY_COMPONENTS:
+        return _numberish_left_expand_start(context, clue)
+    return _routing_left_value_start(context, clue_index, clue)
+
+
 def _route_dynamic_key_type(
     clue: Clue,
     *,
     previous_component_type: AddressComponentType | None,
+    raw_left_value_text: str,
     left_value_text: str,
     followed_by_detail_key: bool,
 ) -> AddressComponentType | None:
@@ -703,9 +770,9 @@ def _route_dynamic_key_type(
     if clue.text == "社区" and comp_type == AddressComponentType.SUBDISTRICT:
         return AddressComponentType.POI
     if clue.text == "楼" and comp_type == AddressComponentType.DETAIL:
-        if not left_value_text:
+        if not raw_left_value_text:
             return comp_type
-        if _PLAIN_ALNUM_RE.fullmatch(left_value_text):
+        if left_value_text:
             if followed_by_detail_key:
                 return AddressComponentType.DETAIL
             if previous_component_type == AddressComponentType.BUILDING:
@@ -753,11 +820,17 @@ def _routed_key_clue(context: _RoutingContext, clue_index: int, clue: Clue) -> C
             return None
         if downgraded_type != clue.component_type:
             clue = replace(clue, component_type=downgraded_type)
-    left_start = _routing_left_value_start(context, clue_index, clue)
-    left_value_text = clean_value(context.raw_text[left_start:clue.start])
+    left_start = _effective_left_value_start(context, clue_index, clue)
+    raw_left_start = left_start
+    if clue.text == "楼" and clue.component_type == AddressComponentType.DETAIL and raw_left_start == clue.start:
+        raw_left_start = _routing_left_value_start(context, clue_index, clue)
+    raw_left_value_text, left_value_text = _left_value_text_for_routing(context, clue, raw_left_start)
+    if raw_left_start != left_start and clue.component_type in _NUMBERISH_KEY_COMPONENTS:
+        left_value_text = _normalize_address_value(clue.component_type, context.raw_text[left_start:clue.start])
     routed_type = _route_dynamic_key_type(
         clue,
         previous_component_type=_routing_context_type(context),
+        raw_left_value_text=raw_left_value_text,
         left_value_text=left_value_text,
         followed_by_detail_key=_has_following_detail_key(context.clues, clue_index, context.stream),
     )
@@ -773,7 +846,7 @@ def _key_has_left_value(
     comp_type: AddressComponentType,
 ) -> bool:
     """判断中文 KEY 是否真的有左值。"""
-    expand_start = _routing_left_value_start(context, clue_index, clue)
+    expand_start = _effective_left_value_start(context, clue_index, clue)
     return bool(_normalize_address_value(comp_type, context.raw_text[expand_start:clue.start]))
 
 
@@ -784,7 +857,7 @@ def _key_left_expand_start_if_deferrable(
     comp_type: AddressComponentType,
 ) -> int | None:
     """判断中文 KEY 左侧是否存在可延迟提交的 value。"""
-    expand_start = _routing_left_value_start(context, clue_index, clue)
+    expand_start = _effective_left_value_start(context, clue_index, clue)
     value = _normalize_address_value(comp_type, context.raw_text[expand_start:clue.start])
     if not value:
         return None
@@ -889,6 +962,7 @@ def _preview_comma_tail_first_component_levels(
             clues=clues,
             raw_text=raw_text,
             stream=stream,
+            search_start=search_anchor,
         )
         effective = clue
         if clue.role == ClueRole.KEY:
@@ -966,6 +1040,7 @@ def _has_reasonable_successor_key(
             clues=clues,
             raw_text=raw_text,
             stream=stream,
+            search_start=_start_after_component_end(stream, previous_component_end) if previous_component_end is not None else None,
         )
         effective = nxt
         if nxt.role == ClueRole.KEY:
