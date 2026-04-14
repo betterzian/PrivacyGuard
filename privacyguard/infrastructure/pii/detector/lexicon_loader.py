@@ -8,14 +8,21 @@ import re
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.lexicon_store import read_scanner_lexicon_json
-from privacyguard.infrastructure.pii.detector.models import AddressComponentType, LabelSpec
+from privacyguard.infrastructure.pii.detector.models import AddressComponentType, ClaimStrength, LabelSpec
 from privacyguard.infrastructure.pii.detector.zh_name_rules import ZhNameRules, build_zh_name_rules
+
+
+@dataclass(frozen=True, slots=True)
+class AddressKeyword:
+    """单个地址关键字，含 strength 分级。"""
+    text: str
+    strength: ClaimStrength
 
 
 @dataclass(frozen=True, slots=True)
 class AddressKeywordGroup:
     component_type: AddressComponentType
-    keywords: tuple[str, ...]
+    entries: tuple[AddressKeyword, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +100,7 @@ def load_company_suffixes() -> tuple[str, ...]:
 
 
 def _load_address_groups(filename: str) -> tuple[AddressKeywordGroup, ...]:
+    """解析 `{"text": ..., "strength": ...}` 格式的地址关键字组。"""
     payload = _read_json(filename)
     if not isinstance(payload, list):
         raise ValueError(f"{filename} 格式错误：根节点应为数组。")
@@ -100,13 +108,28 @@ def _load_address_groups(filename: str) -> tuple[AddressKeywordGroup, ...]:
     for entry in payload:
         if not isinstance(entry, dict):
             raise ValueError(f"{filename} 格式错误：条目应为对象。")
-        keywords = tuple(sorted(set(_clean_str_list(entry.get('keywords', []))), key=len, reverse=True))
+        raw_keywords = entry.get("keywords", [])
+        if not isinstance(raw_keywords, list):
+            raise ValueError(f"{filename} 格式错误：keywords 应为数组。")
+        seen: set[str] = set()
+        keywords: list[AddressKeyword] = []
+        for item in raw_keywords:
+            if not isinstance(item, dict):
+                raise ValueError(f"{filename} 格式错误：keyword 条目应为对象。")
+            text = str(item.get("text", "")).strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            strength = ClaimStrength(str(item.get("strength", "soft")).strip())
+            keywords.append(AddressKeyword(text=text, strength=strength))
+        # 按长度降序排列，保证长词优先匹配。
+        keywords.sort(key=lambda kw: len(kw.text), reverse=True)
         if not keywords:
             continue
         groups.append(
             AddressKeywordGroup(
                 component_type=_parse_component_type(entry.get("component_type")),
-                keywords=keywords,
+                entries=tuple(keywords),
             )
         )
     return tuple(groups)
@@ -131,11 +154,10 @@ def _build_suffix_stripper(groups: tuple[AddressKeywordGroup, ...]) -> dict[str,
     patterns: dict[str, re.Pattern[str]] = {}
     for group in groups:
         key = group.component_type.value
-        if not group.keywords:
+        if not group.entries:
             continue
         # 仅做 suffix-only 删除，按长度降序拼接，避免短词抢先匹配。
-        # 注意：keywords 来自 JSON，不应当作正则使用，必须 escape。
-        escaped = [re.escape(word) for word in group.keywords if str(word).strip()]
+        escaped = [re.escape(entry.text) for entry in group.entries if entry.text]
         if not escaped:
             continue
         patterns[key] = re.compile(rf"(?:{'|'.join(escaped)})$")
@@ -250,6 +272,7 @@ def load_all_negative_words() -> tuple[str, ...]:
 
 
 __all__ = [
+    "AddressKeyword",
     "AddressKeywordGroup",
     "ControlValueSpec",
     "load_all_negative_words",

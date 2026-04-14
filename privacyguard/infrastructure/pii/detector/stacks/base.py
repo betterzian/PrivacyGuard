@@ -8,7 +8,7 @@ from typing import Protocol
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import trim_candidate
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, Clue, ClueRole, StreamInput
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueIndex, Clue, ClueRole, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks.common import _skip_separators, _unit_char_end, _unit_char_start
 
 
@@ -17,6 +17,7 @@ class StackContextLike(Protocol):
     locale_profile: str
     protection_level: ProtectionLevel
     clues: tuple[Clue, ...]
+    clue_index: ClueIndex
 
     def has_negative_cover(self, unit_start: int, unit_end: int) -> bool: ...
 

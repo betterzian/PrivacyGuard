@@ -641,6 +641,7 @@ class BaseAddressStack(BaseStack):
             components,
             self._value_locale(),
             protection_level=self.context.protection_level,
+            max_clue_strength=state.max_clue_strength,
         ):
             return None
         raw_text = self.context.stream.text

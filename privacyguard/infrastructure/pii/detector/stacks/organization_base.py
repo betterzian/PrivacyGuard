@@ -12,7 +12,7 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import (
     organization_suffix_start,
     trim_candidate,
 )
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueRole, StreamInput
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
@@ -149,19 +149,32 @@ class BaseOrganizationStack(BaseStack):
 
     def _next_label_blocker_start(self, start: int) -> int | None:
         blocker_start = start if self.context.has_negative_cover_left_of_char(start) else self.context.next_negative_start_char(start)
-        for clue in self.context.clues:
-            if clue.clue_id == self.clue.clue_id:
-                continue
-            if clue.start < start < clue.end and self._is_label_right_blocker(clue):
-                return start if blocker_start is None else min(blocker_start, start)
-        for index in range(self.clue_index + 1, len(self.context.clues)):
-            clue = self.context.clues[index]
-            if clue.end <= start:
-                continue
-            if self._is_label_right_blocker(clue):
-                candidate = max(start, clue.start)
-                blocker_start = candidate if blocker_start is None else min(blocker_start, candidate)
-                break
+        ci = self.context.clue_index
+        stream = self.context.stream
+        # 检查 cursor 是否在某个 blocker clue 内部（cover_prefix_sum 快速排除）。
+        if stream.char_to_unit and 0 < start < len(stream.char_to_unit):
+            cursor_unit = stream.char_to_unit[start]
+            if cursor_unit < ci.unit_count and ci.cover_prefix_sum[cursor_unit + 1] - ci.cover_prefix_sum[cursor_unit] > 0:
+                for clue in self.context.clues:
+                    if clue.clue_id == self.clue.clue_id:
+                        continue
+                    if clue.start < start < clue.end and self._is_label_right_blocker(clue):
+                        return start if blocker_start is None else min(blocker_start, start)
+        # 向右查找第一个 blocker。
+        if stream.char_to_unit and start < len(stream.char_to_unit):
+            start_unit = stream.char_to_unit[min(start, len(stream.char_to_unit) - 1)]
+            clues = self.context.clues
+            for u in range(start_unit, ci.unit_count):
+                for idx in ci.clues_starting_at[u]:
+                    if idx <= self.clue_index:
+                        continue
+                    clue = clues[idx]
+                    if clue.end <= start:
+                        continue
+                    if self._is_label_right_blocker(clue):
+                        candidate = max(start, clue.start)
+                        blocker_start = candidate if blocker_start is None else min(blocker_start, candidate)
+                        return blocker_start
         return blocker_start
 
     def _is_label_right_blocker(self, clue: Clue) -> bool:
@@ -191,17 +204,22 @@ class BaseOrganizationStack(BaseStack):
         return None
 
     def _organization_clues_in_span(self, start: int, end: int) -> list[tuple[int, Clue]]:
+        ci = self.context.clue_index
+        us, ue = _char_span_to_unit_span(self.context.stream, start, end)
+        org_starts = ci.family_starts.get(ClueFamily.ORGANIZATION)
+        if org_starts is None or ue <= us:
+            return []
+        clues = self.context.clues
         matches: list[tuple[int, Clue]] = []
-        for index, clue in enumerate(self.context.clues):
-            if clue.end <= start:
-                continue
-            if clue.start >= end:
-                break
-            if clue.attr_type != PIIAttributeType.ORGANIZATION:
-                continue
-            if clue.strength == ClaimStrength.HARD:
-                continue
-            matches.append((index, clue))
+        for u in range(max(0, us), min(ue, ci.unit_count)):
+            for idx in org_starts[u]:
+                clue = clues[idx]
+                if clue.attr_type != PIIAttributeType.ORGANIZATION:
+                    continue
+                if clue.strength == ClaimStrength.HARD:
+                    continue
+                if clue.start < end and clue.end > start:
+                    matches.append((idx, clue))
         return matches
 
 

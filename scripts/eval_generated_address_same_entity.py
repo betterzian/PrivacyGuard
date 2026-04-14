@@ -58,7 +58,7 @@ EN_SUFFIX_KEYWORDS: dict[str, list[str]] = defaultdict(list)
 
 for group in load_en_address_keyword_groups():
     key = group.component_type.value
-    keywords = [str(keyword or "").strip().lower() for keyword in group.keywords if str(keyword or "").strip()]
+    keywords = [entry.text.strip().lower() for entry in group.entries if entry.text.strip()]
     EN_SUFFIX_KEYWORDS[key].extend(sorted(keywords, key=len, reverse=True))
 
 EN_ROAD_ABBREVIATIONS = {
