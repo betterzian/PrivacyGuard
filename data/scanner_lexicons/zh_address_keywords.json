@@ -1,38 +1,132 @@
 [
   {
     "component_type": "province",
-    "keywords": ["特别行政区", "自治区", "省"]
+    "keywords": [
+      {"text": "特别行政区", "strength": "hard"},
+      {"text": "自治区", "strength": "hard"},
+      {"text": "省", "strength": "soft"}
+    ]
   },
   {
     "component_type": "city",
-    "keywords": ["自治州", "地区", "盟", "市"]
+    "keywords": [
+      {"text": "自治州", "strength": "soft"},
+      {"text": "市", "strength": "soft"},
+      {"text": "盟", "strength": "soft"},
+      {"text": "地区", "strength": "weak"}
+    ]
   },
   {
     "component_type": "district",
-    "keywords": ["新区", "开发区", "高新区", "经济区", "保税区", "区", "县", "旗"]
+    "keywords": [
+      {"text": "开发区", "strength": "soft"},
+      {"text": "高新区", "strength": "soft"},
+      {"text": "经济区", "strength": "soft"},
+      {"text": "保税区", "strength": "soft"},
+      {"text": "新区", "strength": "soft"},
+      {"text": "县", "strength": "soft"},
+      {"text": "旗", "strength": "soft"},
+      {"text": "区", "strength": "weak"}
+    ]
   },
   {
     "component_type": "subdistrict",
-    "keywords": ["街道办", "居委会", "村委会", "街道", "社区", "镇", "乡", "屯", "村"]
+    "keywords": [
+      {"text": "街道办", "strength": "hard"},
+      {"text": "居委会", "strength": "hard"},
+      {"text": "村委会", "strength": "hard"},
+      {"text": "街道", "strength": "soft"},
+      {"text": "社区", "strength": "soft"},
+      {"text": "镇", "strength": "soft"},
+      {"text": "乡", "strength": "soft"},
+      {"text": "村", "strength": "soft"},
+      {"text": "屯", "strength": "soft"}
+    ]
   },
   {
     "component_type": "road",
-    "keywords": ["大道", "胡同", "公路", "国道", "大街", "中路", "南路", "北路", "东路", "西路", "路", "街", "道", "巷", "弄", "坊", "桥"]
+    "keywords": [
+      {"text": "大道", "strength": "hard"},
+      {"text": "大街", "strength": "hard"},
+      {"text": "胡同", "strength": "hard"},
+      {"text": "公路", "strength": "hard"},
+      {"text": "国道", "strength": "hard"},
+      {"text": "中路", "strength": "hard"},
+      {"text": "南路", "strength": "hard"},
+      {"text": "北路", "strength": "hard"},
+      {"text": "东路", "strength": "hard"},
+      {"text": "西路", "strength": "hard"},
+      {"text": "路", "strength": "soft"},
+      {"text": "街", "strength": "soft"},
+      {"text": "巷", "strength": "soft"},
+      {"text": "弄", "strength": "soft"},
+      {"text": "坊", "strength": "soft"},
+      {"text": "桥", "strength": "soft"},
+      {"text": "道", "strength": "weak"}
+    ]
   },
   {
     "component_type": "number",
-    "keywords": ["门牌号", "门牌", "号"]
+    "keywords": [
+      {"text": "门牌号", "strength": "hard"},
+      {"text": "门牌", "strength": "hard"},
+      {"text": "号", "strength": "weak"}
+    ]
   },
   {
     "component_type": "poi",
-    "keywords": ["小区", "公寓", "大厦", "大楼", "园区", "花园", "家园", "苑", "庭", "府", "湾", "宿舍", "新村", "别墅", "广场", "中心", "城", "商场", "写字楼", "工业园", "科技园", "产业园", "住宅", "楼盘", "新城", "雅苑", "嘉园", "豪庭", "名邸", "华庭", "御园"]
+    "keywords": [
+      {"text": "小区", "strength": "soft"},
+      {"text": "公寓", "strength": "soft"},
+      {"text": "大厦", "strength": "soft"},
+      {"text": "大楼", "strength": "soft"},
+      {"text": "园区", "strength": "soft"},
+      {"text": "花园", "strength": "soft"},
+      {"text": "家园", "strength": "soft"},
+      {"text": "宿舍", "strength": "soft"},
+      {"text": "新村", "strength": "soft"},
+      {"text": "别墅", "strength": "soft"},
+      {"text": "广场", "strength": "soft"},
+      {"text": "商场", "strength": "soft"},
+      {"text": "写字楼", "strength": "soft"},
+      {"text": "工业园", "strength": "soft"},
+      {"text": "科技园", "strength": "soft"},
+      {"text": "产业园", "strength": "soft"},
+      {"text": "住宅", "strength": "soft"},
+      {"text": "楼盘", "strength": "soft"},
+      {"text": "新城", "strength": "soft"},
+      {"text": "雅苑", "strength": "soft"},
+      {"text": "嘉园", "strength": "soft"},
+      {"text": "豪庭", "strength": "soft"},
+      {"text": "名邸", "strength": "soft"},
+      {"text": "华庭", "strength": "soft"},
+      {"text": "御园", "strength": "soft"},
+      {"text": "苑", "strength": "weak"},
+      {"text": "庭", "strength": "weak"},
+      {"text": "府", "strength": "weak"},
+      {"text": "湾", "strength": "weak"},
+      {"text": "城", "strength": "weak"},
+      {"text": "中心", "strength": "weak"}
+    ]
   },
   {
     "component_type": "building",
-    "keywords": ["号楼", "栋", "幢", "座"]
+    "keywords": [
+      {"text": "号楼", "strength": "hard"},
+      {"text": "栋", "strength": "soft"},
+      {"text": "幢", "strength": "soft"},
+      {"text": "座", "strength": "soft"}
+    ]
   },
   {
     "component_type": "detail",
-    "keywords": ["单元", "层", "楼", "室", "房", "户"]
+    "keywords": [
+      {"text": "单元", "strength": "hard"},
+      {"text": "楼", "strength": "weak"},
+      {"text": "层", "strength": "weak"},
+      {"text": "室", "strength": "weak"},
+      {"text": "房", "strength": "weak"},
+      {"text": "户", "strength": "weak"}
+    ]
   }
 ]

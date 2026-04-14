@@ -36,9 +36,11 @@ from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
+    ClaimStrength,
     Clue,
     ClueRole,
     StreamInput,
+    strength_ge,
 )
 from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after
 
@@ -253,6 +255,7 @@ class _ParseState:
     comma_tail_checkpoint: _CommaTailCheckpoint | None = None
     ignored_address_key_indices: set[int] = field(default_factory=set)
     last_piece_end: int | None = None
+    max_clue_strength: ClaimStrength = ClaimStrength.WEAK
 
 
 _StandaloneAdminResolver = Callable[
@@ -751,6 +754,9 @@ def _commit(
     state.last_end = max(state.last_end, committed.end)
     state.last_piece_end = committed.end
     state.evidence_count += 1
+    for clue in committed.raw_chain:
+        if not strength_ge(state.max_clue_strength, clue.strength):
+            state.max_clue_strength = clue.strength
     state.committed_clue_ids |= committed.clue_ids
     _mark_consumed_indices(state, committed.clue_indices)
     _prune_prior_component_suspects(state, committed)
@@ -970,17 +976,33 @@ def _meets_commit_threshold(
     components: list[_DraftComponent],
     locale: str,
     protection_level: ProtectionLevel = ProtectionLevel.STRONG,
+    max_clue_strength: ClaimStrength = ClaimStrength.SOFT,
 ) -> bool:
+    """strength 感知的地址提交阈值。
+
+    STRONG：SOFT 及以上单 evidence 即通过；WEAK only 需 >=2 evidence。
+    BALANCED：HARD 单 evidence 通过；SOFT 需 >=2 或含省/市 admin；WEAK 不通过。
+    WEAK（保护等级最宽松）：HARD 单 evidence 通过；SOFT + >=2 通过；其余不通过。
+    """
     del locale
     if evidence_count <= 0:
         return False
     if protection_level == ProtectionLevel.STRONG:
-        return True
-    if protection_level == ProtectionLevel.BALANCED:
-        if evidence_count >= 2:
+        if strength_ge(max_clue_strength, ClaimStrength.SOFT):
             return True
-        return any(component.component_type in _SINGLE_EVIDENCE_ADMIN for component in components)
-    return evidence_count >= 2
+        return evidence_count >= 2
+    if protection_level == ProtectionLevel.BALANCED:
+        if max_clue_strength == ClaimStrength.HARD:
+            return True
+        if max_clue_strength == ClaimStrength.SOFT:
+            if evidence_count >= 2:
+                return True
+            return any(c.component_type in _SINGLE_EVIDENCE_ADMIN for c in components)
+        return False
+    # ProtectionLevel.WEAK
+    if max_clue_strength == ClaimStrength.HARD:
+        return True
+    return max_clue_strength == ClaimStrength.SOFT and evidence_count >= 2
 
 
 def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> dict[str, list[str]]:
@@ -1082,6 +1104,7 @@ def _rebuild_component_derived_state(
     state.pending_community_poi_index = None
     state.comma_tail_checkpoint = None
     state.last_piece_end = None
+    state.max_clue_strength = ClaimStrength.WEAK
 
     for index, component in enumerate(state.components):
         component_type = component.component_type
@@ -1101,6 +1124,9 @@ def _rebuild_component_derived_state(
         state.last_end = max(state.last_end, component.end)
         state.last_piece_end = component.end
         state.segment_state.group_last_type = component_type
+        for clue in component.raw_chain:
+            if not strength_ge(state.max_clue_strength, clue.strength):
+                state.max_clue_strength = clue.strength
 
     _recompute_last_consumed_index(state)
     if 0 <= state.last_consumed_clue_index < len(clues):

@@ -1,18 +1,106 @@
 [
   {
     "component_type": "road",
-    "keywords": ["street", "st", "road", "rd", "avenue", "ave", "boulevard", "blvd", "drive", "dr", "lane", "ln", "court", "ct", "place", "pl", "parkway", "pkwy", "terrace", "ter", "circle", "cir", "way", "highway", "hwy", "trail", "trl", "alley", "aly", "crescent", "cres", "crossing", "xing", "loop", "path", "pike", "row", "run", "square", "sq", "turnpike", "tpke", "freeway", "fwy", "expressway", "expy"]
+    "keywords": [
+      {"text": "street", "strength": "soft"},
+      {"text": "st", "strength": "soft"},
+      {"text": "road", "strength": "soft"},
+      {"text": "rd", "strength": "soft"},
+      {"text": "avenue", "strength": "soft"},
+      {"text": "ave", "strength": "soft"},
+      {"text": "boulevard", "strength": "soft"},
+      {"text": "blvd", "strength": "soft"},
+      {"text": "drive", "strength": "soft"},
+      {"text": "dr", "strength": "soft"},
+      {"text": "lane", "strength": "soft"},
+      {"text": "ln", "strength": "soft"},
+      {"text": "court", "strength": "soft"},
+      {"text": "ct", "strength": "soft"},
+      {"text": "place", "strength": "soft"},
+      {"text": "pl", "strength": "soft"},
+      {"text": "parkway", "strength": "soft"},
+      {"text": "pkwy", "strength": "soft"},
+      {"text": "terrace", "strength": "soft"},
+      {"text": "ter", "strength": "soft"},
+      {"text": "circle", "strength": "soft"},
+      {"text": "cir", "strength": "soft"},
+      {"text": "way", "strength": "soft"},
+      {"text": "highway", "strength": "soft"},
+      {"text": "hwy", "strength": "soft"},
+      {"text": "trail", "strength": "soft"},
+      {"text": "trl", "strength": "soft"},
+      {"text": "alley", "strength": "soft"},
+      {"text": "aly", "strength": "soft"},
+      {"text": "crescent", "strength": "soft"},
+      {"text": "cres", "strength": "soft"},
+      {"text": "crossing", "strength": "soft"},
+      {"text": "xing", "strength": "soft"},
+      {"text": "loop", "strength": "soft"},
+      {"text": "path", "strength": "soft"},
+      {"text": "pike", "strength": "soft"},
+      {"text": "row", "strength": "soft"},
+      {"text": "run", "strength": "soft"},
+      {"text": "square", "strength": "soft"},
+      {"text": "sq", "strength": "soft"},
+      {"text": "turnpike", "strength": "soft"},
+      {"text": "tpke", "strength": "soft"},
+      {"text": "freeway", "strength": "soft"},
+      {"text": "fwy", "strength": "soft"},
+      {"text": "expressway", "strength": "soft"},
+      {"text": "expy", "strength": "soft"}
+    ]
   },
   {
     "component_type": "detail",
-    "keywords": ["apt", "apartment", "suite", "ste", "unit", "#", "lot", "slip", "space", "spc", "floor", "fl", "level", "lvl", "room", "rm"]
+    "keywords": [
+      {"text": "apt", "strength": "soft"},
+      {"text": "apartment", "strength": "soft"},
+      {"text": "suite", "strength": "soft"},
+      {"text": "ste", "strength": "soft"},
+      {"text": "unit", "strength": "soft"},
+      {"text": "#", "strength": "soft"},
+      {"text": "lot", "strength": "soft"},
+      {"text": "slip", "strength": "soft"},
+      {"text": "space", "strength": "soft"},
+      {"text": "spc", "strength": "soft"},
+      {"text": "floor", "strength": "soft"},
+      {"text": "fl", "strength": "soft"},
+      {"text": "level", "strength": "soft"},
+      {"text": "lvl", "strength": "soft"},
+      {"text": "room", "strength": "soft"},
+      {"text": "rm", "strength": "soft"}
+    ]
   },
   {
     "component_type": "building",
-    "keywords": ["building", "bldg", "tower", "twr", "block", "blk", "house", "complex"]
+    "keywords": [
+      {"text": "building", "strength": "soft"},
+      {"text": "bldg", "strength": "soft"},
+      {"text": "tower", "strength": "soft"},
+      {"text": "twr", "strength": "soft"},
+      {"text": "block", "strength": "soft"},
+      {"text": "blk", "strength": "soft"},
+      {"text": "house", "strength": "soft"},
+      {"text": "complex", "strength": "soft"}
+    ]
   },
   {
     "component_type": "poi",
-    "keywords": ["plaza", "plz", "center", "centre", "park", "estate", "residence", "manor", "villa", "gardens", "heights", "terrace", "court", "mansion"]
+    "keywords": [
+      {"text": "plaza", "strength": "soft"},
+      {"text": "plz", "strength": "soft"},
+      {"text": "center", "strength": "soft"},
+      {"text": "centre", "strength": "soft"},
+      {"text": "park", "strength": "soft"},
+      {"text": "estate", "strength": "soft"},
+      {"text": "residence", "strength": "soft"},
+      {"text": "manor", "strength": "soft"},
+      {"text": "villa", "strength": "soft"},
+      {"text": "gardens", "strength": "soft"},
+      {"text": "heights", "strength": "soft"},
+      {"text": "terrace", "strength": "soft"},
+      {"text": "court", "strength": "soft"},
+      {"text": "mansion", "strength": "soft"}
+    ]
   }
 ]

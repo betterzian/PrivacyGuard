@@ -31,7 +31,7 @@ _DELETED_INTERNAL_ZH_ADMIN_ALIAS_TABLES = True
 def _en_address_street_suffixes() -> tuple[str, ...]:
     for group in load_en_address_keyword_groups():
         if group.component_type.value == "road":
-            return tuple(str(k).strip().lower() for k in group.keywords if str(k).strip())
+            return tuple(entry.text.strip().lower() for entry in group.entries if entry.text.strip())
     return ()
 
 
@@ -42,8 +42,8 @@ def _en_address_unit_prefixes() -> tuple[str, ...]:
     for group in load_en_address_keyword_groups():
         if group.component_type.value not in accepted:
             continue
-        for kw in group.keywords:
-            text = str(kw).strip().lower()
+        for entry in group.entries:
+            text = entry.text.strip().lower()
             if text:
                 prefixes.append(text)
     prefixes.append("#")

@@ -118,8 +118,8 @@ def _en_prefix_keywords() -> set[str]:
     for group in load_en_address_keyword_groups():
         if group.component_type not in {AddressComponentType.DETAIL, AddressComponentType.BUILDING}:
             continue
-        for keyword in group.keywords:
-            text = str(keyword or "").strip().lower()
+        for entry in group.entries:
+            text = entry.text.strip().lower()
             if text:
                 keywords.add(text)
     keywords.add("#")

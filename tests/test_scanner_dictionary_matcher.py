@@ -402,7 +402,8 @@ def test_chinese_dictionary_family_entry_is_downgraded_to_soft_surname_clue():
     assert len(clues) == 1
     clue = clues[0]
     assert clue.role == ClueRole.FAMILY_NAME
-    assert clue.strength == ClaimStrength.SOFT
+    # "王"在 scanner weak tier 中，词典姓氏与 scanner 词库重合时以 scanner tier 为准。
+    assert clue.strength == ClaimStrength.WEAK
     assert "hard_source" not in clue.source_metadata
     assert clue.source_metadata["surname_tier"] == ["weak"]
     assert clue.source_metadata["surname_match_kind"] == ["single"]

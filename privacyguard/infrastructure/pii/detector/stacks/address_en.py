@@ -9,6 +9,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
     CandidateDraft,
     ClaimStrength,
+    ClueFamily,
     Clue,
     ClueRole,
     PIIAttributeType,
@@ -431,20 +432,27 @@ class EnAddressStack(BaseAddressStack):
 
     def _find_suffix_road_key_after_value_seed(self) -> tuple[int, Clue] | tuple[None, None]:
         raw_text = self.context.stream.text
-        for clue_index in range(self.clue_index + 1, len(self.context.clues)):
-            clue = self.context.clues[clue_index]
-            if clue.attr_type is None:
-                continue
-            if clue.attr_type != PIIAttributeType.ADDRESS:
-                continue
-            if clue.role != ClueRole.KEY or clue.component_type != AddressComponentType.ROAD:
-                continue
-            if _clue_unit_gap(self.clue, clue, self.context.stream) > 3:
-                break
-            between = raw_text[self.clue.end:clue.start]
-            if any(char in ",，\r\n" for char in between):
-                return None, None
-            return clue_index, clue
+        ci = self.context.clue_index
+        addr_starts = ci.family_starts.get(ClueFamily.ADDRESS)
+        if addr_starts is None:
+            return None, None
+        start_unit = self.clue.unit_end
+        clues = self.context.clues
+        for u in range(start_unit, ci.unit_count):
+            for idx in addr_starts[u]:
+                if idx <= self.clue_index:
+                    continue
+                clue = clues[idx]
+                if clue.attr_type is None or clue.attr_type != PIIAttributeType.ADDRESS:
+                    continue
+                if clue.role != ClueRole.KEY or clue.component_type != AddressComponentType.ROAD:
+                    continue
+                if _clue_unit_gap(self.clue, clue, self.context.stream) > 3:
+                    return None, None
+                between = raw_text[self.clue.end:clue.start]
+                if any(char in ",，\r\n" for char in between):
+                    return None, None
+                return idx, clue
         return None, None
 
     def _find_leading_house_number_challenge(
@@ -454,7 +462,19 @@ class EnAddressStack(BaseAddressStack):
     ) -> tuple[int, Clue] | None:
         raw_text = self.context.stream.text
         component_value_start = _skip_separators(raw_text, component.start)
-        for clue_index, clue in enumerate(self.context.clues):
+        ci = self.context.clue_index
+        stream = self.context.stream
+        if not stream.char_to_unit or component_value_start >= len(stream.char_to_unit):
+            return None
+        target_unit = stream.char_to_unit[component_value_start]
+        if target_unit >= ci.unit_count:
+            return None
+        struct_starts = ci.family_starts.get(ClueFamily.STRUCTURED)
+        if struct_starts is None:
+            return None
+        clues = self.context.clues
+        for idx in struct_starts[target_unit]:
+            clue = clues[idx]
             if clue.start != component_value_start:
                 continue
             if clue.end > road_key_start:
@@ -463,7 +483,7 @@ class EnAddressStack(BaseAddressStack):
                 continue
             if is_prefix_en_component(component.component_type):
                 continue
-            return clue_index, clue
+            return idx, clue
         return None
 
     def _fallback_house_number_span(

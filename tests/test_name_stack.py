@@ -7,7 +7,7 @@ from dataclasses import replace
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, build_negative_unit_index
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, build_clue_index, build_negative_unit_index
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
@@ -65,6 +65,7 @@ def _run_name_stack(text: str, clue_index: int, clues: tuple[Clue, ...], *, prot
         negative_unit_marks=negative_unit_marks,
         negative_prefix_sum=negative_prefix_sum,
         negative_start_weight=negative_start_weight,
+        clue_index=build_clue_index(len(stream.units), fixed),
     )
     fixed_index = index_by_id[target.clue_id]
     return NameStack(clue=fixed[fixed_index], clue_index=fixed_index, context=context)
@@ -115,6 +116,7 @@ def _parse_name_texts(
             negative_unit_marks=negative_unit_marks,
             negative_prefix_sum=negative_prefix_sum,
             negative_start_weight=negative_start_weight,
+            clue_index=build_clue_index(len(stream.units), fixed),
         ),
     )
     return [candidate.text for candidate in result.candidates if candidate.attr_type == PIIAttributeType.NAME]
