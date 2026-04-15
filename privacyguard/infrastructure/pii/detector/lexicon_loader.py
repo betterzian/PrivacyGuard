@@ -26,6 +26,13 @@ class AddressKeywordGroup:
 
 
 @dataclass(frozen=True, slots=True)
+class TieredEntry:
+    """带 strength 分级的通用词条（英文姓名、公司后缀等）。"""
+    text: str
+    strength: ClaimStrength
+
+
+@dataclass(frozen=True, slots=True)
 class ControlValueSpec:
     text: str
     normalized: str
@@ -94,9 +101,29 @@ def load_zh_name_rules() -> ZhNameRules:
     return build_zh_name_rules(_read_json("zh_name_rules.json"))
 
 
+def _parse_tiered_entries(payload: object) -> tuple[TieredEntry, ...]:
+    """解析 {"hard": [...], "soft": [...], "weak": [...]} 格式的分级词条。"""
+    if not isinstance(payload, dict):
+        raise ValueError("分级词条格式错误：应为 {hard/soft/weak: [...]}")
+    entries: list[TieredEntry] = []
+    seen: set[str] = set()
+    for strength_str in ("hard", "soft", "weak"):
+        names = payload.get(strength_str, [])
+        if not isinstance(names, list):
+            continue
+        strength = ClaimStrength(strength_str)
+        for name in names:
+            text = str(name).strip()
+            if text and text not in seen:
+                seen.add(text)
+                entries.append(TieredEntry(text=text, strength=strength))
+    return tuple(sorted(entries, key=lambda e: len(e.text), reverse=True))
+
+
 @lru_cache(maxsize=1)
-def load_company_suffixes() -> tuple[str, ...]:
-    return tuple(sorted(set(_clean_str_list(_read_json("company_suffixes.json"))), key=len, reverse=True))
+def load_company_suffixes() -> tuple[TieredEntry, ...]:
+    """加载组织后缀词典（含 strength 分级）。"""
+    return _parse_tiered_entries(_read_json("company_suffixes.json"))
 
 
 def _load_address_groups(filename: str) -> tuple[AddressKeywordGroup, ...]:
@@ -217,17 +244,15 @@ def load_negative_ui_words() -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=1)
-def load_en_surnames() -> tuple[str, ...]:
-    """加载英文姓氏词典，按长度降序排列。"""
-    payload = _clean_str_list(_read_json("en_surnames.json"))
-    return tuple(sorted(set(payload), key=len, reverse=True))
+def load_en_surnames() -> tuple[TieredEntry, ...]:
+    """加载英文姓氏词典（含 strength 分级），按长度降序排列。"""
+    return _parse_tiered_entries(_read_json("en_surnames.json"))
 
 
 @lru_cache(maxsize=1)
-def load_en_given_names() -> tuple[str, ...]:
-    """加载英文名字（given name）词典，按长度降序排列。"""
-    payload = _clean_str_list(_read_json("en_given_names.json"))
-    return tuple(sorted(set(payload), key=len, reverse=True))
+def load_en_given_names() -> tuple[TieredEntry, ...]:
+    """加载英文名字（given name）词典（含 strength 分级），按长度降序排列。"""
+    return _parse_tiered_entries(_read_json("en_given_names.json"))
 
 
 @lru_cache(maxsize=1)
@@ -275,6 +300,7 @@ __all__ = [
     "AddressKeyword",
     "AddressKeywordGroup",
     "ControlValueSpec",
+    "TieredEntry",
     "load_all_negative_words",
     "load_company_suffixes",
     "load_en_address_keyword_groups",

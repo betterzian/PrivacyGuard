@@ -59,9 +59,9 @@
       {"text": "路", "strength": "soft"},
       {"text": "街", "strength": "soft"},
       {"text": "巷", "strength": "soft"},
-      {"text": "弄", "strength": "soft"},
       {"text": "坊", "strength": "soft"},
       {"text": "桥", "strength": "soft"},
+      {"text": "弄", "strength": "weak"},
       {"text": "道", "strength": "weak"}
     ]
   },

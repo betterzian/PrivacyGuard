@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.infrastructure.pii.address.geo_db import load_en_geo_lexicon, load_zh_geo_lexicon
+from privacyguard.infrastructure.pii.address.geo_db import GeoEntry, load_en_geo_lexicon, load_zh_geo_lexicon
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_company_suffixes,
@@ -44,6 +44,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     build_negative_unit_index,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
+from privacyguard.infrastructure.pii.detector.stacks.common import is_ascii_alnum_like_unit
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
 from privacyguard.infrastructure.pii.detector.zh_name_rules import ZhNameRules, compact_zh_name_text
 
@@ -885,13 +886,14 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
 
 
 def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
-    """扫描英文姓氏，产出 FAMILY_NAME clue。"""
+    """扫描英文姓氏，产出 FAMILY_NAME clue（strength 来自分级词典）。"""
     clues: list[Clue] = []
     for match in _en_surname_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
         if normalized is None:
             continue
         raw_start, raw_end, matched_text = normalized
+        entry = match.payload
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -899,7 +901,7 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 family=ClueFamily.NAME,
                 role=ClueRole.FAMILY_NAME,
                 attr_type=PIIAttributeType.NAME,
-                strength=ClaimStrength.SOFT,
+                strength=entry.strength,
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
@@ -912,13 +914,14 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
 
 
 def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
-    """扫描英文名字（given name），产出 GIVEN_NAME clue。"""
+    """扫描英文名字（given name），产出 GIVEN_NAME clue（strength 来自分级词典）。"""
     clues: list[Clue] = []
     for match in _en_given_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
         if normalized is None:
             continue
         raw_start, raw_end, matched_text = normalized
+        entry = match.payload
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -926,7 +929,7 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 family=ClueFamily.NAME,
                 role=ClueRole.GIVEN_NAME,
                 attr_type=PIIAttributeType.NAME,
-                strength=ClaimStrength.SOFT,
+                strength=entry.strength,
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
@@ -973,6 +976,7 @@ def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> lis
         if normalized is None:
             continue
         raw_start, raw_end, matched_text = normalized
+        entry = match.payload
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -980,7 +984,7 @@ def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> lis
                 family=ClueFamily.ORGANIZATION,
                 role=ClueRole.SUFFIX,
                 attr_type=PIIAttributeType.ORGANIZATION,
-                strength=ClaimStrength.SOFT,
+                strength=entry.strength,
                 start=raw_start,
                 end=raw_end,
                 text=matched_text,
@@ -1043,7 +1047,7 @@ def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, loca
 
 
 def _promote_by_digit_prefix(stream: StreamInput, raw_start: int, strength: ClaimStrength) -> ClaimStrength:
-    """WEAK detail 关键字前方紧邻纯数字 unit 时提升为 SOFT（如 "3楼" "201室"）。"""
+    """WEAK detail 关键字前方紧邻英数字 unit 时提升为 SOFT（如 "3楼" "201室"）。"""
     if strength != ClaimStrength.WEAK:
         return strength
     if raw_start <= 0 or not stream.char_to_unit:
@@ -1052,7 +1056,7 @@ def _promote_by_digit_prefix(stream: StreamInput, raw_start: int, strength: Clai
     if unit_idx <= 0:
         return strength
     prev_unit = stream.units[unit_idx - 1]
-    if prev_unit.kind == "ascii_word" and prev_unit.text.isdigit():
+    if is_ascii_alnum_like_unit(prev_unit):
         return ClaimStrength.SOFT
     return strength
 
@@ -1072,7 +1076,7 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
-                strength=ClaimStrength.SOFT,
+                strength=payload.strength,
                 start=raw_start,
                 end=raw_end,
                 text=payload.canonical_text,
@@ -1126,7 +1130,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 family=ClueFamily.ADDRESS,
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ADDRESS,
-                strength=ClaimStrength.SOFT,
+                strength=payload.strength,
                 start=raw_start,
                 end=raw_end,
                 text=payload.canonical_text,
@@ -1855,11 +1859,11 @@ def _en_surname_matcher() -> AhoMatcher:
     return AhoMatcher.from_patterns(
         tuple(
             AhoPattern(
-                text=surname,
-                payload=surname,
+                text=entry.text,
+                payload=entry,
                 ascii_boundary=True,
             )
-            for surname in load_en_surnames()
+            for entry in load_en_surnames()
         )
     )
 
@@ -1869,11 +1873,11 @@ def _en_given_name_matcher() -> AhoMatcher:
     return AhoMatcher.from_patterns(
         tuple(
             AhoPattern(
-                text=name,
-                payload=name,
+                text=entry.text,
+                payload=entry,
                 ascii_boundary=True,
             )
-            for name in load_en_given_names()
+            for entry in load_en_given_names()
         )
     )
 
@@ -1898,11 +1902,11 @@ def _company_suffix_matcher() -> AhoMatcher:
     return AhoMatcher.from_patterns(
         tuple(
             AhoPattern(
-                text=suffix,
-                payload=suffix,
-                ascii_boundary=_needs_ascii_keyword_boundary(suffix),
+                text=entry.text,
+                payload=entry,
+                ascii_boundary=_needs_ascii_keyword_boundary(entry.text),
             )
-            for suffix in load_company_suffixes()
+            for entry in load_company_suffixes()
         )
     )
 
@@ -1911,19 +1915,32 @@ def _company_suffix_matcher() -> AhoMatcher:
 def _zh_address_value_matcher() -> AhoMatcher:
     lexicon = load_zh_geo_lexicon()
     direct_city_names = {"北京", "上海", "天津", "重庆", "香港", "澳门"}
-    geo_specs = (
-        (AddressComponentType.PROVINCE, tuple(item for item in lexicon.provinces if item not in direct_city_names)),
-        (AddressComponentType.CITY, tuple([*lexicon.cities, *sorted(direct_city_names)])),
+    # 直辖市从 province 层移到 city 层，保留原始 strength。
+    province_entries = tuple(e for e in lexicon.provinces if e.text not in direct_city_names)
+    direct_entries = tuple(
+        sorted((e for e in lexicon.provinces if e.text in direct_city_names), key=lambda e: e.text)
+    )
+    geo_specs: tuple[tuple[AddressComponentType, tuple[GeoEntry, ...]], ...] = (
+        (AddressComponentType.PROVINCE, province_entries),
+        (AddressComponentType.CITY, tuple([*lexicon.cities, *direct_entries])),
         (AddressComponentType.DISTRICT, lexicon.districts),
     )
     patterns: list[AhoPattern] = []
-    for component_type, names in geo_specs:
-        for name in sorted(set(names), key=len, reverse=True):
+    seen: set[str] = set()
+    for component_type, entries in geo_specs:
+        for entry in sorted(entries, key=lambda e: len(e.text), reverse=True):
+            if entry.text in seen:
+                continue
+            seen.add(entry.text)
             patterns.append(
                 AhoPattern(
-                    text=name,
-                    payload=_AddressPatternPayload(component_type=component_type, canonical_text=name),
-                    ascii_boundary=_needs_ascii_keyword_boundary(name),
+                    text=entry.text,
+                    payload=_AddressPatternPayload(
+                        component_type=component_type,
+                        canonical_text=entry.text,
+                        strength=entry.strength,
+                    ),
+                    ascii_boundary=_needs_ascii_keyword_boundary(entry.text),
                 )
             )
     return AhoMatcher.from_patterns(tuple(patterns))
@@ -1969,34 +1986,53 @@ def _zh_address_key_matcher() -> AhoMatcher:
 def _en_address_value_matcher() -> AhoMatcher:
     lexicon = load_en_geo_lexicon()
     country_aliases = load_en_address_country_aliases()
-    geo_specs = (
-        (AddressComponentType.PROVINCE, tuple([*lexicon.tier_a_state_names, *lexicon.tier_a_state_codes])),
-        (AddressComponentType.CITY, tuple([*lexicon.tier_b_places, *lexicon.tier_c_places])),
-        (
-            AddressComponentType.COUNTRY,
-            tuple(
-                sorted(
-                    {
-                        canonical.strip()
-                        for canonical in country_aliases.values()
-                        if canonical.strip()
-                    },
-                    key=len,
-                    reverse=True,
-                )
-            ),
-        ),
+    geo_entry_specs: tuple[tuple[AddressComponentType, tuple[GeoEntry, ...]], ...] = (
+        (AddressComponentType.PROVINCE, tuple([*lexicon.state_names, *lexicon.state_codes])),
+        (AddressComponentType.CITY, lexicon.cities),
+    )
+    # 国家别名去重后以 SOFT 补入。
+    country_names = tuple(
+        sorted(
+            {canonical.strip() for canonical in country_aliases.values() if canonical.strip()},
+            key=len,
+            reverse=True,
+        )
     )
     patterns: list[AhoPattern] = []
-    for component_type, names in geo_specs:
-        for name in sorted(set(names), key=len, reverse=True):
+    seen: set[str] = set()
+    for component_type, entries in geo_entry_specs:
+        for entry in sorted(entries, key=lambda e: len(e.text), reverse=True):
+            lower = entry.text.lower()
+            if lower in seen:
+                continue
+            seen.add(lower)
             patterns.append(
                 AhoPattern(
-                    text=name,
-                    payload=_AddressPatternPayload(component_type=component_type, canonical_text=name),
-                    ascii_boundary=_needs_ascii_keyword_boundary(name),
+                    text=entry.text,
+                    payload=_AddressPatternPayload(
+                        component_type=component_type,
+                        canonical_text=entry.text,
+                        strength=entry.strength,
+                    ),
+                    ascii_boundary=_needs_ascii_keyword_boundary(entry.text),
                 )
             )
+    for name in country_names:
+        lower = name.lower()
+        if lower in seen:
+            continue
+        seen.add(lower)
+        patterns.append(
+            AhoPattern(
+                text=name,
+                payload=_AddressPatternPayload(
+                    component_type=AddressComponentType.COUNTRY,
+                    canonical_text=name,
+                    strength=ClaimStrength.SOFT,
+                ),
+                ascii_boundary=_needs_ascii_keyword_boundary(name),
+            )
+        )
     for alias, canonical in sorted(country_aliases.items(), key=lambda item: len(item[0]), reverse=True):
         alias_text = alias.strip()
         canonical_text = canonical.strip()
@@ -2122,7 +2158,8 @@ def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], 
     2. Seed 裁决：完全包含→大的覆盖；否则保留 start 更靠后的。
     3. 扫描轮 2：seed 依赖规则。
     4. 姓名组件覆盖。
-    5. Label vs soft content：完全包含→大的覆盖；其余保留。
+    5. 地址组件覆盖：ADDRESS family 内仅在严格完全包含时覆盖，部分重叠保留。
+    6. Label vs soft content：完全包含→大的覆盖；其余保留。
 
     返回 (resolved_clues, inspire_entries)。
     """
@@ -2149,6 +2186,9 @@ def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], 
 
     # ── 姓名组件覆盖 ──
     survivors = _apply_name_component_coverage(survivors)
+
+    # ── 地址组件覆盖（仅完全包含时覆盖）──
+    survivors = _apply_address_component_coverage(survivors)
 
     # ── Label vs soft content ──
     return _label_vs_soft_filter(survivors), inspire_entries
@@ -2339,6 +2379,31 @@ def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
                 continue
         survivors.append(clue)
     return survivors
+
+
+def _apply_address_component_coverage(clues: list[Clue]) -> list[Clue]:
+    """地址组件覆盖裁决：仅严格完全包含时做覆盖，部分重叠都保留。"""
+    address_clues = [clue for clue in clues if clue.family == ClueFamily.ADDRESS]
+    if len(address_clues) <= 1:
+        return clues
+
+    dropped_ids: set[str] = set()
+    for clue in address_clues:
+        if clue.clue_id in dropped_ids:
+            continue
+        for other in address_clues:
+            if clue.clue_id == other.clue_id:
+                continue
+            # 仅严格包含时覆盖；完全相等与部分重叠都保留。
+            if (
+                other.start <= clue.start
+                and clue.end <= other.end
+                and (other.start < clue.start or clue.end < other.end)
+            ):
+                dropped_ids.add(clue.clue_id)
+                break
+
+    return [clue for clue in clues if clue.clue_id not in dropped_ids]
 
 
 def _resolve_name_component_overlap_winners(clues: list[Clue]) -> list[Clue]:

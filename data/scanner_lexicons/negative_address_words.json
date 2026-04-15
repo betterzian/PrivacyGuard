@@ -24,7 +24,6 @@
   "频道",
   "轨道",
   "报道",
-
   "路线",
   "路过",
   "路由",
@@ -36,7 +35,6 @@
   "回路",
   "网路",
   "跑路",
-
   "街舞",
   "街拍",
   "街机",
@@ -44,14 +42,11 @@
   "街头",
   "街边",
   "街区",
-
   "弄好",
   "弄完",
   "弄一下",
-
   "巷战",
   "巷道",
-
   "区别",
   "区间",
   "区域",
@@ -65,7 +60,6 @@
   "禁区",
   "盲区",
   "误区",
-
   "省略",
   "省心",
   "省事",
@@ -78,7 +72,6 @@
   "省会",
   "全省",
   "省内",
-
   "市场",
   "市值",
   "市盈率",
@@ -92,11 +85,9 @@
   "市内",
   "市民",
   "超市",
-
   "县级",
   "县城",
   "全县",
-
   "城区",
   "城乡",
   "城墙",
@@ -105,10 +96,8 @@
   "进城",
   "攻城",
   "围城",
-
   "镇店",
   "镇场",
-
   "乡镇",
   "乡亲",
   "故乡",
@@ -117,17 +106,14 @@
   "同乡",
   "思乡",
   "还乡",
-
   "村民",
   "村庄",
   "农村",
   "乡村",
   "村落",
-
   "社区团购",
   "社区服务",
   "社区活动",
-
   "订单号",
   "编号",
   "货号",
@@ -141,28 +127,22 @@
   "群号",
   "号码",
   "号称",
-
   "栋梁",
-
   "座机",
   "座位",
   "星座",
   "讲座",
   "底座",
   "宝座",
-
   "单元格",
   "单元测试",
   "单元剧",
-
   "楼主",
-
   "层级",
   "图层",
   "分层",
   "涂层",
   "层析",
-
   "教室",
   "办公室",
   "会议室",
@@ -172,7 +152,6 @@
   "演播室",
   "休息室",
   "美容室",
-
   "热门",
   "部门",
   "门票",
@@ -192,34 +171,28 @@
   "专门",
   "窍门",
   "冷门",
-
   "政府",
   "幕府",
   "工夫",
   "功夫",
   "师傅",
-
   "庭审",
   "家庭",
   "庭院",
   "法庭",
   "出庭",
-
   "园艺",
   "城堡",
-
   "广场舞",
   "中心思想",
   "中心化",
   "去中心化",
-
   "roadmap",
   "roadshow",
   "roadblock",
   "roadside",
   "railroad",
   "off-road",
-
   "hard drive",
   "flash drive",
   "disk drive",
@@ -227,15 +200,12 @@
   "drive through",
   "drive time",
   "test drive",
-
   "waybill",
-
   "unit test",
   "unit price",
   "unit cost",
   "unit rate",
   "unit size",
-
   "side street",
   "street art",
   "street food",
@@ -247,7 +217,6 @@
   "street racing",
   "main street",
   "high street",
-
   "courtyard",
   "court case",
   "court order",
@@ -257,7 +226,6 @@
   "basketball court",
   "food court",
   "court hearing",
-
   "marketplace",
   "workplace",
   "fireplace",
@@ -268,7 +236,6 @@
   "take place",
   "in place",
   "replace",
-
   "city center",
   "city hall",
   "city life",
@@ -276,42 +243,34 @@
   "inner city",
   "city limits",
   "city planning",
-
   "town hall",
   "downtown",
   "town square",
   "township",
-
   "county seat",
   "county fair",
-
   "state of the art",
   "state machine",
   "state management",
   "state farm",
   "united states",
-
   "province level",
-
   "district attorney",
   "district court",
   "district manager",
   "school district",
-
   "zip file",
   "zip code",
   "unzip",
   "zipline",
   "postal code",
   "postal service",
-
   "building blocks",
   "building upon",
   "team building",
   "bodybuilding",
   "world building",
   "nation building",
-
   "tower defense",
   "tower of",
   "control tower",
@@ -319,20 +278,17 @@
   "cell tower",
   "water tower",
   "ivory tower",
-
   "floor price",
   "floor plan",
   "dance floor",
   "ground floor",
   "ocean floor",
   "floor mat",
-
   "test suite",
   "en suite",
   "software suite",
   "office suite",
   "c-suite",
-
   "level up",
   "level design",
   "level headed",
@@ -340,7 +296,6 @@
   "entry level",
   "sea level",
   "top level",
-
   "room temperature",
   "room service",
   "room for",
@@ -353,32 +308,53 @@
   "living room",
   "legroom",
   "headroom",
-
   "theme park",
   "amusement park",
   "national park",
   "parking",
   "park ranger",
   "ballpark",
-
   "lane change",
   "fast lane",
   "bike lane",
   "memory lane",
   "bowling lane",
   "swim lane",
-
   "highway patrol",
   "highway robbery",
-
   "trail mix",
   "paper trail",
   "audit trail",
   "trailblazer",
   "money trail",
-
   "circle back",
   "inner circle",
   "vicious circle",
-  "full circle"
+  "full circle",
+  "蓝天白云",
+  "白云苍狗",
+  "寿比南山",
+  "金山银山",
+  "金山软件",
+  "金山毒霸",
+  "金牛座",
+  "高新技术",
+  "高新企业",
+  "高新产业",
+  "武侯祠",
+  "大同小异",
+  "大同世界",
+  "天下大同",
+  "日照时长",
+  "日照充足",
+  "日照强度",
+  "乐山乐水",
+  "长安汽车",
+  "长安福特",
+  "长安之星",
+  "中山装",
+  "孙中山",
+  "亦庄亦谐",
+  "朝阳产业",
+  "朝阳升起"
 ]

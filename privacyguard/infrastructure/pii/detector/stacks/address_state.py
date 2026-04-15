@@ -776,6 +776,7 @@ def _flush_chain(
     """冲洗 deferred_chain。若链中含 KEY，用最后一个 KEY 消费；否则逐个 standalone。"""
     if not state.deferred_chain:
         return
+    before_component_count = len(state.components)
     commit = commit_component or (lambda component: _commit(state, component))
 
     last_key_idx: int | None = None
@@ -800,7 +801,7 @@ def _flush_chain(
                 value=value,
                 key=key_clue.text,
                 is_detail=comp_type in _DETAIL_COMPONENTS,
-                raw_chain=[],
+                raw_chain=[clue for _, clue in used_entries],
                 suspected=[
                     _SuspectEntry(
                         level=entry.level,
@@ -831,6 +832,9 @@ def _flush_chain(
     state.chain_left_anchor = None
     state.value_char_end_override.clear()
     _recompute_last_piece_end(state)
+    # 若本轮冲洗没有产出新组件，回退 last_end 到已提交组件末端，避免失败链污染后续 search_start。
+    if len(state.components) == before_component_count and state.components:
+        state.last_end = max(component.end for component in state.components)
 
 
 def _flush_chain_as_standalone(
@@ -895,7 +899,7 @@ def _flush_chain_as_standalone(
                     value=value,
                     key="",
                     is_detail=comp_type in _DETAIL_COMPONENTS,
-                    raw_chain=[],
+                    raw_chain=[entry_clue for _, entry_clue in group_entries],
                     suspected=[
                         _SuspectEntry(
                             level=entry.level,
@@ -929,7 +933,7 @@ def _flush_chain_as_standalone(
             value=value,
             key="",
             is_detail=comp_type in _DETAIL_COMPONENTS,
-            raw_chain=[],
+            raw_chain=[clue],
             suspected=[],
             clue_ids={clue.clue_id},
             clue_indices={clue_index},

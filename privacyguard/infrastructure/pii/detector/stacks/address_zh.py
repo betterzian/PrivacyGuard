@@ -63,7 +63,8 @@ def _state_routing_context(
         clues=clues,
         raw_text=raw_text,
         stream=stream,
-        search_start=state.last_end,
+        # 仅在已有已提交组件时才提供 search_start，避免未提交失败链污染 numberish 左扩起点。
+        search_start=state.last_end if state.components else None,
     )
 
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from privacyguard.infrastructure.pii.detector.models import Clue, ClueRole, StreamInput
+from privacyguard.infrastructure.pii.detector.models import Clue, ClueRole, StreamInput, StreamUnit
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
+
+_ASCII_ALNUM_KINDS = frozenset({"digit_run", "alpha_run", "alnum_run", "ascii_word"})
 
 
 def is_break_clue(clue: Clue) -> bool:
@@ -97,3 +99,13 @@ def _count_non_space_units(units, start_ui: int, end_ui: int) -> int:
         if units[ui].kind != "space":
             count += 1
     return count
+
+
+def is_ascii_alnum_like_unit(unit: StreamUnit) -> bool:
+    """判定 unit 是否属于可吸收的英数字块。"""
+    text = str(unit.text or "")
+    return (
+        unit.kind in _ASCII_ALNUM_KINDS
+        and bool(text)
+        and all(char.isascii() and char.isalnum() for char in text)
+    )

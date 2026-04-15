@@ -51,6 +51,7 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
     _unit_index_at_or_after,
     _unit_index_left_of,
+    is_ascii_alnum_like_unit,
     is_break_clue,
     is_control_number_value_clue,
     is_negative_clue,
@@ -572,7 +573,7 @@ def _left_expand_adjacent_alnum_for_zh(pos: int, floor: int, stream: StreamInput
             cursor = unit.char_start
             left_ui -= 1
             continue
-        if _is_ascii_alnum_unit_text(unit.text):
+        if is_ascii_alnum_like_unit(unit):
             cursor = unit.char_start
             left_ui -= 1
             continue
@@ -619,8 +620,7 @@ def _left_expand_zh(pos: int, floor: int, stream: StreamInput) -> int:
     """中文左扩只允许穿过 inline_gap，再吸收紧邻英数字块或少量汉字。"""
     cursor, left_ui = _skip_inline_gap_left(stream, pos, floor)
     if 0 <= left_ui < len(stream.units):
-        kind = stream.units[left_ui].kind
-        if kind in {"digit_run", "alpha_run", "alnum_run", "ascii_word"}:
+        if is_ascii_alnum_like_unit(stream.units[left_ui]):
             return _left_expand_adjacent_alnum_for_zh(pos, floor, stream)
     return _left_expand_zh_chars(cursor, floor, stream=stream, max_chars=2)
 
@@ -630,10 +630,6 @@ def _routing_context_type(context: _RoutingContext) -> AddressComponentType | No
         if clue.component_type is not None:
             return clue.component_type
     return context.previous_component_type
-
-
-def _is_ascii_alnum_unit_text(text: str) -> bool:
-    return bool(text) and all(char.isascii() and char.isalnum() for char in text)
 
 
 def _find_control_value_clue_ending_at(context: _RoutingContext, char_end: int) -> Clue | None:
@@ -661,7 +657,7 @@ def _numberish_left_expand_start(
     if left_ui < 0 or left_ui >= len(context.stream.units):
         return clue.start
     left_unit = context.stream.units[left_ui]
-    if left_unit.kind in {"digit_run", "alpha_run", "alnum_run", "ascii_word"} and _is_ascii_alnum_unit_text(left_unit.text):
+    if is_ascii_alnum_like_unit(left_unit):
         start = _left_expand_adjacent_alnum_for_zh(clue.start, floor, context.stream)
     else:
         control_clue = _find_control_value_clue_ending_at(context, clue.start)
