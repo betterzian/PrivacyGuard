@@ -1077,9 +1077,9 @@ def _organization_canonical(value: str) -> str:
     changed = True
     while changed:
         changed = False
-        for suffix in load_company_suffixes():
-            if text.lower().endswith(suffix.lower()) and len(text) > len(suffix):
-                text = text[: -len(suffix)].rstrip()
+        for entry in load_company_suffixes():
+            if text.lower().endswith(entry.text.lower()) and len(text) > len(entry.text):
+                text = text[: -len(entry.text)].rstrip()
                 changed = True
                 break
     return _compact_component_text(text)
