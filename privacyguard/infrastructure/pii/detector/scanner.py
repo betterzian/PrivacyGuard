@@ -44,7 +44,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     build_negative_unit_index,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-from privacyguard.infrastructure.pii.detector.stacks.common import is_ascii_alnum_like_unit
+from privacyguard.infrastructure.pii.detector.stacks.common import examine_left_numeral
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
 from privacyguard.infrastructure.pii.detector.zh_name_rules import ZhNameRules, compact_zh_name_text
 
@@ -1048,19 +1048,57 @@ def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, loca
     return _dedupe_clues(clues)
 
 
-def _promote_by_digit_prefix(stream: StreamInput, raw_start: int, strength: ClaimStrength) -> ClaimStrength:
-    """WEAK detail 关键字前方紧邻英数字 unit 时提升为 SOFT（如 "3楼" "201室"）。"""
+# ── weak 关键字数字前缀提升规则 ────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class _PromoteRule:
+    """weak 关键字前缀提升规则。
+
+    digit_count 在 ``[hard_min_digits, hard_max_digits]`` 闭区间内 → HARD；
+    有前缀但不满足 HARD 条件且 ``soft_on_prefix`` 为真 → SOFT。
+    """
+    hard_max_digits: int
+    hard_min_digits: int = 1
+    soft_on_prefix: bool = True
+
+
+# 中文 weak 关键字 → 提升规则。None 表示不提升。
+_ZH_WEAK_PROMOTE: dict[str, _PromoteRule | None] = {
+    "层": _PromoteRule(hard_max_digits=2),
+    "楼": _PromoteRule(hard_max_digits=2),
+    "室": _PromoteRule(hard_max_digits=4),
+    "房": _PromoteRule(hard_max_digits=4, hard_min_digits=2),
+    "户": _PromoteRule(hard_max_digits=4, hard_min_digits=2),
+    "弄": _PromoteRule(hard_max_digits=3),
+    "号": None,
+}
+# 不在表中的 weak keyword：有前缀 → SOFT，不做 HARD 提升。
+_DEFAULT_PROMOTE = _PromoteRule(hard_max_digits=0)
+
+
+def _promote_weak_zh_keyword(
+    stream: StreamInput,
+    raw_start: int,
+    strength: ClaimStrength,
+    canonical_text: str,
+) -> ClaimStrength:
+    """统一的 weak 关键字提升入口。
+
+    根据左侧数字前缀（ASCII / 中文数字 / 天干地支）和 ``_ZH_WEAK_PROMOTE``
+    配置表决定提升目标。
+    """
     if strength != ClaimStrength.WEAK:
         return strength
-    if raw_start <= 0 or not stream.char_to_unit:
+    rule = _ZH_WEAK_PROMOTE.get(canonical_text, _DEFAULT_PROMOTE)
+    if rule is None:
         return strength
-    unit_idx = stream.char_to_unit[raw_start]
-    if unit_idx <= 0:
+    prefix = examine_left_numeral(stream, raw_start)
+    if prefix.kind == "none":
         return strength
-    prev_unit = stream.units[unit_idx - 1]
-    if is_ascii_alnum_like_unit(prev_unit):
-        return ClaimStrength.SOFT
-    return strength
+    if rule.hard_min_digits <= prefix.digit_count <= rule.hard_max_digits:
+        return ClaimStrength.HARD
+    return ClaimStrength.SOFT if rule.soft_on_prefix else strength
 
 
 def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
@@ -1095,9 +1133,9 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
             continue
         raw_start, raw_end, _matched_text = normalized
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
-        strength = payload.strength
-        if strength == ClaimStrength.WEAK and payload.canonical_text != "号":
-            strength = _promote_by_digit_prefix(segment.stream, raw_start, strength)
+        strength = _promote_weak_zh_keyword(
+            segment.stream, raw_start, payload.strength, payload.canonical_text,
+        )
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),

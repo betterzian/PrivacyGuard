@@ -722,6 +722,9 @@ def _commit(
     valid_successors: _SuccessorMap = _VALID_SUCCESSORS,
 ) -> bool:
     """提交 component 到 state，更新 occupancy / segment / evidence。"""
+    # 只有 key 没有 value 的组件不允许提交。
+    if component.key and not component.value:
+        return False
     if not _segment_admit(state, component.component_type, valid_successors=valid_successors):
         state.split_at = component.start
         return False
