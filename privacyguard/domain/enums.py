@@ -51,7 +51,7 @@ class PIIAttributeType(str, Enum):
     TIME / NUMERIC / ALNUM / TEXTUAL 等形态类）的，均应使用 ``OTHER``。
 
     按字符串形态粗分时：
-    - 时钟时间片段（如 ``14:07``、``08:09:10``）为 ``TIME``
+    - 时间/日期时间片段（如 ``14:07``、``08:09:10``）为 ``TIME``
     - 仅数字与少量符号为 ``NUMERIC``
     - 字母与数字并存为 ``ALNUM``
     - 仅文字与少量符号为 ``TEXTUAL``
@@ -63,12 +63,14 @@ class PIIAttributeType(str, Enum):
     BANK_NUMBER = "bank_number"
     PASSPORT_NUMBER = "passport_number"
     DRIVER_LICENSE = "driver_license"
+    LICENSE_PLATE = "license_plate"
     EMAIL = "email"
     ADDRESS = "address"
     DETAILS = "details"
     ID_NUMBER = "id_number"
     ORGANIZATION = "organization"
     TIME = "time"
+    AMOUNT = "amount"
     NUMERIC = "numeric"
     ALNUM = "alnum"
     TEXTUAL = "textual"

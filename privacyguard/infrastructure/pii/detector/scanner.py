@@ -94,6 +94,8 @@ _PLACEHOLDER_BY_ATTR = {
     PIIAttributeType.BANK_NUMBER: "<bank>",
     PIIAttributeType.PASSPORT_NUMBER: "<passport>",
     PIIAttributeType.DRIVER_LICENSE: "<driver_license>",
+    PIIAttributeType.LICENSE_PLATE: "<license_plate>",
+    PIIAttributeType.AMOUNT: "<amount>",
 }
 
 _EMAIL_PATTERN = re.compile(
@@ -102,21 +104,44 @@ _EMAIL_PATTERN = re.compile(
 
 # 与 ``pii_value._TIME_PATTERN`` 一致的时钟片段（时 0–23，分/秒 0–59，冒号半角/全角）。
 _TIME_CLOCK_STRICT = r"(?:[01]?\d|2[0-3])[:：][0-5]\d(?:[:：][0-5]\d)?"
+_TIME_DATE_YMD = r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}"
+_TIME_DATE_MDY = r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}"
+_TIME_DATE_ZH_YMD = r"\d{4}年\d{1,2}月\d{1,2}日"
+_TIME_DATE_ZH_MD = r"\d{1,2}月\d{1,2}日"
 
 # 时间/日期模式——先行匹配并排除，防止其中的数字被当作候选片段。
 _TIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("time_datetime", re.compile(rf"\d{{4}}[-/]\d{{1,2}}[-/]\d{{1,2}}(?:[T ]{_TIME_CLOCK_STRICT})?")),
-    ("time_date_mdy", re.compile(r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}")),
+    ("time_datetime", re.compile(rf"{_TIME_DATE_YMD}(?:[T ]{_TIME_CLOCK_STRICT})?")),
+    ("time_date_mdy", re.compile(_TIME_DATE_MDY)),
+    ("time_zh_datetime", re.compile(rf"{_TIME_DATE_ZH_YMD}(?:\s*{_TIME_CLOCK_STRICT})?")),
+    ("time_zh_md_datetime", re.compile(rf"{_TIME_DATE_ZH_MD}(?:\s*{_TIME_CLOCK_STRICT})?")),
     ("time_clock", re.compile(_TIME_CLOCK_STRICT)),
-    ("time_zh_date", re.compile(r"\d{4}年\d{1,2}月\d{1,2}日")),
 )
 
-# 以下三类需在左右两侧满足「空白 / OCR 块界 / 链内间隙」之一（或紧贴文本首尾），避免粘在语句或数值中间。
-_TIME_KINDS_WITH_TOKEN_BOUNDARY = frozenset({"time_datetime", "time_date_mdy", "time_clock"})
+# 以下模式需在左右两侧满足「空白 / OCR 块界 / 链内间隙」之一（或紧贴文本首尾），避免粘在语句或数值中间。
+_TIME_KINDS_WITH_TOKEN_BOUNDARY = frozenset(
+    {"time_datetime", "time_date_mdy", "time_clock", "time_zh_datetime", "time_zh_md_datetime"}
+)
+
+_AMOUNT_CURRENCY_PREFIX = r"(?i:US\$|USD|RMB|CNY|EUR|GBP|[$¥€£])"
+_AMOUNT_CURRENCY_SUFFIX = r"(?i:USD|RMB|CNY|EUR|GBP|元|美元|欧元|英镑|dollars?|yuan)"
+_AMOUNT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "amount_currency",
+        re.compile(
+            rf"(?<![A-Za-z0-9.])(?:"
+            rf"{_AMOUNT_CURRENCY_PREFIX}\s*\d+(?:\.\d{{2}})?(?:\s*{_AMOUNT_CURRENCY_SUFFIX})?"
+            rf"|"
+            rf"\d+(?:\.\d{{2}})?\s*{_AMOUNT_CURRENCY_SUFFIX}"
+            rf")(?![A-Za-z0-9.])"
+        ),
+    ),
+    ("amount_decimal", re.compile(r"(?<![A-Za-z0-9.])\d+\.\d{2}(?![A-Za-z0-9.])")),
+)
 
 
 def _time_match_adjacent_ok(text: str, start: int, end: int) -> bool:
-    """TIME 匹配片段左侧与右侧是否仅邻接空白、``OCR_BREAK``、``inline_gap`` 标记或串首/串尾。"""
+    """TIME 匹配片段左侧与右侧不能粘在 ASCII 词元或连续数字内部。"""
     if start < 0 or end > len(text) or start > end:
         return False
     if start > 0:
@@ -125,24 +150,30 @@ def _time_match_adjacent_ok(text: str, start: int, end: int) -> bool:
             pass
         elif len(OCR_BREAK) <= start and text[start - len(OCR_BREAK) : start] == OCR_BREAK:
             pass
-        else:
+        elif left_ch.isdigit() or (left_ch.isascii() and (left_ch.isalpha() or left_ch in "._-")):
             return False
+        else:
+            pass
     if end < len(text):
         right_ch = text[end]
         if right_ch.isspace() or right_ch == _OCR_INLINE_GAP_TOKEN:
             pass
         elif end + len(OCR_BREAK) <= len(text) and text[end : end + len(OCR_BREAK)] == OCR_BREAK:
             pass
-        else:
+        elif right_ch.isdigit() or (right_ch.isascii() and (right_ch.isalpha() or right_ch in "._-")):
             return False
+        else:
+            pass
     return True
 
 # 通用数字片段：允许常见“电话号码写法”的连接符。
 # 目的：把 "+86 139-1234-1234" 这类写法抽成一个片段，后续再在 structured stack 中统一去连接符/去国家码做校验。
 _DIGIT_FRAGMENT_PATTERN = re.compile(r"\+?\d(?:[ \-()]*\d)*")
 
-# 混合片段：字母数字混合（至少包含一个数字和一个字母）。
-_ALNUM_FRAGMENT_PATTERN = re.compile(r"(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]+")
+# 混合片段：字母数字混合（至少包含一个数字和一个字母），允许中间带 `_` / `-`。
+_ALNUM_FRAGMENT_PATTERN = re.compile(
+    r"(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)*"
+)
 
 _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
     (BreakType.PUNCT, "break_punct", re.compile(r"[;；。！？!?]")),
@@ -398,7 +429,34 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
             )
             excluded_spans.append((match.start(), match.end()))
 
-    # ── 2b: 先提取字母数字混合片段，避免其内部数字被提前拆走。 ──
+    # ── 2b: 先行匹配金额，避免金额小数被拆成通用片段。 ──
+    for source_kind, pattern in _AMOUNT_PATTERNS:
+        for match in pattern.finditer(text):
+            value = match.group(0).strip()
+            if not value:
+                continue
+            if _overlaps_any(match.start(), match.end(), excluded_spans):
+                continue
+            _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.STRUCTURED,
+                    role=ClueRole.VALUE,
+                    attr_type=PIIAttributeType.AMOUNT,
+                    strength=ClaimStrength.HARD,
+                    start=match.start(),
+                    end=match.end(),
+                    text=value,
+                    unit_start=_us,
+                    unit_end=_ue,
+                    source_kind=source_kind,
+                    source_metadata={"hard_source": ["regex"], "placeholder": ["<amount>"]},
+                )
+            )
+            excluded_spans.append((match.start(), match.end()))
+
+    # ── 2c: 先提取字母数字混合片段，避免其内部数字被提前拆走。 ──
     for match in _ALNUM_FRAGMENT_PATTERN.finditer(text):
         value = match.group(0)
         if _overlaps_any(match.start(), match.end(), excluded_spans):
@@ -430,7 +488,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
         )
         excluded_spans.append((match.start(), match.end()))
 
-    # ── 2c: 提取纯数字片段 ──
+    # ── 2d: 提取纯数字片段 ──
     for match in _DIGIT_FRAGMENT_PATTERN.finditer(text):
         value = match.group(0)
         if _overlaps_any(match.start(), match.end(), excluded_spans):
@@ -1025,6 +1083,28 @@ def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, loca
         raw_start, raw_end, matched_text = normalized
         payload = match.payload
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+        if payload.kind == "license_plate_prefix":
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.CONTROL,
+                    role=ClueRole.VALUE,
+                    attr_type=PIIAttributeType.LICENSE_PLATE,
+                    strength=ClaimStrength.SOFT,
+                    start=raw_start,
+                    end=raw_end,
+                    text=matched_text,
+                    unit_start=_us,
+                    unit_end=_ue,
+                    source_kind="control_license_plate_zh",
+                    source_metadata={
+                        "control_kind": ["license_plate"],
+                        "control_value_kind": [payload.kind],
+                        "normalized_prefix": [payload.normalized_number],
+                    },
+                )
+            )
+            continue
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),

@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 
-from privacyguard.infrastructure.pii.detector.models import Clue, ClueRole, StreamInput, StreamUnit
+from privacyguard.domain.enums import PIIAttributeType
+from privacyguard.infrastructure.pii.detector.models import Clue, ClueFamily, ClueRole, StreamInput, StreamUnit
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
 
 _ASCII_ALNUM_KINDS = frozenset({"digit_run", "alpha_run", "alnum_run", "ascii_word"})
@@ -20,11 +21,19 @@ def is_negative_clue(clue: Clue) -> bool:
 
 
 def is_control_clue(clue: Clue) -> bool:
-    return clue.attr_type is None
+    return clue.family == ClueFamily.CONTROL
 
 
 def is_control_value_clue(clue: Clue) -> bool:
-    return clue.attr_type is None and clue.role == ClueRole.VALUE
+    return clue.family == ClueFamily.CONTROL and clue.attr_type is None and clue.role == ClueRole.VALUE
+
+
+def is_license_plate_prefix_control_clue(clue: Clue) -> bool:
+    return (
+        clue.family == ClueFamily.CONTROL
+        and clue.role == ClueRole.VALUE
+        and clue.attr_type == PIIAttributeType.LICENSE_PLATE
+    )
 
 
 def is_control_number_value_clue(clue: Clue) -> bool:

@@ -471,3 +471,19 @@ def test_alnum_canonical_keeps_uppercase_letters_and_digits_only():
     assert normalized.raw_text == "ab-12 cd"
     assert normalized.canonical == "AB12CD"
     assert normalized.match_terms == ("AB12CD",)
+
+
+def test_license_plate_canonical_keeps_prefix_and_uppercases_suffix():
+    normalized = normalize_pii(PIIAttributeType.LICENSE_PLATE, "粤b h15z0")
+
+    assert normalized.raw_text == "粤b h15z0"
+    assert normalized.canonical == "粤BH15Z0"
+    assert normalized.match_terms == ("粤BH15Z0",)
+
+
+def test_amount_canonical_strips_currency_symbols_and_units():
+    normalized = normalize_pii(PIIAttributeType.AMOUNT, "USD 12")
+
+    assert normalized.raw_text == "USD 12"
+    assert normalized.canonical == "12"
+    assert normalized.match_terms == ("12",)

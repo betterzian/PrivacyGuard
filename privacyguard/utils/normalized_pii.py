@@ -79,6 +79,9 @@ _PUNCT_TRIM_RE = re.compile(r"[\s\-_.,，。:：;；/\\|()（）【】\[\]#]+")
 _DIGIT_RE = re.compile(r"\d+")
 _NAME_COMPONENT_RE = re.compile(r"^[A-Za-z][A-Za-z .,'\-]{0,80}$")
 _ZH_NUMERAL_CHARS = set("零〇一二三四五六七八九十百千两")
+_AMOUNT_UNIT_RE = re.compile(
+    r"(?i)(?:us\$|usd|rmb|cny|eur|gbp|dollars?|yuan|元|美元|欧元|英镑)"
+)
 
 
 def normalize_pii(
@@ -112,8 +115,14 @@ def normalize_pii(
     if attr_type in {PIIAttributeType.PASSPORT_NUMBER, PIIAttributeType.DRIVER_LICENSE, PIIAttributeType.ALNUM}:
         canonical = _alnum_only(normalized_raw).upper()
         return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
+    if attr_type == PIIAttributeType.LICENSE_PLATE:
+        canonical = _license_plate_canonical(normalized_raw)
+        return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
     if attr_type == PIIAttributeType.TIME:
         canonical = _compact_component_text(normalized_raw)
+        return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
+    if attr_type == PIIAttributeType.AMOUNT:
+        canonical = _amount_canonical(normalized_raw)
         return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
     if attr_type == PIIAttributeType.DETAILS:
         canonical = _compact_component_text(normalized_raw)
@@ -1112,6 +1121,29 @@ def _digits_only(value: str) -> str:
 
 def _alnum_only(value: str) -> str:
     return "".join(char for char in unicodedata.normalize("NFKC", value or "") if char.isalnum())
+
+
+def _license_plate_canonical(value: str) -> str:
+    text = unicodedata.normalize("NFKC", value or "").strip()
+    if not text:
+        return ""
+    prefix = ""
+    remainder = text
+    if remainder and "\u4e00" <= remainder[0] <= "\u9fff":
+        prefix = remainder[0]
+        remainder = remainder[1:]
+    return prefix + _alnum_only(remainder).upper()
+
+
+def _amount_canonical(value: str) -> str:
+    text = unicodedata.normalize("NFKC", value or "")
+    if not text:
+        return ""
+    text = _AMOUNT_UNIT_RE.sub("", text)
+    text = text.replace("$", "").replace("¥", "").replace("€", "").replace("£", "")
+    text = re.sub(r"\s+", "", text)
+    match = re.search(r"\d+(?:\.\d{2})?", text)
+    return match.group(0) if match else ""
 
 
 def _compact_component_text(value: str) -> str:

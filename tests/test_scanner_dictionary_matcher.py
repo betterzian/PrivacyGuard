@@ -619,3 +619,79 @@ def test_build_clue_bundle_emits_control_value_number_clues_for_zh_address_token
     assert ("一百", ("100",)) in payloads
     assert ("子", ("子",)) in payloads
 
+
+@pytest.mark.parametrize(
+    ("text", "expected_value"),
+    [
+        ("登记时间3月13日16:50", "3月13日16:50"),
+        ("到达时间是 2026年3月13日16:50", "2026年3月13日16:50"),
+        ("出发时间 2026-03-13 16:50:22", "2026-03-13 16:50:22"),
+        ("记录在2026.03.13 16:50", "2026.03.13 16:50"),
+    ],
+)
+def test_hard_pattern_scan_matches_expanded_time_formats(text: str, expected_value: str):
+    stream = build_prompt_stream(text)
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    time_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.TIME]
+    assert expected_value in time_values
+
+
+def test_hard_pattern_scan_matches_amount_before_generic_fragments():
+    stream = build_prompt_stream("金额填¥88、532.00元、USD 12和181.00 dollars")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    amount_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.AMOUNT]
+    assert amount_values == ["¥88", "532.00元", "USD 12", "181.00 dollars"]
+    assert not any(
+        clue.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}
+        and clue.text in {"88", "532.00", "12", "181.00"}
+        for clue in clues
+    )
+
+
+def test_hard_pattern_scan_matches_alnum_with_underscore_and_hyphen():
+    stream = build_prompt_stream("abc_123 A1-B2 abc-def 123_456")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    alnum_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.ALNUM]
+    assert alnum_values == ["abc_123", "A1-B2"]
+
+
+def test_build_clue_bundle_emits_license_plate_prefix_control_clue():
+    prepared = build_prompt_stream("登记车牌是粤A12345，地址是甲2楼")
+
+    bundle = build_clue_bundle(
+        prepared,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="zh_cn",
+    )
+
+    plate_clues = [
+        clue
+        for clue in bundle.all_clues
+        if clue.source_kind == "control_license_plate_zh"
+    ]
+    assert len(plate_clues) == 1
+    assert plate_clues[0].text == "粤"
+    assert plate_clues[0].attr_type == PIIAttributeType.LICENSE_PLATE
+    assert plate_clues[0].family == scanner_module.ClueFamily.CONTROL
+
+    control_values = [
+        clue
+        for clue in bundle.all_clues
+        if clue.source_kind == "control_value_zh"
+    ]
+    assert any(clue.text == "甲" for clue in control_values)
+
