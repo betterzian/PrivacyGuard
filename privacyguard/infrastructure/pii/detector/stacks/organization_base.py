@@ -18,7 +18,7 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
     _count_non_space_units,
     _is_stop_control_clue,
-    _skip_separators,
+    _label_seed_start_char,
     _unit_char_end,
     _unit_char_start,
     _unit_index_at_or_after,
@@ -70,7 +70,7 @@ class BaseOrganizationStack(BaseStack):
         is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
         locale = self.STACK_LOCALE
         if is_label_seed:
-            start = _skip_separators(self.context.stream.text, self.clue.end)
+            start = _label_seed_start_char(self.context.stream, self.clue.end)
             if start >= len(self.context.stream.text):
                 return None
             end = self._resolve_label_end(start=start, locale=locale)

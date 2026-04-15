@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from privacyguard.infrastructure.pii.detector.models import ClueFamily, ClueRole
 from privacyguard.infrastructure.pii.detector.stacks.address import AddressStack
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack
+from privacyguard.infrastructure.pii.detector.stacks.license_plate import LicensePlateStack
 from privacyguard.infrastructure.pii.detector.stacks.name import NameStack
 from privacyguard.infrastructure.pii.detector.stacks.organization import OrganizationStack
 from privacyguard.infrastructure.pii.detector.stacks.structured import StructuredStack
@@ -34,6 +35,7 @@ _NAME_ROLES = frozenset({
 })
 _ORGANIZATION_ROLES = frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.SUFFIX, ClueRole.VALUE})
 _ADDRESS_ROLES = frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE, ClueRole.KEY})
+_LICENSE_PLATE_ROLES = frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE})
 
 # —— 合法性校验表（开发期断言用） ——
 
@@ -41,11 +43,12 @@ VALID_ROLES: dict[ClueFamily, frozenset[ClueRole]] = {
     ClueFamily.NAME: _NAME_ROLES,
     ClueFamily.ORGANIZATION: _ORGANIZATION_ROLES,
     ClueFamily.ADDRESS: _ADDRESS_ROLES,
+    ClueFamily.LICENSE_PLATE: _LICENSE_PLATE_ROLES,
     ClueFamily.STRUCTURED: _STRUCTURED_ROLES,
     ClueFamily.CONTROL: frozenset({ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.VALUE}),
 }
 
-# —— 注册表：4 条 ——
+# —— 注册表：5 条 ——
 
 _STACK_SPECS: dict[ClueFamily, StackSpec] = {
     ClueFamily.NAME: StackSpec(
@@ -56,6 +59,9 @@ _STACK_SPECS: dict[ClueFamily, StackSpec] = {
     ),
     ClueFamily.ADDRESS: StackSpec(
         ClueFamily.ADDRESS, AddressStack, _ADDRESS_ROLES, soft_priority=30,
+    ),
+    ClueFamily.LICENSE_PLATE: StackSpec(
+        ClueFamily.LICENSE_PLATE, LicensePlateStack, _LICENSE_PLATE_ROLES,
     ),
     ClueFamily.STRUCTURED: StackSpec(
         ClueFamily.STRUCTURED, StructuredStack, _STRUCTURED_ROLES,

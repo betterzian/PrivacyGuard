@@ -8,6 +8,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_en import EnAddress
 from privacyguard.infrastructure.pii.detector.stacks.address_zh import ZhAddressStack
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackContextLike, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.conflict import ConflictOutcome, StackManager
+from privacyguard.infrastructure.pii.detector.stacks.license_plate import LicensePlateStack
 from privacyguard.infrastructure.pii.detector.stacks.name import NameStack, resolve_name_stack_locale
 from privacyguard.infrastructure.pii.detector.stacks.name_base import BaseNameStack
 from privacyguard.infrastructure.pii.detector.stacks.name_en import EnNameStack
@@ -30,6 +31,7 @@ __all__ = [
     "EnAddressStack",
     "EnNameStack",
     "EnOrganizationStack",
+    "LicensePlateStack",
     "NameStack",
     "OrganizationStack",
     "ZhNameStack",

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 
-from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.models import Clue, ClueFamily, ClueRole, StreamInput, StreamUnit
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
 
@@ -26,14 +25,6 @@ def is_control_clue(clue: Clue) -> bool:
 
 def is_control_value_clue(clue: Clue) -> bool:
     return clue.family == ClueFamily.CONTROL and clue.attr_type is None and clue.role == ClueRole.VALUE
-
-
-def is_license_plate_prefix_control_clue(clue: Clue) -> bool:
-    return (
-        clue.family == ClueFamily.CONTROL
-        and clue.role == ClueRole.VALUE
-        and clue.attr_type == PIIAttributeType.LICENSE_PLATE
-    )
 
 
 def is_control_number_value_clue(clue: Clue) -> bool:
@@ -85,6 +76,38 @@ def _skip_separators(text: str, start: int) -> int:
     while index < len(text) and (text[index].isspace() or is_soft_break(text[index])):
         index += 1
     return index
+
+
+def _label_seed_start_char(stream: StreamInput, start_char: int) -> int:
+    """统一计算 LABEL/START 起栈后的 seed 起点。"""
+    if not stream.units:
+        return max(0, start_char)
+    cursor = max(0, start_char)
+    ui = _unit_index_at_or_after(stream, cursor)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        unit_text = unit.text or ""
+        if unit.char_start < cursor:
+            ui += 1
+            continue
+        if unit.kind == "inline_gap":
+            cursor = unit.char_end
+            ui += 1
+            continue
+        if unit.kind == "space" or unit_text.isspace():
+            cursor = unit.char_end
+            ui += 1
+            continue
+        if unit_text in ",，":
+            cursor = unit.char_end
+            ui += 1
+            continue
+        if len(unit_text) == 1 and is_soft_break(unit_text):
+            cursor = unit.char_end
+            ui += 1
+            continue
+        break
+    return cursor
 
 
 def _unit_index_at_or_after(stream: StreamInput, char_index: int) -> int:

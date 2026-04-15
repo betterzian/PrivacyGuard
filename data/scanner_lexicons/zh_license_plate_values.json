@@ -1,0 +1,157 @@
+[
+  {
+    "text": "京",
+    "normalized": "京",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "津",
+    "normalized": "津",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "沪",
+    "normalized": "沪",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "渝",
+    "normalized": "渝",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "冀",
+    "normalized": "冀",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "豫",
+    "normalized": "豫",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "云",
+    "normalized": "云",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "辽",
+    "normalized": "辽",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "黑",
+    "normalized": "黑",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "湘",
+    "normalized": "湘",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "皖",
+    "normalized": "皖",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "鲁",
+    "normalized": "鲁",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "新",
+    "normalized": "新",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "苏",
+    "normalized": "苏",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "浙",
+    "normalized": "浙",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "赣",
+    "normalized": "赣",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "鄂",
+    "normalized": "鄂",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "桂",
+    "normalized": "桂",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "甘",
+    "normalized": "甘",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "晋",
+    "normalized": "晋",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "蒙",
+    "normalized": "蒙",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "陕",
+    "normalized": "陕",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "吉",
+    "normalized": "吉",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "闽",
+    "normalized": "闽",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "贵",
+    "normalized": "贵",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "粤",
+    "normalized": "粤",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "青",
+    "normalized": "青",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "藏",
+    "normalized": "藏",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "川",
+    "normalized": "川",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "宁",
+    "normalized": "宁",
+    "kind": "license_plate_prefix"
+  },
+  {
+    "text": "琼",
+    "normalized": "琼",
+    "kind": "license_plate_prefix"
+  }
+]

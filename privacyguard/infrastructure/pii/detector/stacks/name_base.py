@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint, build_name_candidate_from_value
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput, StreamUnit
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput, StreamUnit, strength_ge
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
+    _label_seed_start_char,
     _is_stop_control_clue,
-    _skip_separators,
     _unit_index_at_or_after,
     _unit_index_left_of,
     is_control_clue,
@@ -41,7 +41,7 @@ class BaseNameStack(BaseStack):
         if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
             return self._build_name_run(start=self.clue.start, end=self.clue.end)
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            start = _skip_separators(self.context.stream.text, self.clue.end)
+            start = _label_seed_start_char(self.context.stream, self.clue.end)
             if start >= len(self.context.stream.text):
                 return None
             end = self._expand_seed_right(
@@ -96,6 +96,7 @@ class BaseNameStack(BaseStack):
 
         name_clues = self._name_clues_in_span(start, end)
         has_negative_overlap = self.context.has_negative_cover(unit_start, unit_end)
+        candidate.claim_strength = self._resolve_claim_strength(name_clues=name_clues)
 
         if self.clue.role not in {ClueRole.FULL_NAME, ClueRole.ALIAS} and not self._should_commit_candidate(
             start=start,
@@ -496,6 +497,16 @@ class BaseNameStack(BaseStack):
             only_clue = name_clues[0][1]
             return only_clue.role == ClueRole.GIVEN_NAME and only_clue.source_kind.startswith("dictionary_")
         return clue_count >= 2
+
+    def _resolve_claim_strength(self, *, name_clues: list[tuple[int, Clue]]) -> ClaimStrength:
+        """standalone 姓名候选继承参与 clue 中的最高强度。"""
+        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
+            return ClaimStrength.SOFT
+        strongest = self.clue.strength
+        for _index, clue in name_clues:
+            if strength_ge(clue.strength, strongest):
+                strongest = clue.strength
+        return strongest
 
 
 def _extend_name_boundary(

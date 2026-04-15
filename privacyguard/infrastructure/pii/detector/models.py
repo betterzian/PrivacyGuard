@@ -33,6 +33,7 @@ class ClueFamily(str, Enum):
     NAME = "name"
     ORGANIZATION = "organization"
     ADDRESS = "address"
+    LICENSE_PLATE = "license_plate"
     STRUCTURED = "structured"
     CONTROL = "control"
 

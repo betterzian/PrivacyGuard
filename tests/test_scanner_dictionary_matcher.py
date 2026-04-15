@@ -667,7 +667,7 @@ def test_hard_pattern_scan_matches_alnum_with_underscore_and_hyphen():
     assert alnum_values == ["abc_123", "A1-B2"]
 
 
-def test_build_clue_bundle_emits_license_plate_prefix_control_clue():
+def test_build_clue_bundle_emits_license_plate_prefix_family_value_clue():
     prepared = build_prompt_stream("登记车牌是粤A12345，地址是甲2楼")
 
     bundle = build_clue_bundle(
@@ -681,17 +681,18 @@ def test_build_clue_bundle_emits_license_plate_prefix_control_clue():
     plate_clues = [
         clue
         for clue in bundle.all_clues
-        if clue.source_kind == "control_license_plate_zh"
+        if clue.source_kind == "lexicon_license_plate_prefix_zh"
     ]
     assert len(plate_clues) == 1
     assert plate_clues[0].text == "粤"
     assert plate_clues[0].attr_type == PIIAttributeType.LICENSE_PLATE
-    assert plate_clues[0].family == scanner_module.ClueFamily.CONTROL
+    assert plate_clues[0].family == scanner_module.ClueFamily.LICENSE_PLATE
 
     control_values = [
         clue
         for clue in bundle.all_clues
         if clue.source_kind == "control_value_zh"
     ]
+    assert not any(clue.text == "粤" for clue in control_values)
     assert any(clue.text == "甲" for clue in control_values)
 

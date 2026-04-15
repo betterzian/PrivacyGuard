@@ -5,6 +5,7 @@ from __future__ import annotations
 from privacyguard.infrastructure.pii.detector.models import ClueFamily, ClueRole
 from privacyguard.infrastructure.pii.detector.stacks import (
     AddressStack,
+    LicensePlateStack,
     NameStack,
     OrganizationStack,
     StructuredStack,
@@ -18,6 +19,7 @@ def test_registered_families_expose_expected_class_and_priority():
         ClueFamily.NAME: (NameStack, 20),
         ClueFamily.ORGANIZATION: (OrganizationStack, 10),
         ClueFamily.ADDRESS: (AddressStack, 30),
+        ClueFamily.LICENSE_PLATE: (LicensePlateStack, 0),
     }
 
     for family, (stack_cls, soft_priority) in expected.items():
@@ -39,6 +41,13 @@ def test_address_start_roles():
 
     assert spec is not None
     assert spec.start_roles == frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE, ClueRole.KEY})
+
+
+def test_license_plate_start_roles():
+    spec = get_stack_spec(ClueFamily.LICENSE_PLATE)
+
+    assert spec is not None
+    assert spec.start_roles == frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE})
 
 
 def test_control_family_returns_none():

@@ -25,6 +25,7 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_negative_ui_words,
     load_zh_address_keyword_groups,
     load_zh_control_values,
+    load_zh_license_plate_values,
     load_zh_name_rules,
 )
 from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern
@@ -59,8 +60,9 @@ _FAMILY_ORDER: dict[ClueFamily, int] = {
     ClueFamily.ADDRESS: 0,
     ClueFamily.NAME: 1,
     ClueFamily.ORGANIZATION: 2,
-    ClueFamily.STRUCTURED: 3,
-    ClueFamily.CONTROL: 4,
+    ClueFamily.LICENSE_PLATE: 3,
+    ClueFamily.STRUCTURED: 4,
+    ClueFamily.CONTROL: 5,
 }
 
 
@@ -84,6 +86,7 @@ def _attr_to_family(attr_type: PIIAttributeType | None) -> ClueFamily:
         PIIAttributeType.NAME: ClueFamily.NAME,
         PIIAttributeType.ORGANIZATION: ClueFamily.ORGANIZATION,
         PIIAttributeType.ADDRESS: ClueFamily.ADDRESS,
+        PIIAttributeType.LICENSE_PLATE: ClueFamily.LICENSE_PLATE,
     }
     return _MAP.get(attr_type, ClueFamily.STRUCTURED)
 
@@ -258,6 +261,12 @@ class _ControlValuePayload:
     kind: str
 
 
+@dataclass(frozen=True, slots=True)
+class _LicensePlateValuePayload:
+    normalized_prefix: str
+    kind: str
+
+
 _DictionaryMetadataItems = tuple[tuple[str, tuple[str, ...]], ...]
 _DictionaryMatcherSignature = tuple[tuple[PIIAttributeType, tuple[str, ...], str, _DictionaryMetadataItems], ...]
 
@@ -335,6 +344,7 @@ def build_clue_bundle(
         soft_clues.extend(_scan_zh_given_name_clues(ctx, segment))
         soft_clues.extend(_scan_company_suffix_clues(ctx, segment))
         soft_clues.extend(_scan_address_clues(ctx, segment, locale_profile=locale_profile))
+        soft_clues.extend(_scan_license_plate_value_clues(ctx, segment, locale_profile=locale_profile))
         soft_clues.extend(_scan_control_value_clues(ctx, segment, locale_profile=locale_profile))
         negative_clues.extend(_scan_negative_clues(ctx, segment))
     if locale_profile in {"en", "mixed"}:
@@ -1065,6 +1075,52 @@ def _scan_address_clues(ctx: DetectContext, segment: _ScanSegment, *, locale_pro
     return _dedupe_clues(clues)
 
 
+def _scan_license_plate_value_clues(
+    ctx: DetectContext,
+    segment: _ScanSegment,
+    *,
+    locale_profile: str,
+) -> list[Clue]:
+    if locale_profile not in {"zh_cn", "mixed"}:
+        return []
+    clues: list[Clue] = []
+    for match in _zh_license_plate_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        normalized = _normalize_segment_ascii_match(
+            segment,
+            match.start,
+            match.end,
+            match.matched_text,
+            match.pattern_text,
+            match.ascii_boundary,
+        )
+        if normalized is None:
+            continue
+        raw_start, raw_end, matched_text = normalized
+        payload = match.payload
+        _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.LICENSE_PLATE,
+                role=ClueRole.VALUE,
+                attr_type=PIIAttributeType.LICENSE_PLATE,
+                strength=ClaimStrength.SOFT,
+                start=raw_start,
+                end=raw_end,
+                text=matched_text,
+                unit_start=_us,
+                unit_end=_ue,
+                source_kind="lexicon_license_plate_prefix_zh",
+                source_metadata={
+                    "matched_by": ["lexicon_license_plate_prefix_zh"],
+                    "value_kind": [payload.kind],
+                    "normalized_prefix": [payload.normalized_prefix],
+                },
+            )
+        )
+    return _dedupe_clues(clues)
+
+
 def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, locale_profile: str) -> list[Clue]:
     if locale_profile not in {"zh_cn", "mixed"}:
         return []
@@ -1083,28 +1139,6 @@ def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, loca
         raw_start, raw_end, matched_text = normalized
         payload = match.payload
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
-        if payload.kind == "license_plate_prefix":
-            clues.append(
-                Clue(
-                    clue_id=ctx.next_clue_id(),
-                    family=ClueFamily.CONTROL,
-                    role=ClueRole.VALUE,
-                    attr_type=PIIAttributeType.LICENSE_PLATE,
-                    strength=ClaimStrength.SOFT,
-                    start=raw_start,
-                    end=raw_end,
-                    text=matched_text,
-                    unit_start=_us,
-                    unit_end=_ue,
-                    source_kind="control_license_plate_zh",
-                    source_metadata={
-                        "control_kind": ["license_plate"],
-                        "control_value_kind": [payload.kind],
-                        "normalized_prefix": [payload.normalized_number],
-                    },
-                )
-            )
-            continue
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -2079,6 +2113,23 @@ def _zh_control_value_matcher() -> AhoMatcher:
                 ascii_boundary=False,
             )
             for item in load_zh_control_values()
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _zh_license_plate_value_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=item.text,
+                payload=_LicensePlateValuePayload(
+                    normalized_prefix=item.normalized,
+                    kind=item.kind,
+                ),
+                ascii_boundary=False,
+            )
+            for item in load_zh_license_plate_values()
         )
     )
 

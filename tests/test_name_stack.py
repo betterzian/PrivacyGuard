@@ -200,6 +200,37 @@ def test_en_given_name_seed_can_expand_left_one_plain_word():
     assert run.candidate.text == "John Marie"
 
 
+def test_standalone_en_name_inherits_strongest_component_strength():
+    text = "Yang John"
+    clues = (
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            0,
+            4,
+            "Yang",
+            source_kind="en_surname",
+            component_hint=NameComponentHint.FAMILY,
+        ),
+        _clue(
+            "given-1",
+            ClueRole.GIVEN_NAME,
+            5,
+            9,
+            "John",
+            source_kind="dictionary_local",
+            component_hint=NameComponentHint.GIVEN,
+            strength=ClaimStrength.HARD,
+        ),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "Yang John"
+    assert run.candidate.claim_strength == ClaimStrength.HARD
+
+
 def test_en_given_name_seed_can_chain_right_given_names():
     text = "Ann de Marie Claire"
     clues = (

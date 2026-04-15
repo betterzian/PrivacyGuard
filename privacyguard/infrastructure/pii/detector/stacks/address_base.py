@@ -33,7 +33,6 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     _clue_unit_gap,
     _first_address_clue_index_after,
     _is_absorbable_digit_clue,
-    _label_seed_start_char,
     _materialize_digit_tail_before_comma,
     _next_address_clue_index_after,
     _normalize_address_value,
@@ -66,6 +65,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
+    _label_seed_start_char,
     _skip_separators,
     _unit_char_end,
     _unit_char_start,

@@ -9,7 +9,7 @@ from privacyguard.domain.enums import PIIAttributeType, PIISourceType, Protectio
 from privacyguard.infrastructure.pii.detector.candidate_utils import trim_candidate
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueIndex, Clue, ClueRole, StreamInput
-from privacyguard.infrastructure.pii.detector.stacks.common import _skip_separators, _unit_char_end, _unit_char_start
+from privacyguard.infrastructure.pii.detector.stacks.common import _unit_char_end, _unit_char_start
 
 
 class StackContextLike(Protocol):

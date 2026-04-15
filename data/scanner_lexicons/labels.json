@@ -488,6 +488,54 @@
     "ascii_boundary": true
   },
   {
+    "keyword": "车牌号",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "牌照号",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "车牌号码",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "牌照号码",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "车牌",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "牌照",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "银行卡号",
     "attr_type": "bank_number",
     "source_kind": "context_bank_number_field",

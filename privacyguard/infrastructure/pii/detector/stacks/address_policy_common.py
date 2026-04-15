@@ -127,18 +127,6 @@ def _skip_from_char_by_units(
     return cursor
 
 
-def _label_seed_start_char(stream: StreamInput, start_char: int) -> int:
-    """LABEL/START 首次起栈时允许跳过的分隔。"""
-    return _skip_from_char_by_units(
-        stream,
-        start_char,
-        allow_space=True,
-        allow_comma=True,
-        allow_soft_break=True,
-        allow_inline_gap=True,
-    )
-
-
 def _label_start_route_locale(
     clues: tuple[Clue, ...],
     stream: StreamInput,

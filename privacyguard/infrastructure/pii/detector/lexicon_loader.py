@@ -279,6 +279,29 @@ def load_zh_control_values() -> tuple[ControlValueSpec, ...]:
 
 
 @lru_cache(maxsize=1)
+def load_zh_license_plate_values() -> tuple[ControlValueSpec, ...]:
+    payload = _read_json("zh_license_plate_values.json")
+    if not isinstance(payload, list):
+        raise ValueError("zh_license_plate_values.json 格式错误：根节点应为数组。")
+    items: list[ControlValueSpec] = []
+    seen: set[tuple[str, str, str]] = set()
+    for entry in payload:
+        if not isinstance(entry, dict):
+            raise ValueError("zh_license_plate_values.json 格式错误：条目应为对象。")
+        text = str(entry.get("text", "")).strip()
+        normalized = str(entry.get("normalized", "")).strip()
+        kind = str(entry.get("kind", "")).strip()
+        if not text or not normalized or not kind:
+            continue
+        key = (text, normalized, kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(ControlValueSpec(text=text, normalized=normalized, kind=kind))
+    return tuple(sorted(items, key=lambda item: (len(item.text), item.text), reverse=True))
+
+
+@lru_cache(maxsize=1)
 def load_all_negative_words() -> tuple[str, ...]:
     return tuple(
         sorted(
@@ -317,6 +340,7 @@ __all__ = [
     "load_negative_ui_words",
     "load_zh_address_keyword_groups",
     "load_zh_control_values",
+    "load_zh_license_plate_values",
     "load_zh_address_suffix_strippers",
     "load_zh_country_prefix_aliases",
     "load_zh_name_rules",

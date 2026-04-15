@@ -8,10 +8,7 @@ from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueRole, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun, _build_value_candidate
-from privacyguard.infrastructure.pii.detector.stacks.common import (
-    is_control_clue,
-    is_license_plate_prefix_control_clue,
-)
+from privacyguard.infrastructure.pii.detector.stacks.common import is_control_clue
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
 
 _LOOKUP_PLACEHOLDER_BY_ATTR = {
@@ -157,50 +154,11 @@ class StructuredStack(BaseStack):
         return None
 
     def _run_fragment(self) -> StackRun | None:
-        plate_run = self._try_absorb_license_plate_prefix()
-        if plate_run is not None:
-            return plate_run
         candidate = self._resolve_fragment_candidate(self.clue)
         return StackRun(
             attr_type=candidate.attr_type,
             candidate=candidate,
             consumed_ids={self.clue.clue_id},
-            next_index=self.clue_index + 1,
-        )
-
-    def _try_absorb_license_plate_prefix(self) -> StackRun | None:
-        normalized_fragment = re.sub(r"[^0-9A-Za-z]", "", self.clue.text or "")
-        if len(normalized_fragment) not in {5, 6} or self.clue_index <= 0:
-            return None
-        previous = self.context.clues[self.clue_index - 1]
-        if not is_license_plate_prefix_control_clue(previous):
-            return None
-        gap_text = self.context.stream.text[previous.end:self.clue.start]
-        if gap_text and not all(ch.isspace() or is_soft_break(ch) for ch in gap_text):
-            return None
-
-        candidate = _build_value_candidate(self.clue, self.context.stream.source)
-        candidate.attr_type = PIIAttributeType.LICENSE_PLATE
-        candidate.start = previous.start
-        candidate.end = self.clue.end
-        candidate.unit_start = previous.unit_start
-        candidate.unit_end = self.clue.unit_end
-        candidate.text = self.context.stream.text[previous.start:self.clue.end]
-        candidate.source_kind = "validated_license_plate_cn"
-        candidate.metadata = merge_metadata(
-            candidate.metadata,
-            {
-                "validated_by": ["validated_license_plate_cn"],
-                "original_fragment_type": [self._fragment_type(self.clue)],
-                "placeholder": ["<license_plate>"],
-                "license_plate_prefix": [previous.text],
-                "license_plate_prefix_clue_id": [previous.clue_id],
-            },
-        )
-        return StackRun(
-            attr_type=PIIAttributeType.LICENSE_PLATE,
-            candidate=candidate,
-            consumed_ids={previous.clue_id, self.clue.clue_id},
             next_index=self.clue_index + 1,
         )
 
