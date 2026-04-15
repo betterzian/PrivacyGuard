@@ -155,6 +155,33 @@ def test_hard_pattern_scan_prefers_alnum_fragment_over_nested_digit_fragment():
     ]
 
 
+def test_hard_pattern_scan_matches_email_when_preceded_by_chinese_text():
+    stream = build_prompt_stream("备用邮箱填kctfqcb33@163.com")
+
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [(clue.source_kind, clue.text, clue.attr_type) for clue in clues] == [
+        ("regex_email", "kctfqcb33@163.com", PIIAttributeType.EMAIL),
+    ]
+
+
+def test_hard_pattern_scan_keeps_plain_email_boundary_behavior():
+    stream = build_prompt_stream("邮箱是 kctfqcb33@163.com")
+
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [(clue.source_kind, clue.text, clue.attr_type) for clue in clues] == [
+        ("regex_email", "kctfqcb33@163.com", PIIAttributeType.EMAIL),
+    ]
+
+
+
 def test_non_ascii_literal_still_matches_substring():
     entry = _entry(text="张三", matched_by="dictionary_local", metadata={"name_component": ["full"]})
 

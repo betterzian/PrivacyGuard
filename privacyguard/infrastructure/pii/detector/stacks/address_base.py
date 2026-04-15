@@ -1,7 +1,7 @@
 """地址 stack 的共享骨架。
 
 中文与英文 stack 共用以下流程：
-1. 起栈与 HARD/SOFT 入口。
+1. 地址 clue 起栈与 label/value seed 入口。
 2. clue 主扫描、非地址 clue 吸收与 next_index 维护。
 3. 负向尾修复、digit tail 挑战、最终 `StackRun` 组装。
 
@@ -124,9 +124,6 @@ class BaseAddressStack(BaseStack):
     ) -> object | None:
         raise NotImplementedError
 
-    def _sub_tokenize_hard(self, stream: StreamInput, hard_clue: Clue) -> list[Clue]:
-        raise NotImplementedError
-
     def _candidate_start_end(self, state: _ParseState) -> tuple[int, int]:
         return (
             min(component.start for component in state.components),
@@ -165,9 +162,6 @@ class BaseAddressStack(BaseStack):
 
     def run(self) -> StackRun | None:
         """地址 stack 主入口。"""
-        if self.clue.strength == ClaimStrength.HARD:
-            return self._run_hard()
-
         stream = self.context.stream
         is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
 
@@ -201,12 +195,6 @@ class BaseAddressStack(BaseStack):
             evidence_count=evidence_count,
         )
 
-    def _run_hard(self) -> StackRun | None:
-        sub_clues = tuple(self._sub_tokenize_hard(self.context.stream, self.clue))
-        if not sub_clues:
-            return None
-        return self._run_with_sub_clues(sub_clues)
-
     def _run_with_clues(
         self,
         *,
@@ -217,7 +205,7 @@ class BaseAddressStack(BaseStack):
         handled_labels: set[str],
         evidence_count: int,
     ) -> StackRun | None:
-        """SOFT 路径：扫描 clue → 可选负向尾修 → suspect 修正 → 数字尾挑战 → 组装 `StackRun`。"""
+        """统一扫描路径：扫描 clue → 尾修复 → 数字尾挑战 → 组装 `StackRun`。"""
         state, index = self._scan_components(
             clues=clues,
             scan_index=scan_index,
@@ -277,30 +265,6 @@ class BaseAddressStack(BaseStack):
             consumed_ids,
             handled_labels,
             index,
-        )
-
-    def _run_with_sub_clues(self, sub_clues: tuple[Clue, ...], *, relaxed: bool = False) -> StackRun | None:
-        state, _ = self._scan_components(
-            clues=sub_clues,
-            scan_index=0,
-            address_start=sub_clues[0].start,
-            evidence_count=0,
-            stop_char_end=self.clue.end,
-            absorb_non_address=False,
-            relaxed=relaxed,
-        )
-        if not state.components:
-            return None
-        self._repair_negative_tail_components(state, sub_clues)
-        if not state.components:
-            return None
-        _fixup_suspected_info(state)
-        return self._build_address_run_from_state(
-            state,
-            set(state.committed_clue_ids),
-            set(),
-            self.clue_index + 1,
-            use_precise_next_index=False,
         )
 
     def _scan_components(
@@ -665,7 +629,7 @@ class BaseAddressStack(BaseStack):
             text=text,
             source=self.context.stream.source,
             source_kind=self.clue.source_kind,
-            claim_strength=ClaimStrength.SOFT,
+            claim_strength=state.max_clue_strength,
             metadata=_address_metadata(self.clue, components),
             label_clue_ids=set(handled_labels),
             label_driven=(self.clue.role == ClueRole.LABEL),

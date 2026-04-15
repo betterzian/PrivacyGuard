@@ -105,7 +105,8 @@ def _validate_cn_id_15(digits: str) -> bool:
 
 def _route_validators(*, digits: str, text: str, fragment_type: str) -> _ValidatorEntry | None:
     """按数值形态升级为明确的结构化属性。"""
-    if fragment_type != "NUM" or not digits:
+    is_cn_id_alnum = fragment_type == "ALNUM" and bool(re.fullmatch(r"\d{17}[Xx]", text))
+    if (fragment_type != "NUM" and not is_cn_id_alnum) or not digits:
         return None
 
     hits: list[_ValidatorEntry] = []
@@ -114,7 +115,7 @@ def _route_validators(*, digits: str, text: str, fragment_type: str) -> _Validat
         hits.append((PIIAttributeType.PHONE, 118, "validated_phone_cn"))
     if n == 10 and _validate_us_phone(digits):
         hits.append((PIIAttributeType.PHONE, 117, "validated_phone_us"))
-    if n == 18 or (len(text) == 18 and text[:17].isdigit() and text[17].upper() == "X"):
+    if n == 18 or is_cn_id_alnum:
         id_text = text if len(text) == 18 else digits
         if _validate_cn_id_18(id_text):
             hits.append((PIIAttributeType.ID_NUMBER, 115, "validated_id_cn_18"))

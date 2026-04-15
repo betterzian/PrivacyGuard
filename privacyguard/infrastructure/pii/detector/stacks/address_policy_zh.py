@@ -4,7 +4,6 @@
 1. suspect 冻结与中文 KEY 路由。
 2. 中文左扩，以及中文地址里允许吸收的相邻英数字片段。
 3. 中文逗号尾预演与后继前瞻。
-4. 中文 HARD clue 子分词。
 """
 
 from __future__ import annotations
@@ -16,9 +15,7 @@ from dataclasses import dataclass, replace
 from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
-    ClaimStrength,
     Clue,
-    ClueFamily,
     ClueRole,
     PIIAttributeType,
     StreamInput,
@@ -48,7 +45,6 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _segment_admit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.common import (
-    _char_span_to_unit_span,
     _unit_index_at_or_after,
     _unit_index_left_of,
     is_ascii_alnum_like_unit,
@@ -1112,83 +1108,3 @@ def _comma_tail_prehandle(
     state.pending_comma_value_right_scan = True
     state.pending_comma_first_component = needs_open_chain
     return None
-
-
-def _sub_tokenize(stream: StreamInput, hard_clue: Clue) -> list[Clue]:
-    """在 HARD clue span 内扫描中文地址关键词，产出 sub-clue 列表。"""
-    from privacyguard.infrastructure.pii.detector.scanner import (
-        _zh_address_key_matcher,
-        _zh_address_value_matcher,
-    )
-
-    span_start = hard_clue.start
-    span_end = hard_clue.end
-    text = stream.text[span_start:span_end]
-    if not text.strip():
-        return []
-
-    folded = text.lower()
-    sub_clues: list[Clue] = []
-    clue_counter = 0
-
-    def _make_id() -> str:
-        nonlocal clue_counter
-        clue_counter += 1
-        return f"sub_{hard_clue.clue_id}_{clue_counter}"
-
-    for matcher in (_zh_address_value_matcher(),):
-        for match in matcher.find_matches(text, folded_text=folded):
-            abs_start = span_start + match.start
-            abs_end = span_start + match.end
-            payload = match.payload
-            unit_start, unit_end = _char_span_to_unit_span(stream, abs_start, abs_end)
-            sub_clues.append(Clue(
-                clue_id=_make_id(),
-                family=ClueFamily.ADDRESS,
-                role=ClueRole.VALUE,
-                attr_type=PIIAttributeType.ADDRESS,
-                strength=ClaimStrength.SOFT,
-                start=abs_start,
-                end=abs_end,
-                text=payload.canonical_text,
-                unit_start=unit_start,
-                unit_end=unit_end,
-                source_kind="sub_tokenize_value",
-                component_type=payload.component_type,
-            ))
-
-    for matcher in (_zh_address_key_matcher(),):
-        for match in matcher.find_matches(text, folded_text=folded):
-            abs_start = span_start + match.start
-            abs_end = span_start + match.end
-            payload = match.payload
-            unit_start, unit_end = _char_span_to_unit_span(stream, abs_start, abs_end)
-            sub_clues.append(Clue(
-                clue_id=_make_id(),
-                family=ClueFamily.ADDRESS,
-                role=ClueRole.KEY,
-                attr_type=PIIAttributeType.ADDRESS,
-                strength=ClaimStrength.SOFT,
-                start=abs_start,
-                end=abs_end,
-                text=payload.canonical_text,
-                unit_start=unit_start,
-                unit_end=unit_end,
-                source_kind="sub_tokenize_key",
-                component_type=payload.component_type,
-            ))
-
-    sub_clues.sort(key=lambda clue: (clue.start, -(clue.end - clue.start)))
-    deduped: list[Clue] = []
-    for clue in sub_clues:
-        if any(
-            kept.start <= clue.start and clue.end <= kept.end
-            and kept.role == clue.role
-            and kept.component_type == clue.component_type
-            for kept in deduped
-        ):
-            continue
-        deduped.append(clue)
-
-    deduped.sort(key=lambda clue: (clue.start, clue.end))
-    return deduped

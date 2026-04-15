@@ -416,6 +416,17 @@ class StreamParser:
         if hard_b and not hard_a:
             return self._commit_winner_and_shrink_loser(context, consumed_ids, run_b, None, run_a, stack_a)
 
+        # 地址若已升级为 HARD，则与通用 numeric HARD 冲突时直接保留地址。
+        if hard_a and hard_b:
+            hard_address_numeric = frozenset({ca.attr_type, cb.attr_type}) == {
+                PIIAttributeType.ADDRESS,
+                PIIAttributeType.NUMERIC,
+            }
+            if hard_address_numeric:
+                if ca.attr_type == PIIAttributeType.ADDRESS:
+                    return self._commit_winner_and_drop_loser(context, consumed_ids, run_a, run_b)
+                return self._commit_winner_and_drop_loser(context, consumed_ids, run_b, run_a)
+
         # 都是 hard：旧逻辑 fallback。
         if hard_a and hard_b:
             return self._fallback_conflict(context, consumed_ids, run_a, run_b)
@@ -458,6 +469,19 @@ class StreamParser:
         else:
             # shrink 失败：只标记 label，不锁死 clue。
             context.handled_label_clue_ids |= loser_run.handled_label_clue_ids
+        return winner_run.next_index
+
+    def _commit_winner_and_drop_loser(
+        self,
+        context: StackContext,
+        consumed_ids: set[str],
+        winner_run: StackRun,
+        loser_run: StackRun,
+    ) -> int:
+        """仅提交胜方，并显式消费败方 clue，避免其再次起栈。"""
+        self._commit_run(context, winner_run, consumed_ids)
+        consumed_ids |= loser_run.consumed_ids
+        context.handled_label_clue_ids |= loser_run.handled_label_clue_ids
         return winner_run.next_index
 
     def _fallback_conflict(

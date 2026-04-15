@@ -3,8 +3,7 @@
 这里仅保留英文 grammar 需要的能力：
 1. 英文 KEY 左扩。
 2. prefix-key（如 `Apt` / `#`）判定。
-3. 英文 HARD clue 子分词。
-4. 英文组件后继图。
+3. 英文组件后继图。
 """
 
 from __future__ import annotations
@@ -14,18 +13,14 @@ import re
 from privacyguard.infrastructure.pii.detector.lexicon_loader import load_en_address_keyword_groups
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
-    ClaimStrength,
     Clue,
-    ClueFamily,
-    ClueRole,
-    PIIAttributeType,
     StreamInput,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
     _RoutingContext,
     _normalize_address_value,
 )
-from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span, _unit_index_left_of
+from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_left_of
 
 EN_VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] = {
     AddressComponentType.COUNTRY: frozenset(),
@@ -214,124 +209,3 @@ def key_left_expand_start_if_deferrable_en(
     if not value:
         return None
     return expand_start
-
-
-def sub_tokenize_en(stream: StreamInput, hard_clue: Clue) -> list[Clue]:
-    """在 HARD clue span 内扫描英文地址关键词，产出 sub-clue 列表。"""
-    from privacyguard.infrastructure.pii.detector.scanner import (
-        _POSTAL_CODE_PATTERN,
-        _ScanSegment,
-        _en_address_key_matcher,
-        _en_address_value_matcher,
-        _normalize_segment_ascii_match,
-        _segment_span_to_raw,
-    )
-
-    span_start = hard_clue.start
-    span_end = hard_clue.end
-    text = stream.text[span_start:span_end]
-    if not text.strip():
-        return []
-
-    folded = text.lower()
-    segment = _ScanSegment(stream=stream, text=text, raw_start=span_start, folded_text=folded)
-    sub_clues: list[Clue] = []
-    clue_counter = 0
-
-    def _make_id() -> str:
-        nonlocal clue_counter
-        clue_counter += 1
-        return f"sub_{hard_clue.clue_id}_{clue_counter}"
-
-    for matcher in (_en_address_value_matcher(),):
-        for match in matcher.find_matches(text, folded_text=folded):
-            normalized = _normalize_segment_ascii_match(
-                segment,
-                match.start,
-                match.end,
-                match.matched_text,
-                match.pattern_text,
-                match.ascii_boundary,
-            )
-            if normalized is None:
-                continue
-            abs_start, abs_end, matched_text = normalized
-            payload = match.payload
-            unit_start, unit_end = _char_span_to_unit_span(stream, abs_start, abs_end)
-            sub_clues.append(Clue(
-                clue_id=_make_id(),
-                family=ClueFamily.ADDRESS,
-                role=ClueRole.VALUE,
-                attr_type=PIIAttributeType.ADDRESS,
-                strength=ClaimStrength.SOFT,
-                start=abs_start,
-                end=abs_end,
-                text=matched_text,
-                unit_start=unit_start,
-                unit_end=unit_end,
-                source_kind="sub_tokenize_value",
-                component_type=payload.component_type,
-            ))
-
-    for matcher in (_en_address_key_matcher(),):
-        for match in matcher.find_matches(text, folded_text=folded):
-            normalized = _normalize_segment_ascii_match(
-                segment,
-                match.start,
-                match.end,
-                match.matched_text,
-                match.pattern_text,
-                match.ascii_boundary,
-            )
-            if normalized is None:
-                continue
-            abs_start, abs_end, matched_text = normalized
-            payload = match.payload
-            unit_start, unit_end = _char_span_to_unit_span(stream, abs_start, abs_end)
-            sub_clues.append(Clue(
-                clue_id=_make_id(),
-                family=ClueFamily.ADDRESS,
-                role=ClueRole.KEY,
-                attr_type=PIIAttributeType.ADDRESS,
-                strength=ClaimStrength.SOFT,
-                start=abs_start,
-                end=abs_end,
-                text=matched_text,
-                unit_start=unit_start,
-                unit_end=unit_end,
-                source_kind="sub_tokenize_key",
-                component_type=payload.component_type,
-            ))
-
-    for token_match in _POSTAL_CODE_PATTERN.finditer(text):
-        abs_start, abs_end = _segment_span_to_raw(segment, token_match.start(), token_match.end())
-        unit_start, unit_end = _char_span_to_unit_span(stream, abs_start, abs_end)
-        sub_clues.append(Clue(
-            clue_id=_make_id(),
-            family=ClueFamily.ADDRESS,
-            role=ClueRole.VALUE,
-            attr_type=PIIAttributeType.ADDRESS,
-            strength=ClaimStrength.SOFT,
-            start=abs_start,
-            end=abs_end,
-            text=token_match.group(0),
-            unit_start=unit_start,
-            unit_end=unit_end,
-            source_kind="sub_tokenize_postal_value",
-            component_type=AddressComponentType.POSTAL_CODE,
-        ))
-
-    sub_clues.sort(key=lambda clue: (clue.start, -(clue.end - clue.start)))
-    deduped: list[Clue] = []
-    for clue in sub_clues:
-        if any(
-            kept.start <= clue.start and clue.end <= kept.end
-            and kept.role == clue.role
-            and kept.component_type == clue.component_type
-            for kept in deduped
-        ):
-            continue
-        deduped.append(clue)
-
-    deduped.sort(key=lambda clue: (clue.start, clue.end))
-    return deduped

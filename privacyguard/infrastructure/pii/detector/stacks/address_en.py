@@ -8,7 +8,6 @@ import re
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
     CandidateDraft,
-    ClaimStrength,
     ClueFamily,
     Clue,
     ClueRole,
@@ -31,7 +30,6 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_en import (
     is_suffix_en_component,
     is_prefix_en_component,
     key_left_expand_start_if_deferrable_en,
-    sub_tokenize_en,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _DraftComponent,
@@ -74,20 +72,13 @@ class EnAddressStack(BaseAddressStack):
 
     def run(self) -> StackRun | None:
         if (
-            self.clue.strength != ClaimStrength.HARD
-            and self.clue.role == ClueRole.VALUE
+            self.clue.role == ClueRole.VALUE
             and self.clue.attr_type == PIIAttributeType.ADDRESS
         ):
             value_seed_run = self._build_suffix_road_from_value_seed()
             if value_seed_run is not None:
                 return value_seed_run
         return super(EnAddressStack, self).run()
-
-    def _run_hard(self):
-        sub_clues = tuple(self._sub_tokenize_hard(self.context.stream, self.clue))
-        if not sub_clues:
-            return None
-        return self._run_with_sub_clues(sub_clues, relaxed=True)
 
     def _handle_value_clue(
         self,
@@ -184,9 +175,6 @@ class EnAddressStack(BaseAddressStack):
 
         state.ignored_address_key_indices.add(clue_index)
         return _SENTINEL_IGNORE
-
-    def _sub_tokenize_hard(self, stream: StreamInput, hard_clue: Clue) -> list[Clue]:
-        return sub_tokenize_en(stream, hard_clue)
 
     def _candidate_start_end(self, state: _ParseState) -> tuple[int, int]:
         return BaseAddressStack._candidate_start_end(self, state)

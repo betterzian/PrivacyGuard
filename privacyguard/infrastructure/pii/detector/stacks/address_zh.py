@@ -31,7 +31,6 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _key_left_expand_start_if_deferrable,
     _remove_last_value_suspect,
     _routed_key_clue,
-    _sub_tokenize,
     _suspect_eligible_after_last_piece,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
@@ -269,5 +268,3 @@ class ZhAddressStack(BaseAddressStack):
         state.ignored_address_key_indices.add(clue_index)
         return _SENTINEL_IGNORE
 
-    def _sub_tokenize_hard(self, stream: StreamInput, hard_clue: Clue) -> list[Clue]:
-        return _sub_tokenize(stream, hard_clue)
