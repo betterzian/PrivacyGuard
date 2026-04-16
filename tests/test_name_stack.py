@@ -316,7 +316,7 @@ def test_standalone_double_boundary_with_negative_is_dropped():
 def test_single_boundary_standalone_upgrades_claim_strength():
     text = "他说张三,"
     clues = (
-        _clue("family-1", ClueRole.FAMILY_NAME, 2, 3, "张", source_kind="family_name", strength=ClaimStrength.soft),
+        _clue("family-1", ClueRole.FAMILY_NAME, 2, 3, "张", source_kind="family_name", strength=ClaimStrength.SOFT),
     )
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
