@@ -1,15 +1,15 @@
-"""中文姓名规则与提交评分。"""
+"""中文姓名纯规则辅助工具。"""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 
 from privacyguard.domain.enums import ProtectionLevel
-from privacyguard.infrastructure.pii.detector.models import Clue, ClueRole
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue
 
 _CJK_NAME_JOINERS = frozenset({"·", "•", "・"})
-_SEED_CONTEXT_ROLES = frozenset({ClueRole.LABEL, ClueRole.START})
 
 
 def _is_cjk(char: str) -> bool:
@@ -17,8 +17,8 @@ def _is_cjk(char: str) -> bool:
 
 
 def compact_zh_name_text(text: str) -> str:
-    """压紧中文姓名候选，只保留 CJK 与常见中点连接符。"""
-    compact = []
+    """压紧中文姓名文本，只保留汉字与中点连接符。"""
+    compact: list[str] = []
     for char in str(text or ""):
         if char.isspace():
             continue
@@ -27,409 +27,283 @@ def compact_zh_name_text(text: str) -> str:
     return "".join(compact)
 
 
-@dataclass(frozen=True, slots=True)
-class ZhNameScoreWeights:
-    """中文姓名打分项。"""
-
-    compound_exact_match: int
-    single_strong: int
-    single_medium: int
-    single_weak: int
-    boostable_medium_after_blacklist_pass: int
-    position_first_char_of_2_to_3_char_cjk_span: int
-    common_given_name_char_after_surname: int
-    name_field_or_contact_context: int
-    fixed_phrase_blacklist_hit: int
-    non_name_field_context: int
+class NegativeOverlapKind(str, Enum):
+    NONE = "none"
+    EXACT_HIT = "exact_hit"
+    SAME_START_COVER = "same_start_cover"
+    FULLY_COVERED = "fully_covered"
+    PARTIAL_OVERLAP = "partial_overlap"
+    NEGATIVE_FULLY_INSIDE = "negative_fully_inside"
 
 
-@dataclass(frozen=True, slots=True)
-class ZhNameSubmitThresholds:
-    """各保护级别的中文姓名提交阈值。"""
+_NEGATIVE_KIND_PRIORITY = {
+    NegativeOverlapKind.SAME_START_COVER: 5,
+    NegativeOverlapKind.FULLY_COVERED: 5,
+    NegativeOverlapKind.PARTIAL_OVERLAP: 5,
+    NegativeOverlapKind.EXACT_HIT: 4,
+    NegativeOverlapKind.NEGATIVE_FULLY_INSIDE: 3,
+    NegativeOverlapKind.NONE: 0,
+}
 
-    strong: int
-    balanced: int
-    weak: int
 
-    def for_level(self, level: ProtectionLevel) -> int:
-        if level == ProtectionLevel.STRONG:
-            return self.strong
-        if level == ProtectionLevel.BALANCED:
-            return self.balanced
-        return self.weak
+class StandaloneMatchKind(str, Enum):
+    NONE = "none"
+    SINGLE_BOUNDARY = "single_boundary"
+    DOUBLE_BOUNDARY = "double_boundary"
 
 
 @dataclass(frozen=True, slots=True)
-class ZhSurnameMatch:
-    """候选前缀的姓氏锚点。"""
+class NegativeOverlap:
+    """单个 negative 与姓名候选的重叠结果。"""
 
+    kind: NegativeOverlapKind
+    clue_id: str
+    start: int
+    end: int
     text: str
-    match_kind: str
-    tier: str
-    base_score: int
-    from_dictionary: bool = False
 
 
 @dataclass(frozen=True, slots=True)
-class ZhNameScoreDecision:
-    """中文姓名提交决策。"""
+class ZhNameCommitDecision:
+    """中文姓名规则机的最终判定结果。"""
 
     should_commit: bool
-    total_score: int
-    threshold: int
-    matched_surname: str = ""
-    surname_match_kind: str = "none"
-    surname_tier: str = "none"
-    surname_score: int = 0
-    seed_context_score: int = 0
-    shape_score: int = 0
-    given_name_evidence_score: int = 0
-    fixed_phrase_penalty: int = 0
+    final_claim_strength: ClaimStrength | None
+    route: str
+    negative_overlap_kind: NegativeOverlapKind = NegativeOverlapKind.NONE
+    standalone_match_kind: StandaloneMatchKind = StandaloneMatchKind.NONE
     reasons: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
-class ZhNameRules:
-    """中文姓名统一规则。"""
+_DIRECT_SUBMIT_ALLOWED_KINDS = frozenset(
+    {
+        NegativeOverlapKind.NONE,
+        NegativeOverlapKind.EXACT_HIT,
+        NegativeOverlapKind.NEGATIVE_FULLY_INSIDE,
+    }
+)
 
-    compound_surnames: tuple[str, ...]
-    single_surname_tiers: dict[str, frozenset[str]]
-    surname_tier_by_char: dict[str, str]
-    boostable_medium_surnames: frozenset[str]
-    boost_blacklist_phrases: dict[str, tuple[str, ...]]
-    zh_given_names: tuple[str, ...]
-    given_name_tail_chars: frozenset[str]
-    scoring: ZhNameScoreWeights
-    submit_thresholds: ZhNameSubmitThresholds
+# 姓片段：完全包住或部分重叠 → 本栈立即结束，不吞名、不提交。
+_FAMILY_IMMEDIATE_EXIT_KINDS = frozenset(
+    {
+        NegativeOverlapKind.FULLY_COVERED,
+        NegativeOverlapKind.PARTIAL_OVERLAP,
+    }
+)
 
-    @property
-    def single_surnames(self) -> frozenset[str]:
-        return frozenset(self.surname_tier_by_char.keys())
+# 名或隐式尾部：同上两类 → 整段姓名候选取消提交。
+_GIVEN_OR_IMPLICIT_TAIL_CANCEL_KINDS = _FAMILY_IMMEDIATE_EXIT_KINDS
 
-    @property
-    def all_surnames(self) -> frozenset[str]:
-        return frozenset((*self.compound_surnames, *self.single_surnames))
+# 仍仅通过降一级 strength 消化的 overlap（与 blacklist 同起点向右延伸等）。
+_CLAIM_STRENGTH_DEMOTION_KINDS = frozenset(
+    {
+        NegativeOverlapKind.SAME_START_COVER,
+    }
+)
 
 
-def build_zh_name_rules(payload: object) -> ZhNameRules:
-    """从 JSON 载荷构造不可变中文姓名规则对象。"""
-    if not isinstance(payload, dict):
-        raise ValueError("zh_name_rules.json 格式错误：根节点应为对象。")
+def upgrade_claim_strength(strength: ClaimStrength) -> ClaimStrength:
+    """把 claim_strength 提升一级。"""
+    if strength == ClaimStrength.WEAK:
+        return ClaimStrength.SOFT
+    return ClaimStrength.HARD
 
-    compound_raw = payload.get("compound_surnames", [])
-    single_tiers_raw = payload.get("single_surname_tiers", {})
-    boostable_raw = payload.get("boostable_medium_surnames", [])
-    blacklist_raw = payload.get("boost_blacklist_phrases", {})
-    given_raw = payload.get("zh_given_names", [])
-    scoring_raw = payload.get("scoring", {})
-    thresholds_raw = payload.get("submit_thresholds", {})
 
-    if not isinstance(compound_raw, list):
-        raise ValueError("zh_name_rules.json 格式错误：compound_surnames 应为数组。")
-    if not isinstance(single_tiers_raw, dict):
-        raise ValueError("zh_name_rules.json 格式错误：single_surname_tiers 应为对象。")
-    if not isinstance(boostable_raw, list):
-        raise ValueError("zh_name_rules.json 格式错误：boostable_medium_surnames 应为数组。")
-    if not isinstance(blacklist_raw, dict):
-        raise ValueError("zh_name_rules.json 格式错误：boost_blacklist_phrases 应为对象。")
-    if not isinstance(given_raw, list):
-        raise ValueError("zh_name_rules.json 格式错误：zh_given_names 应为数组。")
-    if not isinstance(scoring_raw, dict):
-        raise ValueError("zh_name_rules.json 格式错误：scoring 应为对象。")
-    if not isinstance(thresholds_raw, dict):
-        raise ValueError("zh_name_rules.json 格式错误：submit_thresholds 应为对象。")
+def downgrade_claim_strength(strength: ClaimStrength) -> ClaimStrength | None:
+    """把 claim_strength 降一级；``WEAK`` 再降则视为失效。"""
+    if strength == ClaimStrength.HARD:
+        return ClaimStrength.SOFT
+    if strength == ClaimStrength.SOFT:
+        return ClaimStrength.WEAK
+    return None
 
-    compound_surnames = tuple(
-        sorted(
-            {str(item).strip() for item in compound_raw if str(item).strip()},
-            key=len,
-            reverse=True,
+
+def stronger_claim_strength(a: ClaimStrength, b: ClaimStrength) -> ClaimStrength:
+    """返回两个 strength 中更强的那个。"""
+    order = {
+        ClaimStrength.WEAK: 0,
+        ClaimStrength.SOFT: 1,
+        ClaimStrength.HARD: 2,
+    }
+    return a if order[a] >= order[b] else b
+
+
+def claim_strength_required_for_protection(level: ProtectionLevel) -> ClaimStrength:
+    """将保护级别映射为最终提交门槛。"""
+    if level == ProtectionLevel.STRONG:
+        return ClaimStrength.WEAK
+    if level == ProtectionLevel.BALANCED:
+        return ClaimStrength.SOFT
+    return ClaimStrength.HARD
+
+
+def claim_strength_meets_protection(strength: ClaimStrength, level: ProtectionLevel) -> bool:
+    """判断最终 claim_strength 是否满足保护级别门槛。"""
+    required = claim_strength_required_for_protection(level)
+    order = {
+        ClaimStrength.WEAK: 0,
+        ClaimStrength.SOFT: 1,
+        ClaimStrength.HARD: 2,
+    }
+    return order[strength] >= order[required]
+
+
+def classify_negative_overlap(
+    *,
+    candidate_start: int,
+    candidate_end: int,
+    candidate_raw_text: str,
+    negative_start: int,
+    negative_end: int,
+    negative_text: str,
+) -> NegativeOverlapKind:
+    """按最终规则分类单个 negative 与候选的重叠关系。"""
+    if candidate_end <= candidate_start or negative_end <= negative_start:
+        return NegativeOverlapKind.NONE
+    if negative_end <= candidate_start or negative_start >= candidate_end:
+        return NegativeOverlapKind.NONE
+    if (
+        candidate_start == negative_start
+        and candidate_end == negative_end
+        and candidate_raw_text == negative_text
+    ):
+        return NegativeOverlapKind.EXACT_HIT
+    if negative_start == candidate_start and negative_end >= candidate_end:
+        return NegativeOverlapKind.SAME_START_COVER
+    if negative_start <= candidate_start and negative_end >= candidate_end:
+        return NegativeOverlapKind.FULLY_COVERED
+    if candidate_start <= negative_start and candidate_end >= negative_end:
+        return NegativeOverlapKind.NEGATIVE_FULLY_INSIDE
+    return NegativeOverlapKind.PARTIAL_OVERLAP
+
+
+def collect_negative_overlaps(
+    *,
+    candidate_start: int,
+    candidate_end: int,
+    candidate_raw_text: str,
+    negative_clues: Sequence[Clue],
+) -> tuple[NegativeOverlap, ...]:
+    """收集候选与所有 negative clue 的重叠分类。"""
+    overlaps: list[NegativeOverlap] = []
+    for clue in negative_clues:
+        kind = classify_negative_overlap(
+            candidate_start=candidate_start,
+            candidate_end=candidate_end,
+            candidate_raw_text=candidate_raw_text,
+            negative_start=clue.start,
+            negative_end=clue.end,
+            negative_text=clue.text,
+        )
+        if kind == NegativeOverlapKind.NONE:
+            continue
+        overlaps.append(
+            NegativeOverlap(
+                kind=kind,
+                clue_id=clue.clue_id,
+                start=clue.start,
+                end=clue.end,
+                text=clue.text,
+            )
+        )
+    return tuple(overlaps)
+
+
+def collect_blocking_overlaps(
+    *,
+    candidate_start: int,
+    candidate_end: int,
+    candidate_raw_text: str,
+    negative_clues: Sequence[Clue],
+    other_clues: Sequence[Clue],
+) -> tuple[NegativeOverlap, ...]:
+    """收集会阻断姓名判定的所有重叠 clue。
+
+    规则：
+    1. negative clue 维持原语义。
+    2. 其他非 NAME clue 与 negative 使用同一套 span 分类与降级规则。
+    """
+    overlaps = list(
+        collect_negative_overlaps(
+            candidate_start=candidate_start,
+            candidate_end=candidate_end,
+            candidate_raw_text=candidate_raw_text,
+            negative_clues=negative_clues,
         )
     )
-    single_surname_tiers: dict[str, frozenset[str]] = {}
-    surname_tier_by_char: dict[str, str] = {}
-    for tier in ("strong", "medium", "weak"):
-        raw_values = single_tiers_raw.get(tier, [])
-        if not isinstance(raw_values, list):
-            raise ValueError(f"zh_name_rules.json 格式错误：single_surname_tiers.{tier} 应为数组。")
-        values = frozenset(str(item).strip() for item in raw_values if str(item).strip())
-        single_surname_tiers[tier] = values
-        for char in values:
-            surname_tier_by_char[char] = tier
-
-    boostable_medium_surnames = frozenset(str(item).strip() for item in boostable_raw if str(item).strip())
-    boost_blacklist_phrases: dict[str, tuple[str, ...]] = {}
-    for surname, phrases in blacklist_raw.items():
-        if not isinstance(phrases, list):
-            raise ValueError("zh_name_rules.json 格式错误：boost_blacklist_phrases 的值应为数组。")
-        cleaned = tuple(
-            sorted(
-                {str(item).strip() for item in phrases if str(item).strip()},
-                key=len,
-                reverse=True,
+    for clue in other_clues:
+        kind = classify_negative_overlap(
+            candidate_start=candidate_start,
+            candidate_end=candidate_end,
+            candidate_raw_text=candidate_raw_text,
+            negative_start=clue.start,
+            negative_end=clue.end,
+            negative_text=clue.text,
+        )
+        if kind == NegativeOverlapKind.NONE:
+            continue
+        overlaps.append(
+            NegativeOverlap(
+                kind=kind,
+                clue_id=clue.clue_id,
+                start=clue.start,
+                end=clue.end,
+                text=clue.text,
             )
         )
-        if cleaned:
-            boost_blacklist_phrases[str(surname).strip()] = cleaned
-
-    zh_given_names = tuple(
-        sorted(
-            {str(item).strip() for item in given_raw if str(item).strip()},
-            key=len,
-            reverse=True,
-        )
-    )
-    given_name_tail_chars = frozenset(name[-1] for name in zh_given_names if len(name) >= 2 and _is_cjk(name[-1]))
-
-    scoring = ZhNameScoreWeights(
-        compound_exact_match=int(scoring_raw.get("compound_exact_match", 6)),
-        single_strong=int(scoring_raw.get("single_strong", 3)),
-        single_medium=int(scoring_raw.get("single_medium", 1)),
-        single_weak=int(scoring_raw.get("single_weak", -2)),
-        boostable_medium_after_blacklist_pass=int(scoring_raw.get("boostable_medium_after_blacklist_pass", 2)),
-        position_first_char_of_2_to_3_char_cjk_span=int(scoring_raw.get("position_first_char_of_2_to_3_char_cjk_span", 2)),
-        common_given_name_char_after_surname=int(scoring_raw.get("common_given_name_char_after_surname", 2)),
-        name_field_or_contact_context=int(scoring_raw.get("name_field_or_contact_context", 3)),
-        fixed_phrase_blacklist_hit=int(scoring_raw.get("fixed_phrase_blacklist_hit", -4)),
-        non_name_field_context=int(scoring_raw.get("non_name_field_context", -2)),
-    )
-    thresholds = ZhNameSubmitThresholds(
-        strong=int(thresholds_raw.get("strong", 4)),
-        balanced=int(thresholds_raw.get("balanced", 5)),
-        weak=int(thresholds_raw.get("weak", 6)),
-    )
-    return ZhNameRules(
-        compound_surnames=compound_surnames,
-        single_surname_tiers=single_surname_tiers,
-        surname_tier_by_char=surname_tier_by_char,
-        boostable_medium_surnames=boostable_medium_surnames,
-        boost_blacklist_phrases=boost_blacklist_phrases,
-        zh_given_names=zh_given_names,
-        given_name_tail_chars=given_name_tail_chars,
-        scoring=scoring,
-        submit_thresholds=thresholds,
-    )
+    return tuple(overlaps)
 
 
-class ZhNameCommitScorer:
-    """中文 soft-name 唯一提交判定入口。"""
-
-    def __init__(self, rules: ZhNameRules) -> None:
-        self._rules = rules
-
-    def evaluate(
-        self,
-        *,
-        candidate_text: str,
-        start: int,
-        end: int,
-        candidate_unit_start: int,
-        candidate_unit_end: int,
-        seed_clue: Clue,
-        protection_level: ProtectionLevel,
-        name_clues: list[tuple[int, Clue]],
-        negative_unit_marks: Sequence[int],
-        has_negative_start: Callable[[int, int], bool],
-    ) -> ZhNameScoreDecision:
-        compact_candidate = compact_zh_name_text(candidate_text)
-        if len(compact_candidate) < 2 or not all(_is_cjk(char) for char in compact_candidate):
-            return ZhNameScoreDecision(should_commit=False, total_score=0, threshold=self._rules.submit_thresholds.for_level(protection_level), reasons=("candidate_not_compact_cjk",))
-
-        surname_match = self._match_prefix_surname(compact_candidate=compact_candidate, start=start, name_clues=name_clues)
-        threshold = self._rules.submit_thresholds.for_level(protection_level)
-        if surname_match is None:
-            return ZhNameScoreDecision(should_commit=False, total_score=0, threshold=threshold, reasons=("missing_surname_anchor",))
-
-        if len(compact_candidate) <= len(surname_match.text):
-            return ZhNameScoreDecision(
-                should_commit=False,
-                total_score=surname_match.base_score,
-                threshold=threshold,
-                matched_surname=surname_match.text,
-                surname_match_kind=surname_match.match_kind,
-                surname_tier=surname_match.tier,
-                surname_score=surname_match.base_score,
-                reasons=("surname_only_candidate",),
-            )
-
-        surname_unit_len = max(1, len(surname_match.text))
-        tail_unit_start = min(candidate_unit_end, candidate_unit_start + surname_unit_len)
-        if (
-            has_negative_start(candidate_unit_start, candidate_unit_end)
-            and _units_fully_covered(negative_unit_marks, tail_unit_start, candidate_unit_end)
-        ):
-            return ZhNameScoreDecision(
-                should_commit=False,
-                total_score=surname_match.base_score,
-                threshold=threshold,
-                matched_surname=surname_match.text,
-                surname_match_kind=surname_match.match_kind,
-                surname_tier=surname_match.tier,
-                surname_score=surname_match.base_score,
-                reasons=("tail_negative_overlap",),
-            )
-
-        surname_score = surname_match.base_score
-        reasons: list[str] = [f"surname:{surname_match.match_kind}:{surname_match.tier}"]
-        fixed_phrase_penalty = 0
-        blacklist_phrases = self._rules.boost_blacklist_phrases.get(surname_match.text, ())
-        if blacklist_phrases:
-            exact_hit = any(compact_candidate == phrase for phrase in blacklist_phrases)
-            prefix_hit = any(compact_candidate.startswith(phrase) for phrase in blacklist_phrases)
-            if surname_match.tier == "medium" and surname_match.text in self._rules.boostable_medium_surnames:
-                if prefix_hit:
-                    fixed_phrase_penalty = self._rules.scoring.fixed_phrase_blacklist_hit
-                    reasons.append("boost_blacklist_prefix_hit")
-                else:
-                    surname_score = self._rules.scoring.boostable_medium_after_blacklist_pass
-                    reasons.append("boosted_medium_surname")
-            elif exact_hit:
-                fixed_phrase_penalty = self._rules.scoring.fixed_phrase_blacklist_hit
-                reasons.append("fixed_phrase_exact_hit")
-
-        seed_context_score = self._seed_context_score(seed_clue)
-        if seed_context_score:
-            reasons.append(f"seed_context:{seed_context_score}")
-
-        shape_score = 0
-        if 2 <= len(compact_candidate) <= 3:
-            shape_score = self._rules.scoring.position_first_char_of_2_to_3_char_cjk_span
-            reasons.append("compact_2_to_3_char_shape")
-
-        given_name_evidence_score = 0
-        if self._has_given_name_evidence(
-            compact_candidate=compact_candidate,
-            surname_text=surname_match.text,
-            start=start,
-            end=end,
-            name_clues=name_clues,
-        ):
-            given_name_evidence_score = self._rules.scoring.common_given_name_char_after_surname
-            reasons.append("given_name_evidence")
-
-        total_score = surname_score + seed_context_score + shape_score + given_name_evidence_score + fixed_phrase_penalty
-        return ZhNameScoreDecision(
-            should_commit=total_score >= threshold,
-            total_score=total_score,
-            threshold=threshold,
-            matched_surname=surname_match.text,
-            surname_match_kind=surname_match.match_kind,
-            surname_tier=surname_match.tier,
-            surname_score=surname_score,
-            seed_context_score=seed_context_score,
-            shape_score=shape_score,
-            given_name_evidence_score=given_name_evidence_score,
-            fixed_phrase_penalty=fixed_phrase_penalty,
-            reasons=tuple(reasons),
-        )
-
-    def _match_prefix_surname(
-        self,
-        *,
-        compact_candidate: str,
-        start: int,
-        name_clues: list[tuple[int, Clue]],
-    ) -> ZhSurnameMatch | None:
-        for compound in self._rules.compound_surnames:
-            if compact_candidate.startswith(compound):
-                return ZhSurnameMatch(
-                    text=compound,
-                    match_kind="compound",
-                    tier="compound",
-                    base_score=self._rules.scoring.compound_exact_match,
-                )
-
-        single = compact_candidate[0]
-        tier = self._rules.surname_tier_by_char.get(single)
-        if tier is not None:
-            return ZhSurnameMatch(
-                text=single,
-                match_kind="single",
-                tier=tier,
-                base_score=self._score_for_single_tier(tier),
-            )
-
-        for _index, clue in name_clues:
-            if clue.role != ClueRole.FAMILY_NAME or clue.start != start:
-                continue
-            tier_values = clue.source_metadata.get("surname_tier", [])
-            if not tier_values:
-                continue
-            tier_value = str(tier_values[0]).strip().lower()
-            if tier_value != "custom":
-                continue
-            surname_text = compact_zh_name_text(clue.text)
-            if not surname_text or not compact_candidate.startswith(surname_text):
-                continue
-            match_kind = "compound" if len(surname_text) > 1 else "single"
-            return ZhSurnameMatch(
-                text=surname_text,
-                match_kind=match_kind,
-                tier="custom",
-                base_score=self._rules.scoring.single_strong,
-                from_dictionary=True,
-            )
-        return None
-
-    def _has_given_name_evidence(
-        self,
-        *,
-        compact_candidate: str,
-        surname_text: str,
-        start: int,
-        end: int,
-        name_clues: list[tuple[int, Clue]],
-    ) -> bool:
-        tail = compact_candidate[len(surname_text) :]
-        if tail and tail in self._rules.zh_given_names:
-            return True
-        if tail and tail[0] in self._rules.given_name_tail_chars:
-            return True
-        raw_given_start = start + len(surname_text)
-        for _index, clue in name_clues:
-            if clue.role != ClueRole.GIVEN_NAME:
-                continue
-            if clue.start >= raw_given_start and clue.end <= end:
-                return True
-        return False
-
-    def _seed_context_score(self, clue: Clue) -> int:
-        if clue.role not in _SEED_CONTEXT_ROLES:
-            return 0
-        values = clue.source_metadata.get("seed_context_score", [])
-        if not values:
-            return 0
-        try:
-            return int(values[0])
-        except ValueError:
-            return 0
-
-    def _score_for_single_tier(self, tier: str) -> int:
-        if tier == "strong":
-            return self._rules.scoring.single_strong
-        if tier == "medium":
-            return self._rules.scoring.single_medium
-        if tier == "weak":
-            return self._rules.scoring.single_weak
-        return self._rules.scoring.single_strong
+def dominant_negative_overlap_kind(overlaps: Sequence[NegativeOverlap]) -> NegativeOverlapKind:
+    """返回重叠列表中的主导 negative 类型。"""
+    if not overlaps:
+        return NegativeOverlapKind.NONE
+    return max(overlaps, key=lambda item: _NEGATIVE_KIND_PRIORITY[item.kind]).kind
 
 
-def _units_fully_covered(marks: Sequence[int], unit_start: int, unit_end: int) -> bool:
-    """判断姓名尾段是否被 negative 连续完整覆盖。"""
-    safe_start = max(0, min(len(marks), int(unit_start)))
-    safe_end = max(0, min(len(marks), int(unit_end)))
-    if safe_end <= safe_start:
-        return False
-    return all(mark > 0 for mark in marks[safe_start:safe_end])
+def has_any_negative_overlap(overlaps: Sequence[NegativeOverlap]) -> bool:
+    """判断是否命中任意 negative。"""
+    return bool(overlaps)
+
+
+def direct_submit_negative_allowed(overlaps: Sequence[NegativeOverlap]) -> bool:
+    """直接提交路径是否允许当前 negative 命中集合。"""
+    return all(item.kind in _DIRECT_SUBMIT_ALLOWED_KINDS for item in overlaps)
+
+
+def family_negative_blocks_stack_immediately(overlaps: Sequence[NegativeOverlap]) -> bool:
+    """姓片段是否命中强阻断（应立刻结束本栈，不再扩张）。"""
+    return any(item.kind in _FAMILY_IMMEDIATE_EXIT_KINDS for item in overlaps)
+
+
+def given_or_implicit_tail_negative_cancels_candidate(overlaps: Sequence[NegativeOverlap]) -> bool:
+    """显式名或隐式尾部是否命中强阻断（应取消整段姓名提交）。"""
+    return any(item.kind in _GIVEN_OR_IMPLICIT_TAIL_CANCEL_KINDS for item in overlaps)
+
+
+def component_negative_demotes_claim_strength(overlaps: Sequence[NegativeOverlap]) -> bool:
+    """是否仅通过 claim_strength 降一级即可继续（不含强阻断类）。"""
+    return any(item.kind in _CLAIM_STRENGTH_DEMOTION_KINDS for item in overlaps)
 
 
 __all__ = [
-    "ZhNameCommitScorer",
-    "ZhNameRules",
-    "ZhNameScoreDecision",
-    "ZhNameScoreWeights",
-    "ZhNameSubmitThresholds",
-    "ZhSurnameMatch",
-    "build_zh_name_rules",
+    "NegativeOverlap",
+    "NegativeOverlapKind",
+    "StandaloneMatchKind",
+    "ZhNameCommitDecision",
+    "claim_strength_meets_protection",
+    "claim_strength_required_for_protection",
+    "classify_negative_overlap",
+    "collect_blocking_overlaps",
+    "collect_negative_overlaps",
     "compact_zh_name_text",
+    "component_negative_demotes_claim_strength",
+    "direct_submit_negative_allowed",
+    "dominant_negative_overlap_kind",
+    "downgrade_claim_strength",
+    "family_negative_blocks_stack_immediately",
+    "given_or_implicit_tail_negative_cancels_candidate",
+    "has_any_negative_overlap",
+    "stronger_claim_strength",
+    "upgrade_claim_strength",
 ]

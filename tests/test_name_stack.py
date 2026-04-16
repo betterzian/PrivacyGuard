@@ -1,17 +1,35 @@
-"""姓名栈行为测试。"""
+"""中文姓名栈行为测试。"""
 
 from __future__ import annotations
 
 from dataclasses import replace
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
-from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, build_clue_index, build_negative_unit_index
+from privacyguard.infrastructure.pii.detector.models import (
+    AddressComponentType,
+    ClaimStrength,
+    Clue,
+    ClueBundle,
+    ClueFamily,
+    ClueRole,
+    build_clue_index,
+    build_negative_unit_index,
+)
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
 from privacyguard.infrastructure.pii.detector.stacks import NameStack
+from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
+
+
+def _family_for_attr(attr_type: PIIAttributeType | None) -> ClueFamily:
+    if attr_type == PIIAttributeType.NAME:
+        return ClueFamily.NAME
+    if attr_type == PIIAttributeType.ADDRESS:
+        return ClueFamily.ADDRESS
+    if attr_type == PIIAttributeType.ORGANIZATION:
+        return ClueFamily.ORGANIZATION
+    return ClueFamily.CONTROL
 
 
 def _clue(
@@ -22,26 +40,15 @@ def _clue(
     text: str,
     *,
     source_kind: str,
-    component_hint: NameComponentHint | None = None,
     attr_type: PIIAttributeType | None = PIIAttributeType.NAME,
-    hard_source: str | None = None,
-    source_metadata: dict[str, list[str]] | None = None,
     strength: ClaimStrength = ClaimStrength.SOFT,
+    family: ClueFamily | None = None,
+    source_metadata: dict[str, list[str]] | None = None,
+    component_type: AddressComponentType | None = None,
 ) -> Clue:
-    md = dict(source_metadata) if source_metadata else {}
-    if hard_source:
-        md.setdefault("hard_source", [hard_source])
-    if component_hint is not None:
-        md.setdefault("name_component_hint", [component_hint.value])
-    if role == ClueRole.START:
-        md.setdefault("seed_context_score", ["4"])
-        md.setdefault("seed_kind", ["start"])
-    elif role == ClueRole.LABEL:
-        md.setdefault("seed_context_score", ["4"])
-        md.setdefault("seed_kind", ["label"])
     return Clue(
         clue_id=clue_id,
-        family=ClueFamily.CONTROL if role == ClueRole.NEGATIVE or attr_type is None else ClueFamily.NAME,
+        family=family or _family_for_attr(attr_type),
         role=role,
         attr_type=attr_type,
         strength=strength,
@@ -49,26 +56,9 @@ def _clue(
         end=end,
         text=text,
         source_kind=source_kind,
-        source_metadata=md,
+        source_metadata=dict(source_metadata or {}),
+        component_type=component_type,
     )
-
-
-def _run_name_stack(text: str, clue_index: int, clues: tuple[Clue, ...], *, protection_level: ProtectionLevel) -> NameStack:
-    stream = build_prompt_stream(text)
-    fixed, index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
-    target = clues[clue_index]
-    context = StackContext(
-        stream=stream,
-        locale_profile="mixed",
-        protection_level=protection_level,
-        clues=fixed,
-        negative_unit_marks=negative_unit_marks,
-        negative_prefix_sum=negative_prefix_sum,
-        negative_start_weight=negative_start_weight,
-        clue_index=build_clue_index(len(stream.units), fixed),
-    )
-    fixed_index = index_by_id[target.clue_id]
-    return NameStack(clue=fixed[fixed_index], clue_index=fixed_index, context=context)
 
 
 def _with_units(stream, clue: Clue) -> Clue:
@@ -79,14 +69,16 @@ def _with_units(stream, clue: Clue) -> Clue:
 def _split_negative_clues(
     stream,
     clues: tuple[Clue, ...],
-) -> tuple[tuple[Clue, ...], dict[str, int], list[int], list[int], int]:
+) -> tuple[tuple[Clue, ...], tuple[Clue, ...], dict[str, int], list[int], list[int], int]:
     fixed_clues: list[Clue] = []
+    negative_clues: list[Clue] = []
     index_by_id: dict[str, int] = {}
     negative_spans: list[tuple[int, int]] = []
 
     for clue in clues:
         fixed = _with_units(stream, clue)
         if fixed.role == ClueRole.NEGATIVE:
+            negative_clues.append(fixed)
             negative_spans.append((fixed.unit_start, fixed.unit_end))
             continue
         index_by_id[fixed.clue_id] = len(fixed_clues)
@@ -96,744 +88,172 @@ def _split_negative_clues(
         len(stream.units),
         negative_spans,
     )
-    return tuple(fixed_clues), index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight
+    return (
+        tuple(fixed_clues),
+        tuple(negative_clues),
+        index_by_id,
+        negative_unit_marks,
+        negative_prefix_sum,
+        negative_start_weight,
+    )
 
 
-def _parse_name_texts(
+def _run_name_stack(text: str, clue_index: int, clues: tuple[Clue, ...], *, protection_level: ProtectionLevel) -> NameStack:
+    stream = build_prompt_stream(text)
+    fixed, negative_clues, index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(
+        stream,
+        clues,
+    )
+    target = clues[clue_index]
+    context = StackContext(
+        stream=stream,
+        locale_profile="mixed",
+        protection_level=protection_level,
+        clues=fixed,
+        negative_clues=negative_clues,
+        negative_unit_marks=negative_unit_marks,
+        negative_prefix_sum=negative_prefix_sum,
+        negative_start_weight=negative_start_weight,
+        clue_index=build_clue_index(len(stream.units), fixed),
+    )
+    fixed_index = index_by_id[target.clue_id]
+    return NameStack(clue=fixed[fixed_index], clue_index=fixed_index, context=context)
+
+
+def _parse_candidates(
     text: str,
     clues: tuple[Clue, ...],
     *,
     protection_level: ProtectionLevel = ProtectionLevel.STRONG,
-) -> list[str]:
+):
     ctx = DetectContext(protection_level=protection_level)
     stream = build_prompt_stream(text)
-    fixed, _, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
+    fixed, negative_clues, _index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(
+        stream,
+        clues,
+    )
     parser = StreamParser(locale_profile="mixed", ctx=ctx)
     result = parser.parse(
         stream,
         ClueBundle(
             all_clues=fixed,
+            negative_clues=negative_clues,
             negative_unit_marks=negative_unit_marks,
             negative_prefix_sum=negative_prefix_sum,
             negative_start_weight=negative_start_weight,
             clue_index=build_clue_index(len(stream.units), fixed),
         ),
     )
-    return [candidate.text for candidate in result.candidates if candidate.attr_type == PIIAttributeType.NAME]
+    return result.candidates
 
 
-def test_label_seed_skips_separators_and_captures_value_chars():
-    text = "姓名: 张三"
-    clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            2,
-            "姓名",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
+def _name_texts(text: str, clues: tuple[Clue, ...], *, protection_level: ProtectionLevel = ProtectionLevel.STRONG) -> list[str]:
+    return [
+        candidate.text
+        for candidate in _parse_candidates(text, clues, protection_level=protection_level)
+        if candidate.attr_type == PIIAttributeType.NAME
+    ]
+
+
+def test_full_name_direct_submit_accepts_none_exact_and_negative_fully_inside():
+    assert _name_texts(
+        "张三",
+        (
+            _clue("full-1", ClueRole.FULL_NAME, 0, 2, "张三", source_kind="dictionary_local", strength=ClaimStrength.HARD),
         ),
+    ) == ["张三"]
+    assert _name_texts(
+        "张三",
+        (
+            _clue("full-1", ClueRole.FULL_NAME, 0, 2, "张三", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+            _clue("neg-1", ClueRole.NEGATIVE, 0, 2, "张三", source_kind="negative_name_word", attr_type=None),
+        ),
+    ) == ["张三"]
+    assert _name_texts(
+        "张三丰",
+        (
+            _clue("full-1", ClueRole.FULL_NAME, 0, 3, "张三丰", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+            _clue("neg-1", ClueRole.NEGATIVE, 1, 2, "三", source_kind="negative_name_word", attr_type=None),
+        ),
+    ) == ["张三丰"]
+
+
+def test_full_name_direct_submit_allows_local_vault_name_containing_negative_subspan():
+    """本地 FULL_NAME 可包含 blacklist 子串（如「三丰」嵌在「张三丰」内），仍允许直接提交。"""
+    assert _name_texts(
+        "张三丰",
+        (
+            _clue("full-1", ClueRole.FULL_NAME, 0, 3, "张三丰", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+            _clue("neg-1", ClueRole.NEGATIVE, 1, 3, "三丰", source_kind="negative_name_word", attr_type=None),
+        ),
+    ) == ["张三丰"]
+
+
+def test_full_name_parser_drops_name_when_address_span_strictly_contains():
+    """NAME 与更长地址重叠时，parser 按 unit 区间严格包含规则只保留地址，不再输出 NAME。"""
+    assert _name_texts(
+        "张三丰路",
+        (
+            _clue("full-1", ClueRole.FULL_NAME, 0, 3, "张三丰", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+            _clue(
+                "addr-1",
+                ClueRole.VALUE,
+                0,
+                4,
+                "张三丰路",
+                source_kind="geo_db",
+                attr_type=PIIAttributeType.ADDRESS,
+                family=ClueFamily.ADDRESS,
+                strength=ClaimStrength.HARD,
+                component_type=AddressComponentType.ROAD,
+            ),
+        ),
+    ) == []
+
+
+def test_alias_and_given_name_share_direct_submit_rules():
+    assert _name_texts(
+        "阿宝",
+        (
+            _clue("alias-1", ClueRole.ALIAS, 0, 2, "阿宝", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+            _clue("neg-1", ClueRole.NEGATIVE, 1, 2, "宝", source_kind="negative_name_word", attr_type=None),
+        ),
+    ) == ["阿宝"]
+    assert _name_texts(
+        "可欣",
+        (
+            _clue("given-1", ClueRole.GIVEN_NAME, 0, 2, "可欣", source_kind="zh_given_name", strength=ClaimStrength.SOFT),
+            _clue("neg-1", ClueRole.NEGATIVE, 0, 2, "可欣", source_kind="negative_name_word", attr_type=None),
+        ),
+    ) == ["可欣"]
+
+
+def test_given_name_direct_submit_still_respects_protection_gate():
+    assert _name_texts(
+        "可欣",
+        (
+            _clue("given-1", ClueRole.GIVEN_NAME, 0, 2, "可欣", source_kind="zh_given_name", strength=ClaimStrength.SOFT),
+        ),
+        protection_level=ProtectionLevel.WEAK,
+    ) == []
+
+
+def test_family_path_limits_single_surname_to_three_chars_by_default():
+    text = "张三丰武学"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "张", source_kind="family_name", strength=ClaimStrength.WEAK),
     )
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
     assert run is not None
-    assert run.candidate.text == "张三"
+    assert run.candidate.text == "张三丰"
 
 
-def test_start_seed_uses_first_character_after_separator():
-    text = "我是：张三"
+def test_compound_surname_path_allows_four_chars():
+    text = "欧阳娜娜"
     clues = (
-        _clue(
-            "start-1",
-            ClueRole.START,
-            0,
-            2,
-            "我是",
-            source_kind="name_start",
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "张三"
-
-
-def test_zh_given_name_seed_does_not_submit_without_surname_anchor():
-    text = "杨汉文"
-    clues = (
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            1,
-            3,
-            "汉文",
-            source_kind="zh_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is None
-
-
-def test_en_given_name_seed_can_expand_left_one_plain_word():
-    text = "John Marie"
-    clues = (
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            5,
-            10,
-            "Marie",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "John Marie"
-
-
-def test_standalone_en_name_inherits_strongest_component_strength():
-    text = "Yang John"
-    clues = (
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            0,
-            4,
-            "Yang",
-            source_kind="en_surname",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            5,
-            9,
-            "John",
-            source_kind="dictionary_local",
-            component_hint=NameComponentHint.GIVEN,
-            strength=ClaimStrength.HARD,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "Yang John"
-    assert run.candidate.claim_strength == ClaimStrength.HARD
-
-
-def test_en_given_name_seed_can_chain_right_given_names():
-    text = "Ann de Marie Claire"
-    clues = (
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            0,
-            3,
-            "Ann",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-        _clue(
-            "given-2",
-            ClueRole.GIVEN_NAME,
-            7,
-            12,
-            "Marie",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-        _clue(
-            "given-3",
-            ClueRole.GIVEN_NAME,
-            13,
-            19,
-            "Claire",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "Ann de Marie Claire"
-
-
-def test_en_given_name_seed_stops_when_gap_has_two_words():
-    text = "Ann de la Marie"
-    clues = (
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            0,
-            3,
-            "Ann",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-        _clue(
-            "given-2",
-            ClueRole.GIVEN_NAME,
-            10,
-            15,
-            "Marie",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "Ann"
-
-
-def test_en_family_name_seed_switches_to_given_chain():
-    text = "Doe John Paul"
-    clues = (
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            0,
-            3,
-            "Doe",
-            source_kind="en_family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            4,
-            8,
-            "John",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-        _clue(
-            "given-2",
-            ClueRole.GIVEN_NAME,
-            9,
-            13,
-            "Paul",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.WEAK).run()
-
-    assert run is not None
-    assert run.candidate.text == "Doe John Paul"
-
-
-def test_label_seed_switches_to_given_chain_in_english():
-    text = "name: John Paul"
-    clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            4,
-            "name",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-        ),
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            6,
-            10,
-            "John",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-        _clue(
-            "given-2",
-            ClueRole.GIVEN_NAME,
-            11,
-            15,
-            "Paul",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.WEAK).run()
-
-    assert run is not None
-    assert run.candidate.text == "John Paul"
-
-
-def test_full_name_and_alias_submit_directly_under_weak():
-    full_clues = (
-        _clue(
-            "full-1",
-            ClueRole.FULL_NAME,
-            0,
-            11,
-            "Jordan Demo",
-            source_kind="dictionary_local",
-            component_hint=NameComponentHint.FULL,
-            hard_source="local",
-            strength=ClaimStrength.HARD,
-            source_metadata={"name_component": ["full"]},
-        ),
-    )
-    alias_clues = (
-        _clue(
-            "alias-1",
-            ClueRole.ALIAS,
-            0,
-            2,
-            "阿宝",
-            source_kind="dictionary_local",
-            component_hint=NameComponentHint.ALIAS,
-            hard_source="local",
-            strength=ClaimStrength.HARD,
-            source_metadata={"name_component": ["alias"]},
-        ),
-    )
-
-    full_run = _run_name_stack("Jordan Demo", 0, full_clues, protection_level=ProtectionLevel.WEAK).run()
-    alias_run = _run_name_stack("阿宝", 0, alias_clues, protection_level=ProtectionLevel.WEAK).run()
-
-    assert full_run is not None
-    assert full_run.candidate.text == "Jordan Demo"
-    assert alias_run is not None
-    assert alias_run.candidate.text == "阿宝"
-
-
-def test_balanced_accepts_single_dictionary_given_name_longer_than_one_char():
-    clues = (
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            0,
-            2,
-            "汉文",
-            source_kind="dictionary_local",
-            component_hint=NameComponentHint.GIVEN,
-            hard_source="local",
-            strength=ClaimStrength.HARD,
-            source_metadata={"name_component": ["given"]},
-        ),
-    )
-
-    run = _run_name_stack("汉文", 0, clues, protection_level=ProtectionLevel.BALANCED).run()
-
-    assert run is not None
-    assert run.candidate.text == "汉文"
-
-
-def test_weak_rejects_single_non_privileged_name_clue():
-    clues = (
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            0,
-            3,
-            "Ann",
-            source_kind="en_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-    )
-
-    run = _run_name_stack("Ann", 0, clues, protection_level=ProtectionLevel.WEAK).run()
-
-    assert run is None
-
-
-def test_same_role_clues_only_count_once_under_weak():
-    text = "van Helsing"
-    clues = (
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            0,
-            3,
-            "van",
-            source_kind="en_family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue(
-            "family-2",
-            ClueRole.FAMILY_NAME,
-            4,
-            11,
-            "Helsing",
-            source_kind="en_family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.WEAK).run()
-
-    assert run is None
-
-
-def test_negative_overlap_blocks_non_privileged_submit_when_not_fully_exited():
-    text = "杨汉文档"
-    clues = (
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            0,
-            1,
-            "杨",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            1,
-            3,
-            "汉文",
-            source_kind="zh_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-        _clue(
-            "neg-1",
-            ClueRole.NEGATIVE,
-            2,
-            4,
-            "文档",
-            source_kind="negative_ui_word",
-            attr_type=None,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is None
-
-
-def test_start_seed_rejects_blacklisted_exact_negative_name():
-    text = "我叫张力"
-    clues = (
-        _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            2,
-            3,
-            "张",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "张力", source_kind="negative_name_word", attr_type=None),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is None
-
-
-def test_start_seed_rejects_two_char_negative_word_name_under_strong():
-    text = "我叫高兴"
-    clues = (
-        _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            2,
-            3,
-            "高",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "高兴", source_kind="negative_name_word", attr_type=None),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is None
-
-
-def test_start_seed_keeps_three_char_name_when_prefix_is_negative():
-    text = "我叫王国庆"
-    clues = (
-        _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            2,
-            3,
-            "王",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "王国", source_kind="negative_name_word", attr_type=None),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "王国庆"
-
-
-def test_label_seed_keeps_three_char_name_when_prefix_is_negative():
-    text = "收件人：孟子轩"
-    clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            3,
-            "收件人",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-        ),
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            4,
-            5,
-            "孟",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            5,
-            7,
-            "子轩",
-            source_kind="zh_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "孟子", source_kind="negative_name_word", attr_type=None),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "孟子轩"
-
-
-def test_label_seed_rejects_exact_negative_word_name():
-    text = "收件人：高兴"
-    clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            3,
-            "收件人",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-        ),
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            4,
-            5,
-            "高",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "高兴", source_kind="negative_name_word", attr_type=None),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is None
-
-
-def test_label_seed_keeps_name_when_prefix_is_negative_and_given_name_exists():
-    text = "用户许可欣"
-    clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            2,
-            "用户",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-        ),
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            2,
-            3,
-            "许",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            3,
-            5,
-            "可欣",
-            source_kind="zh_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "许可", source_kind="negative_name_word", attr_type=None),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "许可欣"
-
-
-def test_parser_rejects_blacklisted_start_seed_name():
-    text = "我叫张力"
-    clues = (
-        _clue("start-1", ClueRole.START, 0, 2, "我叫", source_kind="name_start"),
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            2,
-            3,
-            "张",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "张力", source_kind="negative_name_word", attr_type=None),
-    )
-
-    assert _parse_name_texts(text, clues) == []
-
-
-def test_parser_keeps_label_seed_name_despite_negative():
-    text = "收件人：孟子轩"
-    clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            3,
-            "收件人",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-        ),
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            4,
-            5,
-            "孟",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            5,
-            7,
-            "子轩",
-            source_kind="zh_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "孟子", source_kind="negative_name_word", attr_type=None),
-    )
-
-    assert _parse_name_texts(text, clues) == ["孟子轩"]
-
-
-def test_parser_rejects_exact_negative_word_from_label_seed():
-    text = "收件人：高兴"
-    clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            3,
-            "收件人",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-        ),
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            4,
-            5,
-            "高",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "高兴", source_kind="negative_name_word", attr_type=None),
-    )
-
-    assert _parse_name_texts(text, clues) == []
-
-
-def test_label_seed_accepts_short_common_name():
-    text = "姓名: 张三"
-    clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            2,
-            "姓名",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-            source_metadata={"seed_context_score": ["4"]},
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "张三"
-
-
-def test_label_seed_accepts_weak_surname_with_given_name_evidence():
-    text = "用户姓名：李娜"
-    clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            4,
-            "用户姓名",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-            source_metadata={"seed_context_score": ["4"]},
-        ),
-        _clue(
-            "given-1",
-            ClueRole.GIVEN_NAME,
-            6,
-            7,
-            "娜",
-            source_kind="zh_given_name",
-            component_hint=NameComponentHint.GIVEN,
-        ),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "李娜"
-
-
-def test_start_seed_accepts_compound_surname_name():
-    text = "姓名是 欧阳娜娜"
-    clues = (
-        _clue(
-            "start-1",
-            ClueRole.START,
-            0,
-            3,
-            "姓名是",
-            source_kind="name_start",
-            source_metadata={"seed_context_score": ["4"], "seed_kind": ["start"]},
-        ),
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 2, "欧阳", source_kind="family_name", strength=ClaimStrength.HARD),
     )
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
@@ -842,20 +262,33 @@ def test_start_seed_accepts_compound_surname_name():
     assert run.candidate.text == "欧阳娜娜"
 
 
-def test_label_seed_rejects_direction_phrase():
-    text = "姓名：方向"
+def test_family_path_same_start_cover_can_drop_weak_family_component():
+    text = "王国庆"
     clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "王", source_kind="family_name", strength=ClaimStrength.WEAK),
+        _clue("neg-1", ClueRole.NEGATIVE, 0, 2, "王国", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is None
+
+
+def test_family_path_other_attr_overlap_demotes_like_negative():
+    text = "王国庆"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "王", source_kind="family_name", strength=ClaimStrength.WEAK),
         _clue(
-            "label-1",
-            ClueRole.LABEL,
+            "addr-1",
+            ClueRole.VALUE,
             0,
             2,
-            "姓名",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-            source_metadata={"seed_context_score": ["4"]},
+            "王国",
+            source_kind="dictionary_local",
+            attr_type=PIIAttributeType.ADDRESS,
+            family=ClueFamily.ADDRESS,
+            strength=ClaimStrength.SOFT,
         ),
-        _clue("neg-1", ClueRole.NEGATIVE, 3, 5, "方向", source_kind="negative_name_word", attr_type=None),
     )
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
@@ -863,20 +296,14 @@ def test_label_seed_rejects_direction_phrase():
     assert run is None
 
 
-def test_label_seed_rejects_title_font_phrase():
-    text = "用户姓名：宋体"
+def test_label_seed_dropped_when_given_or_standalone_hits_strong_negative():
+    """名片段与 blacklist 部分重叠 → 整段取消；standalone 内命中 negative 亦不再提交。"""
+    text = "用户许可欣同学"
     clues = (
-        _clue(
-            "label-1",
-            ClueRole.LABEL,
-            0,
-            4,
-            "用户姓名",
-            source_kind="context_name_field",
-            component_hint=NameComponentHint.FULL,
-            source_metadata={"seed_context_score": ["4"]},
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 5, 7, "宋体", source_kind="negative_name_word", attr_type=None),
+        _clue("label-1", ClueRole.LABEL, 0, 2, "用户", source_kind="context_name_field"),
+        _clue("family-1", ClueRole.FAMILY_NAME, 2, 3, "许", source_kind="family_name", strength=ClaimStrength.SOFT),
+        _clue("given-1", ClueRole.GIVEN_NAME, 3, 5, "可欣", source_kind="zh_given_name", strength=ClaimStrength.SOFT),
+        _clue("neg-1", ClueRole.NEGATIVE, 2, 4, "许可", source_kind="negative_name_word", attr_type=None),
     )
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
@@ -884,19 +311,212 @@ def test_label_seed_rejects_title_font_phrase():
     assert run is None
 
 
-def test_parser_still_blocks_non_seed_negative_phrase():
-    text = "高兴地说"
+def test_standalone_double_boundary_with_negative_is_dropped():
+    text = "收件人：孟子轩"
     clues = (
-        _clue(
-            "family-1",
-            ClueRole.FAMILY_NAME,
-            0,
-            1,
-            "高",
-            source_kind="family_name",
-            component_hint=NameComponentHint.FAMILY,
-        ),
-        _clue("neg-1", ClueRole.NEGATIVE, 0, 2, "高兴", source_kind="negative_name_word", attr_type=None),
+        _clue("label-1", ClueRole.LABEL, 0, 3, "收件人", source_kind="context_name_field"),
+        _clue("family-1", ClueRole.FAMILY_NAME, 4, 5, "孟", source_kind="family_name", strength=ClaimStrength.SOFT),
+        _clue("given-1", ClueRole.GIVEN_NAME, 5, 7, "子轩", source_kind="zh_given_name", strength=ClaimStrength.SOFT),
+        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "孟子", source_kind="negative_name_word", attr_type=None),
     )
 
-    assert _parse_name_texts(text, clues) == []
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is None
+
+
+def test_single_boundary_standalone_upgrades_claim_strength():
+    text = "他说张三,"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 2, 3, "张", source_kind="family_name", strength=ClaimStrength.WEAK),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "张三"
+    assert run.candidate.claim_strength == ClaimStrength.SOFT
+
+
+def test_label_seed_outputs_hard_candidate():
+    text = "姓名: 张三"
+    clues = (
+        _clue("label-1", ClueRole.LABEL, 0, 2, "姓名", source_kind="context_name_field"),
+        _clue("family-1", ClueRole.FAMILY_NAME, 4, 5, "张", source_kind="family_name", strength=ClaimStrength.WEAK),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "张三"
+    assert run.candidate.claim_strength == ClaimStrength.HARD
+
+
+def test_parser_span_containment_address_wins_over_name_prefix():
+    """ADDRESS 的 unit 区间严格包含 NAME 时，包含方胜出（不比较 strength）。"""
+    text = "张三路"
+    clues = (
+        _clue("name-1", ClueRole.FULL_NAME, 0, 2, "张三", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+        _clue(
+            "addr-1",
+            ClueRole.VALUE,
+            0,
+            3,
+            "张三路",
+            source_kind="geo_db",
+            attr_type=PIIAttributeType.ADDRESS,
+            family=ClueFamily.ADDRESS,
+            strength=ClaimStrength.HARD,
+            component_type=AddressComponentType.ROAD,
+        ),
+    )
+
+    candidates = _parse_candidates(text, clues)
+
+    assert [(candidate.attr_type, candidate.text) for candidate in candidates] == [
+        (PIIAttributeType.ADDRESS, "张三路"),
+    ]
+
+
+def test_parser_span_containment_email_wins_over_name_inside():
+    """EMAIL 的 unit 区间严格包含 NAME 时，包含方胜出。"""
+    text = "张三@example.com"
+    clues = (
+        _clue("name-1", ClueRole.FULL_NAME, 0, 2, "张三", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+        _clue(
+            "email-1",
+            ClueRole.VALUE,
+            0,
+            len(text),
+            text,
+            source_kind="regex_email",
+            attr_type=PIIAttributeType.EMAIL,
+            family=ClueFamily.STRUCTURED,
+            strength=ClaimStrength.HARD,
+            source_metadata={"hard_source": ["regex"], "placeholder": ["<email>"]},
+        ),
+    )
+
+    candidates = _parse_candidates(text, clues)
+
+    assert [(candidate.attr_type, candidate.text) for candidate in candidates] == [
+        (PIIAttributeType.EMAIL, text),
+    ]
+
+
+def test_parser_address_wins_name_then_independent_email_commits():
+    """NAME 被更长 ADDRESS 包含则只保留地址；右侧与地址不重叠的 EMAIL 照常提交。"""
+    text = "张三路 demo@example.com"
+    email_text = "demo@example.com"
+    email_start = text.index(email_text)
+    clues = (
+        _clue("name-1", ClueRole.FULL_NAME, 0, 2, "张三", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+        _clue(
+            "addr-1",
+            ClueRole.VALUE,
+            0,
+            3,
+            "张三路",
+            source_kind="geo_db",
+            attr_type=PIIAttributeType.ADDRESS,
+            family=ClueFamily.ADDRESS,
+            strength=ClaimStrength.HARD,
+            component_type=AddressComponentType.ROAD,
+        ),
+        _clue(
+            "email-1",
+            ClueRole.VALUE,
+            email_start,
+            len(text),
+            email_text,
+            source_kind="regex_email",
+            attr_type=PIIAttributeType.EMAIL,
+            family=ClueFamily.STRUCTURED,
+            strength=ClaimStrength.HARD,
+            source_metadata={"hard_source": ["regex"], "placeholder": ["<email>"]},
+        ),
+    )
+
+    candidates = _parse_candidates(text, clues)
+
+    assert [(candidate.attr_type, candidate.text) for candidate in candidates] == [
+        (PIIAttributeType.ADDRESS, "张三路"),
+        (PIIAttributeType.EMAIL, email_text),
+    ]
+
+
+def test_parser_commits_winner_when_name_loses_strength_conflict():
+    text = "张三@example.com"
+    clues = (
+        _clue("name-1", ClueRole.FULL_NAME, 0, 2, "张三", source_kind="dictionary_local", strength=ClaimStrength.SOFT),
+        _clue(
+            "email-1",
+            ClueRole.VALUE,
+            0,
+            len(text),
+            text,
+            source_kind="regex_email",
+            attr_type=PIIAttributeType.EMAIL,
+            family=ClueFamily.STRUCTURED,
+            strength=ClaimStrength.HARD,
+            source_metadata={"hard_source": ["regex"], "placeholder": ["<email>"]},
+        ),
+    )
+
+    candidates = _parse_candidates(text, clues)
+
+    assert [(candidate.attr_type, candidate.text) for candidate in candidates] == [
+        (PIIAttributeType.EMAIL, text),
+    ]
+
+
+def test_family_strong_negative_exits_stack_before_given_expansion():
+    """姓片段被 FULLY_COVERED / PARTIAL 强阻断时本栈立即结束（不吞后续名）。"""
+    text = "左张右可欣"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 1, 2, "张", source_kind="family_name", strength=ClaimStrength.HARD),
+        _clue("given-1", ClueRole.GIVEN_NAME, 3, 5, "可欣", source_kind="zh_given_name", strength=ClaimStrength.SOFT),
+        _clue("neg-1", ClueRole.NEGATIVE, 0, 3, "左张右", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is None
+
+
+def test_implicit_tail_partial_negative_cancels_boundary_name():
+    """无显式 given 时，姓右扩尾部与 blacklist 部分重叠 → 取消整段提交。"""
+    text = "张三丰"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "张", source_kind="family_name", strength=ClaimStrength.HARD),
+        _clue("neg-1", ClueRole.NEGATIVE, 0, 2, "张三", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is None
+
+
+def test_standalone_span_any_negative_cancels_even_single_boundary():
+    """standalone 窗口内任意 negative 命中即放弃提交（不限 double_boundary）。"""
+    text = "他说张三"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 2, 3, "张", source_kind="family_name", strength=ClaimStrength.HARD),
+        _clue("neg-1", ClueRole.NEGATIVE, 1, 2, "说", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is None
+
+
+def test_parser_family_stack_exits_then_given_name_direct_still_parsed():
+    """姓 clue 因强阻断不产生 run 时，parser 继续扫描，后续 given 仍可独立提交。"""
+    text = "左张右可欣"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 1, 2, "张", source_kind="family_name", strength=ClaimStrength.HARD),
+        _clue("given-1", ClueRole.GIVEN_NAME, 3, 5, "可欣", source_kind="zh_given_name", strength=ClaimStrength.HARD),
+        _clue("neg-1", ClueRole.NEGATIVE, 0, 3, "左张右", source_kind="negative_name_word", attr_type=None),
+    )
+
+    assert _name_texts(text, clues, protection_level=ProtectionLevel.STRONG) == ["可欣"]

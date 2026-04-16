@@ -12,7 +12,10 @@ from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.address.geo_db import GeoEntry, load_en_geo_lexicon, load_zh_geo_lexicon
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
-    load_company_suffixes,
+    load_en_company_suffixes,
+    load_en_company_values,
+    load_zh_company_suffixes,
+    load_zh_company_values,
     load_en_address_country_aliases,
     load_en_address_keyword_groups,
     load_en_given_names,
@@ -24,9 +27,10 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_negative_org_words,
     load_negative_ui_words,
     load_zh_address_keyword_groups,
+    load_zh_compound_surnames,
     load_zh_control_values,
     load_zh_license_plate_values,
-    load_zh_name_rules,
+    load_zh_single_surname_claim_strengths,
 )
 from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern
 from privacyguard.infrastructure.pii.detector.models import (
@@ -47,7 +51,7 @@ from privacyguard.infrastructure.pii.detector.models import (
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks.common import examine_left_numeral
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
-from privacyguard.infrastructure.pii.detector.zh_name_rules import ZhNameRules, compact_zh_name_text
+from privacyguard.infrastructure.pii.detector.zh_name_rules import compact_zh_name_text
 
 _HARD_SOURCE_PRIORITY = {
     "session": 4,
@@ -183,22 +187,24 @@ _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
     (BreakType.NEWLINE, "break_newline", re.compile(r"(?:\r?\n){2,}")),
 )
 
+# 英文限定词列表——在 PII 检测中作为结构性 BREAK：
+# 真正的地名/组织名不接受冠词或限定词（如 "the street" 是泛指，不是 PII）。
+_ENGLISH_DETERMINERS = frozenset({
+    "the", "a", "an",
+    "this", "that", "these", "those",
+    "my", "your", "his", "her", "its", "our", "their",
+    "some", "any", "every", "each", "no",
+})
+_DETERMINER_PATTERN = re.compile(
+    r"\b(" + "|".join(sorted(_ENGLISH_DETERMINERS, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
 _LABEL_FIELD_SEPARATOR_CHARS = ":：-—–=|"
 # 标签边界：匹配到的 label 前方或后方至少有一侧满足此集合中的 unit kind，
 # 或处于文本起止位置。防止自然语句中嵌入的关键词被误识别为标签。
 _LABEL_BOUNDARY_UNIT_KINDS = frozenset({"punct", "inline_gap", "ocr_break"})
 _SEED_ROLES = frozenset({ClueRole.LABEL, ClueRole.START})
-_SOFT_CONTENT_ROLES = frozenset(
-    {
-        ClueRole.SUFFIX,
-        ClueRole.KEY,
-        ClueRole.VALUE,
-        ClueRole.FAMILY_NAME,
-        ClueRole.GIVEN_NAME,
-        ClueRole.FULL_NAME,
-        ClueRole.ALIAS,
-    }
-)
 _START_MASKED_SOFT_ROLES = frozenset(
     {
         ClueRole.SUFFIX,
@@ -337,12 +343,13 @@ def build_clue_bundle(
         soft_clues.extend(_scan_name_dictionary_clues(ctx, segment, local_name_entries, source_kind="local"))
         soft_clues.extend(_scan_label_clues(ctx, segment))
         soft_clues.extend(_scan_break_clues(ctx, segment))
+        soft_clues.extend(_scan_determiner_break_clues(ctx, segment))
         soft_clues.extend(_scan_name_start_clues(ctx, segment))
         soft_clues.extend(_scan_family_name_clues(ctx, segment))
         soft_clues.extend(_scan_en_surname_clues(ctx, segment))
         soft_clues.extend(_scan_en_given_name_clues(ctx, segment))
-        soft_clues.extend(_scan_zh_given_name_clues(ctx, segment))
         soft_clues.extend(_scan_company_suffix_clues(ctx, segment))
+        soft_clues.extend(_scan_company_value_clues(ctx, segment))
         soft_clues.extend(_scan_address_clues(ctx, segment, locale_profile=locale_profile))
         soft_clues.extend(_scan_license_plate_value_clues(ctx, segment, locale_profile=locale_profile))
         soft_clues.extend(_scan_control_value_clues(ctx, segment, locale_profile=locale_profile))
@@ -365,6 +372,7 @@ def build_clue_bundle(
     inspire_index = build_inspire_index(unit_count, inspire_entries) if inspire_entries else None
     return ClueBundle(
         all_clues=ordered_clues,
+        negative_clues=tuple(deduped_negative_clues),
         negative_unit_marks=negative_unit_marks,
         negative_prefix_sum=negative_prefix_sum,
         negative_start_weight=negative_start_weight,
@@ -720,12 +728,7 @@ def _scan_name_dictionary_clues(
         strength = ClaimStrength.HARD
         if is_zh_family:
             metadata.update(_zh_surname_metadata(matched_text, from_dictionary=True))
-            # 词典姓氏若与 scanner 词库重合，以 scanner 的 tier strength 为准。
-            rules = load_zh_name_rules()
-            if matched_text in rules.surname_tier_by_char or matched_text in rules.compound_surnames:
-                strength = _surname_strength(matched_text, rules)
-            else:
-                strength = ClaimStrength.SOFT
+            strength = _zh_surname_claim_strength(matched_text) or ClaimStrength.SOFT
         else:
             metadata["hard_source"] = [source_kind]
         _us, _ue = _char_span_to_unit_span(normalized_stream, start, end)
@@ -845,6 +848,41 @@ def _scan_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     return _dedupe_clues(clues)
 
 
+def _scan_determiner_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
+    """扫描英文限定词，生成 BREAK clue。
+
+    真正的地名/组织名不接受冠词（the Main Street ✗，Main Street ✓），
+    因此限定词标志着泛指用法的边界，功能上等同于标点 BREAK。
+    """
+    clues: list[Clue] = []
+    for match in _DETERMINER_PATTERN.finditer(segment.text):
+        raw_start, raw_end = _segment_span_to_raw(segment, match.start(), match.end())
+        text = segment.stream.text
+        # ASCII word boundary 双重确认：避免在 CJK 上下文中误触。
+        if raw_start > 0 and text[raw_start - 1].isascii() and text[raw_start - 1].isalnum():
+            continue
+        if raw_end < len(text) and text[raw_end].isascii() and text[raw_end].isalnum():
+            continue
+        _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.CONTROL,
+                role=ClueRole.BREAK,
+                attr_type=None,
+                strength=ClaimStrength.SOFT,
+                start=raw_start,
+                end=raw_end,
+                text=match.group(0),
+                unit_start=_us,
+                unit_end=_ue,
+                source_kind="break_determiner",
+                break_type=BreakType.DETERMINER,
+            )
+        )
+    return _dedupe_clues(clues)
+
+
 def _scan_ocr_break_clues(
     ctx: DetectContext,
     stream: StreamInput,
@@ -884,7 +922,6 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
             raw_start=raw_start,
             raw_end=raw_end,
             seed_kind="start",
-            fixed_score=4,
         )
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
@@ -906,35 +943,33 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
     return _dedupe_clues(clues)
 
 
-_SURNAME_TIER_TO_STRENGTH: dict[str, ClaimStrength] = {
-    "strong": ClaimStrength.HARD,
-    "medium": ClaimStrength.SOFT,
-    "weak": ClaimStrength.WEAK,
-}
+@lru_cache(maxsize=1)
+def _zh_single_surname_strength_map() -> dict[str, ClaimStrength]:
+    mapping: dict[str, ClaimStrength] = {}
+    for strength, surnames in load_zh_single_surname_claim_strengths().items():
+        for surname in surnames:
+            mapping[surname] = strength
+    return mapping
 
 
-def _surname_strength(surname: str, rules: ZhNameRules) -> ClaimStrength:
-    """根据姓氏 tier 映射 ClaimStrength。复姓 → HARD。"""
-    if len(surname) >= 2:
+def _zh_surname_claim_strength(surname: str) -> ClaimStrength | None:
+    """返回中文姓氏的 claim_strength；复姓固定为 ``HARD``。"""
+    compact = compact_zh_name_text(surname)
+    if compact in set(load_zh_compound_surnames()):
         return ClaimStrength.HARD
-    tier = rules.surname_tier_by_char.get(surname, "medium")
-    return _SURNAME_TIER_TO_STRENGTH.get(tier, ClaimStrength.SOFT)
+    return _zh_single_surname_strength_map().get(compact)
 
 
 def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
-    rules = load_zh_name_rules()
     clues: list[Clue] = []
     for match in _family_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
         normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
         if normalized is None:
             continue
-        tail = segment.text[match.end : match.end + 4]
-        if any(keyword in tail for keyword in ("省", "市", "区", "县", "旗", "路", "街", "道", "大道", "小区", "单元", "栋", "室", "住址", "地址")):
-            continue
         raw_start, raw_end, _matched_text = normalized
         surname_text = str(match.payload)
         metadata = _zh_surname_metadata(surname_text, from_dictionary=False)
-        strength = _surname_strength(surname_text, rules)
+        strength = _zh_surname_claim_strength(surname_text) or ClaimStrength.SOFT
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -1011,34 +1046,6 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
     return _dedupe_clues(clues)
 
 
-def _scan_zh_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
-    """扫描中文名字（given name），产出 GIVEN_NAME clue。"""
-    clues: list[Clue] = []
-    for match in _zh_given_name_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
-        if normalized is None:
-            continue
-        raw_start, raw_end, _matched_text = normalized
-        _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.NAME,
-                role=ClueRole.GIVEN_NAME,
-                attr_type=PIIAttributeType.NAME,
-                strength=ClaimStrength.SOFT,
-                start=raw_start,
-                end=raw_end,
-                text=str(match.payload),
-                unit_start=_us,
-                unit_end=_ue,
-                source_kind="zh_given_name",
-                source_metadata={"name_component_hint": ["given"]},
-            )
-        )
-    return _dedupe_clues(clues)
-
-
 def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
     clues: list[Clue] = []
     for match in _company_suffix_matcher().find_matches(segment.text, folded_text=segment.folded_text):
@@ -1061,6 +1068,36 @@ def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> lis
                 unit_start=_us,
                 unit_end=_ue,
                 source_kind="company_suffix",
+            )
+        )
+    return _dedupe_clues(clues)
+
+
+def _scan_company_value_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
+    """扫描已知公司名（VALUE），用于组织名起栈。"""
+    clues: list[Clue] = []
+    for match in _company_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+        normalized = _normalize_segment_ascii_match(
+            segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary,
+        )
+        if normalized is None:
+            continue
+        raw_start, raw_end, matched_text = normalized
+        entry = match.payload
+        _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+        clues.append(
+            Clue(
+                clue_id=ctx.next_clue_id(),
+                family=ClueFamily.ORGANIZATION,
+                role=ClueRole.VALUE,
+                attr_type=PIIAttributeType.ORGANIZATION,
+                strength=entry.strength,
+                start=raw_start,
+                end=raw_end,
+                text=matched_text,
+                unit_start=_us,
+                unit_end=_ue,
+                source_kind="company_value",
             )
         )
     return _dedupe_clues(clues)
@@ -1615,21 +1652,19 @@ def _is_cjk_text(text: str) -> bool:
 
 
 def _zh_surname_metadata(text: str, *, from_dictionary: bool) -> dict[str, list[str]]:
-    """根据统一中文姓名规则为姓氏 clue 补充元数据。"""
+    """为中文姓氏 clue 补充 scanner 元数据。"""
     compact = compact_zh_name_text(text)
-    rules = load_zh_name_rules()
     metadata: dict[str, list[str]] = {}
-    if compact in rules.compound_surnames:
+    strength = _zh_surname_claim_strength(compact)
+    if compact in set(load_zh_compound_surnames()):
         metadata["surname_match_kind"] = ["compound"]
-        metadata["surname_tier"] = ["compound"]
-    elif len(compact) == 1 and compact in rules.surname_tier_by_char:
+        metadata["surname_claim_strength"] = [ClaimStrength.HARD.value]
+    elif len(compact) == 1 and strength is not None:
         metadata["surname_match_kind"] = ["single"]
-        metadata["surname_tier"] = [rules.surname_tier_by_char[compact]]
+        metadata["surname_claim_strength"] = [strength.value]
     else:
         metadata["surname_match_kind"] = ["compound" if len(compact) > 1 else "single"]
-        metadata["surname_tier"] = ["custom"]
-    if compact in rules.boostable_medium_surnames:
-        metadata["boostable_medium"] = ["1"]
+        metadata["surname_claim_strength"] = [ClaimStrength.SOFT.value]
     if from_dictionary:
         metadata["surname_from_dictionary"] = ["1"]
     return metadata
@@ -1681,10 +1716,9 @@ def _seed_metadata(
     raw_start: int,
     raw_end: int,
     seed_kind: str,
-    fixed_score: int | None = None,
     extra_metadata: dict[str, list[str]] | None = None,
 ) -> dict[str, list[str]]:
-    """为 LABEL/START 生成统一的 seed 置信度元数据。"""
+    """为 LABEL/START 生成统一的边界元数据。"""
     stream = segment.stream
     metadata = {key: list(values) for key, values in (extra_metadata or {}).items()}
     unit_start, unit_end = _char_span_to_unit_span(stream, raw_start, raw_end)
@@ -1707,23 +1741,6 @@ def _seed_metadata(
         unit_index=unit_end,
         is_left=False,
     )
-    if fixed_score is not None:
-        seed_context_score = fixed_score
-    else:
-        seed_context_score = 1
-        if seed_has_connector_after:
-            seed_context_score += 2
-        if seed_is_left_edge:
-            seed_context_score += 1
-        if seed_is_right_edge:
-            seed_context_score += 1
-        if seed_surrounded:
-            seed_context_score += 1
-        if seed_segment_ratio >= 0.5:
-            seed_context_score += 1
-        seed_context_score = min(seed_context_score, 4)
-
-    metadata["seed_context_score"] = [str(seed_context_score)]
     metadata["seed_is_left_edge"] = ["1" if seed_is_left_edge else "0"]
     metadata["seed_is_right_edge"] = ["1" if seed_is_right_edge else "0"]
     metadata["seed_has_connector_after"] = ["1" if seed_has_connector_after else "0"]
@@ -1780,7 +1797,6 @@ def _try_convert_label_to_start(stream: StreamInput, clue: Clue) -> Clue | None:
     """尝试将 LABEL 转为 START：后面紧跟"是"或"is"（英文允许跳过空白 unit）则合并。"""
     def _as_start(target_unit_index: int) -> Clue:
         metadata = {key: list(values) for key, values in clue.source_metadata.items()}
-        metadata["seed_context_score"] = ["4"]
         metadata["seed_kind"] = ["start"]
         return replace(
             clue,
@@ -1995,7 +2011,14 @@ def _name_start_matcher() -> AhoMatcher:
 
 @lru_cache(maxsize=1)
 def _family_name_matcher() -> AhoMatcher:
-    rules = load_zh_name_rules()
+    all_surnames = [
+        *load_zh_compound_surnames(),
+        *[
+            surname
+            for surnames in load_zh_single_surname_claim_strengths().values()
+            for surname in surnames
+        ],
+    ]
     return AhoMatcher.from_patterns(
         tuple(
             AhoPattern(
@@ -2003,7 +2026,7 @@ def _family_name_matcher() -> AhoMatcher:
                 payload=surname,
                 ascii_boundary=_needs_ascii_keyword_boundary(surname),
             )
-            for surname in sorted(rules.all_surnames, key=len, reverse=True)
+            for surname in sorted(set(all_surnames), key=len, reverse=True)
         )
     )
 
@@ -2037,32 +2060,41 @@ def _en_given_name_matcher() -> AhoMatcher:
 
 
 @lru_cache(maxsize=1)
-def _zh_given_name_matcher() -> AhoMatcher:
-    rules = load_zh_name_rules()
-    return AhoMatcher.from_patterns(
-        tuple(
-            AhoPattern(
-                text=name,
-                payload=name,
-                ascii_boundary=_needs_ascii_keyword_boundary(name),
-            )
-            for name in rules.zh_given_names
-        )
-    )
-
-
-@lru_cache(maxsize=1)
 def _company_suffix_matcher() -> AhoMatcher:
-    return AhoMatcher.from_patterns(
-        tuple(
+    """合并中英文组织后缀词典，各自保留独立 strength。"""
+    seen: set[str] = set()
+    patterns: list[AhoPattern] = []
+    for entry in (*load_zh_company_suffixes(), *load_en_company_suffixes()):
+        if entry.text in seen:
+            continue
+        seen.add(entry.text)
+        patterns.append(
             AhoPattern(
                 text=entry.text,
                 payload=entry,
                 ascii_boundary=_needs_ascii_keyword_boundary(entry.text),
             )
-            for entry in load_company_suffixes()
         )
-    )
+    return AhoMatcher.from_patterns(tuple(patterns))
+
+
+@lru_cache(maxsize=1)
+def _company_value_matcher() -> AhoMatcher:
+    """合并中英文已知公司名词典。"""
+    seen: set[str] = set()
+    patterns: list[AhoPattern] = []
+    for entry in (*load_zh_company_values(), *load_en_company_values()):
+        if entry.text in seen:
+            continue
+        seen.add(entry.text)
+        patterns.append(
+            AhoPattern(
+                text=entry.text,
+                payload=entry,
+                ascii_boundary=_needs_ascii_keyword_boundary(entry.text),
+            )
+        )
+    return AhoMatcher.from_patterns(tuple(patterns))
 
 
 @lru_cache(maxsize=1)
@@ -2362,7 +2394,7 @@ def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], 
     survivors = _apply_address_component_coverage(survivors)
 
     # ── Label vs soft content ──
-    return _label_vs_soft_filter(survivors), inspire_entries
+    return _apply_seed_containment_coverage(survivors), inspire_entries
 
 
 def _build_events(
@@ -2518,7 +2550,7 @@ def _sweep_pass2(clues: list[Clue], unit_len: int) -> list[Clue]:
 def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
     """姓名组件覆盖裁决。
 
-    FULL_NAME / ALIAS 仅在完全包含时做覆盖，部分重叠都保留。
+    FULL_NAME / ALIAS / FAMILY_NAME 仅在完全包含时做覆盖，部分重叠都保留。
     """
     full_name_winners = _resolve_name_component_overlap_winners(
         [clue for clue in clues if clue.role == ClueRole.FULL_NAME]
@@ -2534,6 +2566,11 @@ def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
     alias_winners = _resolve_name_component_overlap_winners(alias_candidates)
     alias_ids = {clue.clue_id for clue in alias_winners}
 
+    family_name_winners = _resolve_name_component_overlap_winners(
+        [clue for clue in clues if clue.role == ClueRole.FAMILY_NAME]
+    )
+    family_name_ids = {clue.clue_id for clue in family_name_winners}
+
     blocked_name_clues = [*full_name_winners, *alias_winners]
     survivors: list[Clue] = []
     for clue in clues:
@@ -2545,7 +2582,12 @@ def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
             if clue.clue_id in alias_ids:
                 survivors.append(clue)
             continue
-        if clue.role in {ClueRole.FAMILY_NAME, ClueRole.GIVEN_NAME}:
+        if clue.role == ClueRole.FAMILY_NAME:
+            if clue.clue_id not in family_name_ids:
+                continue
+            if any(_clues_overlap(clue, blocker) for blocker in blocked_name_clues):
+                continue
+        elif clue.role == ClueRole.GIVEN_NAME:
             if any(_clues_overlap(clue, blocker) for blocker in blocked_name_clues):
                 continue
         survivors.append(clue)
@@ -2594,32 +2636,32 @@ def _resolve_name_component_overlap_winners(clues: list[Clue]) -> list[Clue]:
     return sorted(survivors, key=lambda c: (c.start, c.end))
 
 
-def _label_vs_soft_filter(clues: list[Clue]) -> list[Clue]:
-    """Label vs soft content 裁决。
+def _apply_seed_containment_coverage(clues: list[Clue]) -> list[Clue]:
+    """seed 严格包含普通 clue 时，直接删除被包含的 clue。
 
-    完全包含→大的覆盖小的；其余情况（完全重合、部分重叠）→两者都保留。
+    这里只做单向裁决：LABEL/START 作为 seed 覆盖普通 clue；
+    普通 clue 即使更长，也不会反向删除 seed。
     """
-    label_clues = [c for c in clues if c.role == ClueRole.LABEL]
-    soft_content_clues = [c for c in clues if c.role in _SOFT_CONTENT_ROLES]
-    if not label_clues or not soft_content_clues:
+    seed_clues = [c for c in clues if c.role in _SEED_ROLES]
+    covered_candidates = [
+        c
+        for c in clues
+        if c.role not in _SEED_ROLES and c.role != ClueRole.BREAK and c.family != ClueFamily.CONTROL
+    ]
+    if not seed_clues or not covered_candidates:
         return clues
 
     dropped_ids: set[str] = set()
-    for label in label_clues:
-        if label.clue_id in dropped_ids:
+    for seed in seed_clues:
+        if seed.clue_id in dropped_ids:
             continue
-        for soft in soft_content_clues:
-            if soft.clue_id in dropped_ids:
+        for clue in covered_candidates:
+            if clue.clue_id in dropped_ids:
                 continue
-            if not _clues_overlap(label, soft):
+            if not _clues_overlap(seed, clue):
                 continue
-            # 严格包含（区间不完全相等时一方包含另一方）→大的覆盖小的。
-            label_contains = label.start <= soft.start and soft.end <= label.end and (label.start < soft.start or soft.end < label.end)
-            soft_contains = soft.start <= label.start and label.end <= soft.end and (soft.start < label.start or label.end < soft.end)
-            if label_contains:
-                dropped_ids.add(soft.clue_id)
-            elif soft_contains:
-                dropped_ids.add(label.clue_id)
+            if seed.start <= clue.start and clue.end <= seed.end and (seed.start < clue.start or clue.end < seed.end):
+                dropped_ids.add(clue.clue_id)
 
     return [c for c in clues if c.clue_id not in dropped_ids]
 

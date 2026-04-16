@@ -82,6 +82,7 @@ class BreakType(str, Enum):
     OCR = "ocr"
     PUNCT = "punct"
     NEWLINE = "newline"
+    DETERMINER = "determiner"
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,6 +433,7 @@ def _get_empty_inspire_index() -> InspireIndex:
 @dataclass(slots=True)
 class ClueBundle:
     all_clues: tuple[Clue, ...]
+    negative_clues: tuple[Clue, ...] = ()
     negative_unit_marks: list[int] = field(default_factory=list)
     negative_prefix_sum: list[int] = field(default_factory=lambda: [0])
     negative_start_weight: int = 0

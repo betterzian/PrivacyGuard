@@ -1,0 +1,28 @@
+{
+  "hard": [
+    "incorporated",
+    "corporation",
+    "llc",
+    "plc",
+    "gmbh",
+    "pte",
+    "inc",
+    "corp",
+    "ltd"
+  ],
+  "soft": [
+    "company",
+    "limited",
+    "co",
+    "hotel",
+    "hospital",
+    "clinic",
+    "bank"
+  ],
+  "weak": [
+    "university",
+    "college",
+    "lab",
+    "labs"
+  ]
+}

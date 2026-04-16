@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from privacyguard.domain.enums import PIIAttributeType
+from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import (
     build_organization_candidate_from_value,
     clean_value,
@@ -65,8 +65,6 @@ class BaseOrganizationStack(BaseStack):
         )
 
     def run(self) -> StackRun | None:
-        if self.clue.strength == ClaimStrength.HARD:
-            return self._build_direct_run()
         is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
         locale = self.STACK_LOCALE
         if is_label_seed:
@@ -79,6 +77,8 @@ class BaseOrganizationStack(BaseStack):
             start = self._resolve_suffix_start(locale=locale)
             end = self.clue.end
             handled = set()
+        elif self.clue.role == ClueRole.VALUE:
+            return self._build_value_seed_run(locale=locale)
         else:
             return None
         matches = self._organization_clues_in_span(start, end)
@@ -98,6 +98,20 @@ class BaseOrganizationStack(BaseStack):
             return None
         if not _organization_has_body_before_suffix(candidate.text):
             return None
+        evidence = self._build_org_evidence(
+            start=start,
+            end=end,
+            is_label_seed=is_label_seed,
+            default_suffix_strength=self.clue.strength if self.clue.role == ClueRole.SUFFIX else None,
+            default_value_strength=self.clue.strength if self.clue.role == ClueRole.VALUE else None,
+        )
+        if not _meets_org_commit_threshold(
+            evidence=evidence,
+            locale=locale,
+            protection_level=self.context.protection_level,
+        ):
+            return None
+        candidate.claim_strength = evidence.max_clue_strength
         consumed_ids = {clue.clue_id for _index, clue in matches}
         consumed_ids.add(self.clue.clue_id)
         last_index = max((index for index, _clue in matches), default=self.clue_index)
@@ -203,7 +217,96 @@ class BaseOrganizationStack(BaseStack):
                 return clue.end
         return None
 
-    def _organization_clues_in_span(self, start: int, end: int) -> list[tuple[int, Clue]]:
+    def _build_value_seed_run(self, *, locale: str) -> StackRun | None:
+        """VALUE seed：已知公司名起栈，向右搜索 suffix 以扩展。"""
+        value_start = self.clue.start
+        value_end = self.clue.end
+        # 向右搜索 suffix。
+        suffix_clue = self._find_suffix_after_value(value_end, locale=locale)
+        consumed_ids = {self.clue.clue_id}
+        if suffix_clue is not None:
+            # 有 suffix → 吸收 value ~ suffix 区间。
+            end = suffix_clue.end
+            consumed_ids.add(suffix_clue.clue_id)
+        else:
+            end = value_end
+        start = value_start
+        matches = self._organization_clues_in_span(start, end)
+        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
+        candidate = build_organization_candidate_from_value(
+            source=self.context.stream.source,
+            value_text=self.context.stream.text[start:end],
+            value_start=start,
+            value_end=end,
+            source_kind=self.clue.source_kind,
+            unit_start=unit_start,
+            unit_end=unit_end,
+            value_driven=True,
+        )
+        if candidate is None:
+            return None
+        evidence = self._build_org_evidence(
+            start=start,
+            end=end,
+            is_label_seed=False,
+            default_suffix_strength=suffix_clue.strength if suffix_clue is not None else None,
+            default_value_strength=self.clue.strength,
+        )
+        if not _meets_org_commit_threshold(
+            evidence=evidence,
+            locale=locale,
+            protection_level=self.context.protection_level,
+        ):
+            return None
+        candidate.claim_strength = evidence.max_clue_strength
+        consumed_ids.update(clue_id for _index, clue in matches for clue_id in [clue.clue_id])
+        last_index = max(
+            (index for index, _clue in matches),
+            default=self.clue_index,
+        )
+        return StackRun(
+            attr_type=PIIAttributeType.ORGANIZATION,
+            candidate=candidate,
+            consumed_ids=consumed_ids,
+            handled_label_clue_ids=set(),
+            next_index=last_index + 1,
+        )
+
+    def _find_suffix_after_value(self, value_end: int, *, locale: str) -> Clue | None:
+        """在 value 右侧窗口内查找 SUFFIX clue（中文 ≤6 unit，英文 ≤2 word-token）。"""
+        stream = self.context.stream
+        if not stream.char_to_unit or value_end >= len(stream.text):
+            return None
+        value_end_ui = _unit_index_at_or_after(stream, value_end)
+        window_limit = 6 if locale == "zh" else 2
+        body_count = 0
+        # 逐 unit 计数，在窗口内查找 suffix。
+        upper_char = len(stream.text)
+        ui = value_end_ui
+        while ui < len(stream.units) and body_count < window_limit:
+            unit = stream.units[ui]
+            if unit.kind in {"space", "punct"}:
+                ui += 1
+                continue
+            if _is_organization_count_unit(unit.kind, locale):
+                body_count += 1
+                upper_char = unit.char_end
+                ui += 1
+                continue
+            break
+        # 在窗口范围内搜索 suffix clue。
+        for index in range(self.clue_index + 1, len(self.context.clues)):
+            clue = self.context.clues[index]
+            if clue.start > upper_char:
+                break
+            if clue.start < value_end:
+                continue
+            if clue.attr_type != PIIAttributeType.ORGANIZATION or clue.role != ClueRole.SUFFIX:
+                continue
+            return clue
+        return None
+
+    def _organization_clues_in_span(self, start: int, end: int, *, include_hard: bool = False) -> list[tuple[int, Clue]]:
         ci = self.context.clue_index
         us, ue = _char_span_to_unit_span(self.context.stream, start, end)
         org_starts = ci.family_starts.get(ClueFamily.ORGANIZATION)
@@ -216,11 +319,114 @@ class BaseOrganizationStack(BaseStack):
                 clue = clues[idx]
                 if clue.attr_type != PIIAttributeType.ORGANIZATION:
                     continue
-                if clue.strength == ClaimStrength.HARD:
+                if clue.strength == ClaimStrength.HARD and not include_hard:
                     continue
                 if clue.start < end and clue.end > start:
                     matches.append((idx, clue))
         return matches
+
+    def _build_org_evidence(
+        self,
+        *,
+        start: int,
+        end: int,
+        is_label_seed: bool,
+        default_suffix_strength: ClaimStrength | None,
+        default_value_strength: ClaimStrength | None,
+    ) -> "_OrgEvidence":
+        """聚合组织候选证据，为提交阈值提供统一输入。"""
+        has_suffix = False
+        has_value = False
+        suffix_strength = default_suffix_strength or ClaimStrength.WEAK
+        value_strength = default_value_strength or ClaimStrength.WEAK
+        for _index, clue in self._organization_clues_in_span(start, end, include_hard=True):
+            if clue.role == ClueRole.SUFFIX:
+                has_suffix = True
+                suffix_strength = _max_strength(suffix_strength, clue.strength)
+            elif clue.role == ClueRole.VALUE:
+                has_value = True
+                value_strength = _max_strength(value_strength, clue.strength)
+        if self.clue.role == ClueRole.SUFFIX:
+            has_suffix = True
+            suffix_strength = _max_strength(suffix_strength, self.clue.strength)
+        if self.clue.role == ClueRole.VALUE:
+            has_value = True
+            value_strength = _max_strength(value_strength, self.clue.strength)
+        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
+        has_inspire = self.context.inspire_index.has_inspire_nearby(
+            PIIAttributeType.ORGANIZATION,
+            unit_start,
+            unit_end,
+        )
+        return _OrgEvidence(
+            has_suffix=has_suffix,
+            suffix_strength=suffix_strength,
+            has_value=has_value,
+            value_strength=value_strength,
+            has_label=is_label_seed,
+            has_inspire=has_inspire,
+            max_clue_strength=_max_strength(suffix_strength, value_strength),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _OrgEvidence:
+    """组织候选提交阈值所需的证据摘要。"""
+    has_suffix: bool = False
+    suffix_strength: ClaimStrength = ClaimStrength.WEAK
+    has_value: bool = False
+    value_strength: ClaimStrength = ClaimStrength.WEAK
+    has_label: bool = False
+    has_inspire: bool = False
+    max_clue_strength: ClaimStrength = ClaimStrength.WEAK
+
+
+def _max_strength(left: ClaimStrength, right: ClaimStrength) -> ClaimStrength:
+    order = {
+        ClaimStrength.WEAK: 0,
+        ClaimStrength.SOFT: 1,
+        ClaimStrength.HARD: 2,
+    }
+    return left if order[left] >= order[right] else right
+
+
+def _meets_org_commit_threshold(
+    *,
+    evidence: _OrgEvidence,
+    locale: str,
+    protection_level: ProtectionLevel,
+) -> bool:
+    """组织候选提交阈值。
+
+    规则来自 guide 里的 6 组场景矩阵：
+    1) HARD suffix / VALUE+suffix / LABEL seed 全级别通过。
+    2) suffix-only 按语言+强度+保护级别收敛。
+    3) value-only：HARD 在 STRONG/BALANCED 通过，SOFT 仅 STRONG 通过。
+    """
+    if evidence.has_label:
+        return True
+    if evidence.has_suffix and evidence.suffix_strength == ClaimStrength.HARD:
+        return True
+    if evidence.has_suffix and evidence.has_value:
+        return True
+    is_strong = protection_level == ProtectionLevel.STRONG
+    is_balanced = protection_level == ProtectionLevel.BALANCED
+    if evidence.has_suffix and not evidence.has_value:
+        if evidence.suffix_strength == ClaimStrength.SOFT:
+            if locale == "zh":
+                return is_strong or (is_balanced and evidence.has_inspire)
+            return is_strong or is_balanced
+        if evidence.suffix_strength == ClaimStrength.WEAK:
+            if locale == "zh":
+                return False
+            return is_strong and evidence.has_inspire
+        return False
+    if evidence.has_value and not evidence.has_suffix:
+        if evidence.value_strength == ClaimStrength.HARD:
+            return is_strong or is_balanced
+        if evidence.value_strength == ClaimStrength.SOFT:
+            return is_strong
+    return False
 
 
 def _left_expand_text_boundary(context, start: int) -> int:

@@ -9,7 +9,6 @@ import re
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.lexicon_store import read_scanner_lexicon_json
 from privacyguard.infrastructure.pii.detector.models import AddressComponentType, ClaimStrength, LabelSpec
-from privacyguard.infrastructure.pii.detector.zh_name_rules import ZhNameRules, build_zh_name_rules
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,9 +95,58 @@ def load_name_start_keywords() -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=1)
-def load_zh_name_rules() -> ZhNameRules:
-    """加载中文姓名统一规则。"""
-    return build_zh_name_rules(_read_json("zh_name_rules.json"))
+def load_zh_compound_surnames() -> tuple[str, ...]:
+    """加载中文复姓词表。"""
+    return tuple(sorted(set(_clean_str_list(_read_json("zh_compound_surnames.json"))), key=len, reverse=True))
+
+
+def _clean_claim_strength_groups(values: object) -> dict[ClaimStrength, tuple[str, ...]]:
+    """解析 ``{hard/soft/weak: [...]}`` 格式的中文姓氏分组。"""
+    if not isinstance(values, dict):
+        raise ValueError("词典文件格式错误：应为 {hard/soft/weak: [...]}。")
+    groups: dict[ClaimStrength, tuple[str, ...]] = {}
+    for strength in (ClaimStrength.HARD, ClaimStrength.SOFT, ClaimStrength.WEAK):
+        raw_items = values.get(strength.value, [])
+        if not isinstance(raw_items, list):
+            raise ValueError(f"词典文件格式错误：{strength.value} 应为数组。")
+        cleaned = tuple(
+            sorted(
+                {str(item).strip() for item in raw_items if str(item).strip()},
+                key=len,
+                reverse=True,
+            )
+        )
+        groups[strength] = cleaned
+    return groups
+
+
+@lru_cache(maxsize=1)
+def load_zh_single_surname_claim_strengths() -> dict[ClaimStrength, tuple[str, ...]]:
+    """加载中文单姓 claim_strength 分组。"""
+    return _clean_claim_strength_groups(_read_json("zh_single_surname_claim_strengths.json"))
+
+
+@lru_cache(maxsize=1)
+def load_zh_name_negative_phrases() -> dict[str, tuple[str, ...]]:
+    """加载中文姓名负词表（姓氏 -> 负向短语列表）。"""
+    raw = _read_json("zh_name_negative_phrases.json")
+    if not isinstance(raw, dict):
+        raise ValueError("zh_name_negative_phrases.json 格式错误：根节点应为对象。")
+    cleaned: dict[str, tuple[str, ...]] = {}
+    for raw_key, raw_values in raw.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        if not isinstance(raw_values, list):
+            raise ValueError(f"zh_name_negative_phrases.json 格式错误：{key} 应为数组。")
+        cleaned[key] = tuple(
+            sorted(
+                {str(item).strip() for item in raw_values if str(item).strip()},
+                key=len,
+                reverse=True,
+            )
+        )
+    return cleaned
 
 
 def _parse_tiered_entries(payload: object) -> tuple[TieredEntry, ...]:
@@ -121,9 +169,27 @@ def _parse_tiered_entries(payload: object) -> tuple[TieredEntry, ...]:
 
 
 @lru_cache(maxsize=1)
-def load_company_suffixes() -> tuple[TieredEntry, ...]:
-    """加载组织后缀词典（含 strength 分级）。"""
-    return _parse_tiered_entries(_read_json("company_suffixes.json"))
+def load_zh_company_suffixes() -> tuple[TieredEntry, ...]:
+    """加载中文组织后缀词典（含 strength 分级）。"""
+    return _parse_tiered_entries(_read_json("zh_company_suffixes.json"))
+
+
+@lru_cache(maxsize=1)
+def load_en_company_suffixes() -> tuple[TieredEntry, ...]:
+    """加载英文组织后缀词典（含 strength 分级）。"""
+    return _parse_tiered_entries(_read_json("en_company_suffixes.json"))
+
+
+@lru_cache(maxsize=1)
+def load_zh_company_values() -> tuple[TieredEntry, ...]:
+    """加载中文已知公司名词典（含 strength 分级）。"""
+    return _parse_tiered_entries(_read_json("zh_company_values.json"))
+
+
+@lru_cache(maxsize=1)
+def load_en_company_values() -> tuple[TieredEntry, ...]:
+    """加载英文已知公司名词典（含 strength 分级）。"""
+    return _parse_tiered_entries(_read_json("en_company_values.json"))
 
 
 def _load_address_groups(filename: str) -> tuple[AddressKeywordGroup, ...]:
@@ -325,7 +391,10 @@ __all__ = [
     "ControlValueSpec",
     "TieredEntry",
     "load_all_negative_words",
-    "load_company_suffixes",
+    "load_en_company_suffixes",
+    "load_en_company_values",
+    "load_zh_company_suffixes",
+    "load_zh_company_values",
     "load_en_address_keyword_groups",
     "load_en_address_country_aliases",
     "load_en_address_suffix_strippers",
@@ -339,9 +408,11 @@ __all__ = [
     "load_negative_org_words",
     "load_negative_ui_words",
     "load_zh_address_keyword_groups",
+    "load_zh_compound_surnames",
     "load_zh_control_values",
     "load_zh_license_plate_values",
+    "load_zh_name_negative_phrases",
     "load_zh_address_suffix_strippers",
     "load_zh_country_prefix_aliases",
-    "load_zh_name_rules",
+    "load_zh_single_surname_claim_strengths",
 ]

@@ -1,10 +1,11 @@
 """按 stack 注册表路由的单主栈 parser。
 
 冲突裁决策略：
-- hard clue 直接产出候选，不参与 soft 竞争。
-- soft 类型间按静态优先级裁决：ADDRESS > NAME > ORGANIZATION。
-- 低优先级 stack 遇到高优先级 challenger 时，通过 shrink 回缩让渡重叠区域。
-- 同优先级 / 同类型 fallback 到 StackManager.score 比分。
+- 只要冲突涉及 NAME，统一按 claim_strength 裁决；同级保留 NAME。
+- NAME 胜出时仅提交 NAME，本轮从 NAME 的 next_index 继续，失败 challenger 不提前消费。
+- NAME 未赢则提交赢家并消费 NAME。
+- parser 维护全局 commit_ceiling；任何后续候选都不能再取到其左侧 unit。
+- 不涉及 NAME 时，沿用现有 hard/soft + soft_priority + fallback 机制。
 """
 
 from __future__ import annotations
@@ -51,6 +52,32 @@ def _is_control_clue(clue: Clue) -> bool:
 
 def _candidates_overlap(a: CandidateDraft, b: CandidateDraft) -> bool:
     return a.unit_start < b.unit_end and b.unit_start < a.unit_end
+
+
+def _unit_span_strictly_contains(outer_start: int, outer_end: int, inner_start: int, inner_end: int) -> bool:
+    """判断 unit 半开区间 ``[outer_start, outer_end)`` 是否严格包含 ``[inner_start, inner_end)``。"""
+    if outer_end <= outer_start or inner_end <= inner_start:
+        return False
+    if outer_start > inner_start or inner_end > outer_end:
+        return False
+    return outer_start < inner_start or inner_end < outer_end
+
+
+def _strict_unit_container_winner_key(a: CandidateDraft, b: CandidateDraft) -> str | None:
+    """若一方在 unit 区间上严格包含另一方，返回 ``\"a\"`` / ``\"b\"``；同区间或仅部分重叠返回 ``None``。"""
+    if _unit_span_strictly_contains(a.unit_start, a.unit_end, b.unit_start, b.unit_end):
+        return "a"
+    if _unit_span_strictly_contains(b.unit_start, b.unit_end, a.unit_start, a.unit_end):
+        return "b"
+    return None
+
+
+def _claim_strength_rank(strength: ClaimStrength) -> int:
+    return {
+        ClaimStrength.WEAK: 0,
+        ClaimStrength.SOFT: 1,
+        ClaimStrength.HARD: 2,
+    }[strength]
 
 
 _ADDRESS_STRUCTURAL_METADATA_KEYS = frozenset({
@@ -224,13 +251,14 @@ class StackContext:
     locale_profile: str
     protection_level: ProtectionLevel = ProtectionLevel.STRONG
     clues: tuple[Clue, ...] = ()
+    negative_clues: tuple[Clue, ...] = ()
     negative_unit_marks: list[int] = field(default_factory=list)
     negative_prefix_sum: list[int] = field(default_factory=lambda: [0])
     negative_start_weight: int = 0
     structured_lookup_index: StructuredLookupIndex = field(default_factory=StructuredLookupIndex)
     clue_index: ClueIndex = field(default_factory=_get_empty_clue_index)
     inspire_index: InspireIndex = field(default_factory=_get_empty_inspire_index)
-    committed_until: int = 0
+    commit_ceiling: int = 0
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     handled_label_clue_ids: set[str] = field(default_factory=set)
@@ -297,6 +325,10 @@ class StackContext:
             unit_index += 1
         return unit_index
 
+    def blocks_unit_start(self, unit_start: int) -> bool:
+        """判断给定候选起点是否越过已提交候选形成的全局左边界。"""
+        return unit_start < self.commit_ceiling
+
 
 class StreamParser:
     def __init__(self, *, locale_profile: str, ctx: DetectContext) -> None:
@@ -320,6 +352,7 @@ class StreamParser:
             locale_profile=self.locale_profile,
             protection_level=self.ctx.protection_level,
             clues=bundle.all_clues,
+            negative_clues=bundle.negative_clues,
             negative_unit_marks=list(bundle.negative_unit_marks),
             negative_prefix_sum=list(bundle.negative_prefix_sum),
             negative_start_weight=bundle.negative_start_weight,
@@ -333,7 +366,11 @@ class StreamParser:
         index = 0
         while index < len(context.clues):
             clue = context.clues[index]
-            if clue.clue_id in consumed_ids or _is_control_clue(clue):
+            if (
+                clue.clue_id in consumed_ids
+                or _is_control_clue(clue)
+                or context.blocks_unit_start(clue.unit_start)
+            ):
                 index += 1
                 continue
 
@@ -344,11 +381,14 @@ class StreamParser:
 
             if current_run.pending_challenge is not None:
                 current_run = self._resolve_pending_challenge(context, current_run)
+                if context.blocks_unit_start(current_run.candidate.unit_start):
+                    index += 1
+                    continue
 
             # 查找下一个不在 current_run 中、不同类型的 clue 作为 challenger。
             challenger_run, challenger_stack = None, None
             skip_ids = consumed_ids | current_run.consumed_ids
-            next_index = self._next_unconsumed_index(context.clues, current_run.next_index, skip_ids)
+            next_index = self._next_unconsumed_index(context, current_run.next_index, skip_ids)
             if next_index is not None:
                 next_clue = context.clues[next_index]
                 if next_clue.attr_type != current_run.attr_type:
@@ -363,7 +403,7 @@ class StreamParser:
             # 无 challenger 或不重叠 → 直接 commit。
             if challenger_run is None or not _candidates_overlap(current_run.candidate, challenger_run.candidate):
                 self._commit_run(context, current_run, consumed_ids)
-                index = self._next_unconsumed_index(context.clues, current_run.next_index, consumed_ids) or len(context.clues)
+                index = self._next_unconsumed_index(context, current_run.next_index, consumed_ids) or len(context.clues)
                 continue
 
             # 有重叠 → 按类型优先级 + shrink 裁决。
@@ -374,7 +414,7 @@ class StreamParser:
             )
 
             index = self._next_unconsumed_index(
-                context.clues,
+                context,
                 winner_next_index,
                 consumed_ids,
             ) or len(context.clues)
@@ -398,6 +438,7 @@ class StreamParser:
     ) -> int:
         """按类型优先级裁决两个重叠的 StackRun。
 
+        0. unit 区间严格包含：包含方胜出（不比较 claim_strength），败方丢弃。
         1. 比较 hard / soft：hard 一方直接胜出，soft 一方 shrink。
         2. 同为 soft：按 ATTR_TYPE_PRIORITY 裁决。
         3. 优先级相同或同类型：fallback 到 score 比分。
@@ -407,6 +448,17 @@ class StreamParser:
         败方即使 shrink 成功，也不能把主循环游标整体推到自己的 next_index。
         """
         ca, cb = run_a.candidate, run_b.candidate
+        if PIIAttributeType.LICENSE_PLATE in {ca.attr_type, cb.attr_type}:
+            return self._resolve_license_plate_conflict(context, consumed_ids, run_a, run_b)
+        # unit 区间严格包含：包含方胜出，不比较 claim_strength；否则再按 NAME / hard-soft 等规则。
+        win_key = _strict_unit_container_winner_key(ca, cb)
+        if win_key == "a":
+            return self._commit_winner_and_drop_loser(context, consumed_ids, run_a, run_b)
+        if win_key == "b":
+            return self._commit_winner_and_drop_loser(context, consumed_ids, run_b, run_a)
+        if PIIAttributeType.NAME in {ca.attr_type, cb.attr_type}:
+            return self._resolve_name_conflict(context, consumed_ids, run_a, run_b)
+
         hard_a = ca.claim_strength == ClaimStrength.HARD
         hard_b = cb.claim_strength == ClaimStrength.HARD
 
@@ -442,6 +494,50 @@ class StreamParser:
 
         # 优先级相同（含同类型）→ score 比分。
         return self._fallback_conflict(context, consumed_ids, run_a, run_b)
+
+    def _resolve_name_conflict(
+        self,
+        context: StackContext,
+        consumed_ids: set[str],
+        run_a: StackRun,
+        run_b: StackRun,
+    ) -> int:
+        """统一处理 NAME 相关冲突，不做 shrink。"""
+        ca, cb = run_a.candidate, run_b.candidate
+        rank_a = _claim_strength_rank(ca.claim_strength)
+        rank_b = _claim_strength_rank(cb.claim_strength)
+
+        if rank_a > rank_b:
+            winner_run, loser_run = run_a, run_b
+        elif rank_b > rank_a:
+            winner_run, loser_run = run_b, run_a
+        elif ca.attr_type == PIIAttributeType.NAME and cb.attr_type != PIIAttributeType.NAME:
+            winner_run, loser_run = run_a, run_b
+        elif cb.attr_type == PIIAttributeType.NAME and ca.attr_type != PIIAttributeType.NAME:
+            winner_run, loser_run = run_b, run_a
+        elif (ca.unit_end - ca.unit_start) >= (cb.unit_end - cb.unit_start):
+            winner_run, loser_run = run_a, run_b
+        else:
+            winner_run, loser_run = run_b, run_a
+
+        if winner_run.candidate.attr_type == PIIAttributeType.NAME:
+            return self._commit_name_winner_and_keep_loser(context, consumed_ids, winner_run)
+        return self._commit_winner_and_drop_loser(context, consumed_ids, winner_run, loser_run)
+
+    def _resolve_license_plate_conflict(
+        self,
+        context: StackContext,
+        consumed_ids: set[str],
+        run_a: StackRun,
+        run_b: StackRun,
+    ) -> int:
+        """LICENSE_PLATE 与其他类型冲突时始终保留 LICENSE_PLATE。"""
+        ca, cb = run_a.candidate, run_b.candidate
+        if ca.attr_type == cb.attr_type == PIIAttributeType.LICENSE_PLATE:
+            return self._fallback_conflict(context, consumed_ids, run_a, run_b)
+        if ca.attr_type == PIIAttributeType.LICENSE_PLATE:
+            return self._commit_winner_and_drop_loser(context, consumed_ids, run_a, run_b)
+        return self._commit_winner_and_drop_loser(context, consumed_ids, run_b, run_a)
 
     def _commit_winner_and_shrink_loser(
         self,
@@ -482,6 +578,16 @@ class StreamParser:
         self._commit_run(context, winner_run, consumed_ids)
         consumed_ids |= loser_run.consumed_ids
         context.handled_label_clue_ids |= loser_run.handled_label_clue_ids
+        return winner_run.next_index
+
+    def _commit_name_winner_and_keep_loser(
+        self,
+        context: StackContext,
+        consumed_ids: set[str],
+        winner_run: StackRun,
+    ) -> int:
+        """NAME 胜出时只提交 NAME，自身 next_index 之后的 clue 仍可继续参与解析。"""
+        self._commit_run(context, winner_run, consumed_ids)
         return winner_run.next_index
 
     def _fallback_conflict(
@@ -525,6 +631,8 @@ class StreamParser:
         stack = spec.stack_cls(clue=clue, clue_index=index, context=context)
         run = stack.run()
         if run is None or not run.candidate.text.strip():
+            return None, None
+        if context.blocks_unit_start(run.candidate.unit_start):
             return None, None
         return run, stack
 
@@ -594,6 +702,8 @@ class StreamParser:
         context.handled_label_clue_ids |= run.handled_label_clue_ids
 
     def _commit_candidate(self, context: StackContext, candidate: CandidateDraft) -> None:
+        if context.blocks_unit_start(candidate.unit_start):
+            return
         existing = self._find_identical(context, candidate)
         if existing is not None:
             existing.metadata = merge_metadata(existing.metadata, candidate.metadata)
@@ -614,7 +724,7 @@ class StreamParser:
             )
         )
         context.handled_label_clue_ids |= candidate.label_clue_ids
-        context.committed_until = max(context.committed_until, candidate.unit_end)
+        context.commit_ceiling = max(context.commit_ceiling, candidate.unit_end)
 
     # ------------------------------------------------------------------
     # 工具方法
@@ -742,13 +852,17 @@ class StreamParser:
         context.candidate_identity_index.pop(previous_key, None)
         context.candidate_identity_index[_candidate_identity_key(previous)] = previous
         context.handled_label_clue_ids |= candidate.label_clue_ids
-        context.committed_until = max(context.committed_until, previous.unit_end)
+        context.commit_ceiling = max(context.commit_ceiling, previous.unit_end)
         return True
 
-    def _next_unconsumed_index(self, clues: tuple[Clue, ...], start_index: int, consumed_ids: set[str]) -> int | None:
-        for index in range(start_index, len(clues)):
-            clue = clues[index]
-            if clue.clue_id in consumed_ids or _is_control_clue(clue):
+    def _next_unconsumed_index(self, context: StackContext, start_index: int, consumed_ids: set[str]) -> int | None:
+        for index in range(start_index, len(context.clues)):
+            clue = context.clues[index]
+            if (
+                clue.clue_id in consumed_ids
+                or _is_control_clue(clue)
+                or context.blocks_unit_start(clue.unit_start)
+            ):
                 continue
             return index
         return None

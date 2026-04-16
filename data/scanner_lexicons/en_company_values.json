@@ -1,0 +1,12 @@
+{
+  "hard": [
+    "Google", "Microsoft", "Amazon", "Tesla", "Netflix", "Oracle", "Intel",
+    "Cisco", "Adobe", "Nvidia", "Samsung", "Toyota", "Boeing", "Pfizer",
+    "Walmart", "Starbucks", "Disney", "Nike", "Goldman Sachs", "JPMorgan",
+    "Citigroup", "BlackRock", "Mastercard", "Visa", "IBM", "HP", "Qualcomm",
+    "Huawei", "Alibaba", "Tencent", "ByteDance"
+  ],
+  "soft": [
+    "Apple", "Meta", "Shell", "Sprint", "Chase", "Target", "Square", "Uber"
+  ]
+}

@@ -8,6 +8,7 @@ from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
+from privacyguard.infrastructure.pii.detector.lexicon_loader import load_zh_name_negative_phrases
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueRole, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
@@ -429,10 +430,10 @@ def test_chinese_dictionary_family_entry_is_downgraded_to_soft_surname_clue():
     assert len(clues) == 1
     clue = clues[0]
     assert clue.role == ClueRole.FAMILY_NAME
-    # "王"在 scanner weak tier 中，词典姓氏与 scanner 词库重合时以 scanner tier 为准。
+    # "王"在 scanner weak claim_strength 词表中，词典姓氏与 scanner 词库重合时以 scanner 词表为准。
     assert clue.strength == ClaimStrength.WEAK
     assert "hard_source" not in clue.source_metadata
-    assert clue.source_metadata["surname_tier"] == ["weak"]
+    assert clue.source_metadata["surname_claim_strength"] == ["weak"]
     assert clue.source_metadata["surname_match_kind"] == ["single"]
     assert clue.source_metadata["surname_from_dictionary"] == ["1"]
 
@@ -455,11 +456,12 @@ def test_chinese_dictionary_custom_family_entry_keeps_soft_custom_tier():
     clue = clues[0]
     assert clue.role == ClueRole.FAMILY_NAME
     assert clue.strength == ClaimStrength.SOFT
-    assert clue.source_metadata["surname_tier"] == ["custom"]
+    assert clue.source_metadata["surname_claim_strength"] == ["soft"]
+    assert clue.source_metadata["surname_match_kind"] == ["compound"]
     assert clue.source_metadata["surname_from_dictionary"] == ["1"]
 
 
-def test_label_seed_context_metadata_prefers_left_edge_and_connector():
+def test_label_seed_metadata_keeps_boundary_signals():
     ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
     _stream_a, segment_a = _first_segment("姓名: 张三")
     _stream_b, segment_b = _first_segment("这里的姓名 张三")
@@ -467,19 +469,82 @@ def test_label_seed_context_metadata_prefers_left_edge_and_connector():
     label_a = scanner_module._scan_label_clues(ctx, segment_a)[0]
     label_b = scanner_module._scan_label_clues(ctx, segment_b)[0]
 
-    assert int(label_a.source_metadata["seed_context_score"][0]) > int(label_b.source_metadata["seed_context_score"][0])
     assert label_a.source_metadata["seed_has_connector_after"] == ["1"]
     assert label_a.source_metadata["seed_is_left_edge"] == ["1"]
+    assert label_b.source_metadata["seed_has_connector_after"] == ["0"]
+    assert label_b.source_metadata["seed_is_left_edge"] == ["0"]
 
 
-def test_start_seed_context_metadata_is_fixed_to_four():
+def test_start_seed_metadata_marks_start_kind():
     ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
     _stream, segment = _first_segment("我叫张三")
 
     start = scanner_module._scan_name_start_clues(ctx, segment)[0]
 
-    assert start.source_metadata["seed_context_score"] == ["4"]
     assert start.source_metadata["seed_kind"] == ["start"]
+
+
+def test_family_name_scanner_keeps_compound_surname_before_address_terms():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    _stream, segment = _first_segment("司马名区中山路")
+
+    clues = scanner_module._scan_family_name_clues(ctx, segment)
+
+    assert any(
+        clue.role == ClueRole.FAMILY_NAME
+        and clue.text == "司马"
+        and clue.strength == ClaimStrength.HARD
+        for clue in clues
+    )
+
+
+def test_name_component_coverage_drops_contained_family_name_clue():
+    stream = build_prompt_stream("司马名区中山路")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    family_name_clues = sorted(
+        (
+            clue.text,
+            clue.start,
+            clue.end,
+            clue.strength,
+        )
+        for clue in bundle.all_clues
+        if clue.role == ClueRole.FAMILY_NAME and clue.start == 0
+    )
+
+    assert family_name_clues == [("司马", 0, 2, ClaimStrength.HARD)]
+
+
+def test_zh_name_negative_phrases_preserve_legacy_blacklist_entries():
+    phrases = load_zh_name_negative_phrases()
+
+    assert phrases["张"] == ("张力",)
+    assert "杭州" in phrases["杭"]
+
+
+def test_scanner_no_longer_emits_generic_zh_given_name_clues():
+    stream = build_prompt_stream("可欣今天到了")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    assert not any(
+        clue.role == ClueRole.GIVEN_NAME and clue.source_kind == "zh_given_name"
+        for clue in bundle.all_clues
+    )
 
 
 def test_parser_keeps_char_span_and_unit_span_for_dictionary_name_candidate():
@@ -695,4 +760,27 @@ def test_build_clue_bundle_emits_license_plate_prefix_family_value_clue():
     ]
     assert not any(clue.text == "粤" for clue in control_values)
     assert any(clue.text == "甲" for clue in control_values)
+
+
+def test_license_plate_start_seed_covers_contained_name_clue():
+    prepared = build_prompt_stream("车牌是粤A12345")
+
+    bundle = build_clue_bundle(
+        prepared,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    assert any(
+        clue.family == scanner_module.ClueFamily.LICENSE_PLATE
+        and clue.role == ClueRole.START
+        and clue.text == "车牌是"
+        for clue in bundle.all_clues
+    )
+    assert not any(
+        clue.role == ClueRole.FAMILY_NAME and clue.text == "车"
+        for clue in bundle.all_clues
+    )
 

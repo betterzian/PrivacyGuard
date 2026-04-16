@@ -880,6 +880,94 @@
     "ascii_boundary": true
   },
   {
+    "keyword": "corporate name",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "business name",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "entity name",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "legal name",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "firm name",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "workplace",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "就职单位",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "任职单位",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "投保单位",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "甲方",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "乙方",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "家庭住址",
     "attr_type": "address",
     "source_kind": "context_address_field",
@@ -1022,6 +1110,254 @@
     "ocr_source_kind": "ocr_label_address_field",
     "component_hint": null,
     "ascii_boundary": true
+  },
+  {
+    "keyword": "work address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "office address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "billing address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "delivery address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "residential address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "residence address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "current address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "correspondence address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "registered address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "business address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "home street",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "home road",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "home city",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "home state",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "home zip",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "work street",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "office street",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "billing street",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "billing city",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "delivery street",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "户籍地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "户籍所在地",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "现住址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "现居地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "工作地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "办公地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "注册地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "经营地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "寄件地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "送货地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "常住地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
   },
   {
     "keyword": "住客姓名",

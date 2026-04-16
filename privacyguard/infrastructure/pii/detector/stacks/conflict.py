@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.infrastructure.pii.detector.candidate_utils import has_organization_suffix, organization_suffix_start, trim_candidate
+from privacyguard.infrastructure.pii.detector.candidate_utils import has_organization_suffix, trim_candidate
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, StreamInput
-from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span, _unit_char_end, _unit_char_start
+from privacyguard.infrastructure.pii.detector.stacks.common import _unit_char_end, _unit_char_start
 
 
 @dataclass(slots=True)
@@ -18,6 +18,8 @@ class ConflictOutcome:
 
 
 class StackManager:
+    """非 NAME 冲突的通用裁决器。"""
+
     def score(self, candidate: CandidateDraft) -> float:
         score = 0.0
         if candidate.claim_strength == ClaimStrength.HARD:
@@ -41,10 +43,6 @@ class StackManager:
         attr_pair = frozenset({existing.attr_type, incoming.attr_type})
         if attr_pair == {PIIAttributeType.ADDRESS, PIIAttributeType.ORGANIZATION}:
             return self._resolve_address_organization(context.stream, existing, incoming)
-        if attr_pair == {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
-            return self._resolve_name_organization(context.stream, existing, incoming)
-        if attr_pair == {PIIAttributeType.NAME, PIIAttributeType.ADDRESS}:
-            return self._resolve_name_address(context.stream, existing, incoming)
         return self._resolve_by_score(existing, incoming)
 
     def _resolve_same_attr(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
@@ -64,45 +62,6 @@ class StackManager:
             return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
         trimmed = self._trim_candidate(stream, address, organization)
         return ConflictOutcome(incoming=trimmed)
-
-    def _resolve_name_organization(self, stream: StreamInput, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
-        organization = incoming if incoming.attr_type == PIIAttributeType.ORGANIZATION else existing
-        name = incoming if incoming.attr_type == PIIAttributeType.NAME else existing
-        if not has_organization_suffix(organization.text):
-            return ConflictOutcome(incoming=incoming if incoming.attr_type == PIIAttributeType.NAME else None)
-        suffix_start = organization_suffix_start(organization.text)
-        if suffix_start <= 0:
-            return ConflictOutcome(incoming=organization if incoming is organization else None, drop_existing=name is existing)
-        trim_end = min(name.end, organization.start + suffix_start)
-        trim_unit_start, trim_unit_end = _char_span_to_unit_span(stream, name.start, trim_end)
-        if organization is incoming:
-            trimmed = trim_candidate(
-                name,
-                stream.text,
-                start=name.start,
-                end=trim_end,
-                unit_start=trim_unit_start,
-                unit_end=trim_unit_end,
-            )
-            return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
-        trimmed = trim_candidate(
-            name,
-            stream.text,
-            start=name.start,
-            end=trim_end,
-            unit_start=trim_unit_start,
-            unit_end=trim_unit_end,
-        )
-        return ConflictOutcome(incoming=trimmed)
-
-    def _resolve_name_address(self, stream: StreamInput, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
-        address = incoming if incoming.attr_type == PIIAttributeType.ADDRESS else existing
-        name = incoming if incoming.attr_type == PIIAttributeType.NAME else existing
-        if name is incoming:
-            trimmed = self._trim_candidate(stream, name, address)
-            return ConflictOutcome(incoming=trimmed)
-        trimmed = self._trim_candidate(stream, name, address)
-        return ConflictOutcome(incoming=incoming, drop_existing=trimmed is None, replace_existing=trimmed)
 
     def _resolve_by_score(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
         if self.score(incoming) > self.score(existing):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from functools import lru_cache
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
@@ -19,10 +20,28 @@ class NameComponentHint(str, Enum):
     ALIAS = "alias"
     MIDDLE = "middle"
 
-_ORG_SUFFIX_RE = re.compile(
-    r"(?i)(股份有限公司|有限责任公司|有限公司|研究院|实验室|工作室|事务所|集团|公司|大学|学院|银行|酒店|医院|中心"
-    r"|incorporated|corporation|company|limited|inc\.?|corp\.?|co\.?|ltd\.?|llc|plc|gmbh|pte|university|college|bank|hotel|hospital|clinic|labs?)"
-)
+
+@lru_cache(maxsize=1)
+def _build_org_suffix_re() -> re.Pattern[str]:
+    """从中英文组织后缀词典动态构建正则，保持与词典单一真源。"""
+    from privacyguard.infrastructure.pii.detector.lexicon_loader import (
+        load_en_company_suffixes,
+        load_zh_company_suffixes,
+    )
+    texts = sorted(
+        {e.text for e in (*load_zh_company_suffixes(), *load_en_company_suffixes())},
+        key=len,
+        reverse=True,
+    )
+    parts: list[str] = []
+    for text in texts:
+        esc = re.escape(text)
+        # 短英文缩写允许带可选句点（inc. / corp. 等）。
+        if text.isascii() and len(text) <= 4 and text.isalpha():
+            parts.append(esc + r"\.?")
+        else:
+            parts.append(esc)
+    return re.compile(r"(?i)(" + "|".join(parts) + r")")
 _ADDRESS_SIGNAL_RE = re.compile(
     r"(?i)(省|市|区|县|旗|镇|乡|村|路|街|道|巷|弄|小区|公寓|大厦|园区|花园|家园|苑|庭|府|湾|宿舍|栋|幢|座|楼|单元|层|室|房|户"
     r"|street|st|road|rd|avenue|ave|boulevard|blvd|drive|dr|lane|ln|court|ct|suite|ste|apt|unit|zip)"
@@ -81,10 +100,11 @@ def build_organization_candidate_from_value(
     unit_end: int = 0,
     label_clue_id: str | None = None,
     label_driven: bool = False,
+    value_driven: bool = False,
 ) -> CandidateDraft | None:
     del value_end
     cleaned = _strip_leading_address_label(_clean_value(value_text))
-    if not _is_plausible_organization(cleaned, label_driven=label_driven):
+    if not _is_plausible_organization(cleaned, label_driven=label_driven, value_driven=value_driven):
         return None
     offset = value_text.find(cleaned)
     return CandidateDraft(
@@ -202,11 +222,11 @@ def trim_candidate(
 
 
 def has_organization_suffix(text: str) -> bool:
-    return _ORG_SUFFIX_RE.search(str(text or "")) is not None
+    return _build_org_suffix_re().search(str(text or "")) is not None
 
 
 def organization_suffix_start(text: str) -> int:
-    match = _ORG_SUFFIX_RE.search(text)
+    match = _build_org_suffix_re().search(text)
     return match.start() if match else -1
 
 
@@ -257,14 +277,14 @@ def _is_plausible_name(text: str, *, component_hint: NameComponentHint) -> bool:
     return 1 <= len(tokens) <= 4 and all(_EN_NAME_TOKEN_RE.fullmatch(token) is not None for token in tokens)
 
 
-def _is_plausible_organization(text: str, *, label_driven: bool) -> bool:
+def _is_plausible_organization(text: str, *, label_driven: bool, value_driven: bool = False) -> bool:
     if not text or len(text) < 2 or len(text) > 120 or "@" in text:
         return False
-    if _ADDRESS_SIGNAL_RE.search(text) and not _ORG_SUFFIX_RE.search(text):
+    if _ADDRESS_SIGNAL_RE.search(text) and not _build_org_suffix_re().search(text):
         return False
-    if label_driven:
+    if label_driven or value_driven:
         return True
-    return _ORG_SUFFIX_RE.search(text) is not None
+    return _build_org_suffix_re().search(text) is not None
 
 
 def _strip_leading_address_label(text: str) -> str:

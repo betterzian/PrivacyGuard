@@ -46,11 +46,11 @@
   {
     "component_type": "road",
     "keywords": [
-      {"text": "大道", "strength": "hard"},
-      {"text": "大街", "strength": "hard"},
+      {"text": "大道", "strength": "soft"},
+      {"text": "大街", "strength": "soft"},
       {"text": "胡同", "strength": "hard"},
-      {"text": "公路", "strength": "hard"},
-      {"text": "国道", "strength": "hard"},
+      {"text": "公路", "strength": "soft"},
+      {"text": "国道", "strength": "soft"},
       {"text": "中路", "strength": "hard"},
       {"text": "南路", "strength": "hard"},
       {"text": "北路", "strength": "hard"},

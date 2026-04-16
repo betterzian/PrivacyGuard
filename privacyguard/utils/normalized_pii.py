@@ -15,7 +15,8 @@ from privacyguard.domain.models.normalized_pii import (
     NormalizedPII,
 )
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
-    load_company_suffixes,
+    load_en_company_suffixes,
+    load_zh_company_suffixes,
     load_en_address_country_aliases,
     load_en_address_suffix_strippers,
     load_en_us_states,
@@ -1086,7 +1087,7 @@ def _organization_canonical(value: str) -> str:
     changed = True
     while changed:
         changed = False
-        for entry in load_company_suffixes():
+        for entry in (*load_zh_company_suffixes(), *load_en_company_suffixes()):
             if text.lower().endswith(entry.text.lower()) and len(text) > len(entry.text):
                 text = text[: -len(entry.text)].rstrip()
                 changed = True
