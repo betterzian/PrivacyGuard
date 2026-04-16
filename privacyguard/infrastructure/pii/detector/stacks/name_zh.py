@@ -13,15 +13,16 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, Clue, ClueRole
 from privacyguard.infrastructure.pii.detector.stacks.base import StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
+    ExpansionBreakPolicy,
     _char_span_to_unit_span,
     _label_seed_start_char,
     _unit_index_at_or_after,
     _unit_index_left_of,
+    need_break,
 )
 from privacyguard.infrastructure.pii.detector.stacks.name_base import BaseNameStack
 from privacyguard.infrastructure.pii.detector.zh_name_rules import (
     NegativeOverlapKind,
-    StandaloneMatchKind,
     claim_strength_meets_protection,
     collect_blocking_overlaps,
     collect_negative_overlaps,
@@ -32,7 +33,6 @@ from privacyguard.infrastructure.pii.detector.zh_name_rules import (
     downgrade_claim_strength,
     family_negative_blocks_stack_immediately,
     given_or_implicit_tail_negative_cancels_candidate,
-    has_any_negative_overlap,
     stronger_claim_strength,
     upgrade_claim_strength,
 )
@@ -119,7 +119,6 @@ class ZhNameStack(BaseNameStack):
             claim_strength=final_strength,
             route=self.clue.role.value,
             negative_overlap_kind=dominant_kind,
-            standalone_match_kind=StandaloneMatchKind.NONE,
             extra_metadata={
                 "name_route": [self.clue.role.value],
             },
@@ -221,22 +220,10 @@ class ZhNameStack(BaseNameStack):
             candidate_end=candidate_end,
             candidate_raw_text=candidate_raw_text,
         )
-        standalone_overlaps = self._collect_blocking_overlaps(
-            candidate_start=standalone.start,
-            candidate_end=standalone.end,
-            candidate_raw_text=self.context.stream.text[standalone.start:standalone.end],
-        )
-        standalone_kind = self._resolve_standalone_match_kind(
-            candidate_start=start,
+        if self._should_upgrade_by_family_candidate_boundaries(
+            family_anchor=family_anchor,
             candidate_end=candidate_end,
-            standalone=standalone,
-        )
-        if has_any_negative_overlap(standalone_overlaps):
-            return None
-
-        if standalone_kind == StandaloneMatchKind.DOUBLE_BOUNDARY and standalone.unit_width <= 4:
-            final_strength = ClaimStrength.HARD
-        elif standalone_kind == StandaloneMatchKind.SINGLE_BOUNDARY:
+        ):
             final_strength = upgrade_claim_strength(final_strength)
 
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
@@ -252,12 +239,10 @@ class ZhNameStack(BaseNameStack):
             claim_strength=final_strength,
             route=route,
             negative_overlap_kind=dominant_negative_overlap_kind(candidate_overlaps),
-            standalone_match_kind=standalone_kind,
             extra_metadata={
                 "name_route": [route],
                 "family_claim_strength_before_negative": [family_strength_before.value],
                 "family_claim_strength_after_negative": [family_strength_after.value],
-                "standalone_match_kind": [standalone_kind.value],
                 "negative_overlap_kind": [dominant_negative_overlap_kind(candidate_overlaps).value],
                 "family_anchor_text": [family_anchor.text],
             }
@@ -386,20 +371,71 @@ class ZhNameStack(BaseNameStack):
         unit_start, unit_end = _char_span_to_unit_span(self.context.stream, left, right)
         return _StandaloneRange(start=left, end=right, unit_start=unit_start, unit_end=unit_end)
 
-    def _resolve_standalone_match_kind(
+    def _should_upgrade_by_family_candidate_boundaries(
         self,
         *,
-        candidate_start: int,
+        family_anchor: _FamilyAnchor,
         candidate_end: int,
-        standalone: _StandaloneRange,
-    ) -> StandaloneMatchKind:
-        left_match = candidate_start == standalone.start
-        right_match = candidate_end == standalone.end
-        if left_match and right_match:
-            return StandaloneMatchKind.DOUBLE_BOUNDARY
-        if left_match or right_match:
-            return StandaloneMatchKind.SINGLE_BOUNDARY
-        return StandaloneMatchKind.NONE
+    ) -> bool:
+        """按 family 左右边界与跨度判定是否提升一级 strength。"""
+        stream = self.context.stream
+        if not stream.units or not stream.char_to_unit:
+            return False
+        family_unit_start, _family_unit_end = _char_span_to_unit_span(
+            stream,
+            family_anchor.start,
+            family_anchor.end,
+        )
+        candidate_unit_start, candidate_unit_end = _char_span_to_unit_span(stream, family_anchor.start, candidate_end)
+        if candidate_unit_end <= candidate_unit_start:
+            return False
+        if candidate_unit_end - family_unit_start > 4:
+            return False
+        if not self._left_boundary_is_break(family_unit_start):
+            return False
+        if not self._right_boundary_is_break(candidate_unit_end):
+            return False
+        return True
+
+    def _left_boundary_is_break(self, family_unit_start: int) -> bool:
+        """判断 family 起始 unit 左侧是否形成 break。"""
+        units = self.context.stream.units
+        raw_text = self.context.stream.text
+        if family_unit_start <= 0:
+            return True
+        subject_index = family_unit_start - 1
+        subject = units[subject_index]
+        prev_unit = units[subject_index - 1] if subject_index - 1 >= 0 else None
+        left_char = _peek_unit_last_char(units, subject_index - 1)
+        right_char = raw_text[subject.char_end] if subject.char_end < len(raw_text) else None
+        return need_break(
+            subject,
+            ExpansionBreakPolicy.NAME_ZH_LEFT_UNIT,
+            lower=0,
+            prev_unit=prev_unit,
+            left_char=left_char,
+            right_char=right_char,
+        )
+
+    def _right_boundary_is_break(self, candidate_unit_end: int) -> bool:
+        """判断候选末端右侧是否形成 break。"""
+        units = self.context.stream.units
+        raw_text = self.context.stream.text
+        if candidate_unit_end >= len(units):
+            return True
+        subject_index = candidate_unit_end
+        subject = units[subject_index]
+        next_unit = units[subject_index + 1] if subject_index + 1 < len(units) else None
+        left_char = raw_text[subject.char_start - 1] if subject.char_start > 0 else None
+        right_char = _peek_unit_first_char(units, subject_index + 1)
+        return need_break(
+            subject,
+            ExpansionBreakPolicy.NAME_ZH_RIGHT_UNIT,
+            upper=len(raw_text),
+            next_unit=next_unit,
+            left_char=left_char,
+            right_char=right_char,
+        )
 
     def _unit_is_name_like(self, unit_index: int) -> bool:
         if unit_index < 0 or unit_index >= len(self.context.stream.units):
@@ -481,7 +517,6 @@ class ZhNameStack(BaseNameStack):
         claim_strength: ClaimStrength,
         route: str,
         negative_overlap_kind: NegativeOverlapKind,
-        standalone_match_kind: StandaloneMatchKind,
         extra_metadata: dict[str, list[str]],
     ) -> CandidateDraft | None:
         text = compact_zh_name_text(self.context.stream.text[start:end])
@@ -492,7 +527,6 @@ class ZhNameStack(BaseNameStack):
         metadata.setdefault("matched_by", [self.clue.source_kind])
         metadata["name_route"] = [route]
         metadata["negative_overlap_kind"] = [negative_overlap_kind.value]
-        metadata["standalone_match_kind"] = [standalone_match_kind.value]
         for key, values in extra_metadata.items():
             metadata[key] = list(values)
         return CandidateDraft(

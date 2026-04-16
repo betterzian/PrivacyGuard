@@ -97,7 +97,19 @@ def load_name_start_keywords() -> tuple[str, ...]:
 @lru_cache(maxsize=1)
 def load_zh_compound_surnames() -> tuple[str, ...]:
     """加载中文复姓词表。"""
-    return tuple(sorted(set(_clean_str_list(_read_json("zh_compound_surnames.json"))), key=len, reverse=True))
+    grouped = _clean_claim_strength_groups(_read_json("zh_surnames.json"))
+    return tuple(
+        sorted(
+            {
+                surname
+                for surnames in grouped.values()
+                for surname in surnames
+                if len(surname) > 1
+            },
+            key=len,
+            reverse=True,
+        )
+    )
 
 
 def _clean_claim_strength_groups(values: object) -> dict[ClaimStrength, tuple[str, ...]]:
@@ -123,30 +135,11 @@ def _clean_claim_strength_groups(values: object) -> dict[ClaimStrength, tuple[st
 @lru_cache(maxsize=1)
 def load_zh_single_surname_claim_strengths() -> dict[ClaimStrength, tuple[str, ...]]:
     """加载中文单姓 claim_strength 分组。"""
-    return _clean_claim_strength_groups(_read_json("zh_single_surname_claim_strengths.json"))
-
-
-@lru_cache(maxsize=1)
-def load_zh_name_negative_phrases() -> dict[str, tuple[str, ...]]:
-    """加载中文姓名负词表（姓氏 -> 负向短语列表）。"""
-    raw = _read_json("zh_name_negative_phrases.json")
-    if not isinstance(raw, dict):
-        raise ValueError("zh_name_negative_phrases.json 格式错误：根节点应为对象。")
-    cleaned: dict[str, tuple[str, ...]] = {}
-    for raw_key, raw_values in raw.items():
-        key = str(raw_key).strip()
-        if not key:
-            continue
-        if not isinstance(raw_values, list):
-            raise ValueError(f"zh_name_negative_phrases.json 格式错误：{key} 应为数组。")
-        cleaned[key] = tuple(
-            sorted(
-                {str(item).strip() for item in raw_values if str(item).strip()},
-                key=len,
-                reverse=True,
-            )
-        )
-    return cleaned
+    grouped = _clean_claim_strength_groups(_read_json("zh_surnames.json"))
+    return {
+        strength: tuple(surname for surname in surnames if len(surname) == 1)
+        for strength, surnames in grouped.items()
+    }
 
 
 def _parse_tiered_entries(payload: object) -> tuple[TieredEntry, ...]:
@@ -411,7 +404,6 @@ __all__ = [
     "load_zh_compound_surnames",
     "load_zh_control_values",
     "load_zh_license_plate_values",
-    "load_zh_name_negative_phrases",
     "load_zh_address_suffix_strippers",
     "load_zh_country_prefix_aliases",
     "load_zh_single_surname_claim_strengths",

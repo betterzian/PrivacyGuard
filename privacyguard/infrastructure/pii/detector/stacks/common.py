@@ -21,6 +21,8 @@ class ExpansionBreakPolicy(StrEnum):
     ORG_LEFT_BOUNDARY = "org_left_boundary"
     NAME_EN_RIGHT_UNIT = "name_en_right_unit"
     NAME_EN_LEFT_UNIT = "name_en_left_unit"
+    NAME_ZH_RIGHT_UNIT = "name_zh_right_unit"
+    NAME_ZH_LEFT_UNIT = "name_zh_left_unit"
 
 
 def need_break(
@@ -47,11 +49,35 @@ def need_break(
             return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}
         return False
 
-    if policy not in {ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT, ExpansionBreakPolicy.NAME_EN_LEFT_UNIT}:
+    name_unit_policies = {
+        ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT,
+        ExpansionBreakPolicy.NAME_EN_LEFT_UNIT,
+        ExpansionBreakPolicy.NAME_ZH_RIGHT_UNIT,
+        ExpansionBreakPolicy.NAME_ZH_LEFT_UNIT,
+    }
+    if policy not in name_unit_policies:
         return False
-    if policy == ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT and upper is not None and subject.char_start >= upper:
+    is_right_policy = policy in {
+        ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT,
+        ExpansionBreakPolicy.NAME_ZH_RIGHT_UNIT,
+    }
+    is_left_policy = policy in {
+        ExpansionBreakPolicy.NAME_EN_LEFT_UNIT,
+        ExpansionBreakPolicy.NAME_ZH_LEFT_UNIT,
+    }
+    is_zh_policy = policy in {
+        ExpansionBreakPolicy.NAME_ZH_RIGHT_UNIT,
+        ExpansionBreakPolicy.NAME_ZH_LEFT_UNIT,
+    }
+    if is_right_policy and upper is not None and subject.char_start >= upper:
         return True
-    if policy == ExpansionBreakPolicy.NAME_EN_LEFT_UNIT and lower is not None and subject.char_end <= lower:
+    if is_left_policy and lower is not None and subject.char_end <= lower:
+        return True
+    if is_zh_policy:
+        if subject.kind == "cjk_char":
+            return False
+        if subject.kind == "punct":
+            return not is_name_joiner(subject.text, left_char, right_char)
         return True
     if subject.kind == "ascii_word":
         return False

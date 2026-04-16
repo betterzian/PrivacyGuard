@@ -46,12 +46,6 @@ _NEGATIVE_KIND_PRIORITY = {
 }
 
 
-class StandaloneMatchKind(str, Enum):
-    NONE = "none"
-    SINGLE_BOUNDARY = "single_boundary"
-    DOUBLE_BOUNDARY = "double_boundary"
-
-
 @dataclass(frozen=True, slots=True)
 class NegativeOverlap:
     """单个 negative 与姓名候选的重叠结果。"""
@@ -71,7 +65,6 @@ class ZhNameCommitDecision:
     final_claim_strength: ClaimStrength | None
     route: str
     negative_overlap_kind: NegativeOverlapKind = NegativeOverlapKind.NONE
-    standalone_match_kind: StandaloneMatchKind = StandaloneMatchKind.NONE
     reasons: tuple[str, ...] = ()
 
 
@@ -289,7 +282,6 @@ def component_negative_demotes_claim_strength(overlaps: Sequence[NegativeOverlap
 __all__ = [
     "NegativeOverlap",
     "NegativeOverlapKind",
-    "StandaloneMatchKind",
     "ZhNameCommitDecision",
     "claim_strength_meets_protection",
     "claim_strength_required_for_protection",

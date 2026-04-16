@@ -483,6 +483,12 @@ class BaseNameStack(BaseStack):
     ) -> bool:
         """默认姓名提交判定，供英文路径复用。"""
         del start, end, candidate_unit_start, candidate_unit_end
+        current_strength = self._resolve_claim_strength(name_clues=name_clues)
+        required_strength = ClaimStrength.SOFT
+        if self.context.protection_level in {ProtectionLevel.BALANCED, ProtectionLevel.WEAK}:
+            required_strength = ClaimStrength.HARD
+        if not strength_ge(current_strength, required_strength):
+            return False
         unique_roles = {clue.role for _index, clue in name_clues}
         if self.clue.role in _NAME_COMPONENT_ROLES:
             unique_roles.discard(self.clue.role)
