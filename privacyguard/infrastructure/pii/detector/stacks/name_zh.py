@@ -11,14 +11,12 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_zh_single_surname_claim_strengths,
 )
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, Clue, ClueRole
-from privacyguard.infrastructure.pii.detector.stacks.base import StackRun
+from privacyguard.infrastructure.pii.detector.stacks.base import PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
-    ExpansionBreakPolicy,
     _char_span_to_unit_span,
     _label_seed_start_char,
     _unit_index_at_or_after,
     _unit_index_left_of,
-    need_break,
 )
 from privacyguard.infrastructure.pii.detector.stacks.name_base import BaseNameStack
 from privacyguard.infrastructure.pii.detector.zh_name_rules import (
@@ -82,6 +80,29 @@ class ZhNameStack(BaseNameStack):
     """中文姓名 stack。"""
 
     STACK_LOCALE = "zh"
+
+    def need_break(
+        self,
+        subject,
+        *,
+        next_unit=None,
+        prev_unit=None,
+        upper=None,
+        lower=None,
+        left_char=None,
+        right_char=None,
+    ) -> bool:
+        if isinstance(subject, Clue):
+            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
+        if upper is not None and subject.char_start >= upper:
+            return True
+        if lower is not None and subject.char_end <= lower:
+            return True
+        if subject.kind == "cjk_char":
+            return False
+        if subject.kind == "punct":
+            return not is_name_joiner(subject.text, left_char, right_char)
+        return True
 
     def run(self) -> StackRun | None:
         if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS, ClueRole.GIVEN_NAME}:
@@ -259,7 +280,41 @@ class ZhNameStack(BaseNameStack):
         )
         if candidate is None:
             return None
+        overlap_index = self._first_address_overlap_clue_index(start, candidate_end)
+        if overlap_index is not None and family_anchor.end > start:
+            conservative = self._build_candidate(
+                start=start,
+                end=family_anchor.end,
+                claim_strength=final_strength,
+                route=route,
+                negative_overlap_kind=dominant_negative_overlap_kind(candidate_overlaps),
+                extra_metadata={
+                    "name_route": [route],
+                    "family_claim_strength_before_negative": [family_strength_before.value],
+                    "family_claim_strength_after_negative": [family_strength_after.value],
+                    "negative_overlap_kind": [dominant_negative_overlap_kind(candidate_overlaps).value],
+                    "family_anchor_text": [family_anchor.text],
+                },
+            )
+            if conservative is not None:
+                run = self._finalize_run(start, family_anchor.end, conservative)
+                run.pending_challenge = PendingChallenge(
+                    clue_index=overlap_index,
+                    extended_candidate=candidate,
+                    extended_consumed_ids={*run.consumed_ids},
+                    extended_next_index=max(run.next_index, overlap_index + 1),
+                    challenge_kind="name_same_start_blocker",
+                )
+                return run
         return self._finalize_run(start, candidate_end, candidate)
+
+    def _first_address_overlap_clue_index(self, start: int, end: int) -> int | None:
+        for idx, clue in enumerate(self.context.clues):
+            if clue.attr_type != PIIAttributeType.ADDRESS:
+                continue
+            if clue.start < end and clue.end > start:
+                return idx
+        return None
 
     def _resolve_boundary_start(self) -> int:
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
@@ -408,9 +463,8 @@ class ZhNameStack(BaseNameStack):
         prev_unit = units[subject_index - 1] if subject_index - 1 >= 0 else None
         left_char = _peek_unit_last_char(units, subject_index - 1)
         right_char = raw_text[subject.char_end] if subject.char_end < len(raw_text) else None
-        return need_break(
+        return self.need_break(
             subject,
-            ExpansionBreakPolicy.NAME_ZH_LEFT_UNIT,
             lower=0,
             prev_unit=prev_unit,
             left_char=left_char,
@@ -428,9 +482,8 @@ class ZhNameStack(BaseNameStack):
         next_unit = units[subject_index + 1] if subject_index + 1 < len(units) else None
         left_char = raw_text[subject.char_start - 1] if subject.char_start > 0 else None
         right_char = _peek_unit_first_char(units, subject_index + 1)
-        return need_break(
+        return self.need_break(
             subject,
-            ExpansionBreakPolicy.NAME_ZH_RIGHT_UNIT,
             upper=len(raw_text),
             next_unit=next_unit,
             left_char=left_char,

@@ -48,6 +48,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
 
 
 def _state_routing_context(
+    stack: BaseAddressStack,
     state: _ParseState,
     clues: tuple[Clue, ...],
     raw_text: str,
@@ -64,6 +65,7 @@ def _state_routing_context(
         stream=stream,
         # 仅在已有已提交组件时才提供 search_start，避免未提交失败链污染 numberish 左扩起点。
         search_start=state.last_end if state.components else None,
+        should_break_clue=lambda clue: stack.need_break(clue),
     )
 
 
@@ -96,7 +98,7 @@ class ZhAddressStack(BaseAddressStack):
         if clue.role != ClueRole.KEY:
             return clue
         routed_key = _routed_key_clue(
-            _state_routing_context(state, clues, raw_text, stream),
+            _state_routing_context(self, state, clues, raw_text, stream),
             clue_index,
             clue,
         )
@@ -128,6 +130,7 @@ class ZhAddressStack(BaseAddressStack):
             clue,
             flush_chain=lambda idx: self._flush_chain(state, clue_index=idx),
             materialize_digit_tail_before_comma=lambda idx: self._materialize_digit_tail_before_comma(state, clues, idx),
+            should_break=self.need_break,
         )
 
     def _handle_value_clue(
@@ -154,7 +157,14 @@ class ZhAddressStack(BaseAddressStack):
 
         if state.pending_comma_value_right_scan:
             state.pending_comma_value_right_scan = False
-            upper_bound = _comma_value_scan_upper_bound(clues, clue_index, clue, stream, len(raw_text))
+            upper_bound = _comma_value_scan_upper_bound(
+                clues,
+                clue_index,
+                clue,
+                stream,
+                len(raw_text),
+                should_break=self.need_break,
+            )
             value_end = _scan_forward_value_end(raw_text, clue.end, upper_bound, stream=stream)
             if value_end > clue.end:
                 merged = raw_text[clue.start:value_end]
@@ -198,6 +208,7 @@ class ZhAddressStack(BaseAddressStack):
                     admin_levels,
                     stream,
                     raw_text,
+                    should_break=self.need_break,
                 ):
                     self._flush_chain(state, clue_index=clue_index)
                     if state.split_at is not None:
@@ -257,7 +268,7 @@ class ZhAddressStack(BaseAddressStack):
                 return _SENTINEL_STOP
             _reroute_pending_community_poi_to_subdistrict(state)
 
-        context = _state_routing_context(state, clues, raw_text, stream)
+        context = _state_routing_context(self, state, clues, raw_text, stream)
         expand_defer = _key_left_expand_start_if_deferrable(context, clue_index, clue, comp_type)
         if expand_defer is not None:
             state.chain_left_anchor = expand_defer

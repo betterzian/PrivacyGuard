@@ -16,6 +16,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueRole,
     InspireIndex,
     StreamInput,
+    StreamUnit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.common import _unit_char_end, _unit_char_start
 
@@ -106,6 +107,23 @@ class BaseStack:
 
     def run(self) -> StackRun | None:
         raise NotImplementedError
+
+    def need_break(
+        self,
+        subject: Clue | StreamUnit,
+        *,
+        next_unit: StreamUnit | None = None,
+        prev_unit: StreamUnit | None = None,
+        upper: int | None = None,
+        lower: int | None = None,
+        left_char: str | None = None,
+        right_char: str | None = None,
+    ) -> bool:
+        """单步边界判定；仅返回是否应停止，由各 stack 覆写具体规则。"""
+        del next_unit, prev_unit, upper, lower, left_char, right_char
+        if isinstance(subject, Clue):
+            return subject.role == ClueRole.BREAK
+        return False
 
     def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
         """被更高优先级候选抢占后，尝试做默认文本级回缩。"""

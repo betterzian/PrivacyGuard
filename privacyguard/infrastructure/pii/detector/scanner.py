@@ -2112,12 +2112,15 @@ def _zh_address_value_matcher() -> AhoMatcher:
         (AddressComponentType.DISTRICT, lexicon.districts),
     )
     patterns: list[AhoPattern] = []
-    seen: set[str] = set()
+    # 中文行政 value 允许同文案多层级并存（如“朝阳”可同时是 city/district），
+    # 后续交给地址 stack 的 suspect/route 机制在上下文中消歧。
+    seen: set[tuple[AddressComponentType, str]] = set()
     for component_type, entries in geo_specs:
         for entry in sorted(entries, key=lambda e: len(e.text), reverse=True):
-            if entry.text in seen:
+            dedupe_key = (component_type, entry.text)
+            if dedupe_key in seen:
                 continue
-            seen.add(entry.text)
+            seen.add(dedupe_key)
             patterns.append(
                 AhoPattern(
                     text=entry.text,
@@ -2274,7 +2277,7 @@ def _en_address_key_matcher() -> AhoMatcher:
 
 
 def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
-    """只去掉完全同义的 clue，不在这里做覆盖裁决。"""
+    """去重并执行同属性完全包含覆盖。"""
 
     def _preserve_same_span_zh_admin_value(
         kept: Clue,
@@ -2329,20 +2332,16 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
         )
         if key in seen:
             continue
-        # 同 role 线索覆盖：若 clue 完全包含于已保留线索，且 role/attr 相同，则子 clue 被覆盖丢弃。
+        # 通用同属性线索覆盖：若 clue 被已保留 clue 完全包含（含相等），则子 clue 被覆盖丢弃。
+        # ADDRESS 不在这里覆盖，统一交给 _apply_address_component_coverage。
         # 典型：district KEY “新区” 覆盖 “区”。
         covered = False
         for kept in reversed(ordered):
             if _preserve_same_span_zh_admin_value(kept, clue):
                 continue
-            if kept.start <= clue.start and clue.end <= kept.end:
-                if (
-                    kept.role == clue.role
-                    and kept.attr_type == clue.attr_type
-                    and kept.strength == clue.strength
-                ):
-                    covered = True
-                    break
+            if _same_attr_full_containment_cover(kept, clue):
+                covered = True
+                break
             if kept.start < clue.start and kept.end <= clue.start:
                 # 已离开可能覆盖范围。
                 break
@@ -2595,7 +2594,7 @@ def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
 
 
 def _apply_address_component_coverage(clues: list[Clue]) -> list[Clue]:
-    """地址组件覆盖裁决：仅严格完全包含时做覆盖，部分重叠都保留。"""
+    """地址组件覆盖裁决：仅在 ADDRESS family 内按严格完全包含覆盖。"""
     address_clues = [clue for clue in clues if clue.family == ClueFamily.ADDRESS]
     if len(address_clues) <= 1:
         return clues
@@ -2607,7 +2606,7 @@ def _apply_address_component_coverage(clues: list[Clue]) -> list[Clue]:
         for other in address_clues:
             if clue.clue_id == other.clue_id:
                 continue
-            # 仅严格包含时覆盖；完全相等与部分重叠都保留。
+            # ADDRESS 维持专属覆盖规则：严格包含才覆盖，完全相等与部分重叠都保留。
             if (
                 other.start <= clue.start
                 and clue.end <= other.end
@@ -2620,17 +2619,12 @@ def _apply_address_component_coverage(clues: list[Clue]) -> list[Clue]:
 
 
 def _resolve_name_component_overlap_winners(clues: list[Clue]) -> list[Clue]:
-    """姓名组件重叠裁决：仅完全包含时做覆盖，部分重叠都保留。"""
+    """姓名组件重叠裁决：同属性完全包含时覆盖，部分重叠都保留。"""
     if not clues:
         return []
     survivors: list[Clue] = []
     for clue in clues:
-        if any(
-            other.start <= clue.start and clue.end <= other.end
-            and (other.start < clue.start or clue.end < other.end)
-            for other in clues
-            if other.clue_id != clue.clue_id
-        ):
+        if any(_same_attr_full_containment_cover(other, clue) for other in clues if other.clue_id != clue.clue_id):
             continue
         survivors.append(clue)
     return sorted(survivors, key=lambda c: (c.start, c.end))
@@ -2664,6 +2658,17 @@ def _apply_seed_containment_coverage(clues: list[Clue]) -> list[Clue]:
                 dropped_ids.add(clue.clue_id)
 
     return [c for c in clues if c.clue_id not in dropped_ids]
+
+
+def _same_attr_full_containment_cover(container: Clue, contained: Clue) -> bool:
+    """通用同属性完全包含覆盖判定（不包含 ADDRESS）。"""
+    if container.attr_type is None or contained.attr_type is None:
+        return False
+    if container.attr_type != contained.attr_type:
+        return False
+    if container.attr_type == PIIAttributeType.ADDRESS:
+        return False
+    return container.start <= contained.start and contained.end <= container.end
 
 
 def _skip_whitespace_right(raw_text: str, start: int) -> int:

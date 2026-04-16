@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
+from typing import Callable
 
 from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value
 from privacyguard.infrastructure.pii.detector.models import (
@@ -45,14 +46,12 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _segment_admit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.common import (
-    ExpansionBreakPolicy,
     _unit_index_at_or_after,
     _unit_index_left_of,
     examine_left_numeral,
     is_ascii_alnum_like_unit,
     is_control_number_value_clue,
     is_negative_clue,
-    need_break,
 )
 
 _NUMBERISH_KEY_COMPONENTS = frozenset({
@@ -60,6 +59,10 @@ _NUMBERISH_KEY_COMPONENTS = frozenset({
     AddressComponentType.BUILDING,
     AddressComponentType.DETAIL,
 })
+
+
+def _address_should_break(clue: Clue) -> bool:
+    return clue.role == ClueRole.BREAK
 
 
 @dataclass(frozen=True, slots=True)
@@ -784,11 +787,13 @@ def _has_following_detail_key(
     clues: tuple[Clue, ...],
     clue_index: int,
     stream: StreamInput,
+    *,
+    should_break: Callable[[Clue], bool] = _address_should_break,
 ) -> bool:
     anchor = clues[clue_index]
     for index in range(clue_index + 1, len(clues)):
         clue = clues[index]
-        if need_break(clue, ExpansionBreakPolicy.ADDRESS_CLUE):
+        if should_break(clue):
             return False
         if is_negative_clue(clue):
             continue
@@ -830,7 +835,12 @@ def _routed_key_clue(context: _RoutingContext, clue_index: int, clue: Clue) -> C
         previous_component_type=_routing_context_type(context),
         raw_left_value_text=raw_left_value_text,
         left_value_text=left_value_text,
-        followed_by_detail_key=_has_following_detail_key(context.clues, clue_index, context.stream),
+        followed_by_detail_key=_has_following_detail_key(
+            context.clues,
+            clue_index,
+            context.stream,
+            should_break=context.should_break_clue or _address_should_break,
+        ),
     )
     if routed_type == clue.component_type:
         return clue
@@ -934,6 +944,8 @@ def _preview_comma_tail_first_component_levels(
     previous_component_type: AddressComponentType | None,
     previous_component_end: int | None,
     raw_text: str,
+    *,
+    should_break: Callable[[Clue], bool] = _address_should_break,
 ) -> tuple[tuple[AddressComponentType, ...], bool]:
     """预演逗号尾首段，返回首个 component 类型及是否需保持链打开。"""
     chain: list[Clue] = []
@@ -944,7 +956,7 @@ def _preview_comma_tail_first_component_levels(
         if not chain and search_anchor is not None and clue.start > search_anchor:
             if _span_has_search_stop_unit(stream, search_anchor, clue.start):
                 break
-        if need_break(clue, ExpansionBreakPolicy.ADDRESS_CLUE):
+        if should_break(clue):
             break
         if is_negative_clue(clue):
             continue
@@ -961,6 +973,7 @@ def _preview_comma_tail_first_component_levels(
             raw_text=raw_text,
             stream=stream,
             search_start=search_anchor,
+            should_break_clue=should_break,
         )
         effective = clue
         if clue.role == ClueRole.KEY:
@@ -987,12 +1000,14 @@ def _comma_value_scan_upper_bound(
     clue: Clue,
     stream: StreamInput,
     raw_text_len: int,
+    *,
+    should_break: Callable[[Clue], bool] = _address_should_break,
 ) -> int:
     """逗号后 VALUE 右扩上界。"""
     upper_bound = min(raw_text_len, clue.end + 48)
     for index in range(clue_index + 1, len(clues)):
         nxt = clues[index]
-        if need_break(nxt, ExpansionBreakPolicy.ADDRESS_CLUE):
+        if should_break(nxt):
             return min(upper_bound, nxt.start)
         if is_negative_clue(nxt):
             continue
@@ -1011,6 +1026,8 @@ def _has_reasonable_successor_key(
     admin_levels: tuple[AddressComponentType, ...],
     stream: StreamInput,
     raw_text: str,
+    *,
+    should_break: Callable[[Clue], bool] = _address_should_break,
 ) -> bool:
     """后置 admin VALUE 的前瞻。"""
     anchor = clues[index]
@@ -1021,7 +1038,7 @@ def _has_reasonable_successor_key(
     start_index = current_span.last_index + 1 if current_span is not None else index + 1
     for clue_index in range(start_index, len(clues)):
         nxt = clues[clue_index]
-        if need_break(nxt, ExpansionBreakPolicy.ADDRESS_CLUE):
+        if should_break(nxt):
             break
         if is_negative_clue(nxt) or nxt.role == ClueRole.LABEL:
             continue
@@ -1039,6 +1056,7 @@ def _has_reasonable_successor_key(
             raw_text=raw_text,
             stream=stream,
             search_start=_start_after_component_end(stream, previous_component_end) if previous_component_end is not None else None,
+            should_break_clue=should_break,
         )
         effective = nxt
         if nxt.role == ClueRole.KEY:
@@ -1070,6 +1088,7 @@ def _comma_tail_prehandle(
     *,
     flush_chain,
     materialize_digit_tail_before_comma,
+    should_break: Callable[[Clue], bool] = _address_should_break,
 ) -> object | None:
     """gap 内若有逗号，先断开左链，再按首个真实 component 做准入判定。"""
     comma_pos = _comma_char_index_in_gap(raw_text, state.last_end, clue.start)
@@ -1098,6 +1117,7 @@ def _comma_tail_prehandle(
         state.last_component_type,
         state.components[-1].end if state.components else None,
         raw_text,
+        should_break=should_break,
     )
     if not first_component_levels:
         state.split_at = comma_pos

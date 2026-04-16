@@ -641,6 +641,18 @@ class StreamParser:
         challenge = run.pending_challenge
         assert challenge is not None
         struct_run, _ = self._try_run_stack(context, challenge.clue_index)
+        if challenge.challenge_kind == "name_same_start_blocker":
+            if struct_run is None or struct_run.candidate.attr_type == PIIAttributeType.ADDRESS:
+                run.pending_challenge = None
+                return run
+            return StackRun(
+                attr_type=run.attr_type,
+                candidate=challenge.extended_candidate,
+                consumed_ids=challenge.extended_consumed_ids,
+                handled_label_clue_ids=run.handled_label_clue_ids,
+                next_index=challenge.extended_next_index,
+                suppress_challenger_clue_ids=run.suppress_challenger_clue_ids,
+            )
         use_extended = False
         if struct_run is None:
             use_extended = True

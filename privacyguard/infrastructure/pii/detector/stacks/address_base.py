@@ -64,10 +64,8 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
 )
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
-    ExpansionBreakPolicy,
     _char_span_to_unit_span,
     _label_seed_start_char,
-    need_break,
     _skip_separators,
     _unit_char_end,
     _unit_char_start,
@@ -302,7 +300,7 @@ class BaseAddressStack(BaseStack):
                     if _span_has_non_comma_search_stop_unit(stream, search_anchor, clue.start):
                         break
 
-            if need_break(clue, ExpansionBreakPolicy.ADDRESS_CLUE):
+            if self.need_break(clue):
                 break
             if clue.attr_type is None:
                 index += 1
@@ -347,10 +345,16 @@ class BaseAddressStack(BaseStack):
             _mark_consumed_indices(state, {index})
             return True
         if clue.attr_type in {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
-            nxt_addr = _next_address_clue_index_after(clues, index)
+            nxt_addr = _next_address_clue_index_after(clues, index, should_break=self.need_break)
             if nxt_addr is not None and _bridge_last_address_to_next_within_units(state, clues[nxt_addr], stream):
                 state.suppress_challenger_clue_ids.add(clue.clue_id)
                 state.absorbed_digit_unit_end = max(state.absorbed_digit_unit_end, clue.unit_end)
+        return False
+
+    def need_break(self, subject, **kwargs) -> bool:
+        del kwargs
+        if isinstance(subject, Clue):
+            return subject.role == ClueRole.BREAK
         return False
 
     def _handle_address_clue(

@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Callable
 
 from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value
 from privacyguard.infrastructure.pii.detector.lexicon_loader import load_zh_control_values
@@ -30,12 +31,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _DraftComponent,
     _ParseState,
 )
-from privacyguard.infrastructure.pii.detector.stacks.common import (
-    ExpansionBreakPolicy,
-    _unit_index_at_or_after,
-    is_negative_clue,
-    need_break,
-)
+from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after, is_negative_clue
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, is_any_break, is_soft_break
 
 _SENTINEL_STOP = object()
@@ -282,6 +278,31 @@ def _span_has_non_comma_search_stop_unit(stream: StreamInput, start_char: int, e
     return False
 
 
+def _is_comma_boundary_span(stream: StreamInput, start_char: int, end_char: int) -> bool:
+    """区间是否是“仅由逗号分隔”的组件边界。"""
+    if end_char <= start_char or not stream.units:
+        return False
+    saw_comma = False
+    ui = _unit_index_at_or_after(stream, start_char)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.char_start >= end_char:
+            break
+        if _is_inline_gap_unit(unit) or _is_space_unit(unit):
+            ui += 1
+            continue
+        if _is_comma_unit(unit):
+            saw_comma = True
+            ui += 1
+            continue
+        if unit.kind in {"ocr_break"}:
+            return False
+        if any(is_any_break(char) for char in unit.text):
+            return False
+        return False
+    return saw_comma
+
+
 def _clue_gap_has_search_stop(left: Clue, right: Clue, stream: StreamInput | None) -> bool:
     if stream is None:
         return False
@@ -368,6 +389,7 @@ class _RoutingContext:
     raw_text: str
     stream: StreamInput
     search_start: int | None = None
+    should_break_clue: Callable[[Clue], bool] | None = None
 
 
 def _scan_forward_value_end(
@@ -443,11 +465,16 @@ def _label_seed_address_index(
     return key_index
 
 
-def _next_address_clue_index_after(clues: tuple[Clue, ...], after_index: int) -> int | None:
+def _next_address_clue_index_after(
+    clues: tuple[Clue, ...],
+    after_index: int,
+    *,
+    should_break: Callable[[Clue], bool],
+) -> int | None:
     """从给定下标之后找第一个可消费的 ADDRESS 线索。"""
     for index in range(after_index + 1, len(clues)):
         clue = clues[index]
-        if need_break(clue, ExpansionBreakPolicy.ADDRESS_CLUE):
+        if should_break(clue):
             return None
         if is_negative_clue(clue) or clue.attr_type is None:
             continue

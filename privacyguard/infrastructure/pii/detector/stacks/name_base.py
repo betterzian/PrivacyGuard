@@ -5,7 +5,7 @@ from __future__ import annotations
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint, build_name_candidate_from_value
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput, StreamUnit, strength_ge
-from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
+from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     ExpansionBreakPolicy,
     _char_span_to_unit_span,
@@ -35,7 +35,44 @@ class BaseNameStack(BaseStack):
 
     STACK_LOCALE = "zh"
 
+    def need_break(
+        self,
+        subject: Clue | StreamUnit,
+        *,
+        next_unit: StreamUnit | None = None,
+        prev_unit: StreamUnit | None = None,
+        upper: int | None = None,
+        lower: int | None = None,
+        left_char: str | None = None,
+        right_char: str | None = None,
+    ) -> bool:
+        if isinstance(subject, Clue):
+            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
+        locale = self.STACK_LOCALE
+        if locale == "zh":
+            if subject.kind == "cjk_char":
+                return False
+            if subject.kind == "punct":
+                return not is_name_joiner(subject.text, left_char, right_char)
+            return True
+        if subject.kind == "ascii_word":
+            return False
+        if subject.kind == "space":
+            if next_unit is not None:
+                return not (
+                    next_unit.kind == "ascii_word" and (upper is None or next_unit.char_start < upper)
+                )
+            if prev_unit is not None:
+                return not (
+                    prev_unit.kind == "ascii_word" and (lower is None or prev_unit.char_end > lower)
+                )
+            return True
+        if subject.kind == "punct":
+            return not is_name_joiner(subject.text, left_char, right_char)
+        return True
+
     def run(self) -> StackRun | None:
+        self._name_pending_challenge: tuple[int, int] | None = None
         if self.clue.strength == ClaimStrength.HARD:
             return self._build_direct_run()
         locale = self.STACK_LOCALE
@@ -113,13 +150,38 @@ class BaseNameStack(BaseStack):
         consumed_ids = {self.clue.clue_id}
         consumed_ids.update(clue.clue_id for _index, clue in name_clues)
         last_name_index = max((index for index, _clue in name_clues), default=self.clue_index)
-        return StackRun(
+        run = StackRun(
             attr_type=PIIAttributeType.NAME,
             candidate=candidate,
             consumed_ids=consumed_ids,
             handled_label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
             next_index=max(self.clue_index + 1, last_name_index + 1),
         )
+        pending = getattr(self, "_name_pending_challenge", None)
+        if pending is not None:
+            blocker_index, extended_end = pending
+            if extended_end > end:
+                extended_candidate = build_name_candidate_from_value(
+                    source=self.context.stream.source,
+                    value_text=self.context.stream.text[start:extended_end],
+                    value_start=start,
+                    value_end=extended_end,
+                    source_kind=self.clue.source_kind,
+                    component_hint=self._effective_hint(start, extended_end),
+                    unit_start=unit_start,
+                    unit_end=_char_span_to_unit_span(self.context.stream, start, extended_end)[1],
+                    label_clue_id=self.clue.clue_id if is_label_seed else None,
+                    label_driven=is_label_seed,
+                )
+                if extended_candidate is not None:
+                    run.pending_challenge = PendingChallenge(
+                        clue_index=blocker_index,
+                        extended_candidate=extended_candidate,
+                        extended_consumed_ids=set(consumed_ids),
+                        extended_next_index=max(run.next_index, blocker_index + 1),
+                        challenge_kind="name_same_start_blocker",
+                    )
+        return run
 
     def _extend_given_left_en(self, start: int) -> int:
         word_span = self._previous_plain_ascii_word(start)
@@ -168,6 +230,15 @@ class BaseNameStack(BaseStack):
             if cursor < plain_limit:
                 return cursor
 
+            if (
+                next_blocker is not None
+                and next_blocker[1].start == cursor
+                and next_blocker[1].attr_type == PIIAttributeType.ADDRESS
+            ):
+                # 同址遇到 ADDRESS blocker：先保守停在 blocker 左侧，交由 parser 挑战裁决。
+                extended_end = next_component[1].end if next_component is not None and next_component[1].start == cursor else cursor
+                self._name_pending_challenge = (next_blocker[0], extended_end)
+                return cursor
             if next_component is None or next_component[1].start != cursor:
                 return cursor
 

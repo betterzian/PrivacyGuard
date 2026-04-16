@@ -15,7 +15,6 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import (
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
-    ExpansionBreakPolicy,
     _char_span_to_unit_span,
     _count_non_space_units,
     _label_seed_start_char,
@@ -24,7 +23,6 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     _unit_index_at_or_after,
     _unit_index_left_of,
     is_control_clue,
-    need_break,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_any_break, is_hard_break
 
@@ -34,6 +32,12 @@ class BaseOrganizationStack(BaseStack):
     """组织名检测 stack 基类。"""
 
     STACK_LOCALE = "zh"
+
+    def need_break(self, subject, **kwargs) -> bool:
+        del kwargs
+        if isinstance(subject, Clue):
+            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}
+        return False
 
     def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
         """组织名回缩：后缀被截即放弃，前缀被截后需重新校验。"""
@@ -139,7 +143,7 @@ class BaseOrganizationStack(BaseStack):
         )
 
     def _resolve_suffix_start(self, *, locale: str) -> int:
-        floor = _left_expand_text_boundary(self.context, self.clue.start)
+        floor = _left_expand_text_boundary(self.context, self.clue.start, should_break=self.need_break)
         return _extend_organization_left_with_limit(
             self.context.stream,
             floor=floor,
@@ -430,7 +434,7 @@ def _meets_org_commit_threshold(
     return False
 
 
-def _left_expand_text_boundary(context, start: int) -> int:
+def _left_expand_text_boundary(context, start: int, *, should_break) -> int:
     """组织名向左扩展文本边界。遇到任何断点符号即停止。"""
     raw_text = context.stream.text
     clues = context.clues
@@ -440,7 +444,7 @@ def _left_expand_text_boundary(context, start: int) -> int:
         floor = max(floor, negative_floor)
     for clue in reversed(clues):
         if clue.end <= start:
-            if need_break(clue, ExpansionBreakPolicy.ORG_LEFT_BOUNDARY):
+            if should_break(clue):
                 floor = clue.end
                 break
     index = start
@@ -458,7 +462,7 @@ def _organization_body_limit(locale: str) -> int:
 
 def _is_organization_count_unit(kind: str, locale: str) -> bool:
     if locale == "zh":
-        return kind == "cjk_char"
+        return kind in {"cjk_char", "ascii_word"}
     return kind == "ascii_word"
 
 
@@ -482,11 +486,13 @@ def _extend_organization_right_with_limit(
         unit = stream.units[ui]
         if unit.char_start >= upper:
             break
-        if unit.kind in {"space", "punct"}:
-            if end > start:
+        if unit.kind == "space":
+            if locale == "en" and end > start:
                 end = min(unit.char_end, upper)
                 ui += 1
                 continue
+            break
+        if unit.kind == "punct":
             break
         if _is_organization_count_unit(unit.kind, locale):
             if count >= limit:
@@ -519,10 +525,14 @@ def _extend_organization_left_with_limit(
         unit = stream.units[ui]
         if unit.char_end <= floor:
             break
-        if unit.kind in {"space", "punct"}:
+        if unit.kind == "space":
+            if locale != "en":
+                break
             next_start = max(floor, unit.char_start)
             ui -= 1
             continue
+        if unit.kind == "punct":
+            break
         if _is_organization_count_unit(unit.kind, locale):
             if count >= limit:
                 break
