@@ -279,6 +279,12 @@ def main() -> None:
         default="mixed",
         choices=("mixed", "zh_cn", "en_us"),
     )
+    parser.add_argument(
+        "--protection-level",
+        default=ProtectionLevel.STRONG.value,
+        choices=(ProtectionLevel.STRONG.value, ProtectionLevel.BALANCED.value, ProtectionLevel.WEAK.value),
+        help="规则检测保护度：strong/balanced/weak（默认 strong）。",
+    )
     args = parser.parse_args()
 
     if args.strip_mode == "all_pii_tags":
@@ -342,6 +348,7 @@ def main() -> None:
     args.converted_json.write_text(json.dumps(converted, ensure_ascii=False, indent=2), encoding="utf-8")
 
     detector = RuleBasedPIIDetector(locale_profile=args.locale_profile)
+    protection_level = ProtectionLevel(str(args.protection_level))
 
     all_serializable: list[dict[str, Any]] = []
     comparison_rows: list[dict[str, Any]] = []
@@ -387,7 +394,7 @@ def main() -> None:
             [],
             session_id=None,
             turn_id=None,
-            protection_level=ProtectionLevel.STRONG,
+            protection_level=protection_level,
             detector_overrides=None,
         )
         detect_seconds_total += time.perf_counter() - t_det0

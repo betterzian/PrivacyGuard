@@ -124,9 +124,9 @@ def stronger_claim_strength(a: ClaimStrength, b: ClaimStrength) -> ClaimStrength
 def claim_strength_required_for_protection(level: ProtectionLevel) -> ClaimStrength:
     """将保护级别映射为最终提交门槛。"""
     if level == ProtectionLevel.STRONG:
-        return ClaimStrength.WEAK
-    if level == ProtectionLevel.BALANCED:
         return ClaimStrength.SOFT
+    if level == ProtectionLevel.BALANCED:
+        return ClaimStrength.HARD
     return ClaimStrength.HARD
 
 
