@@ -30,12 +30,14 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_en import (
     is_suffix_en_component,
     is_prefix_en_component,
     key_left_expand_start_if_deferrable_en,
+    resolve_standalone_admin_value_group_en,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _DraftComponent,
     _ParseState,
     _append_deferred,
     _clone_draft_component,
+    _flush_chain,
     _segment_admit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.base import PendingChallenge, StackRun
@@ -69,6 +71,15 @@ class EnAddressStack(BaseAddressStack):
     @property
     def valid_successors(self):
         return EN_VALID_SUCCESSORS
+
+    def _flush_chain(self, state: _ParseState, *, clue_index: int) -> None:
+        _flush_chain(
+            state,
+            self.context.stream.text,
+            normalize_value=_normalize_address_value,
+            commit_component=lambda component: self._commit_component(state, component),
+            resolve_standalone_admin_group=resolve_standalone_admin_value_group_en,
+        )
 
     def run(self) -> StackRun | None:
         if (

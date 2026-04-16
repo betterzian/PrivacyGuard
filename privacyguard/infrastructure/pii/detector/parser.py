@@ -83,12 +83,14 @@ def _claim_strength_rank(strength: ClaimStrength) -> int:
 _ADDRESS_STRUCTURAL_METADATA_KEYS = frozenset({
     "address_component_trace",
     "address_component_key_trace",
+    "address_component_levels",
     "address_component_suspected",
     "address_component_type",
 })
 _ADDRESS_STRUCTURAL_SEQUENCE_KEYS = frozenset({
     "address_component_trace",
     "address_component_key_trace",
+    "address_component_levels",
     "address_component_suspected",
     "address_component_type",
     "address_details_type",

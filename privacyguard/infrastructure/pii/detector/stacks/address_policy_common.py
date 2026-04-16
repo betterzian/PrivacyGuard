@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Callable
 
@@ -26,6 +27,8 @@ from privacyguard.infrastructure.pii.detector.models import (
     StreamUnit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
+    _ADMIN_RANK,
+    _ADMIN_TYPES,
     _DETAIL_COMPONENTS,
     _DIGIT_TAIL_TRIGGER_TYPES,
     _DraftComponent,
@@ -37,12 +40,191 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK
 _SENTINEL_STOP = object()
 _SENTINEL_IGNORE = object()
 
+_MULTI_LEVEL_KEY_LEVELS: dict[str, tuple[AddressComponentType, ...]] = {
+    "市": (
+        AddressComponentType.PROVINCE,
+        AddressComponentType.CITY,
+        AddressComponentType.DISTRICT_CITY,
+    ),
+}
+
 _ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM})
 _NUMBERISH_COMPONENTS = frozenset({
     AddressComponentType.NUMBER,
     AddressComponentType.BUILDING,
     AddressComponentType.DETAIL,
 })
+
+
+@dataclass(frozen=True, slots=True)
+class _AdminValueSpan:
+    """同一 value span 上的行政层级集合。"""
+
+    start: int
+    end: int
+    text: str
+    levels: tuple[AddressComponentType, ...]
+    resolved_level: AddressComponentType | None = None
+    first_index: int = -1
+    last_index: int = -1
+
+
+def _is_admin_value_clue(clue: Clue) -> bool:
+    return (
+        clue.role == ClueRole.VALUE
+        and clue.attr_type == PIIAttributeType.ADDRESS
+        and clue.component_type in _ADMIN_TYPES
+        and clue.component_type != AddressComponentType.MULTI_ADMIN
+    )
+
+
+def _is_admin_key_clue(clue: Clue) -> bool:
+    return (
+        clue.role == ClueRole.KEY
+        and clue.attr_type == PIIAttributeType.ADDRESS
+        and (
+            clue.component_type in _ADMIN_TYPES
+            or clue.component_type == AddressComponentType.MULTI_ADMIN
+        )
+    )
+
+
+def _same_admin_value_span(left: Clue, right: Clue) -> bool:
+    return (
+        _is_admin_value_clue(left)
+        and _is_admin_value_clue(right)
+        and left.start == right.start
+        and left.end == right.end
+    )
+
+
+def _ordered_admin_levels(levels: Iterable[AddressComponentType]) -> tuple[AddressComponentType, ...]:
+    seen: list[AddressComponentType] = []
+    for level in levels:
+        if level not in _ADMIN_RANK or level in seen:
+            continue
+        seen.append(level)
+    return tuple(sorted(seen, key=lambda item: _ADMIN_RANK[item], reverse=True))
+
+
+def _build_admin_value_span(
+    clues: Sequence[Clue],
+    *,
+    first_index: int = -1,
+    last_index: int = -1,
+) -> _AdminValueSpan | None:
+    if not clues:
+        return None
+    first = clues[0]
+    if not _is_admin_value_clue(first):
+        return None
+    if any(not _same_admin_value_span(first, current) for current in clues):
+        return None
+    levels = _ordered_admin_levels(
+        current.component_type
+        for current in clues
+        if current.component_type is not None
+    )
+    if not levels:
+        return None
+    return _AdminValueSpan(
+        start=first.start,
+        end=first.end,
+        text=first.text,
+        levels=levels,
+        first_index=first_index,
+        last_index=last_index,
+    )
+
+
+def collect_admin_value_span(
+    clues: Sequence[Clue],
+    clue_index: int,
+) -> _AdminValueSpan | None:
+    """按 clue 下标收集其所在的同 span 行政 VALUE 组。"""
+    if not (0 <= clue_index < len(clues)):
+        return None
+    anchor = clues[clue_index]
+    if not _is_admin_value_clue(anchor):
+        return None
+    left = clue_index
+    while left - 1 >= 0 and _same_admin_value_span(clues[left - 1], anchor):
+        left -= 1
+    right = clue_index
+    while right + 1 < len(clues) and _same_admin_value_span(anchor, clues[right + 1]):
+        right += 1
+    return _build_admin_value_span(clues[left:right + 1], first_index=left, last_index=right)
+
+
+def _collect_chain_edge_admin_value_span(
+    chain: Sequence[Clue],
+    *,
+    edge: str,
+    anchor: Clue | None = None,
+    stream: StreamInput | None = None,
+    max_gap_units: int = 0,
+    require_entire_chain_same_span: bool = False,
+) -> _AdminValueSpan | None:
+    """从 deferred/preview 链一端提取同 span 行政 VALUE 组。"""
+    if not chain:
+        return None
+    if edge == "right":
+        reference_index = len(chain) - 1
+    elif edge == "left":
+        reference_index = 0
+    else:
+        return None
+    reference = chain[reference_index]
+    if not _is_admin_value_clue(reference):
+        return None
+    if anchor is not None and stream is not None:
+        if _clue_gap_has_search_stop(reference, anchor, stream):
+            return None
+        if _clue_unit_gap(reference, anchor, stream) > max_gap_units:
+            return None
+    if edge == "right":
+        left = reference_index
+        while left - 1 >= 0 and _same_admin_value_span(chain[left - 1], reference):
+            left -= 1
+        if require_entire_chain_same_span and left != 0:
+            return None
+        return _build_admin_value_span(chain[left:], first_index=left, last_index=reference_index)
+    right = reference_index
+    while right + 1 < len(chain) and _same_admin_value_span(reference, chain[right + 1]):
+        right += 1
+    if require_entire_chain_same_span and right != len(chain) - 1:
+        return None
+    return _build_admin_value_span(chain[:right + 1], first_index=reference_index, last_index=right)
+
+
+def match_admin_levels(
+    preferred_levels: Iterable[AddressComponentType],
+    candidate_levels: Iterable[AddressComponentType],
+) -> AddressComponentType | None:
+    candidate_set = set(_ordered_admin_levels(candidate_levels))
+    if not candidate_set:
+        return None
+    for level in _ordered_admin_levels(preferred_levels):
+        if level in candidate_set:
+            return level
+    return None
+
+
+def ordered_intersect(
+    left: Iterable[AddressComponentType],
+    right: Iterable[AddressComponentType],
+) -> tuple[AddressComponentType, ...]:
+    right_set = set(right)
+    return tuple(level for level in _ordered_admin_levels(left) if level in right_set)
+
+
+def key_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    explicit = _MULTI_LEVEL_KEY_LEVELS.get(clue.text)
+    if explicit:
+        return explicit
+    if clue.component_type is None:
+        return ()
+    return (clue.component_type,)
 
 
 def _is_absorbable_digit_clue(clue: Clue) -> bool:
@@ -87,6 +269,24 @@ def _is_search_stop_unit(unit: StreamUnit) -> bool:
     if unit.kind in {"space", "ocr_break"}:
         return True
     return any(is_any_break(char) for char in unit.text)
+
+
+def _is_admin_soft_boundary_span(stream: StreamInput, start_char: int, end_char: int) -> bool:
+    """区间仅包含空格/逗号/inline_gap 时，允许 admin value 链继续累积。"""
+    if end_char <= start_char or not stream.units:
+        return False
+    saw_boundary = False
+    ui = _unit_index_at_or_after(stream, start_char)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.char_start >= end_char:
+            break
+        if _is_inline_gap_unit(unit) or _is_space_unit(unit) or _is_comma_unit(unit):
+            saw_boundary = True
+            ui += 1
+            continue
+        return False
+    return saw_boundary
 
 
 def _skip_from_char_by_units(
@@ -309,6 +509,26 @@ def _clue_gap_has_search_stop(left: Clue, right: Clue, stream: StreamInput | Non
     return _span_has_search_stop_unit(stream, left.end, right.start)
 
 
+def _is_pure_admin_value_chain(chain: Sequence[Clue]) -> bool:
+    return bool(chain) and all(_is_admin_value_clue(clue) for clue in chain)
+
+
+def _admin_value_chain_can_cross_gap(chain: Sequence[Clue], clue: Clue, stream: StreamInput | None) -> bool:
+    if stream is None or not _is_pure_admin_value_chain(chain) or not _is_admin_value_clue(clue):
+        return False
+    return _is_admin_soft_boundary_span(stream, chain[-1].end, clue.start)
+
+
+def _is_admin_chain(chain: Sequence[Clue]) -> bool:
+    return bool(chain) and all(_is_admin_value_clue(clue) or _is_admin_key_clue(clue) for clue in chain)
+
+
+def _admin_key_chain_can_cross_gap(chain: Sequence[Clue], clue: Clue, stream: StreamInput | None) -> bool:
+    if stream is None or not _is_admin_chain(chain) or not _is_admin_value_clue(clue):
+        return False
+    return _is_admin_key_clue(chain[-1]) and _is_admin_soft_boundary_span(stream, chain[-1].end, clue.start)
+
+
 def _state_next_component_start(
     state: _ParseState,
     stream: StreamInput,
@@ -429,6 +649,10 @@ def _chain_can_accept(chain: list[Clue], clue: Clue, stream: StreamInput) -> boo
     if not chain:
         return False
     last = chain[-1]
+    if _admin_value_chain_can_cross_gap(chain, clue, stream):
+        return True
+    if _admin_key_chain_can_cross_gap(chain, clue, stream):
+        return True
     if _clue_gap_has_search_stop(last, clue, stream):
         return False
     gap = _clue_unit_gap(last, clue, stream)

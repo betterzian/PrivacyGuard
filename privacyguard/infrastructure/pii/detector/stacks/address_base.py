@@ -27,6 +27,8 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     DigitTailResult,
     _SENTINEL_IGNORE,
     _SENTINEL_STOP,
+    _admin_key_chain_can_cross_gap,
+    _admin_value_chain_can_cross_gap,
     _analyze_digit_tail,
     _bridge_last_address_to_next_within_units,
     _clue_gap_has_search_stop,
@@ -292,12 +294,28 @@ class BaseAddressStack(BaseStack):
             search_anchor = _state_next_component_start(state, stream, address_start=address_start)
             if not relaxed and search_anchor is not None and clue.start > search_anchor:
                 if _span_has_search_stop_unit(stream, search_anchor, clue.start):
-                    if state.deferred_chain:
+                    if (
+                        clue.attr_type == PIIAttributeType.ADDRESS
+                        and (
+                            _admin_value_chain_can_cross_gap(
+                                [deferred for _, deferred in state.deferred_chain],
+                                clue,
+                                stream,
+                            )
+                            or _admin_key_chain_can_cross_gap(
+                                [deferred for _, deferred in state.deferred_chain],
+                                clue,
+                                stream,
+                            )
+                        )
+                    ):
+                        pass
+                    elif state.deferred_chain:
                         self._flush_chain(state, clue_index=index)
                         if state.split_at is not None:
                             break
                         continue
-                    if _span_has_non_comma_search_stop_unit(stream, search_anchor, clue.start):
+                    elif _span_has_non_comma_search_stop_unit(stream, search_anchor, clue.start):
                         break
 
             if self.need_break(clue):

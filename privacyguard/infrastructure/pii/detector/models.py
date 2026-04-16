@@ -67,6 +67,8 @@ class AddressComponentType(str, Enum):
     PROVINCE = "province"
     CITY = "city"
     DISTRICT = "district"
+    DISTRICT_CITY = "district_city"
+    MULTI_ADMIN = "multi_admin"
     SUBDISTRICT = "subdistrict"
     ROAD = "road"
     NUMBER = "number"
@@ -180,6 +182,7 @@ class Clue:
     # —— family 专属（可选） ——
     component_type: AddressComponentType | None = None
     break_type: BreakType | None = None
+    levels: tuple[AddressComponentType, ...] = ()
 
 
 def _normalize_negative_unit_range(unit_count: int, unit_start: int, unit_end: int) -> tuple[int, int]:

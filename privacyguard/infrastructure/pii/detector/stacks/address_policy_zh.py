@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Callable
 
@@ -22,14 +22,22 @@ from privacyguard.infrastructure.pii.detector.models import (
     StreamInput,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
+    _AdminValueSpan,
     _RoutingContext,
     _SENTINEL_STOP,
+    _build_admin_value_span,
     _chain_can_accept,
     _clue_gap_has_search_stop,
     _clue_unit_gap,
+    _collect_chain_edge_admin_value_span,
     _normalize_address_value,
+    _ordered_admin_levels,
     _span_has_search_stop_unit,
     _start_after_component_end,
+    collect_admin_value_span,
+    key_levels,
+    match_admin_levels,
+    ordered_intersect,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _ADMIN_RANK,
@@ -65,45 +73,6 @@ def _address_should_break(clue: Clue) -> bool:
     return clue.role == ClueRole.BREAK
 
 
-@dataclass(frozen=True, slots=True)
-class _AdminValueSpan:
-    """同一 value span 上的中文行政层级集合。"""
-
-    start: int
-    end: int
-    text: str
-    levels: tuple[AddressComponentType, ...]
-    resolved_level: AddressComponentType | None = None
-    first_index: int = -1
-    last_index: int = -1
-
-
-def _is_admin_value_clue(clue: Clue) -> bool:
-    return (
-        clue.role == ClueRole.VALUE
-        and clue.attr_type == PIIAttributeType.ADDRESS
-        and clue.component_type in _ADMIN_TYPES
-    )
-
-
-def _same_admin_value_span(left: Clue, right: Clue) -> bool:
-    return (
-        _is_admin_value_clue(left)
-        and _is_admin_value_clue(right)
-        and left.start == right.start
-        and left.end == right.end
-    )
-
-
-def _ordered_admin_levels(levels: Iterable[AddressComponentType]) -> tuple[AddressComponentType, ...]:
-    seen: list[AddressComponentType] = []
-    for level in levels:
-        if level not in _ADMIN_TYPES or level in seen:
-            continue
-        seen.append(level)
-    return tuple(sorted(seen, key=lambda item: _ADMIN_RANK.get(item, 0), reverse=True))
-
-
 def _ordered_component_types(levels: Iterable[AddressComponentType]) -> tuple[AddressComponentType, ...]:
     seen: list[AddressComponentType] = []
     for level in levels:
@@ -116,108 +85,10 @@ def _ordered_component_types(levels: Iterable[AddressComponentType]) -> tuple[Ad
     return tuple(admins + non_admins)
 
 
-def _build_admin_value_span(
-    clues: Sequence[Clue],
-    *,
-    first_index: int = -1,
-    last_index: int = -1,
-) -> _AdminValueSpan | None:
-    if not clues:
-        return None
-    first = clues[0]
-    if not _is_admin_value_clue(first):
-        return None
-    if any(not _same_admin_value_span(first, current) for current in clues):
-        return None
-    levels = _ordered_admin_levels(
-        current.component_type
-        for current in clues
-        if current.component_type is not None
-    )
-    if not levels:
-        return None
-    return _AdminValueSpan(
-        start=first.start,
-        end=first.end,
-        text=first.text,
-        levels=levels,
-        first_index=first_index,
-        last_index=last_index,
-    )
-
-
-def collect_admin_value_span(
-    clues: Sequence[Clue],
-    clue_index: int,
-) -> _AdminValueSpan | None:
-    """按 clue 下标收集其所在的同 span 行政 VALUE 组。"""
-    if not (0 <= clue_index < len(clues)):
-        return None
-    anchor = clues[clue_index]
-    if not _is_admin_value_clue(anchor):
-        return None
-    left = clue_index
-    while left - 1 >= 0 and _same_admin_value_span(clues[left - 1], anchor):
-        left -= 1
-    right = clue_index
-    while right + 1 < len(clues) and _same_admin_value_span(anchor, clues[right + 1]):
-        right += 1
-    return _build_admin_value_span(clues[left:right + 1], first_index=left, last_index=right)
-
-
-def _collect_chain_edge_admin_value_span(
-    chain: Sequence[Clue],
-    *,
-    edge: str,
-    anchor: Clue | None = None,
-    stream: StreamInput | None = None,
-    max_gap_units: int = 0,
-    require_entire_chain_same_span: bool = False,
-) -> _AdminValueSpan | None:
-    """从 deferred/preview 链一端提取同 span 行政 VALUE 组。"""
-    if not chain:
-        return None
-    if edge == "right":
-        reference_index = len(chain) - 1
-    elif edge == "left":
-        reference_index = 0
-    else:
-        return None
-    reference = chain[reference_index]
-    if not _is_admin_value_clue(reference):
-        return None
-    if anchor is not None and stream is not None:
-        if _clue_gap_has_search_stop(reference, anchor, stream):
-            return None
-        if _clue_unit_gap(reference, anchor, stream) > max_gap_units:
-            return None
-    if edge == "right":
-        left = reference_index
-        while left - 1 >= 0 and _same_admin_value_span(chain[left - 1], reference):
-            left -= 1
-        if require_entire_chain_same_span and left != 0:
-            return None
-        return _build_admin_value_span(chain[left:], first_index=left, last_index=reference_index)
-    right = reference_index
-    while right + 1 < len(chain) and _same_admin_value_span(reference, chain[right + 1]):
-        right += 1
-    if require_entire_chain_same_span and right != len(chain) - 1:
-        return None
-    return _build_admin_value_span(chain[:right + 1], first_index=reference_index, last_index=right)
-
-
-def match_admin_levels(
-    preferred_levels: Iterable[AddressComponentType],
-    candidate_levels: Iterable[AddressComponentType],
-) -> AddressComponentType | None:
-    """按优先顺序匹配行政层级，命中任一层级即返回该层级。"""
-    candidate_set = set(_ordered_component_types(candidate_levels))
-    if not candidate_set:
-        return None
-    for level in _ordered_component_types(preferred_levels):
-        if level in candidate_set:
-            return level
-    return None
+@dataclass(frozen=True, slots=True)
+class _AdminResolveResult:
+    primary: AddressComponentType
+    levels: tuple[AddressComponentType, ...]
 
 
 def _available_admin_levels_for_state(
@@ -260,8 +131,8 @@ def resolve_admin_value_span(
     span: _AdminValueSpan,
     *,
     valid_successors: dict[AddressComponentType, frozenset[AddressComponentType]] = _VALID_SUCCESSORS,
-) -> _AdminValueSpan | None:
-    """按当前状态选择同 span 行政 VALUE 的最终真实层级。"""
+) -> _AdminResolveResult | None:
+    """按当前状态解析同 span 行政 VALUE 的全部可用层级。"""
     available = _available_admin_levels_for_state(
         state,
         span,
@@ -271,21 +142,21 @@ def resolve_admin_value_span(
     )
     if not available:
         return None
-    return replace(span, levels=available, resolved_level=available[0])
+    return _AdminResolveResult(primary=available[0], levels=available)
 
 
 def _resolve_standalone_admin_value_group(
     state: _ParseState,
     clue_entries: tuple[tuple[int, Clue], ...],
 ) -> tuple[AddressComponentType, tuple[AddressComponentType, ...]] | None:
-    """将 standalone 链上的同 span 行政 VALUE 组解析为单一真实层级。"""
+    """将 standalone 链上的同 span 行政 VALUE 组解析为主层级与全部可用层级。"""
     span = _build_admin_value_span(tuple(clue for _, clue in clue_entries))
     if span is None:
         return None
     resolved = resolve_admin_value_span(state, span, valid_successors=_VALID_SUCCESSORS)
-    if resolved is None or resolved.resolved_level is None:
+    if resolved is None:
         return None
-    return resolved.resolved_level, resolved.levels
+    return resolved.primary, resolved.levels
 
 
 def _suspect_eligible_after_last_piece(
@@ -686,6 +557,7 @@ def _left_value_text_for_routing(context: _RoutingContext, clue: Clue, left_star
 
 def _adjacent_value_span(
     context: _RoutingContext,
+    clue_index: int,
     clue: Clue,
 ) -> _AdminValueSpan | None:
     """返回 key 左侧紧邻且纯 value 的行政 span。"""
@@ -693,8 +565,43 @@ def _adjacent_value_span(
         AddressComponentType.PROVINCE,
         AddressComponentType.CITY,
         AddressComponentType.DISTRICT,
+        AddressComponentType.MULTI_ADMIN,
     }:
         return None
+    if context.chain:
+        suffix_values: list[Clue] = []
+        for prior in reversed(context.chain):
+            if prior.role == ClueRole.KEY:
+                if suffix_values:
+                    break
+                continue
+            if prior.role != ClueRole.VALUE or prior.attr_type != PIIAttributeType.ADDRESS:
+                break
+            if not suffix_values:
+                suffix_values.append(prior)
+                continue
+            if prior.start == suffix_values[-1].start and prior.end == suffix_values[-1].end:
+                suffix_values.append(prior)
+                continue
+            break
+        if suffix_values:
+            suffix_values.reverse()
+            span = _build_admin_value_span(suffix_values)
+            if span is not None and not _clue_gap_has_search_stop(suffix_values[-1], clue, context.stream):
+                return span
+    if 0 <= clue_index - 1 < len(context.clues):
+        anchor = clue_index - 1
+        while anchor >= 0:
+            candidate = context.clues[anchor]
+            if candidate.attr_type != PIIAttributeType.ADDRESS or candidate.role == ClueRole.LABEL:
+                anchor -= 1
+                continue
+            if _clue_gap_has_search_stop(candidate, clue, context.stream):
+                break
+            span = collect_admin_value_span(context.clues, anchor)
+            if span is not None and span.end <= clue.start:
+                return span
+            break
     return _collect_chain_edge_admin_value_span(
         context.chain,
         edge="right",
@@ -716,15 +623,6 @@ def _successor_candidate_levels(
             if successor not in ordered:
                 ordered.append(successor)
     return tuple(ordered)
-
-
-def _key_should_degrade_from_non_pure_value(clue: Clue) -> AddressComponentType | None:
-    """非纯 value 场景下的 key 降级规则。"""
-    if clue.text == "省" and clue.component_type == AddressComponentType.PROVINCE:
-        return None
-    if clue.text == "市" and clue.component_type == AddressComponentType.CITY:
-        return AddressComponentType.DISTRICT
-    return clue.component_type
 
 
 def _routing_left_value_start(
@@ -813,16 +711,26 @@ def _routed_key_clue(context: _RoutingContext, clue_index: int, clue: Clue) -> C
     """把当前 KEY clue 重映射为真正参与中文状态机的类型。"""
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
-    adjacent_span = _adjacent_value_span(context, clue)
+    adjacent_span = _adjacent_value_span(context, clue_index, clue)
     if adjacent_span is not None:
-        if match_admin_levels((clue.component_type,), adjacent_span.levels) is None:
+        intersection = ordered_intersect(adjacent_span.levels, key_levels(clue))
+        if not intersection:
             return None
+        if len(intersection) == 1:
+            clue = replace(clue, component_type=intersection[0], levels=())
+        else:
+            clue = replace(
+                clue,
+                component_type=AddressComponentType.MULTI_ADMIN,
+                levels=intersection,
+            )
     else:
-        downgraded_type = _key_should_degrade_from_non_pure_value(clue)
-        if downgraded_type is None:
+        if clue.text == "市":
+            clue = replace(clue, component_type=AddressComponentType.DISTRICT_CITY, levels=())
+        elif clue.text == "省":
             return None
-        if downgraded_type != clue.component_type:
-            clue = replace(clue, component_type=downgraded_type)
+        else:
+            clue = replace(clue, levels=())
     left_start = _effective_left_value_start(context, clue_index, clue)
     raw_left_start = left_start
     if clue.text == "楼" and clue.component_type == AddressComponentType.DETAIL and raw_left_start == clue.start:
@@ -844,7 +752,7 @@ def _routed_key_clue(context: _RoutingContext, clue_index: int, clue: Clue) -> C
     )
     if routed_type == clue.component_type:
         return clue
-    return replace(clue, component_type=routed_type)
+    return replace(clue, component_type=routed_type, levels=())
 
 
 def _key_has_left_value(
@@ -894,7 +802,12 @@ def _comma_char_index_in_gap(raw_text: str, last_end: int, clue_start: int) -> i
 
 def _prior_max_admin_from_components(components: list[_DraftComponent]) -> AddressComponentType | None:
     """已提交 component 中行政类型的最高一层。"""
-    types = [component.component_type for component in components if component.component_type in _ADMIN_TYPES]
+    types = [
+        level
+        for component in components
+        for level in (component.levels or (component.component_type,))
+        if level in _ADMIN_RANK
+    ]
     if not types:
         return None
     return max(types, key=lambda component_type: _ADMIN_RANK.get(component_type, 0))
@@ -926,6 +839,8 @@ def _preview_first_component_levels_from_chain(
         if clue.role != ClueRole.KEY:
             continue
         comp_type = clue.component_type or AddressComponentType.POI
+        if comp_type == AddressComponentType.MULTI_ADMIN and clue.levels:
+            return clue.levels
         if comp_type == AddressComponentType.NUMBER and previous_component_type in _DETAIL_COMPONENTS:
             return (AddressComponentType.DETAIL,)
         return (comp_type,)

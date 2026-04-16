@@ -14,11 +14,18 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import load_en_addr
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
     Clue,
+    PIIAttributeType,
     StreamInput,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
     _RoutingContext,
+    _build_admin_value_span,
     _normalize_address_value,
+)
+from privacyguard.infrastructure.pii.detector.stacks.address_state import (
+    _ParseState,
+    _VALID_SUCCESSORS,
+    _segment_admit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_left_of
 
@@ -106,6 +113,25 @@ EN_VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]]
         AddressComponentType.COUNTRY,
     }),
 }
+
+
+def resolve_standalone_admin_value_group_en(
+    state: _ParseState,
+    clue_entries: tuple[tuple[int, Clue], ...],
+) -> tuple[AddressComponentType, tuple[AddressComponentType, ...]] | None:
+    """英文同 span 多层级行政 value 的公共解析。"""
+    span = _build_admin_value_span(tuple(clue for _, clue in clue_entries))
+    if span is None:
+        return None
+    available = tuple(
+        level
+        for level in span.levels
+        if _segment_admit(state, level, valid_successors=_VALID_SUCCESSORS)
+    )
+    if not available:
+        return None
+    primary = AddressComponentType.CITY if AddressComponentType.CITY in available else available[0]
+    return primary, available
 
 
 def _en_prefix_keywords() -> set[str]:

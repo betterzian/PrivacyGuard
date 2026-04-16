@@ -2100,15 +2100,9 @@ def _company_value_matcher() -> AhoMatcher:
 @lru_cache(maxsize=1)
 def _zh_address_value_matcher() -> AhoMatcher:
     lexicon = load_zh_geo_lexicon()
-    direct_city_names = {"北京", "上海", "天津", "重庆", "香港", "澳门"}
-    # 直辖市从 province 层移到 city 层，保留原始 strength。
-    province_entries = tuple(e for e in lexicon.provinces if e.text not in direct_city_names)
-    direct_entries = tuple(
-        sorted((e for e in lexicon.provinces if e.text in direct_city_names), key=lambda e: e.text)
-    )
     geo_specs: tuple[tuple[AddressComponentType, tuple[GeoEntry, ...]], ...] = (
-        (AddressComponentType.PROVINCE, province_entries),
-        (AddressComponentType.CITY, tuple([*lexicon.cities, *direct_entries])),
+        (AddressComponentType.PROVINCE, lexicon.provinces),
+        (AddressComponentType.CITY, lexicon.cities),
         (AddressComponentType.DISTRICT, lexicon.districts),
     )
     patterns: list[AhoPattern] = []
@@ -2205,13 +2199,13 @@ def _en_address_value_matcher() -> AhoMatcher:
         )
     )
     patterns: list[AhoPattern] = []
-    seen: set[str] = set()
+    seen: set[tuple[AddressComponentType, str]] = set()
     for component_type, entries in geo_entry_specs:
         for entry in sorted(entries, key=lambda e: len(e.text), reverse=True):
-            lower = entry.text.lower()
-            if lower in seen:
+            dedupe_key = (component_type, entry.text.lower())
+            if dedupe_key in seen:
                 continue
-            seen.add(lower)
+            seen.add(dedupe_key)
             patterns.append(
                 AhoPattern(
                     text=entry.text,
@@ -2225,9 +2219,9 @@ def _en_address_value_matcher() -> AhoMatcher:
             )
     for name in country_names:
         lower = name.lower()
-        if lower in seen:
+        if (AddressComponentType.COUNTRY, lower) in seen:
             continue
-        seen.add(lower)
+        seen.add((AddressComponentType.COUNTRY, lower))
         patterns.append(
             AhoPattern(
                 text=name,

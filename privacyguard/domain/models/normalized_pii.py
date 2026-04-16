@@ -26,6 +26,7 @@ class NormalizedAddressComponent(BaseModel):
     component_type: str
     value: str | tuple[str, ...]
     key: str | tuple[str, ...] = ""
+    levels: tuple[str, ...] = Field(default_factory=tuple)
     suspected: tuple[NormalizedAddressSuspectEntry, ...] = Field(default_factory=tuple)
 
 

@@ -25,11 +25,8 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _comma_value_scan_upper_bound,
     _resolve_standalone_admin_value_group,
     collect_admin_value_span,
-    _freeze_key_suspect_from_previous_key,
-    _freeze_value_suspect_for_mismatched_admin_key,
     _has_reasonable_successor_key,
     _key_left_expand_start_if_deferrable,
-    _remove_last_value_suspect,
     _routed_key_clue,
     _suspect_eligible_after_last_piece,
 )
@@ -67,8 +64,6 @@ def _state_routing_context(
         search_start=state.last_end if state.components else None,
         should_break_clue=lambda clue: stack.need_break(clue),
     )
-
-
 @dataclass(slots=True)
 class ZhAddressStack(BaseAddressStack):
     """中文地址专用 stack。"""
@@ -103,11 +98,6 @@ class ZhAddressStack(BaseAddressStack):
             clue,
         )
         if routed_key is None:
-            _freeze_value_suspect_for_mismatched_admin_key(
-                state,
-                clue,
-                stream=stream,
-            )
             state.ignored_address_key_indices.add(clue_index)
             return _SENTINEL_IGNORE
         return routed_key
@@ -181,6 +171,29 @@ class ZhAddressStack(BaseAddressStack):
             self._flush_chain(state, clue_index=clue_index)
             if state.split_at is not None:
                 return _SENTINEL_STOP
+
+        pure_admin_value_chain = (
+            admin_span is not None
+            and bool(state.deferred_chain)
+            and all(
+                deferred.role == ClueRole.VALUE
+                and deferred.attr_type == clue.attr_type
+                and deferred.component_type in _ADMIN_TYPES
+                for _, deferred in state.deferred_chain
+            )
+        )
+        same_admin_text_chain = (
+            pure_admin_value_chain
+            and any(
+                deferred.text == clue.text
+                for _, deferred in state.deferred_chain
+            )
+        )
+        if pure_admin_value_chain:
+            _append_deferred(state, clue_index, clue, record_suspect=False)
+            state.last_value = clue
+            state.last_end = max(state.last_end, clue.end)
+            return None
         if state.deferred_chain and not _chain_can_accept([c for _, c in state.deferred_chain], clue, stream):
             self._flush_chain(state, clue_index=clue_index)
             if state.split_at is not None:
@@ -189,6 +202,7 @@ class ZhAddressStack(BaseAddressStack):
         if state.components or state.deferred_chain:
             admin_levels = admin_span.levels if admin_span is not None else (comp_type,)
             admitted_level = comp_type
+            admitted_levels: tuple[AddressComponentType, ...] = ()
             if admin_span is not None:
                 resolved_group = _resolve_standalone_admin_value_group(
                     state,
@@ -196,10 +210,16 @@ class ZhAddressStack(BaseAddressStack):
                 )
                 if resolved_group is not None:
                     admitted_level = resolved_group[0]
+                    admitted_levels = resolved_group[1] if len(resolved_group[1]) >= 2 else ()
             if (
                 not state.pending_comma_first_component
                 and not state.segment_state.comma_tail_active
-                and not _segment_admit(state, admitted_level, valid_successors=self.valid_successors)
+                and not _segment_admit(
+                    state,
+                    admitted_level if not admitted_levels else AddressComponentType.MULTI_ADMIN,
+                    levels=admitted_levels,
+                    valid_successors=self.valid_successors,
+                )
             ):
                 if comp_type in _ADMIN_TYPES and _has_reasonable_successor_key(
                     state,
@@ -213,6 +233,11 @@ class ZhAddressStack(BaseAddressStack):
                     self._flush_chain(state, clue_index=clue_index)
                     if state.split_at is not None:
                         return _SENTINEL_STOP
+                    _append_deferred(state, clue_index, clue, record_suspect=False)
+                    state.last_value = clue
+                    state.last_end = max(state.last_end, clue.end)
+                    return None
+                if same_admin_text_chain:
                     _append_deferred(state, clue_index, clue, record_suspect=False)
                     state.last_value = clue
                     state.last_end = max(state.last_end, clue.end)
@@ -248,10 +273,6 @@ class ZhAddressStack(BaseAddressStack):
         state.pending_comma_value_right_scan = False
         chain = [item for _, item in state.deferred_chain]
         if chain and _chain_can_accept(chain, clue, stream):
-            last_chain_clue = chain[-1]
-            if last_chain_clue.role == ClueRole.KEY and last_chain_clue.component_type in _SUSPECT_KEY_TYPES:
-                _freeze_key_suspect_from_previous_key(state, raw_text, stream, last_chain_clue)
-            _remove_last_value_suspect(state, clue, stream)
             _append_deferred(state, clue_index, clue, record_suspect=False)
             state.last_end = max(state.last_end, clue.end)
             return None

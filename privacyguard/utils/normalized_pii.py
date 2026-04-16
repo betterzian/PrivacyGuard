@@ -28,9 +28,11 @@ from privacyguard.utils.pii_value import parse_name_components
 _NAME_COMPONENT_KEYS = ("full", "family", "given", "alias", "middle")
 _ADDRESS_COMPONENT_KEYS = (
     "country",
+    "multi_admin",
     "province",
     "city",
     "district",
+    "district_city",
     "subdistrict",
     "road",
     "house_number",
@@ -40,14 +42,16 @@ _ADDRESS_COMPONENT_KEYS = (
     "detail",
     "postal_code",
 )
-_ADDRESS_MATCH_KEYS = ("province", "city", "district", "subdistrict", "road", "poi")
+_ADDRESS_MATCH_KEYS = ("multi_admin", "province", "city", "district", "district_city", "subdistrict", "road", "poi")
 _ADDRESS_DETAIL_KEYS = ("building", "detail")
-_ADDRESS_COMPONENT_COMPARE_KEYS = ("province", "city", "district", "road", "subdistrict")
+_ADDRESS_COMPONENT_COMPARE_KEYS = ("multi_admin", "province", "city", "district", "district_city", "road", "subdistrict")
 _ORDERED_COMPONENT_KEYS = (
     "country",
+    "multi_admin",
     "province",
     "city",
     "district",
+    "district_city",
     "road",
     "house_number",
     "number",
@@ -76,6 +80,14 @@ _ADDRESS_COMPONENT_ALIASES = {
     "postal": "postal_code",
     "country_region": "country",
 }
+_ADDRESS_ADMIN_COMPONENT_KEYS = frozenset({
+    "multi_admin",
+    "province",
+    "city",
+    "district",
+    "district_city",
+    "subdistrict",
+})
 _PUNCT_TRIM_RE = re.compile(r"[\s\-_.,，。:：;；/\\|()（）【】\[\]#]+")
 _DIGIT_RE = re.compile(r"\d+")
 _NAME_COMPONENT_RE = re.compile(r"^[A-Za-z][A-Za-z .,'\-]{0,80}$")
@@ -385,8 +397,7 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
         if left.identity.get(key) and right.identity.get(key):
             substantive_hits += 1
 
-    # 单层级组件按组件自身的 suspected 比较，不再做地址级合并。
-    for key in ("city", "district", "road", "poi", "building", "detail"):
+    for key in ("city", "district", "district_city", "road", "poi", "building", "detail"):
         left_component = _ordered_component_by_type(left, key)
         right_component = _ordered_component_by_type(right, key)
         if left_component is None or right_component is None:
@@ -465,12 +476,26 @@ def _compare_component_with_suspected(
     return True
 
 
+def _component_type_levels(component: NormalizedAddressComponent | None) -> tuple[str, ...]:
+    if component is None:
+        return ()
+    ordered: list[str] = []
+    for level in (component.component_type, *component.levels):
+        text = str(level or "").strip()
+        if not text or text in ordered:
+            continue
+        ordered.append(text)
+    return tuple(ordered)
+
+
 def _ordered_component_by_type(
     normalized: NormalizedPII,
     component_type: str,
 ) -> NormalizedAddressComponent | None:
     for component in normalized.ordered_components:
         if component.component_type == component_type:
+            return component
+        if component_type in _component_type_levels(component):
             return component
     return None
 
@@ -683,6 +708,25 @@ def _component_suspected_tuple_from_metadata(
     return tuple(_parse_one_component_suspected(str(item or "")) for item in raw)
 
 
+def _component_levels_tuple_from_metadata(
+    metadata: Mapping[str, object] | None,
+) -> tuple[tuple[str, ...], ...]:
+    if not metadata:
+        return ()
+    raw = metadata.get("address_component_levels")
+    if not isinstance(raw, list):
+        return ()
+    parsed: list[tuple[str, ...]] = []
+    for item in raw:
+        levels = tuple(
+            level.strip()
+            for level in str(item or "").split("|")
+            if level.strip()
+        )
+        parsed.append(levels)
+    return tuple(parsed)
+
+
 def _address_ordered_components(
     *,
     metadata: Mapping[str, object] | None,
@@ -724,6 +768,7 @@ def _ordered_components_from_direct_components(
             component_type=component_type,
             value=value,
             key=key,
+            levels=(),
             suspected=(),
         ))
     return tuple(ordered)
@@ -737,6 +782,7 @@ def _ordered_components_from_metadata(
     if not trace_entries:
         return ()
     key_entries = _parse_address_trace_entries(_metadata_values(metadata, "address_component_key_trace"))
+    level_entries = _component_levels_tuple_from_metadata(metadata)
     suspected_entries = _component_suspected_tuple_from_metadata(metadata)
 
     ordered: list[NormalizedAddressComponent] = []
@@ -746,6 +792,7 @@ def _ordered_components_from_metadata(
 
     while trace_index < len(trace_entries):
         component_type, value = trace_entries[trace_index]
+        levels = level_entries[component_index] if component_index < len(level_entries) else ()
         suspected = suspected_entries[component_index] if component_index < len(suspected_entries) else ()
         component_index += 1
 
@@ -763,6 +810,7 @@ def _ordered_components_from_metadata(
                 component_type="poi",
                 value=tuple(values) if len(values) > 1 else values[0],
                 key=tuple(keys) if len(keys) > 1 else (keys[0] if keys else ""),
+                levels=(),
                 suspected=tuple(suspected),
             ))
             continue
@@ -775,6 +823,7 @@ def _ordered_components_from_metadata(
             component_type=component_type,
             value=value,
             key=key_value,
+            levels=levels,
             suspected=tuple(suspected),
         ))
         trace_index += 1
