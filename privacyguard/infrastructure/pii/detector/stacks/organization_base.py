@@ -15,15 +15,16 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import (
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
+    ExpansionBreakPolicy,
     _char_span_to_unit_span,
     _count_non_space_units,
-    _is_stop_control_clue,
     _label_seed_start_char,
     _unit_char_end,
     _unit_char_start,
     _unit_index_at_or_after,
     _unit_index_left_of,
     is_control_clue,
+    need_break,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_any_break, is_hard_break
 
@@ -439,10 +440,7 @@ def _left_expand_text_boundary(context, start: int) -> int:
         floor = max(floor, negative_floor)
     for clue in reversed(clues):
         if clue.end <= start:
-            if _is_stop_control_clue(clue):
-                floor = clue.end
-                break
-            if clue.role == ClueRole.LABEL:
+            if need_break(clue, ExpansionBreakPolicy.ORG_LEFT_BOUNDARY):
                 floor = clue.end
                 break
     index = start

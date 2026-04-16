@@ -64,13 +64,13 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
 )
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
+    ExpansionBreakPolicy,
     _char_span_to_unit_span,
     _label_seed_start_char,
+    need_break,
     _skip_separators,
     _unit_char_end,
     _unit_char_start,
-    is_break_clue,
-    is_negative_clue,
 )
 
 
@@ -302,11 +302,8 @@ class BaseAddressStack(BaseStack):
                     if _span_has_non_comma_search_stop_unit(stream, search_anchor, clue.start):
                         break
 
-            if is_break_clue(clue):
+            if need_break(clue, ExpansionBreakPolicy.ADDRESS_CLUE):
                 break
-            if is_negative_clue(clue):
-                index += 1
-                continue
             if clue.attr_type is None:
                 index += 1
                 continue

@@ -30,7 +30,12 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _DraftComponent,
     _ParseState,
 )
-from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after, is_break_clue, is_negative_clue
+from privacyguard.infrastructure.pii.detector.stacks.common import (
+    ExpansionBreakPolicy,
+    _unit_index_at_or_after,
+    is_negative_clue,
+    need_break,
+)
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, is_any_break, is_soft_break
 
 _SENTINEL_STOP = object()
@@ -442,7 +447,7 @@ def _next_address_clue_index_after(clues: tuple[Clue, ...], after_index: int) ->
     """从给定下标之后找第一个可消费的 ADDRESS 线索。"""
     for index in range(after_index + 1, len(clues)):
         clue = clues[index]
-        if is_break_clue(clue):
+        if need_break(clue, ExpansionBreakPolicy.ADDRESS_CLUE):
             return None
         if is_negative_clue(clue) or clue.attr_type is None:
             continue

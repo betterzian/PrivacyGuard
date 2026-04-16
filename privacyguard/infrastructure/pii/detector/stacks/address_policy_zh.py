@@ -45,13 +45,14 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _segment_admit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.common import (
+    ExpansionBreakPolicy,
     _unit_index_at_or_after,
     _unit_index_left_of,
     examine_left_numeral,
     is_ascii_alnum_like_unit,
-    is_break_clue,
     is_control_number_value_clue,
     is_negative_clue,
+    need_break,
 )
 
 _NUMBERISH_KEY_COMPONENTS = frozenset({
@@ -787,7 +788,7 @@ def _has_following_detail_key(
     anchor = clues[clue_index]
     for index in range(clue_index + 1, len(clues)):
         clue = clues[index]
-        if is_break_clue(clue):
+        if need_break(clue, ExpansionBreakPolicy.ADDRESS_CLUE):
             return False
         if is_negative_clue(clue):
             continue
@@ -943,7 +944,7 @@ def _preview_comma_tail_first_component_levels(
         if not chain and search_anchor is not None and clue.start > search_anchor:
             if _span_has_search_stop_unit(stream, search_anchor, clue.start):
                 break
-        if is_break_clue(clue):
+        if need_break(clue, ExpansionBreakPolicy.ADDRESS_CLUE):
             break
         if is_negative_clue(clue):
             continue
@@ -991,7 +992,7 @@ def _comma_value_scan_upper_bound(
     upper_bound = min(raw_text_len, clue.end + 48)
     for index in range(clue_index + 1, len(clues)):
         nxt = clues[index]
-        if is_break_clue(nxt):
+        if need_break(nxt, ExpansionBreakPolicy.ADDRESS_CLUE):
             return min(upper_bound, nxt.start)
         if is_negative_clue(nxt):
             continue
@@ -1020,7 +1021,7 @@ def _has_reasonable_successor_key(
     start_index = current_span.last_index + 1 if current_span is not None else index + 1
     for clue_index in range(start_index, len(clues)):
         nxt = clues[clue_index]
-        if is_break_clue(nxt):
+        if need_break(nxt, ExpansionBreakPolicy.ADDRESS_CLUE):
             break
         if is_negative_clue(nxt) or nxt.role == ClueRole.LABEL:
             continue

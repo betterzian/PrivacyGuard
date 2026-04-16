@@ -3,16 +3,73 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from functools import lru_cache
 
 from privacyguard.infrastructure.pii.detector.models import Clue, ClueFamily, ClueRole, StreamInput, StreamUnit
+from privacyguard.infrastructure.pii.rule_based_detector_shared import is_name_joiner
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
 
 _ASCII_ALNUM_KINDS = frozenset({"digit_run", "alpha_run", "alnum_run", "ascii_word"})
 
 
-def is_break_clue(clue: Clue) -> bool:
-    return clue.role == ClueRole.BREAK
+class ExpansionBreakPolicy(StrEnum):
+    """统一边界判定策略。"""
+
+    ADDRESS_CLUE = "address_clue"
+    CLUE_SEQUENCE_BLOCKER = "clue_sequence_blocker"
+    ORG_LEFT_BOUNDARY = "org_left_boundary"
+    NAME_EN_RIGHT_UNIT = "name_en_right_unit"
+    NAME_EN_LEFT_UNIT = "name_en_left_unit"
+
+
+def need_break(
+    subject: Clue | StreamUnit,
+    policy: ExpansionBreakPolicy,
+    *,
+    next_unit: StreamUnit | None = None,
+    prev_unit: StreamUnit | None = None,
+    upper: int | None = None,
+    lower: int | None = None,
+    left_char: str | None = None,
+    right_char: str | None = None,
+) -> bool:
+    """判断当前一步是否应停止扩张。
+
+    仅返回 bool，不维护任何索引。
+    """
+    if isinstance(subject, Clue):
+        if policy == ExpansionBreakPolicy.ADDRESS_CLUE:
+            return subject.role == ClueRole.BREAK
+        if policy == ExpansionBreakPolicy.CLUE_SEQUENCE_BLOCKER:
+            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
+        if policy == ExpansionBreakPolicy.ORG_LEFT_BOUNDARY:
+            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}
+        return False
+
+    if policy not in {ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT, ExpansionBreakPolicy.NAME_EN_LEFT_UNIT}:
+        return False
+    if policy == ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT and upper is not None and subject.char_start >= upper:
+        return True
+    if policy == ExpansionBreakPolicy.NAME_EN_LEFT_UNIT and lower is not None and subject.char_end <= lower:
+        return True
+    if subject.kind == "ascii_word":
+        return False
+    if subject.kind == "space":
+        if policy == ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT:
+            return not (
+                next_unit is not None
+                and next_unit.kind == "ascii_word"
+                and (upper is None or next_unit.char_start < upper)
+            )
+        return not (
+            prev_unit is not None
+            and prev_unit.kind == "ascii_word"
+            and (lower is None or prev_unit.char_end > lower)
+        )
+    if subject.kind == "punct":
+        return not is_name_joiner(subject.text, left_char, right_char)
+    return True
 
 
 def is_negative_clue(clue: Clue) -> bool:
@@ -38,10 +95,6 @@ def control_value_normalized_number(clue: Clue) -> str:
     if not is_control_number_value_clue(clue):
         return ""
     return str((clue.source_metadata.get("normalized_number") or [""])[0]).strip()
-
-
-def _is_stop_control_clue(clue: Clue) -> bool:
-    return clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
 
 
 def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[int, int]:

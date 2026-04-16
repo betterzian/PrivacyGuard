@@ -7,12 +7,13 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import NameCompone
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput, StreamUnit, strength_ge
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
+    ExpansionBreakPolicy,
     _char_span_to_unit_span,
     _label_seed_start_char,
-    _is_stop_control_clue,
     _unit_index_at_or_after,
     _unit_index_left_of,
     is_control_clue,
+    need_break,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import (
     _is_cjk as _shared_is_cjk,
@@ -524,7 +525,7 @@ def _extend_name_boundary(
     upper = len(raw_text)
     for index in range(next_clue_index, len(clues)):
         clue = clues[index]
-        if _is_stop_control_clue(clue):
+        if need_break(clue, ExpansionBreakPolicy.CLUE_SEQUENCE_BLOCKER):
             upper = min(upper, clue.start)
             break
         if is_control_clue(clue):
@@ -581,9 +582,19 @@ def _extend_name_right_en(
     ui = char_to_unit[end - 1] + 1 if end > 0 and end <= len(char_to_unit) else len(units)
     while ui < len(units):
         unit = units[ui]
-        if unit.char_start >= upper:
-            break
         if unit.char_end - start > 80:
+            break
+        next_unit = units[ui + 1] if ui + 1 < len(units) else None
+        left_char = raw_text[unit.char_start - 1] if unit.char_start > 0 else None
+        right_char = _peek_unit_first_char(units, ui + 1)
+        if need_break(
+            unit,
+            ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT,
+            upper=upper,
+            next_unit=next_unit,
+            left_char=left_char,
+            right_char=right_char,
+        ):
             break
         if unit.kind == "ascii_word":
             cursor_end = unit.char_end
@@ -599,8 +610,6 @@ def _extend_name_right_en(
                 continue
             break
         if unit.kind == "punct":
-            left_char = raw_text[unit.char_start - 1] if unit.char_start > 0 else None
-            right_char = _peek_unit_first_char(units, ui + 1)
             if is_name_joiner(unit.text, left_char, right_char):
                 cursor_end = unit.char_end
                 ui += 1
@@ -624,7 +633,7 @@ def _extend_name_boundary_left(
     lower = 0
     for index in range(clue_index - 1, -1, -1):
         clue = clues[index]
-        if _is_stop_control_clue(clue):
+        if need_break(clue, ExpansionBreakPolicy.CLUE_SEQUENCE_BLOCKER):
             lower = clue.end
             break
         if is_control_clue(clue):
@@ -681,9 +690,19 @@ def _extend_name_left_en(
     ui = char_to_unit[start] - 1 if start < len(char_to_unit) else -1
     while ui >= 0:
         unit = units[ui]
-        if unit.char_end <= lower:
-            break
         if end - unit.char_start > 80:
+            break
+        prev_unit = units[ui - 1] if ui - 1 >= 0 else None
+        left_char = _peek_unit_last_char(units, ui - 1)
+        right_char = raw_text[unit.char_end] if unit.char_end < len(raw_text) else None
+        if need_break(
+            unit,
+            ExpansionBreakPolicy.NAME_EN_LEFT_UNIT,
+            lower=lower,
+            prev_unit=prev_unit,
+            left_char=left_char,
+            right_char=right_char,
+        ):
             break
         if unit.kind == "ascii_word":
             cursor_start = unit.char_start
@@ -699,8 +718,6 @@ def _extend_name_left_en(
                 continue
             break
         if unit.kind == "punct":
-            left_char = _peek_unit_last_char(units, ui - 1)
-            right_char = raw_text[unit.char_end] if unit.char_end < len(raw_text) else None
             if is_name_joiner(unit.text, left_char, right_char):
                 cursor_start = unit.char_start
                 ui -= 1
