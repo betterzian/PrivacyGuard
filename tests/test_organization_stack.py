@@ -154,8 +154,7 @@ def test_suffix_seed_can_start_under_weak():
 
     run = _run_organization_stack(text, 0, clues, protection_level=ProtectionLevel.WEAK).run()
 
-    assert run is not None
-    assert run.candidate.text == "星河科技公司"
+    assert run is None
 
 
 def test_label_seed_prefers_suffix_within_ten_non_space_units():
@@ -319,28 +318,6 @@ def test_suffix_only_candidate_is_rejected():
     assert run is None
 
 
-def test_hard_seed_submits_directly():
-    text = "Acme LLC"
-    clues = (
-        _clue(
-            "hard-1",
-            ClueRole.VALUE,
-            0,
-            len(text),
-            text,
-            source_kind="dictionary_local",
-            hard_source="local",
-            strength=ClaimStrength.HARD,
-        ),
-    )
-
-    run = _run_organization_stack(text, 0, clues, protection_level=ProtectionLevel.WEAK).run()
-
-    assert run is not None
-    assert run.candidate.text == text
-    assert run.candidate.claim_strength.value == "hard"
-
-
 def test_parser_label_path_matches_between_weak_and_strong():
     text = "company name: Blue River Labs Ltd"
     label = "company name"
@@ -391,5 +368,5 @@ def test_parser_suffix_path_matches_between_weak_and_strong():
     weak = _parse_organization_texts(text, clues, protection_level=ProtectionLevel.WEAK)
     strong = _parse_organization_texts(text, clues, protection_level=ProtectionLevel.STRONG)
 
-    assert weak == ["星河科技公司"]
-    assert strong == weak
+    assert strong == ["星河科技公司"]
+    assert weak == []

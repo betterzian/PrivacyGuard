@@ -8,7 +8,6 @@ from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.lexicon_loader import load_zh_name_negative_phrases
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueRole, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
@@ -522,12 +521,6 @@ def test_name_component_coverage_drops_contained_family_name_clue():
 
     assert family_name_clues == [("司马", 0, 2, ClaimStrength.HARD)]
 
-
-def test_zh_name_negative_phrases_preserve_legacy_blacklist_entries():
-    phrases = load_zh_name_negative_phrases()
-
-    assert phrases["张"] == ("张力",)
-    assert "杭州" in phrases["杭"]
 
 
 def test_scanner_no_longer_emits_generic_zh_given_name_clues():

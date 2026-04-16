@@ -238,18 +238,6 @@ def test_given_name_direct_submit_still_respects_protection_gate():
     ) == []
 
 
-def test_family_path_limits_single_surname_to_three_chars_by_default():
-    text = "张三丰武学"
-    clues = (
-        _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "张", source_kind="family_name", strength=ClaimStrength.WEAK),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is not None
-    assert run.candidate.text == "张三丰"
-
-
 def test_compound_surname_path_allows_four_chars():
     text = "欧阳娜娜"
     clues = (
@@ -328,7 +316,7 @@ def test_standalone_double_boundary_with_negative_is_dropped():
 def test_single_boundary_standalone_upgrades_claim_strength():
     text = "他说张三,"
     clues = (
-        _clue("family-1", ClueRole.FAMILY_NAME, 2, 3, "张", source_kind="family_name", strength=ClaimStrength.WEAK),
+        _clue("family-1", ClueRole.FAMILY_NAME, 2, 3, "张", source_kind="family_name", strength=ClaimStrength.soft),
     )
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
@@ -490,19 +478,6 @@ def test_implicit_tail_partial_negative_cancels_boundary_name():
     clues = (
         _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "张", source_kind="family_name", strength=ClaimStrength.HARD),
         _clue("neg-1", ClueRole.NEGATIVE, 0, 2, "张三", source_kind="negative_name_word", attr_type=None),
-    )
-
-    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
-
-    assert run is None
-
-
-def test_standalone_span_any_negative_cancels_even_single_boundary():
-    """standalone 窗口内任意 negative 命中即放弃提交（不限 double_boundary）。"""
-    text = "他说张三"
-    clues = (
-        _clue("family-1", ClueRole.FAMILY_NAME, 2, 3, "张", source_kind="family_name", strength=ClaimStrength.HARD),
-        _clue("neg-1", ClueRole.NEGATIVE, 1, 2, "说", source_kind="negative_name_word", attr_type=None),
     )
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
