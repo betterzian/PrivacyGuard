@@ -188,18 +188,23 @@ class ZhAddressStack(BaseAddressStack):
 
         if state.components or state.deferred_chain:
             admin_levels = admin_span.levels if admin_span is not None else (comp_type,)
-            admitted_level = comp_type
+            # MULTI_ADMIN 探针：resolve 返回的每一层都要做 _segment_admit 探测，
+            # 任一层可接纳即视为可挂；全部失败才走 split/寻后继的降级路径。
+            probe_levels: tuple[AddressComponentType, ...] = (comp_type,)
             if admin_span is not None:
                 resolved_group = _resolve_standalone_admin_value_group(
                     state,
                     tuple((index, clues[index]) for index in range(admin_span.first_index, admin_span.last_index + 1)),
                 )
-                if resolved_group is not None:
-                    admitted_level = resolved_group[0]
+                if resolved_group is not None and resolved_group:
+                    probe_levels = resolved_group
             if (
                 not state.pending_comma_first_component
                 and not state.segment_state.comma_tail_active
-                and not _segment_admit(state, admitted_level, valid_successors=self.valid_successors)
+                and not any(
+                    _segment_admit(state, lvl, valid_successors=self.valid_successors)
+                    for lvl in probe_levels
+                )
             ):
                 if comp_type in _ADMIN_TYPES and _has_reasonable_successor_key(
                     state,

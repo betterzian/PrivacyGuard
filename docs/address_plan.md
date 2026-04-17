@@ -374,7 +374,7 @@ direct_city_names = {"北京", "上海", "天津", "重庆", "香港", "澳门"}
 
 ### 3.2 词典层级补齐 [`data/scanner_lexicons/zh_geo_lexicon.json`]
 
-- `provinces.soft` 补入 `{北京, 上海, 天津, 重庆}`（`cities.soft` 已有）
+- `cities.soft` 补入 `{北京, 上海, 天津, 重庆}`（`provinces.soft` 已有）；`cities.hard` 补入 `{香港, 澳门}`（`provinces.hard` 已有）。使直辖市与特别行政区在 PROVINCE / CITY 两层均可命中，由 scanner 同 span dual-emit `(PROVINCE, CITY)`
 - `district_cities.soft`：新建，初始填 `{张家港}` 等典型县级市
 - 不补普通县级市到 `cities`
 
@@ -1305,7 +1305,7 @@ def _level_suspect_surfaces(
 ### 9.9 "北京北京"（无 KEY、无 anchor）当前轨迹与改造路径
 
 - 全仓未发现 `_should_eager_split_duplicate_dual_admins` 具体实现——计划中作为占位风险名称，需在动工时改造或删除等价旁路（"连续同值 dual admin 立刻 split"）。
-- 词典 / scanner 依赖：`data/scanner_lexicons/zh_geo_lexicon.json` 的 `provinces.soft` 当前未包含 `{北京, 上海, 天津, 重庆}`，需按 §3.2 补齐；同时删除 `scanner.py` 中 `direct_city_names` special case（§3.1）。
+- 词典 / scanner 依赖：`data/scanner_lexicons/zh_geo_lexicon.json` 的 `cities.soft` 当前未包含 `{北京, 上海, 天津, 重庆}`、`cities.hard` 未包含 `{香港, 澳门}`，需按 §3.2 补齐（`provinces.*` 侧已就绪）；同时删除 `scanner.py` 中 `direct_city_names` special case（§3.1）。
 - 当前"北京"单独出现时 scanner 仅 emit CITY；改造后 scanner 同 span dual-emit `(PROVINCE, CITY)`，`collect_admin_value_span` 返回 `levels=(PROVINCE, CITY)`。
 - 预期轨迹（改造后）：
   1. 第一个"北京" → `_flush_chain_as_standalone` → `MULTI_ADMIN(北京,(P,C))`；`occupancy={P:0, C:0}`。

@@ -21,6 +21,8 @@ class ZhGeoLexicon:
     provinces: tuple[GeoEntry, ...]
     cities: tuple[GeoEntry, ...]
     districts: tuple[GeoEntry, ...]
+    # 县级市（张家港等）。独立字段与 districts 分开承载，与 DISTRICT_CITY 组件类型对应。
+    district_cities: tuple[GeoEntry, ...]
     local_places: tuple[GeoEntry, ...]
 
 
@@ -55,6 +57,8 @@ def load_zh_geo_lexicon() -> ZhGeoLexicon:
         provinces=_parse_tiered_geo(payload.get("provinces", {})),
         cities=_parse_tiered_geo(payload.get("cities", {})),
         districts=_parse_tiered_geo(payload.get("districts", {})),
+        # district_cities 字段可缺省（向后兼容）；缺失时返回空元组。
+        district_cities=_parse_tiered_geo(payload.get("district_cities", {})),
         local_places=_parse_tiered_geo(payload.get("local_places", {})),
     )
 

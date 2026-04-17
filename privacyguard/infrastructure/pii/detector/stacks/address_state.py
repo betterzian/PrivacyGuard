@@ -410,7 +410,7 @@ class _ParseState:
 
 _StandaloneAdminResolver = Callable[
     [_ParseState, tuple[_IndexedClue, ...]],
-    tuple[AddressComponentType, tuple[AddressComponentType, ...]] | None,
+    tuple[AddressComponentType, ...] | None,
 ]
 
 
@@ -1062,55 +1062,46 @@ def _flush_chain_as_standalone(
             ):
                 group_end += 1
             group_entries = tuple(state.deferred_chain[cursor:group_end])
-            resolved_group = resolve_standalone_admin_group(state, group_entries)
-            if resolved_group is None:
+            resolved_levels = resolve_standalone_admin_group(state, group_entries)
+            if resolved_levels is None or not resolved_levels:
                 state.split_at = clue.start
                 break
-            comp_type, available_levels = resolved_group
-            if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
+            # §3.4：len>=2 直接构造 MULTI_ADMIN 组件；len==1 退回单层 admin 组件。
+            # SINGLE_OCCUPY 占位冲突检查改为逐层：任一层被占用即视为冲突。
+            occupancy_conflict = any(
+                lvl in SINGLE_OCCUPY and lvl in state.occupancy
+                for lvl in resolved_levels
+            )
+            if occupancy_conflict:
                 state.split_at = clue.start
                 break
             value_end = max(
                 state.value_char_end_override.get(entry_clue.clue_id, entry_clue.end)
                 for _, entry_clue in group_entries
             )
-            value = normalize_value(comp_type, raw_text[clue.start:value_end])
+            # normalize_value 仍按最高 rank 的 admin 类型做归一化（与历史行为对齐）。
+            primary_level = resolved_levels[0]
+            value = normalize_value(primary_level, raw_text[clue.start:value_end])
             if value:
-                # 剩余层级：resolve 返回的 available_levels 去掉最终 commit 的 comp_type；
-                # 承载这些层的 suspect 继续挂在新 component 上作为多层候选的"未消化"部分。
-                remaining_levels = {
-                    lvl for lvl in available_levels if lvl != comp_type
-                }
-                removed_suspects = _remove_pending_suspect_group_by_span(
+                # MULTI_ADMIN 直接承载全部 resolved_levels；不再保留未消化 suspect 候选。
+                _remove_pending_suspect_group_by_span(
                     state,
                     clue.start,
                     clue.end,
                     origin="value",
                 )
-                suspect_survivors: list[_SuspectEntry] = []
-                for entry in removed_suspects:
-                    surviving_levels = tuple(
-                        lvl for lvl in entry.level if lvl in remaining_levels
-                    )
-                    if not surviving_levels:
-                        continue
-                    suspect_survivors.append(_SuspectEntry(
-                        level=surviving_levels,
-                        value=entry.value,
-                        key=entry.key,
-                        origin=entry.origin,
-                        start=entry.start,
-                        end=entry.end,
-                    ))
                 component = _DraftComponent(
-                    component_type=comp_type,
+                    component_type=AddressComponentType.MULTI_ADMIN
+                    if len(resolved_levels) >= 2
+                    else primary_level,
                     start=clue.start,
                     end=value_end,
                     value=value,
                     key="",
-                    is_detail=comp_type in _DETAIL_COMPONENTS,
+                    is_detail=primary_level in _DETAIL_COMPONENTS,
                     raw_chain=[entry_clue for _, entry_clue in group_entries],
-                    suspected=suspect_survivors,
+                    suspected=[],
+                    level=tuple(resolved_levels),
                     clue_ids={entry_clue.clue_id for _, entry_clue in group_entries},
                     clue_indices={entry_index for entry_index, _ in group_entries},
                 )

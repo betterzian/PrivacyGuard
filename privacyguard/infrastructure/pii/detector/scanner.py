@@ -2100,16 +2100,16 @@ def _company_value_matcher() -> AhoMatcher:
 @lru_cache(maxsize=1)
 def _zh_address_value_matcher() -> AhoMatcher:
     lexicon = load_zh_geo_lexicon()
-    direct_city_names = {"北京", "上海", "天津", "重庆", "香港", "澳门"}
-    # 直辖市从 province 层移到 city 层，保留原始 strength。
-    province_entries = tuple(e for e in lexicon.provinces if e.text not in direct_city_names)
-    direct_entries = tuple(
-        sorted((e for e in lexicon.provinces if e.text in direct_city_names), key=lambda e: e.text)
-    )
+    # 直辖市 / 特别行政区不再做 scanner 端的 special-case 搬运：
+    # 词典已在 provinces 与 cities 两层同时登记（例：北京 ∈ provinces.soft ∩ cities.soft），
+    # 由下方 dual-emit 机制自然注册为 (PROVINCE, CITY) 两条 clue，
+    # 落到 _flush_chain_as_standalone 时再按 _DraftComponent.level 元组合并为 MULTI_ADMIN。
     geo_specs: tuple[tuple[AddressComponentType, tuple[GeoEntry, ...]], ...] = (
-        (AddressComponentType.PROVINCE, province_entries),
-        (AddressComponentType.CITY, tuple([*lexicon.cities, *direct_entries])),
+        (AddressComponentType.PROVINCE, lexicon.provinces),
+        (AddressComponentType.CITY, lexicon.cities),
         (AddressComponentType.DISTRICT, lexicon.districts),
+        # 县级市（张家港等）独立注册为 DISTRICT_CITY；与 DISTRICT 同 rank、共享 SINGLE_OCCUPY 槽位。
+        (AddressComponentType.DISTRICT_CITY, lexicon.district_cities),
     )
     patterns: list[AhoPattern] = []
     # 中文行政 value 允许同文案多层级并存（如“朝阳”可同时是 city/district），

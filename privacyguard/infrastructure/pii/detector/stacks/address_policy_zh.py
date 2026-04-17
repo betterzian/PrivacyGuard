@@ -277,15 +277,22 @@ def resolve_admin_value_span(
 def _resolve_standalone_admin_value_group(
     state: _ParseState,
     clue_entries: tuple[tuple[int, Clue], ...],
-) -> tuple[AddressComponentType, tuple[AddressComponentType, ...]] | None:
-    """将 standalone 链上的同 span 行政 VALUE 组解析为单一真实层级。"""
+) -> tuple[AddressComponentType, ...] | None:
+    """将 standalone 链上的同 span 行政 VALUE 组解析为可用层级元组。
+
+    返回值语义（与 PR #1/#2 引入的 MULTI_ADMIN 对齐）：
+    - `None`：该 span 在当前 state 下没有任何可用层（全部被 occupancy / suspect 冲突拦下），
+      上游应走 split / collision 分支（collision 在 PR #3b 引入）。
+    - 元组长度 == 1：单层落库（例：苏州市 → (CITY,)）。
+    - 元组长度 >= 2：多层歧义未消，上游应落 MULTI_ADMIN（例：北京 → (PROVINCE, CITY)）。
+    """
     span = _build_admin_value_span(tuple(clue for _, clue in clue_entries))
     if span is None:
         return None
     resolved = resolve_admin_value_span(state, span, valid_successors=_VALID_SUCCESSORS)
-    if resolved is None or resolved.resolved_level is None:
+    if resolved is None or not resolved.levels:
         return None
-    return resolved.resolved_level, resolved.levels
+    return tuple(resolved.levels)
 
 
 def _suspect_eligible_after_last_piece(
