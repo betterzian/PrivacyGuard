@@ -349,7 +349,8 @@ def _pending_level_exists_on_other_group(
     origin: str,
 ) -> bool:
     return any(
-        entry.level == level.value
+        # entry.level 已改为 tuple[AddressComponentType, ...]，用 `in` 而非 `==` 匹配目标层。
+        level in entry.level
         and not _same_pending_suspect_group(
             entry,
             start=start,
@@ -412,7 +413,8 @@ def _freeze_value_suspect_for_mismatched_admin_key(
             key="",
             origin="value",
         ) and any(
-            entry.level == level.value
+            # entry.level 为 tuple；判断本 level 是否已登记。
+            level in entry.level
             and _same_pending_suspect_group(
                 entry,
                 start=span.start,
@@ -425,7 +427,9 @@ def _freeze_value_suspect_for_mismatched_admin_key(
         ):
             continue
         state.pending_suspects.append(_SuspectEntry(
-            level=level.value,
+            # 单层 suspect：level 传 tuple；后续若有其他层同 span 加入也会作为另一条 entry，
+            # 由 canonical 比较或上游合并处理（tuple 合并在 §3 MULTI_ADMIN 阶段引入）。
+            level=(level,),
             value=span.text,
             key="",
             origin="value",
@@ -461,12 +465,14 @@ def _freeze_key_suspect_from_previous_key(
         text=value_text,
         levels=(level,),
     )
+    # 与存储端对齐：新建 key-driven suspect 时 key 置空（KEY 由 span 推导，不存入 entry），
+    # 查询 pending 组是否已存在也用 key="" 做 key 维度的对齐。
     same_group_exists = _pending_group_exists(
         state.pending_suspects,
         start=span.start,
         end=span.end,
         value=value_text,
-        key=key_clue.text,
+        key="",
         origin="key",
     )
     available_levels = _available_admin_levels_for_state(
@@ -480,22 +486,26 @@ def _freeze_key_suspect_from_previous_key(
     if not available_levels:
         return False
     if same_group_exists and any(
-        entry.level == available_levels[0].value
+        # 只要 tuple 中已含第一候选层，即视为重复登记。
+        available_levels[0] in entry.level
         and _same_pending_suspect_group(
             entry,
             start=span.start,
             end=span.end,
             value=value_text,
-            key=key_clue.text,
+            key="",
             origin="key",
         )
         for entry in state.pending_suspects
     ):
         return False
+    # 按 §9.5：surface = entry.value + entry.key 要与 ROAD/POI 主 value 兼容地 trim；
+    # 把 KEY（"市"/"省"/"区"）从 entry.key 挪出（置空），所有候选层放进 level 元组——
+    # 这样 _fixup_suspected_info 用 "北京" 而非 "北京市" 去 trim "北京中山"。
     state.pending_suspects.append(_SuspectEntry(
-        level=available_levels[0].value,
+        level=tuple(available_levels),
         value=value_text,
-        key=key_clue.text,
+        key="",
         origin="key",
         start=span.start,
         end=span.end,

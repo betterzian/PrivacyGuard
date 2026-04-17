@@ -67,6 +67,9 @@ class AddressComponentType(str, Enum):
     PROVINCE = "province"
     CITY = "city"
     DISTRICT = "district"
+    # 县级市（张家港等）。行政等级与 DISTRICT 同级（_ADMIN_RANK=2），
+    # 与 DISTRICT 互斥占用同一槽位。
+    DISTRICT_CITY = "district_city"
     SUBDISTRICT = "subdistrict"
     ROAD = "road"
     NUMBER = "number"
@@ -76,6 +79,11 @@ class AddressComponentType(str, Enum):
     DETAIL = "detail"
     POSTAL_CODE = "postal_code"
     COUNTRY = "country"
+    # MULTI_ADMIN 是 `_DraftComponent.level` 元组长度 >= 2 时的 derived 视图，
+    # 表示同一 value 同时承担多个行政层级（例：北京 = PROVINCE + CITY）。
+    # 真实占位写入 occupancy 时按 `level` 元组中的各层分别记录，
+    # 不另设 MULTI_ADMIN 槽位。
+    MULTI_ADMIN = "multi_admin"
 
 
 class BreakType(str, Enum):
