@@ -2205,13 +2205,15 @@ def _en_address_value_matcher() -> AhoMatcher:
         )
     )
     patterns: list[AhoPattern] = []
-    seen: set[str] = set()
+    # §6.1：按 (component_type, text) 去重，使同一串 (如 "New York") 可同时登记为 state+city，
+    # 交给下游 address stack 通过 _DraftComponent.level 元组合并为 MULTI_ADMIN。
+    seen: set[tuple[AddressComponentType, str]] = set()
     for component_type, entries in geo_entry_specs:
         for entry in sorted(entries, key=lambda e: len(e.text), reverse=True):
-            lower = entry.text.lower()
-            if lower in seen:
+            dedupe_key = (component_type, entry.text.lower())
+            if dedupe_key in seen:
                 continue
-            seen.add(lower)
+            seen.add(dedupe_key)
             patterns.append(
                 AhoPattern(
                     text=entry.text,
@@ -2224,10 +2226,10 @@ def _en_address_value_matcher() -> AhoMatcher:
                 )
             )
     for name in country_names:
-        lower = name.lower()
-        if lower in seen:
+        dedupe_key = (AddressComponentType.COUNTRY, name.lower())
+        if dedupe_key in seen:
             continue
-        seen.add(lower)
+        seen.add(dedupe_key)
         patterns.append(
             AhoPattern(
                 text=name,

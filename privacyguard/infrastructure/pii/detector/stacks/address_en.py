@@ -31,11 +31,19 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_en import (
     is_prefix_en_component,
     key_left_expand_start_if_deferrable_en,
 )
+from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
+    _resolve_admin_key_chain_levels,
+    _resolve_standalone_admin_value_group,
+    collect_admin_value_span,
+)
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
+    _ADMIN_TYPES,
     _DraftComponent,
     _ParseState,
     _append_deferred,
     _clone_draft_component,
+    _flush_chain,
+    _resolve_multi_admin_collision,
     _segment_admit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.base import PendingChallenge, StackRun
@@ -70,6 +78,22 @@ class EnAddressStack(BaseAddressStack):
     def valid_successors(self):
         return EN_VALID_SUCCESSORS
 
+    def _flush_chain(self, state: _ParseState, *, clue_index: int) -> None:
+        # §6.2：EN 冲洗链接入与 ZH 对等的 admin 解析器，但闭包到 EN_VALID_SUCCESSORS。
+        en_valid = self.valid_successors
+        _flush_chain(
+            state,
+            self.context.stream.text,
+            normalize_value=_normalize_address_value,
+            commit_component=lambda component: self._commit_component(state, component),
+            resolve_standalone_admin_group=lambda s, entries: _resolve_standalone_admin_value_group(
+                s, entries, valid_successors=en_valid,
+            ),
+            resolve_admin_key_chain_levels=lambda s, value_entries, key_clue: _resolve_admin_key_chain_levels(
+                s, value_entries, key_clue, valid_successors=en_valid,
+            ),
+        )
+
     def run(self) -> StackRun | None:
         if (
             self.clue.role == ClueRole.VALUE
@@ -88,29 +112,89 @@ class EnAddressStack(BaseAddressStack):
         clue_index: int,
         comp_type: AddressComponentType,
     ) -> object | None:
-        del clues
         stream = self.context.stream
+        raw_text = self.context.stream.text
+        # §6.2：EN 同 span 多层 admin VALUE 组 —— dual-emit 后按相同 start/end 聚成一个 admin span，
+        # 用于 resolver / collision 决策；非 admin 类型继续走单层路径。
+        admin_span = collect_admin_value_span(clues, clue_index) if comp_type in _ADMIN_TYPES else None
+        trailing_deferred = state.deferred_chain[-1][1] if state.deferred_chain else None
+        same_trailing_admin_span = (
+            admin_span is not None
+            and trailing_deferred is not None
+            and trailing_deferred.role == ClueRole.VALUE
+            and trailing_deferred.attr_type == clue.attr_type
+            and trailing_deferred.component_type in _ADMIN_TYPES
+            and trailing_deferred.start == admin_span.start
+            and trailing_deferred.end == admin_span.end
+        )
+
         if state.deferred_chain and not _chain_can_accept([c for _, c in state.deferred_chain], clue, stream):
             self._flush_chain(state, clue_index=clue_index)
             if state.split_at is not None:
                 return _SENTINEL_STOP
-
-        if (state.components or state.deferred_chain) and not _segment_admit(
-            state,
-            comp_type,
-            valid_successors=self.valid_successors,
+        # 新的 admin VALUE 组进入时若链尾是另一个 admin 组，先冲洗（触发 §5.1 collision 的前置条件）。
+        if (
+            admin_span is not None
+            and trailing_deferred is not None
+            and trailing_deferred.role == ClueRole.VALUE
+            and trailing_deferred.attr_type == clue.attr_type
+            and trailing_deferred.component_type in _ADMIN_TYPES
+            and not same_trailing_admin_span
         ):
-            if state.deferred_chain:
-                self._flush_chain(state, clue_index=clue_index)
-                if state.split_at is not None:
-                    return _SENTINEL_STOP
-            if state.components and not _segment_admit(
-                state,
-                comp_type,
-                valid_successors=self.valid_successors,
-            ):
-                state.split_at = clue.start
+            self._flush_chain(state, clue_index=clue_index)
+            if state.split_at is not None:
                 return _SENTINEL_STOP
+
+        if state.components or state.deferred_chain:
+            # MULTI_ADMIN 探针：admin_span 存在时逐层用 _segment_admit 试探，任一层通过即可挂。
+            probe_levels: tuple[AddressComponentType, ...] = (comp_type,)
+            resolved_group = None
+            if admin_span is not None:
+                resolved_group = _resolve_standalone_admin_value_group(
+                    state,
+                    tuple(
+                        (index, clues[index])
+                        for index in range(admin_span.first_index, admin_span.last_index + 1)
+                    ),
+                    valid_successors=self.valid_successors,
+                )
+                if resolved_group is not None and resolved_group.available_levels:
+                    probe_levels = resolved_group.available_levels
+            probe_failed = not any(
+                _segment_admit(state, lvl, valid_successors=self.valid_successors)
+                for lvl in probe_levels
+            )
+            # §5.2.1：admin_span + 无 deferred_chain + 探针全失败时，尝试同值 MULTI_ADMIN 原地降解。
+            if (
+                probe_failed
+                and admin_span is not None
+                and resolved_group is not None
+                and not state.deferred_chain
+            ):
+                forced = _resolve_multi_admin_collision(
+                    state,
+                    raw_text,
+                    clue.start,
+                    resolved_group.text,
+                    resolved_group.all_levels,
+                )
+                if forced is not None:
+                    probe_levels = forced
+                    probe_failed = not any(
+                        _segment_admit(state, lvl, valid_successors=self.valid_successors)
+                        for lvl in probe_levels
+                    )
+            if probe_failed:
+                if state.deferred_chain:
+                    self._flush_chain(state, clue_index=clue_index)
+                    if state.split_at is not None:
+                        return _SENTINEL_STOP
+                if state.components and not any(
+                    _segment_admit(state, lvl, valid_successors=self.valid_successors)
+                    for lvl in probe_levels
+                ):
+                    state.split_at = clue.start
+                    return _SENTINEL_STOP
 
         _append_deferred(state, clue_index, clue, record_suspect=False)
         state.last_value = clue

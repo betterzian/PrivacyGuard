@@ -279,6 +279,8 @@ def _resolve_admin_key_chain_levels(
     state: _ParseState,
     value_entries: tuple[tuple[int, Clue], ...],
     key_clue: Clue,
+    *,
+    valid_successors: dict[AddressComponentType, frozenset[AddressComponentType]] = _VALID_SUCCESSORS,
 ) -> _AdminSpanView | None:
     """§3.5 KEY-driven admin 链层级解析。
 
@@ -311,7 +313,7 @@ def _resolve_admin_key_chain_levels(
     for lvl in candidate:
         if lvl in state.occupancy:
             continue
-        if not _segment_admit(state, lvl, valid_successors=_VALID_SUCCESSORS):
+        if not _segment_admit(state, lvl, valid_successors=valid_successors):
             continue
         available.append(lvl)
     return _AdminSpanView(
@@ -338,6 +340,8 @@ class _AdminSpanView:
 def _resolve_standalone_admin_value_group(
     state: _ParseState,
     clue_entries: tuple[tuple[int, Clue], ...],
+    *,
+    valid_successors: dict[AddressComponentType, frozenset[AddressComponentType]] = _VALID_SUCCESSORS,
 ) -> _AdminSpanView | None:
     """将 standalone 链上的同 span 行政 VALUE 组解析为视图结构。
 
@@ -350,7 +354,7 @@ def _resolve_standalone_admin_value_group(
     span = _build_admin_value_span(tuple(clue for _, clue in clue_entries))
     if span is None:
         return None
-    resolved = resolve_admin_value_span(state, span, valid_successors=_VALID_SUCCESSORS)
+    resolved = resolve_admin_value_span(state, span, valid_successors=valid_successors)
     available: tuple[AddressComponentType, ...] = ()
     if resolved is not None:
         available = tuple(resolved.levels)
