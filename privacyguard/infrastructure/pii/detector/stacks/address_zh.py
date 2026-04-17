@@ -23,6 +23,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _comma_tail_prehandle,
     _comma_value_scan_upper_bound,
+    _resolve_admin_key_chain_levels,
     _resolve_standalone_admin_value_group,
     collect_admin_value_span,
     _freeze_key_suspect_from_previous_key,
@@ -43,6 +44,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _flush_chain,
     _pending_community_blocks_road,
     _reroute_pending_community_poi_to_subdistrict,
+    _resolve_multi_admin_collision,
     _segment_admit,
 )
 
@@ -84,6 +86,7 @@ class ZhAddressStack(BaseAddressStack):
             normalize_value=_normalize_address_value,
             commit_component=lambda component: self._commit_component(state, component),
             resolve_standalone_admin_group=_resolve_standalone_admin_value_group,
+            resolve_admin_key_chain_levels=_resolve_admin_key_chain_levels,
         )
 
     def _prepare_effective_clue(
@@ -181,6 +184,20 @@ class ZhAddressStack(BaseAddressStack):
             self._flush_chain(state, clue_index=clue_index)
             if state.split_at is not None:
                 return _SENTINEL_STOP
+        # 新的 admin VALUE 组到达（与链尾 admin VALUE 组不同 span）：
+        # 先冲洗链把前一个 admin 组 commit，才能让 §5.2.1 collision 在同值冲突时生效；
+        # 否则多个 admin VALUE 组会在链中堆积，最终被尾部 KEY 的 left-expand 整体吞掉。
+        if (
+            admin_span is not None
+            and trailing_deferred is not None
+            and trailing_deferred.role == ClueRole.VALUE
+            and trailing_deferred.attr_type == clue.attr_type
+            and trailing_deferred.component_type in _ADMIN_TYPES
+            and not same_trailing_admin_span
+        ):
+            self._flush_chain(state, clue_index=clue_index)
+            if state.split_at is not None:
+                return _SENTINEL_STOP
         if state.deferred_chain and not _chain_can_accept([c for _, c in state.deferred_chain], clue, stream):
             self._flush_chain(state, clue_index=clue_index)
             if state.split_at is not None:
@@ -191,21 +208,45 @@ class ZhAddressStack(BaseAddressStack):
             # MULTI_ADMIN 探针：resolve 返回的每一层都要做 _segment_admit 探测，
             # 任一层可接纳即视为可挂；全部失败才走 split/寻后继的降级路径。
             probe_levels: tuple[AddressComponentType, ...] = (comp_type,)
+            resolved_group = None
             if admin_span is not None:
                 resolved_group = _resolve_standalone_admin_value_group(
                     state,
                     tuple((index, clues[index]) for index in range(admin_span.first_index, admin_span.last_index + 1)),
                 )
-                if resolved_group is not None and resolved_group:
-                    probe_levels = resolved_group
-            if (
+                if resolved_group is not None and resolved_group.available_levels:
+                    probe_levels = resolved_group.available_levels
+            probe_failed = (
                 not state.pending_comma_first_component
                 and not state.segment_state.comma_tail_active
                 and not any(
                     _segment_admit(state, lvl, valid_successors=self.valid_successors)
                     for lvl in probe_levels
                 )
+            )
+            # §5.2.1 collision 触发点：admin_span 存在、无 deferred_chain、probe 全失败时，
+            # 尝试同值 MULTI_ADMIN 原地降解以让 incoming 取互补层继续 admit。降解后占位被释放，
+            # 再重跑一次探针；若任一层能 admit 则跳过 split。
+            if (
+                probe_failed
+                and admin_span is not None
+                and resolved_group is not None
+                and not state.deferred_chain
             ):
+                forced = _resolve_multi_admin_collision(
+                    state,
+                    raw_text,
+                    clue.start,
+                    resolved_group.text,
+                    resolved_group.all_levels,
+                )
+                if forced is not None:
+                    probe_levels = forced
+                    probe_failed = not any(
+                        _segment_admit(state, lvl, valid_successors=self.valid_successors)
+                        for lvl in probe_levels
+                    )
+            if probe_failed:
                 if comp_type in _ADMIN_TYPES and _has_reasonable_successor_key(
                     state,
                     clues,

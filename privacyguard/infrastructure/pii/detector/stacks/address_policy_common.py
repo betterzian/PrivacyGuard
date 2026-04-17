@@ -44,6 +44,30 @@ _NUMBERISH_COMPONENTS = frozenset({
     AddressComponentType.DETAIL,
 })
 
+# §4.1 KEY 多层级映射：某些 KEY 字面（如 "市"）在语义上可承担多层 admin（P / C / DC）；
+# 具体落到哪一层由 adjacent VALUE span 的 levels 与本表的交集决定，无 adjacent 时按 §4.2 规则降级。
+_MULTI_LEVEL_KEY_LEVELS: dict[str, tuple[AddressComponentType, ...]] = {
+    "市": (
+        AddressComponentType.PROVINCE,
+        AddressComponentType.CITY,
+        AddressComponentType.DISTRICT_CITY,
+    ),
+}
+
+
+def key_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    """返回 KEY clue 可承担的层级集合（按偏好顺序）。
+
+    - 多层级 KEY（目前仅 "市"）返回显式映射表；用于与 adjacent VALUE span levels 求交集。
+    - 其他 KEY 直接返回 `(clue.component_type,)`（单层），若 component_type 为空返回空元组。
+    """
+    explicit = _MULTI_LEVEL_KEY_LEVELS.get(clue.text)
+    if explicit is not None:
+        return explicit
+    if clue.component_type is None:
+        return ()
+    return (clue.component_type,)
+
 
 def _is_absorbable_digit_clue(clue: Clue) -> bool:
     if clue.attr_type not in _ABSORBABLE_DIGIT_ATTR_TYPES:

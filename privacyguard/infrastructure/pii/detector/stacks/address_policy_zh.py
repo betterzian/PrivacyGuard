@@ -30,6 +30,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     _normalize_address_value,
     _span_has_search_stop_unit,
     _start_after_component_end,
+    key_levels,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _ADMIN_RANK,
@@ -274,25 +275,90 @@ def resolve_admin_value_span(
     return replace(span, levels=available, resolved_level=available[0])
 
 
+def _resolve_admin_key_chain_levels(
+    state: _ParseState,
+    value_entries: tuple[tuple[int, Clue], ...],
+    key_clue: Clue,
+) -> _AdminSpanView | None:
+    """§3.5 KEY-driven admin 链层级解析。
+
+    输入：last KEY 之前的 VALUE 条目（需全部在同 admin VALUE span），以及 last KEY clue。
+    流程：span.levels ∩ key_levels(key_clue) → 再按 state 做 occupancy + segment_admit 过滤。
+
+    返回值语义（与 standalone 统一为 `_AdminSpanView`）：
+    - `None`：非 admin 链或 value_entries 构不成 span；上游走非 admin KEY 路径或 split。
+    - `_AdminSpanView` with empty `available_levels`：交集存在但全部被 occupancy/admit 拦下；
+       上游应尝试 §5.1 collision 以重用 `all_levels` / `text`。
+    - `available_levels` 长度 >= 1：可直接落库（len==1 单层；len>=2 MULTI_ADMIN）。
+    """
+    if not value_entries:
+        return None
+    span = _build_admin_value_span(tuple(clue for _, clue in value_entries))
+    if span is None:
+        return None
+    candidate = _ordered_component_types(
+        lvl for lvl in span.levels if lvl in set(key_levels(key_clue))
+    )
+    if not candidate:
+        # 无交集：视为 `_AdminSpanView(available_levels=(), all_levels=span.levels, text=...)`
+        # 让上游尝试 collision（例如同值 MULTI_ADMIN 降解）。
+        return _AdminSpanView(
+            available_levels=(),
+            all_levels=tuple(span.levels),
+            text=span.text,
+        )
+    available: list[AddressComponentType] = []
+    for lvl in candidate:
+        if lvl in state.occupancy:
+            continue
+        if not _segment_admit(state, lvl, valid_successors=_VALID_SUCCESSORS):
+            continue
+        available.append(lvl)
+    return _AdminSpanView(
+        available_levels=tuple(available),
+        all_levels=tuple(candidate),
+        text=span.text,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _AdminSpanView:
+    """供 commit 路径使用的 admin VALUE span 视图。
+
+    - `available_levels`：经 occupancy + segment_admit 过滤后剩余的可落层级（按 rank 降序）。
+    - `all_levels`：scanner/词典赋予该 span 的全部 admin 候选层级，用于 collision 路径。
+    - `text`：span 原文，供 collision 同值比较使用。
+    """
+
+    available_levels: tuple[AddressComponentType, ...]
+    all_levels: tuple[AddressComponentType, ...]
+    text: str
+
+
 def _resolve_standalone_admin_value_group(
     state: _ParseState,
     clue_entries: tuple[tuple[int, Clue], ...],
-) -> tuple[AddressComponentType, ...] | None:
-    """将 standalone 链上的同 span 行政 VALUE 组解析为可用层级元组。
+) -> _AdminSpanView | None:
+    """将 standalone 链上的同 span 行政 VALUE 组解析为视图结构。
 
-    返回值语义（与 PR #1/#2 引入的 MULTI_ADMIN 对齐）：
-    - `None`：该 span 在当前 state 下没有任何可用层（全部被 occupancy / suspect 冲突拦下），
-      上游应走 split / collision 分支（collision 在 PR #3b 引入）。
-    - 元组长度 == 1：单层落库（例：苏州市 → (CITY,)）。
-    - 元组长度 >= 2：多层歧义未消，上游应落 MULTI_ADMIN（例：北京 → (PROVINCE, CITY)）。
+    返回值语义（与 PR #1/#2/#3b 的 MULTI_ADMIN / collision 对齐）：
+    - `None`：非行政 VALUE span（不是 admin 族或 clue 间 span 不同），上游走非 admin 分支。
+    - `_AdminSpanView(available_levels=(), all_levels=(...), text=...)`：
+      span 存在但全部被 occupancy/suspect/admit 拦下，上游应尝试 collision；失败再 split。
+    - `available_levels` 长度 >= 1：可直接落库（len==1 单层；len>=2 MULTI_ADMIN）。
     """
     span = _build_admin_value_span(tuple(clue for _, clue in clue_entries))
     if span is None:
         return None
     resolved = resolve_admin_value_span(state, span, valid_successors=_VALID_SUCCESSORS)
-    if resolved is None or not resolved.levels:
-        return None
-    return tuple(resolved.levels)
+    available: tuple[AddressComponentType, ...] = ()
+    if resolved is not None:
+        available = tuple(resolved.levels)
+    return _AdminSpanView(
+        available_levels=available,
+        all_levels=tuple(span.levels),
+        text=span.text,
+    )
 
 
 def _suspect_eligible_after_last_piece(
@@ -736,11 +802,17 @@ def _successor_candidate_levels(
 
 
 def _key_should_degrade_from_non_pure_value(clue: Clue) -> AddressComponentType | None:
-    """非纯 value 场景下的 key 降级规则。"""
+    """非纯 value 场景下的 key 降级规则。
+
+    §4.2：无左邻 admin value 时——
+    - "省" PROVINCE → None（裸"省"字无法独立成值）
+    - "市" CITY → DISTRICT_CITY（县级市是"市" KEY 唯一可独立存在的语义落点）
+    其他保持不变。
+    """
     if clue.text == "省" and clue.component_type == AddressComponentType.PROVINCE:
         return None
     if clue.text == "市" and clue.component_type == AddressComponentType.CITY:
-        return AddressComponentType.DISTRICT
+        return AddressComponentType.DISTRICT_CITY
     return clue.component_type
 
 
@@ -827,13 +899,29 @@ def _has_following_detail_key(
 
 
 def _routed_key_clue(context: _RoutingContext, clue_index: int, clue: Clue) -> Clue | None:
-    """把当前 KEY clue 重映射为真正参与中文状态机的类型。"""
+    """把当前 KEY clue 重映射为真正参与中文状态机的类型。
+
+    §4.2 KEY 多层级 intersection 路由：
+    - adjacent VALUE span 存在：与 `key_levels(clue)` 求有序交集。
+        空→ None；单层→ 该 level；≥2 层→ MULTI_ADMIN（交集信息后续在 flush 路径重算）。
+    - 无 adjacent：按 `_key_should_degrade_from_non_pure_value` 降级（"省"→None、"市"→DISTRICT_CITY）。
+    """
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
     adjacent_span = _adjacent_value_span(context, clue)
     if adjacent_span is not None:
-        if match_admin_levels((clue.component_type,), adjacent_span.levels) is None:
+        intersection = _ordered_component_types(
+            level for level in adjacent_span.levels if level in set(key_levels(clue))
+        )
+        if not intersection:
             return None
+        if len(intersection) == 1:
+            if intersection[0] != clue.component_type:
+                clue = replace(clue, component_type=intersection[0])
+        else:
+            # 多层未消歧 → MULTI_ADMIN；_route_dynamic_key_type 对 MULTI_ADMIN 为 pass-through，
+            # 直接早退避免后续动态重路由覆盖该决策。
+            return replace(clue, component_type=AddressComponentType.MULTI_ADMIN)
     else:
         downgraded_type = _key_should_degrade_from_non_pure_value(clue)
         if downgraded_type is None:

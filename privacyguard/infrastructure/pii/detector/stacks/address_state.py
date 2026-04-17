@@ -408,8 +408,18 @@ class _ParseState:
     max_clue_strength: ClaimStrength = ClaimStrength.WEAK
 
 
+# §3.4 resolver 返回视图；此处不显式 import 以避免与 policy 的循环依赖，
+# 运行时 duck-type 访问 `available_levels` / `all_levels` / `text` 三个字段。
+# 契约见 `privacyguard.infrastructure.pii.detector.stacks.address_policy_zh._AdminSpanView`。
 _StandaloneAdminResolver = Callable[
     [_ParseState, tuple[_IndexedClue, ...]],
+    "object | None",
+]
+
+# §3.5：KEY-driven admin chain 的层级解析回调。给定 last KEY 之前的 VALUE 条目 +
+# last KEY clue，返回可落 admin 组件的层级元组（见 policy_zh._resolve_admin_key_chain_levels）。
+_AdminKeyChainResolver = Callable[
+    [_ParseState, tuple[_IndexedClue, ...], Clue],
     tuple[AddressComponentType, ...] | None,
 ]
 
@@ -900,6 +910,88 @@ def _prune_prior_component_suspects(state: _ParseState, new_component: _DraftCom
             prior.suspect_demoted = True
 
 
+def _resolve_multi_admin_collision(
+    state: _ParseState,
+    raw_text: str,
+    incoming_start: int,
+    incoming_value: str,
+    incoming_levels: tuple[AddressComponentType, ...],
+    *,
+    admin_rank: Mapping[AddressComponentType, int] = None,  # type: ignore[assignment]
+) -> tuple[AddressComponentType, ...] | None:
+    """§5.1 MULTI_ADMIN 同值降解。
+
+    仅供 admin commit 路径调用（`_flush_chain_as_standalone` / KEY-driven admin flush /
+    进入 `_segment_admit` 前）。若 incoming_value 与某已提交的 MULTI_ADMIN 同值且
+    level 有交集，按 pair 之间的逗号方向把 existing MULTI_ADMIN 原地降解，
+    返回 incoming 应取的 level 子集；无碰撞 / 无交集返回 None。
+
+    方向规则：
+    - 无逗号（顺向）：existing 保留最高层（"北京市" = P），incoming 取最低层（= C）
+    - 有逗号（逆向）：existing 保留最低层（= C），incoming 取最高层（= P）
+
+    suspect 是旁注元数据、不占 occupancy，`_freeze_*` 路径**不**触发 collision。
+    """
+    rank = admin_rank if admin_rank is not None else _ADMIN_RANK
+    target_idx: int | None = None
+    for lvl in incoming_levels:
+        idx = state.occupancy.get(lvl)
+        if idx is None:
+            continue
+        comp = state.components[idx]
+        if (
+            comp.component_type == AddressComponentType.MULTI_ADMIN
+            and not isinstance(comp.value, list)
+            and comp.value == incoming_value
+        ):
+            target_idx = idx
+            break
+    if target_idx is None:
+        return None
+
+    existing = state.components[target_idx]
+    overlap = [lvl for lvl in existing.level if lvl in incoming_levels]
+    if not overlap:
+        return None
+
+    has_comma = any(char in ",，" for char in raw_text[existing.end:incoming_start])
+    if has_comma:
+        incoming_take = max(overlap, key=lambda item: rank.get(item, 0))
+    else:
+        incoming_take = min(overlap, key=lambda item: rank.get(item, 0))
+
+    # 原地降解 existing：把 incoming_take 这一层从 existing.level 中移除。
+    state.occupancy.pop(incoming_take, None)
+    new_level = tuple(lvl for lvl in existing.level if lvl != incoming_take)
+    if not new_level:
+        # 理论上 overlap 不会覆盖 existing.level 全部（否则 incoming 等价于 existing），
+        # 留一个防御性退路：无法降解就不动，返回 None。
+        return None
+    prev_type = existing.component_type
+    _set_component_level(existing, new_level)
+    new_type = existing.component_type
+
+    if prev_type != new_type:
+        # existing 从 MULTI_ADMIN 退回具体 admin 层：修正 component_counts 与 segment 视图。
+        if prev_type == AddressComponentType.MULTI_ADMIN:
+            count = state.component_counts.get(AddressComponentType.MULTI_ADMIN, 0)
+            if count <= 1:
+                state.component_counts.pop(AddressComponentType.MULTI_ADMIN, None)
+            else:
+                state.component_counts[AddressComponentType.MULTI_ADMIN] = count - 1
+            _increment_component_count(state, new_type)
+        if state.last_component_type == prev_type:
+            state.last_component_type = new_type
+        if state.segment_state.group_last_type == prev_type:
+            state.segment_state.group_last_type = new_type
+        if state.segment_state.group_first_type == prev_type:
+            state.segment_state.group_first_type = new_type
+        # 原地降解改变了段序推导基础，方向需要重新评估。
+        state.segment_state.direction = None
+
+    return (incoming_take,)
+
+
 def _commit(
     state: _ParseState,
     component: _DraftComponent,
@@ -963,6 +1055,7 @@ def _flush_chain(
     normalize_value,
     commit_component: _CommitFn | None = None,
     resolve_standalone_admin_group: _StandaloneAdminResolver | None = None,
+    resolve_admin_key_chain_levels: _AdminKeyChainResolver | None = None,
 ) -> None:
     """冲洗 deferred_chain。若链中含 KEY，用最后一个 KEY 消费；否则逐个 standalone。"""
     if not state.deferred_chain:
@@ -983,31 +1076,77 @@ def _flush_chain(
         if comp_type == AddressComponentType.NUMBER and state.last_component_type in _DETAIL_COMPONENTS:
             comp_type = AddressComponentType.DETAIL
         component_start = state.chain_left_anchor if state.chain_left_anchor is not None else key_clue.start
-        value = normalize_value(comp_type, raw_text[component_start:key_clue.start])
-        if value:
-            component = _DraftComponent(
-                component_type=comp_type,
-                start=component_start,
-                end=key_clue.end,
-                value=value,
-                key=key_clue.text,
-                is_detail=comp_type in _DETAIL_COMPONENTS,
-                raw_chain=[clue for _, clue in used_entries],
-                suspected=[
-                    _SuspectEntry(
-                        level=entry.level,
-                        value=entry.value,
-                        key=entry.key,
-                        origin=entry.origin,
-                        start=entry.start,
-                        end=entry.end,
+
+        # §3.5：MULTI_ADMIN routed KEY 必须通过 admin-key-chain 解析器拿到 level 元组才能构造组件。
+        if comp_type == AddressComponentType.MULTI_ADMIN:
+            value_entries = tuple(used_entries[:-1])
+            resolution = None
+            if resolve_admin_key_chain_levels is not None:
+                resolution = resolve_admin_key_chain_levels(state, value_entries, key_clue)
+            if resolution is None:
+                # 非 admin 链或无法 build span：MULTI_ADMIN 类型无法构造，split。
+                state.split_at = component_start
+            else:
+                resolved_levels: tuple[AddressComponentType, ...] = resolution.available_levels
+                if not resolved_levels:
+                    # §5.2.3 collision 触发点：available 为空时，先尝试同值 MULTI_ADMIN 降解。
+                    forced = _resolve_multi_admin_collision(
+                        state,
+                        raw_text,
+                        component_start,
+                        resolution.text,
+                        resolution.all_levels,
                     )
-                    for entry in state.pending_suspects
-                ],
-                clue_ids={clue.clue_id for _, clue in used_entries},
-                clue_indices={index for index, _ in used_entries},
-            )
-            commit(component)
+                    if forced is None:
+                        state.split_at = component_start
+                    else:
+                        resolved_levels = forced
+                if resolved_levels:
+                    primary_level = resolved_levels[0]
+                    value = normalize_value(primary_level, raw_text[component_start:key_clue.start])
+                    if value:
+                        component = _DraftComponent(
+                            component_type=AddressComponentType.MULTI_ADMIN
+                            if len(resolved_levels) >= 2
+                            else primary_level,
+                            start=component_start,
+                            end=key_clue.end,
+                            value=value,
+                            key=key_clue.text,
+                            is_detail=primary_level in _DETAIL_COMPONENTS,
+                            raw_chain=[clue for _, clue in used_entries],
+                            suspected=[],
+                            level=tuple(resolved_levels),
+                            clue_ids={clue.clue_id for _, clue in used_entries},
+                            clue_indices={index for index, _ in used_entries},
+                        )
+                        commit(component)
+        else:
+            value = normalize_value(comp_type, raw_text[component_start:key_clue.start])
+            if value:
+                component = _DraftComponent(
+                    component_type=comp_type,
+                    start=component_start,
+                    end=key_clue.end,
+                    value=value,
+                    key=key_clue.text,
+                    is_detail=comp_type in _DETAIL_COMPONENTS,
+                    raw_chain=[clue for _, clue in used_entries],
+                    suspected=[
+                        _SuspectEntry(
+                            level=entry.level,
+                            value=entry.value,
+                            key=entry.key,
+                            origin=entry.origin,
+                            start=entry.start,
+                            end=entry.end,
+                        )
+                        for entry in state.pending_suspects
+                    ],
+                    clue_ids={clue.clue_id for _, clue in used_entries},
+                    clue_indices={index for index, _ in used_entries},
+                )
+                commit(component)
     else:
         _flush_chain_as_standalone(
             state,
@@ -1062,10 +1201,32 @@ def _flush_chain_as_standalone(
             ):
                 group_end += 1
             group_entries = tuple(state.deferred_chain[cursor:group_end])
-            resolved_levels = resolve_standalone_admin_group(state, group_entries)
-            if resolved_levels is None or not resolved_levels:
+            resolution = resolve_standalone_admin_group(state, group_entries)
+            if resolution is None:
                 state.split_at = clue.start
                 break
+            # 契约：`resolution` 是 policy 侧 `_AdminSpanView`（duck-typed 访问字段）。
+            resolved_levels: tuple[AddressComponentType, ...] = resolution.available_levels
+            raw_levels: tuple[AddressComponentType, ...] = resolution.all_levels
+            span_text: str = resolution.text
+            value_end = max(
+                state.value_char_end_override.get(entry_clue.clue_id, entry_clue.end)
+                for _, entry_clue in group_entries
+            )
+            if not resolved_levels:
+                # §5.2.2 collision 触发点：available 为空时，若存在同值 MULTI_ADMIN 则原地降解，
+                # 让 incoming 取互补层继续落库；否则 split。
+                forced = _resolve_multi_admin_collision(
+                    state,
+                    raw_text,
+                    clue.start,
+                    span_text,
+                    raw_levels,
+                )
+                if forced is None:
+                    state.split_at = clue.start
+                    break
+                resolved_levels = forced
             # §3.4：len>=2 直接构造 MULTI_ADMIN 组件；len==1 退回单层 admin 组件。
             # SINGLE_OCCUPY 占位冲突检查改为逐层：任一层被占用即视为冲突。
             occupancy_conflict = any(
@@ -1075,10 +1236,6 @@ def _flush_chain_as_standalone(
             if occupancy_conflict:
                 state.split_at = clue.start
                 break
-            value_end = max(
-                state.value_char_end_override.get(entry_clue.clue_id, entry_clue.end)
-                for _, entry_clue in group_entries
-            )
             # normalize_value 仍按最高 rank 的 admin 类型做归一化（与历史行为对齐）。
             primary_level = resolved_levels[0]
             value = normalize_value(primary_level, raw_text[clue.start:value_end])
