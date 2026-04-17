@@ -35,7 +35,7 @@
 
 **核心规则**：两个地址比较时，对每个 admin 层级 `L`，查找"level 元组中包含 `L` 的 component"（而非按 `component_type` 精确匹配）。MULTI_ADMIN(P,C) 既能在 L=P 被查到也能在 L=C 被查到。
 
-**多层消歧的"或链"语义**：MULTI_ADMIN 的 value 在哪一层属实是**歧义的**。两个地址判定为同实体的充分必要条件是：**存在一种对双方所有 MULTI_ADMIN 的层级解释**，使得在所有"双方共同拥有的层级"上值都一致。等价于：枚举每个 MULTI_ADMIN 的层级解释（2^k 种组合，k = 双方 MULTI_ADMIN 总数），对每种组合做标准单层比较，**任一成立即匹配**。
+**多层消歧的"或链"语义**：MULTI_ADMIN 的 value 在哪一层属实是**歧义的**。两个地址判定为同实体的充分必要条件是：**存在一种对双方所有 MULTI_ADMIN 的层级解释**，使得在所有"双方共同拥有的层级"上值都一致。等价于：枚举每个 MULTI_ADMIN 的层级解释（2^k 种组合，k = 双方 MULTI_ADMIN 总数），对每种组合做标准单层比较，**任一成立即匹配**；**仅当所有解释均出现显式冲突**时才判定为不同，**任一解释为 inconclusive**（该解释下无共同可比层或全靠 suspect 覆盖）时整体结果为 inconclusive，交由 has_admin 闸门裁决。
 
 | A | B | 推理 | 结论 |
 |---|---|------|------|
@@ -46,12 +46,18 @@
 | MULTI(北京,P,C) | PROVINCE=北京, CITY=南京 | A=P 匹配 | 同 |
 | MULTI(北京,P,C) | 仅 DISTRICT=朝阳 | 无 P/C 共同层 | 交由 has_admin 闸门裁决 |
 
+**值比较策略统一定义**（贯穿所有 admin / suspect / 非 admin 层级比较）：
+
+- **A. 同层级 component↔component（admin 直接比较）**：用 `value` 精确相等（`a == b`）。理由：scanner / policy 已在两侧都剥掉 KEY（省/市/区/州），value 即裸名字；再做子串互容反而引入"北京" ⊂ "北京市朝阳区"式的假阳。
+- **B. 非 admin 层级 component↔component（road / poi / building / detail / subdistrict）**：用 `_admin_text_subset_either`（短 ⊂ 长双向子串）。理由：路名/POI 常有别名前后缀差异，需要模糊容忍。
+- **C. suspect entry ↔ 对侧真实 component（含同层 peer 与 level 覆盖组件）**：用 `surface = entry.value + entry.key` 对 `other_component.value` 做**双向子串**。理由：suspect 的 surface 是原始表面文本，可能带 KEY 尾缀；对侧 value 是剥 KEY 后的裸值——两侧粒度不对称时子串最稳。
+
 **suspect OR 链（核心语义）**：每个 component 的 `suspected` 列表把可能值扩展到额外层级。当前层 L 的判定步骤：
 
-1. **同层级 peer 子串检验**：`surface = entry.value + entry.key`，若 `surface` 落在**对侧同 component_type 组件**（peer）的 value 内 → 认作一致。
+1. **同层级 peer 子串检验（策略 C）**：`surface = entry.value + entry.key`，若 `surface` 与**对侧同 component_type 组件**（peer）的 value 互为子串 → 认作一致。
    - 语义：suspect 的文本出现在 peer 同层名字里，说明这段文本是同层名字的一部分（例如：左 ROAD.suspect "北京" 出现在右 ROAD.value "北京中山" 里，则 "北京" 属路名拼接而非行政），不视为行政不一致；同时**不**将 suspect-owner 侧标记为 has_admin。
-2. **对侧 suspect 同 level**：对侧 peer.suspected 里有任一 entry 的 `level` 覆盖 L 且 value 相等 → 一致。
-3. **对侧 level 覆盖组件**：对侧存在 level 元组覆盖 L 的 component 且 value 相等 → 一致。
+2. **对侧 suspect 同 level**：对侧 peer.suspected 里有任一 entry 的 `level` 覆盖 L 且 `value` 严格相等 → 一致（两侧都是 suspect，已是剥 KEY 裸值，走策略 A）。
+3. **对侧 level 覆盖组件（策略 C）**：对侧存在 level 元组覆盖 L 的 component，且其 value 与当前 entry 的 `surface` 互为子串 → 一致。
 4. 其余 → 不一致。
 
 **DISTRICT_CITY 与 DISTRICT 无 level 交集**（一个是 `(DISTRICT_CITY,)`，另一个是 `(DISTRICT,)`），按上述规则**不参与互通**——符合"不同行政性质不做模糊匹配"语义。
@@ -448,6 +454,8 @@ if (
 
 直接产出**单层** component（每个 `level=(single,)`），不走 MULTI_ADMIN。
 
+**与 §5.1 collision 的关系**：本分支是"同一次 flush 内两段 admin VALUE 语义完全等价于一次 collision"的**优化短路**——不调用 `_resolve_multi_admin_collision`，但逻辑等价：无逗号→正序（高层→次高层）、有逗号→逆序；`len(segments)>2 or _has_admin_anchor_before_chain(state)` 限制条件保证只在"上下文足以消歧"时生效（否则退回常规路径：seg[0] 落 MULTI_ADMIN，seg[1] 走 §5.1 的 collision）。两条路径对同一输入产出**相同组件链**，不得并存冲突。
+
 ---
 
 ## 4. 阶段 2 — KEY 多层级与 intersection 路由
@@ -487,11 +495,15 @@ def _routed_key_clue(context, clue_index, clue):
     if clue.text == "市":
         return replace(clue, component_type=AddressComponentType.DISTRICT_CITY)
     if clue.text == "省":
-        return None
+        return None                  # 裸"省"字无依附，丢弃
     return clue
 ```
 
-**不**给 `Clue` 加 `levels` 字段。intersection 信息在 `_flush_admin_key_chain` 中由 `key_levels(clue) ∩ span.level` 重新计算，避免污染 scanner 输出。
+**说明**：
+- `adjacent_span is None` 即 KEY 左侧没有可吸收的 admin value（例如句首、或前面是非 admin 片段）。
+- "市" 无左邻 admin → 退化为 DISTRICT_CITY（县级市是"市" KEY 唯一可独立存在的语义落点）。
+- "省" 无左邻 admin → 无法单独承担 value，返回 None（clue 不入链，由调用方判定整条链是否切断）。
+- **不**给 `Clue` 加 `levels` 字段。intersection 信息在 `_flush_admin_key_chain` 中由 `key_levels(clue) ∩ span.level` 重新计算，避免污染 scanner 输出。
 
 ### 4.3 `_handle_key_clue` 处理 MULTI_ADMIN routed key [`address_zh.py`]
 
@@ -635,21 +647,44 @@ suspect 是元数据旁注，不占 occupancy。suspect 的 `level` 元组保持
 
 #### "北京北京"（无 KEY、无 anchor）
 
-```
-"北京"[1] VALUE → scanner dual-emit (P,C) → admin_span.level=(P,C)
-              → _flush_chain_as_standalone 落 MULTI_ADMIN(北京,(P,C))
-              → occupancy: {P:0, C:0}
+输入："北京北京"（4 字符，无 KEY、无分隔符、无前驱 anchor）。
 
-"北京"[2] VALUE → admin_span.level=(P,C), occupancy 全被 MULTI_ADMIN 占
-              → _resolve_multi_admin_collision:
-                   existing=MULTI_ADMIN at 0, overlap=[P,C], no comma
-                   → existing 保 P → PROVINCE(北京), incoming 取 (C,)
-              → 以 level=(C,) 走 _flush_chain_as_standalone 产出 CITY(北京)
+scanner 按 token 粒度 emit：
+
+| 位置 | token | emit |
+|------|-------|------|
+| 0–2 | 北京 | (PROVINCE, "北京"), (CITY, "北京") → 同 span 双层 |
+| 2–4 | 北京 | (PROVINCE, "北京"), (CITY, "北京") → 同 span 双层 |
+
+`collect_admin_value_span` **严格不跨 token 合并**：span[0]=[0..2] level=(P,C)；span[1]=[2..4] level=(P,C)。链上存在两个独立 admin span。
+
+```
+span[0] 先进 deferred_chain（levels=(P,C), value="北京"）
+         ↓
+span[1] 试图续链：VALUE→VALUE 且两者均为 admin dual-level
+         scanner/chain 既不"合并"也不"eager-split"——保持两段独立
+         ↓
+_flush_chain_as_standalone 按 span 顺序逐段处理：
+
+seg[0]: resolve → level=(P,C), len>=2
+        → MULTI_ADMIN(北京,(P,C)), occupancy: {P:0, C:0}
+
+seg[1]: resolve → level=(P,C) 但 occupancy 全被 MULTI_ADMIN 占
+        → _resolve_multi_admin_collision:
+             existing=MULTI_ADMIN at 0, overlap=[P,C], no comma
+             → existing 保 P → 降解成 PROVINCE(北京), occupancy: {P:0}
+             → 返回 incoming_take=(C,)
+        → 以 level=(C,) commit → CITY(北京), occupancy: {P:0, C:1}
 
 结果：PROVINCE(北京) + CITY(北京)
 ```
 
-**关键要求**：取消任何"连续重复同值 dual-level admin"场景下"第二个静默丢弃 / split 当新地址"的旁路（即 `_should_eager_split_duplicate_dual_admins` 或等价分支一律返回 False / 不入网）。第二个"北京"必须以 VALUE 身份触发 collision，走 5.1 降解路径。后续再接 `朝阳` 时 successor 检查按 CITY→DISTRICT 合法（直辖市链已不依赖 MULTI_ADMIN 占位）。
+**实现要求（强约束，对照 §9.9 清零项）**：
+
+1. `collect_admin_value_span` 以 token/clue 边界结束 span，**不得**把相邻 token 同层 admin VALUE 合并成单 span。
+2. `_chain_can_accept` 对"连续 admin VALUE"要么全部入链、要么按 span 边界切开后逐段 flush——**禁止**出现"第二个静默丢弃"或"span[1] 整体作为新地址 split"的旁路。原计划占位名 `_should_eager_split_duplicate_dual_admins` 即需清除的等价分支，见 §9.9 定位。
+3. `_flush_chain_as_standalone` 遍历链内各 span 时按顺序单独 resolve；第二段走 §3.4 的 `len(level)==0 → collision` 分支，由 collision 返回强制 level。
+4. 后续"北京北京朝阳"沿此链路：seg[2]="朝阳" 走 MULTI_ADMIN(朝阳,(C,D)) 或 DISTRICT(朝阳,(D,))；`CITY→DISTRICT` 在 `_VALID_SUCCESSORS` 中合法（无需 MULTI_ADMIN 占位兼容）。
 
 ---
 
@@ -711,6 +746,7 @@ EN stack 维护 `_EN_ADMIN_RANK` 与 `_EN_VALID_SUCCESSORS`：
 - `_ADMIN_LEVEL_KEYS = ("province", "city", "district", "district_city", "subdistrict")`——canonical 比较时按此顺序逐层检验
 - `_HAS_ADMIN_LEVEL_KEYS = frozenset({"province", "city", "district", "district_city"})`——has_admin 计算专用（SUBDISTRICT 不参与）
 - `_ADMIN_LEVEL_RANK: dict[str, int]` 供多解释枚举时的排序
+- `_MULTI_ADMIN_INTERP_CAP = 4`——左右 MULTI_ADMIN 总数上限；超过时走 `_admin_match_simplified`（见 §11 #1）
 
 ### 7.4 `NormalizedAddressComponent.level` 与 `NormalizedPII.has_admin` [`types.py`]
 
@@ -732,7 +768,7 @@ class NormalizedPII:
 - 单层 component：`level=(component_type,)` 或为空（构造时由 `component_type` 反填充）
 - MULTI_ADMIN：`level=("province","city")` 等
 - `_ordered_components_from_metadata` 解析时读 `address_component_level` trace 挂到 component 上；若 trace 缺失则按 `component_type` 反填
-- `has_admin_static` 在 `NormalizedPII` 构建时计算：遍历 `ordered_components`，任一 component 的 `level` 与 `_HAS_ADMIN_LEVEL_KEYS` 有交集即 True
+- `has_admin_static` **在 `_ordered_components_from_metadata` 完成、`NormalizedPII` 冻结前**计算并写入；触发点位于 `NormalizedPII` 的构造链末节（`normalize_pii` 的最后一步），确保 dataclass 冻结后不再变动。遍历 `ordered_components`，任一 component 的 `level` 与 `_HAS_ADMIN_LEVEL_KEYS` 有交集即 True
 
 `NormalizedAddressSuspectEntry` 已有 `levels: tuple[str, ...]`，保持不变。
 
@@ -897,25 +933,26 @@ def _suspect_group_matches_with_flag(
 ) -> tuple[bool | None, bool]:
     """
     返回 (match_result, step1_failed)。
-    match_result: True / False / None（同现有语义）。
-    step1_failed: 第 1 步（entry 文本是否为 peer 同 component_type value 的子串）是否"未命中"。
-                  peer 不存在时也视为未命中（保守计 Case 2）。
+    match_result: True / False / None。
+    step1_failed: 第 1 步（entry.surface 是否与 peer 同 component_type value 互为子串）
+                  是否"未命中"。peer 不存在时也视为未命中（保守计 Case 2）。
     """
     surface = f"{entry.value}{entry.key}".strip()
     other_value = _component_value_text(other_component)
 
-    if surface and other_value and surface in other_value:
-        return True, False   # 第 1 步命中 → 不触发 Case 2
+    # 第 1 步：surface ↔ peer.value 双向子串（策略 C）
+    if surface and other_value and _admin_text_subset_either(surface, other_value):
+        return True, False
 
     step1_failed = True
 
-    # 第 2 步：对侧 peer.suspected 同 level
+    # 第 2 步：对侧 peer.suspected 同 level，value 精确相等（策略 A：两侧均为剥 KEY 裸值）
     for level in entry.levels:
         peer_suspected = _suspect_entry_by_level(other_component, level)
         if peer_suspected is not None:
             return (peer_suspected.value.strip() == entry.value.strip()), step1_failed
 
-    # 第 3 步：对侧按 level 查找任一覆盖该 level 的 component
+    # 第 3 步：对侧按 level 查找任一覆盖该 level 的 component；surface 与其 value 双向子串（策略 C）
     for level in entry.levels:
         other_level_component = _component_covering_level(other_normalized, level)
         if other_level_component is None:
@@ -923,7 +960,10 @@ def _suspect_group_matches_with_flag(
         other_level_value = _component_value_text(other_level_component)
         if not other_level_value:
             continue
-        return (other_level_value == entry.value.strip()), step1_failed
+        return (
+            _admin_text_subset_either(surface, other_level_value),
+            step1_failed,
+        )
 
     return True, step1_failed   # 无从判定 → 不否决
 ```
@@ -931,6 +971,12 @@ def _suspect_group_matches_with_flag(
 `_suspect_entry_by_level` 现有实现已按 `level in entry.levels` 检查，保留。
 
 #### 7.5.5 `_compare_admin_levels_with_interpretations` 返回三态
+
+**聚合规则**（与 §0.2 对齐）：
+
+- 任一解释产出 `match` → 整体 `match`。
+- 否则任一解释产出 `inconclusive` → 整体 `inconclusive`（存在一种"未被显式证伪"的解释）。
+- 否则（所有解释均 `mismatch`）→ 整体 `mismatch`。
 
 ```python
 def _compare_admin_levels_with_interpretations(
@@ -944,6 +990,10 @@ def _compare_admin_levels_with_interpretations(
     right_multis = [c for c in right.ordered_components
                     if c.component_type == "multi_admin" or len(c.level) >= 2]
 
+    # 计算量兜底（§11 风险 #1）：当 k 过大时回退为简化比较
+    if len(left_multis) + len(right_multis) > _MULTI_ADMIN_INTERP_CAP:
+        return _admin_match_simplified(left, right)
+
     def iter_interpretations(multis):
         if not multis:
             yield {}; return
@@ -952,7 +1002,7 @@ def _compare_admin_levels_with_interpretations(
         for combo in product(*level_sets):
             yield dict(zip(multis, combo))
 
-    any_inconclusive_only = True
+    all_mismatch = True
 
     for left_interp in iter_interpretations(left_multis):
         for right_interp in iter_interpretations(right_multis):
@@ -961,10 +1011,10 @@ def _compare_admin_levels_with_interpretations(
             )
             if result == "match":
                 return "match"
-            elif result == "mismatch":
-                any_inconclusive_only = False
+            if result == "inconclusive":
+                all_mismatch = False
 
-    return "inconclusive" if any_inconclusive_only else "mismatch"
+    return "mismatch" if all_mismatch else "inconclusive"
 
 
 def _admin_match_under_interpretation(
@@ -973,14 +1023,18 @@ def _admin_match_under_interpretation(
     left_interp: dict,
     right_interp: dict,
 ) -> str:
-    """某种解释下逐层比较。返回 match/inconclusive/mismatch。"""
+    """某种解释下逐层比较。返回 match / inconclusive / mismatch。"""
     matched_any = False
 
-    for L in _ADMIN_LEVEL_KEYS:
+    for L in _ADMIN_LEVEL_KEYS:   # ("province","city","district","district_city","subdistrict")
         left_value = _admin_value_at_level(left, L, left_interp)
         right_value = _admin_value_at_level(right, L, right_interp)
 
+        if left_value is None and right_value is None:
+            continue  # 本层双缺
+
         if left_value is None or right_value is None:
+            # 单侧缺：由 suspect 链路决定是否存在确定性冲突
             if not _suspect_chain_consistent_at_level(
                 left, right, L, left_interp, right_interp,
             ):
@@ -991,9 +1045,11 @@ def _admin_match_under_interpretation(
             matched_any = True
             continue
 
+        # 双方都有值但 value-精确不等：看 suspect 能否补救（子串兜底）
         if _suspect_chain_can_reconcile(
             left, right, L, left_interp, right_interp,
         ):
+            matched_any = True
             continue
         return "mismatch"
 
@@ -1003,6 +1059,10 @@ def _admin_match_under_interpretation(
 def _admin_value_at_level(
     normalized: NormalizedPII, level: str, interpretation: dict,
 ) -> str | None:
+    """取本侧在 level 层的 component value（硬值）。
+    - interpretation 中 multi component 仅在被固定到 level 时才贡献。
+    - 单层 component 只要 level 在其 level 元组里即贡献。
+    """
     for c in normalized.ordered_components:
         if c in interpretation:
             if interpretation[c] == level:
@@ -1014,7 +1074,98 @@ def _admin_value_at_level(
 
 
 def _admin_value_match(a: str, b: str) -> bool:
-    return _admin_text_subset_either(a, b)
+    """admin 同层 component↔component 值比较（策略 A）。
+    两侧均已剥 KEY，采用精确相等，避免"北京"⊂"北京市朝阳"式假阳。
+    """
+    return (a or "").strip() == (b or "").strip() and bool((a or "").strip())
+```
+
+**`_suspect_chain_consistent_at_level`（单侧缺值时的 OR 链）**：
+
+```python
+def _suspect_chain_consistent_at_level(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    level: str,
+    left_interp: dict,
+    right_interp: dict,
+) -> bool:
+    """
+    本层至少一侧硬值缺失时调用。
+    收集两侧在 level 上的"候选值集合"（硬 value + suspect entry.value），任一方为空
+    视为 True（单缺不证伪）；双方都有候选且任一对候选满足 _admin_text_subset_either
+    → True，否则 False（显式冲突）。
+    """
+    left_set = _level_candidates(left, level, left_interp)
+    right_set = _level_candidates(right, level, right_interp)
+    if not left_set or not right_set:
+        return True
+    for a in left_set:
+        for b in right_set:
+            if _admin_text_subset_either(a, b):
+                return True
+    return False
+
+
+def _level_candidates(
+    normalized: NormalizedPII, level: str, interpretation: dict,
+) -> set[str]:
+    out: set[str] = set()
+    for c in normalized.ordered_components:
+        # 硬值（受解释约束）
+        if c in interpretation:
+            if interpretation[c] == level:
+                v = _component_value_text(c)
+                if v: out.add(v)
+        else:
+            if level in c.level or (not c.level and c.component_type == level):
+                v = _component_value_text(c)
+                if v: out.add(v)
+        # suspect 值（不受解释约束，原始候选集）
+        for s in c.suspected:
+            if level in s.levels and s.value:
+                out.add(s.value.strip())
+    return out
+```
+
+**`_suspect_chain_can_reconcile`（双侧硬值不等时的补救）**：
+
+```python
+def _suspect_chain_can_reconcile(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    level: str,
+    left_interp: dict,
+    right_interp: dict,
+) -> bool:
+    """
+    双方在 level 上都有硬值但精确不等时调用。
+    仅凭 suspect 层扩展的候选集，若存在 a∈左候选、b∈右候选使得 surface 粒度双向子串
+    → True（视作歧义中的可能一致解释）。
+    硬值本身不参与补救（硬值不等已判；补救只看 suspect 带来的增量）。
+    """
+    left_set = _level_suspect_surfaces(left, level)
+    right_set = _level_suspect_surfaces(right, level)
+    if not left_set or not right_set:
+        return False
+    for a in left_set:
+        for b in right_set:
+            if _admin_text_subset_either(a, b):
+                return True
+    return False
+
+
+def _level_suspect_surfaces(
+    normalized: NormalizedPII, level: str,
+) -> set[str]:
+    out: set[str] = set()
+    for c in normalized.ordered_components:
+        for s in c.suspected:
+            if level in s.levels:
+                surface = f"{s.value}{s.key}".strip()
+                if surface:
+                    out.add(surface)
+    return out
 ```
 
 #### 7.5.6 与 non-admin 层的混合流程
@@ -1161,10 +1312,11 @@ def _admin_value_match(a: str, b: str) -> bool:
   2. 第二个"北京" → admin_span.level=(P,C)，全 occupied → `_resolve_multi_admin_collision`：无逗号 → existing 保 P，incoming 取 `(C,)` → 产出 `CITY(北京)`。
   3. 最终：`PROVINCE(北京) + CITY(北京)`。
 - 需要调整的判断点：
+  - `collect_admin_value_span`（`address_policy_common.py` 上提后）——**严格按 token 边界结束 span**，相邻同层 admin VALUE token **不**合并为单 span（否则会把"北京北京" 视为单个长 value）。测试锁定：span[0].text=="北京" 且 span[1].text=="北京"，两段独立。
   - `_has_reasonable_successor_key`（`address_policy_zh.py:1022-1078`）中 `_preview_first_component_levels_from_chain` 等前瞻函数——**禁止**在"下一个 VALUE 与当前 admin VALUE 同值"时提前 split；把该决定交给 collision。
-  - `_flush_chain_as_standalone`（§3.4）对 `len(level)==0` 的 fallback 必须走 collision 路径（已在 §3.4 伪码中规定）。
-  - `_chain_can_accept`（`address_state.py:184` 附近）——确认同 value dual-level clue 不会被早期 dedup 静默丢弃。
-- **结论**：推进无阻塞；依赖 §3.1 / §3.2 词典与 scanner 改造；`_should_eager_split_duplicate_dual_admins`（或其等价旁路）动工时一并清掉。
+  - `_flush_chain_as_standalone`（§3.4）对 `len(level)==0` 的 fallback 必须走 collision 路径（已在 §3.4 伪码中规定）；且多 span 时按顺序逐段 resolve，前一段落 MULTI_ADMIN 后，后一段即在 occupancy 全占下触发 collision。
+  - `_chain_can_accept`（`address_state.py:184` 附近）——确认同 value dual-level clue 不会被早期 dedup 静默丢弃；相邻同 value dual-level span 允许共存于一条 chain 并被逐段 flush。
+- **结论**：推进无阻塞；依赖 §3.1 / §3.2 词典与 scanner 改造；`_should_eager_split_duplicate_dual_admins`（或其等价旁路）动工时一并清掉；"北京北京"/"北京北京朝阳" 两 case 作为该分支的 guard test。
 
 ### 9.10 总体可推进性与优先级
 
@@ -1243,6 +1395,26 @@ has_admin 闸门核心用例（suspect 场景）：
 | ROAD(中山, suspect=[{(P,C),北京}]) | PROVINCE=上海 + ROAD(中山) | 不同 | 双方 True, admin mismatch at P |
 | ROAD(北京中山, suspect=[]) | ROAD(中山, suspect=[{(P,C),北京}]) | 同 | 左 ROAD value 含 "北京" → 右 suspect 第 1 步命中；右 Case2=False；任一 False 放行 |
 | ROAD(中山) | ROAD(中山) | 同 | 双方 has_admin=False, 无 admin 比较 |
+| ROAD(朝阳中山, suspect=[{(C,D),朝阳}]) | ROAD(中山, suspect=[{(P,),江苏}]) 等价形态 | 不同 | 双方 True, admin 无共同层 inconclusive + has_admin 闸门 |
+| SUBDISTRICT=大鲁巷 + ROAD(中山) | SUBDISTRICT=大鲁巷 + ROAD(中山) | 同 | SUBDISTRICT 不计入 has_admin，视为 has_admin=False/False → 放行 |
+| MULTI(北京,P,C) + ROAD(中山) | SUBDISTRICT=大鲁巷 + ROAD(中山) | 不同 | 左 has_admin=True, 右 False（SUBDISTRICT 不算），admin inconclusive → 左侧单缺但 has_admin 闸门允许；此为边界 case，预期放行—— **需用实测锁定** |
+
+策略 A / B / C 边界 case：
+
+| 左 | 右 | 预期 | 策略 |
+|----|----|------|------|
+| PROVINCE=北京 | PROVINCE=北京 | 同（admin match）| A: value 精确相等 |
+| PROVINCE=北京 | PROVINCE=北京市 | 不同（admin mismatch）| A: 精确不等；若词典未剥 KEY 暴露该问题 |
+| ROAD(中山) | ROAD(中山路) | 同 | B: 子串互容 |
+| ROAD(中山, suspect=[{(P,C),北京, key="市"}]) | PROVINCE=北京 + ROAD(中山) | 同 | C: suspect surface="北京市" 与 peer value="北京" 子串互容 |
+
+EN MULTI_ADMIN 比较：
+
+| 左 | 右 | 预期 | 说明 |
+|----|----|------|------|
+| Brooklyn, New York, NY | MULTI(New York, CITY+STATE) + DISTRICT(Brooklyn) | 同 | 左边 CITY=New York + STATE=NY 可拆；右 MULTI 多解释覆盖 |
+| Brooklyn | Manhattan | 不同 | 双方仅 DISTRICT，值不等 |
+| New York (单地址) | Los Angeles (单地址) | 不同 | MULTI vs MULTI，任一解释下都 mismatch |
 
 ### 10.3 旧测试策略
 
@@ -1257,7 +1429,7 @@ has_admin 闸门核心用例（suspect 场景）：
 
 ## 11. 风险与未验证假设
 
-1. **多解释枚举的计算量**：k = 双方 MULTI_ADMIN 总数，枚举 2^k。实际 k 极少超过 2。若异常数据让 k >> 2，需要对枚举数做上限保护（如 k > 4 时回退为"简单单层比较"）。
+1. **多解释枚举的计算量**：k = 双方 MULTI_ADMIN 总数，枚举 2^k。常见 k ≤ 2，即至多 4 组合；异常数据时兜底函数 `_admin_match_simplified(left, right)`：在 `_MULTI_ADMIN_INTERP_CAP=4` 上限触发，按"固定最高 rank 解释"单轮评估——对每个 MULTI_ADMIN 取其 `level` 的最高层作唯一解释（相当于把 MULTI 近似为该层的单层 component），随后沿 `_ADMIN_LEVEL_KEYS` 逐层复用 `_admin_match_under_interpretation` 的单轮计算（但跳过枚举），返回同三态语义。兜底路径保持三态语义不变，仅牺牲"可能存在另一种解释使之 match"的召回。
 2. **`segment_state.direction = None` 副作用**：重置方向可能影响后续组件的逗号尾判断。已知对称 case 已验证；五个以上连续 admin 的复杂序列未系统验证。
 3. **PROVINCE→DISTRICT 后继开放**：可能让以前被拒绝的序列通过，产生 false-positive。需监控旧测试。
 4. **连续同值 dual-level admin 必须走 collision，不得旁路 split**："北京北京"（无 KEY、无 anchor）的目标落点为 `PROVINCE(北京) + CITY(北京)`，依赖 §3 scanner dual-emit + §5.1 collision 降解。任何"第二个同值 MULTI_ADMIN 提前 split 成新地址"或"静默丢弃"的历史旁路（如计划占位名 `_should_eager_split_duplicate_dual_admins`）一律清除。需用"北京北京"/"北京北京朝阳"两个 case 测试锁定行为。
@@ -1277,7 +1449,8 @@ has_admin 闸门核心用例（suspect 场景）：
 |----|------|------|
 | #1 | 阶段 0 | 类型基建：MULTI_ADMIN / DISTRICT_CITY 枚举、`_DraftComponent.level` / `_SuspectEntry.level` 字段、`_commit` occupancy、`_segment_admit` 后继逻辑、公共抽象上提 |
 | #2 | 阶段 1 | value 多层落 MULTI_ADMIN：scanner dual-emit、词典补、`_flush_chain_as_standalone` / `_flush_admin_key_chain` 多层 commit |
-| #3 | 阶段 2 + 阶段 3 | KEY intersection + `_routed_key_clue` + `_resolve_multi_admin_collision`（仅 admin commit 路径）+ DISTRICT_CITY 路由 |
+| #3a | 阶段 2 | KEY intersection + `_routed_key_clue` + DISTRICT_CITY 路由（`_flush_admin_key_chain` 多层分支与 §3.6 优化短路一同落地）|
+| #3b | 阶段 3 | `_resolve_multi_admin_collision` + 三个触发点（`_segment_admit` 前、`_flush_chain_as_standalone`、`_flush_admin_key_chain`）+ `_freeze_*` 路径不触发的守护 + "北京北京"/"北京北京朝阳" 解析 case |
 | #4 | 阶段 4 | EN scanner 去重 + EnAddressStack 接 admin span（不含 EN 词典数据） |
 | #5 | 阶段 5（detector 侧） | `_address_metadata.address_component_level` trace、parser 透传、`NormalizedAddressComponent.level` / `NormalizedPII.has_admin_static` |
 | #6 | 阶段 5（比较器侧） | `_component_covering_level` / `_compare_admin_levels_with_interpretations`（三态返回）/ `_compare_peer_with_suspect_case2` / has_admin 闸门 |
