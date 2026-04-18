@@ -408,13 +408,21 @@ def _same_organization(left: NormalizedPII, right: NormalizedPII) -> bool:
 
 
 def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
-    """§6 canonical 比较顺序：province → city → district → road → numbers → subdistrict → poi。
+    """§7.5 canonical 比较：has_admin 闸门 + admin 多解释枚举。
 
-    除任一步失败立即返回 False 外，要求「实质性成功匹配」占比：成功次数除以
-    ``min(len(left.ordered_components), len(right.ordered_components))`` 必须 **严格大于** 0.3；
-    单侧缺失而放行的层级不计入成功次数。分母为 0 时返回 False。
+    流程：
+    1. address_part 闸门：任一侧缺则失败。
+    2. 顶层 identity（country / province / house_number / postal_code）：双侧俱存时必须相等。
+    3. 非 admin 层（road / poi / building / detail）：按 component_type peer 比较，
+       并顺带累计 has_admin Case 2（suspect step1 失败 + entry.level ⊂ admin 集合）。
+    4. admin 层（province / city / district / district_city / subdistrict）：
+       走多解释枚举，返回 match / inconclusive / mismatch。
+       - match → 计入命中；
+       - mismatch → 失败；
+       - inconclusive → 若双方 has_admin=True 则失败，否则放行不计命中。
+    5. numbers、subdistrict（component_type 视角）、poi list。
+    6. substantive_hits / denom > 0.3。
     """
-    # 必须有实质地址信息。
     if not left.identity.get("address_part") or not right.identity.get("address_part"):
         return False
 
@@ -426,36 +434,54 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
         if left.identity.get(key) and right.identity.get(key):
             substantive_hits += 1
 
-    # 单层级组件按组件自身的 suspected 比较，不再做地址级合并。
-    for key in ("city", "district", "road", "poi", "building", "detail"):
-        left_component = _ordered_component_by_type(left, key)
-        right_component = _ordered_component_by_type(right, key)
-        if left_component is None or right_component is None:
-            if not _compare_component_with_suspected(left, right, key):
-                return False
-            continue
-        if not _compare_component_with_suspected(left, right, key):
-            return False
-        substantive_hits += 1
+    # has_admin 动态累计器：static（Case 1）作为起点，非 admin 层再累计 Case 2。
+    left_has_admin = left.has_admin_static
+    right_has_admin = right.has_admin_static
 
-    # numbers —— 逆序子序列 / keyed。
-    if not _numbers_match(left.numbers, right.numbers,
-                          left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers):
+    # 非 admin 层比较 + has_admin Case 2 累计
+    for key in ("road", "poi", "building", "detail"):
+        ok, left_admin_hit, right_admin_hit = _compare_peer_with_suspect_case2(
+            left, right, key,
+        )
+        if not ok:
+            return False
+        left_has_admin = left_has_admin or left_admin_hit
+        right_has_admin = right_has_admin or right_admin_hit
+        if _ordered_component_by_type(left, key) and _ordered_component_by_type(right, key):
+            substantive_hits += 1
+
+    # admin 层多解释枚举
+    admin_result = _compare_admin_levels_with_interpretations(left, right)
+    if admin_result == "mismatch":
+        return False
+    if admin_result == "match":
+        substantive_hits += 1
+    else:  # inconclusive：双方都 has_admin 才否决
+        if left_has_admin and right_has_admin:
+            return False
+
+    # numbers —— 逆序子序列 / keyed
+    if not _numbers_match(
+        left.numbers, right.numbers,
+        left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers,
+    ):
         return False
     if _numbers_substantive_pair(left, right):
         substantive_hits += 1
 
-    left_sd = _ordered_component_by_type(left, "subdistrict")
-    right_sd = _ordered_component_by_type(right, "subdistrict")
-    if left_sd is None or right_sd is None:
-        if not _compare_component_with_suspected(left, right, "subdistrict"):
-            return False
-    else:
-        if not _compare_component_with_suspected(left, right, "subdistrict"):
-            return False
+    # subdistrict：走非 admin peer 路径；不累计 has_admin（SUBDISTRICT ∉ _HAS_ADMIN_LEVEL_KEYS）
+    ok_sd, _lhit_sd, _rhit_sd = _compare_peer_with_suspect_case2(
+        left, right, "subdistrict",
+    )
+    if not ok_sd:
+        return False
+    if (
+        _ordered_component_by_type(left, "subdistrict")
+        and _ordered_component_by_type(right, "subdistrict")
+    ):
         substantive_hits += 1
 
-    # poi —— 列表双向子集（仅可去掉各 POI 的最后一个 key，不做任意后缀剥离）。
+    # poi 列表：双向子集
     if not _compare_poi_list(left, right):
         return False
 
@@ -512,6 +538,25 @@ def _ordered_component_by_type(
 ) -> NormalizedAddressComponent | None:
     for component in normalized.ordered_components:
         if component.component_type == component_type:
+            return component
+    return None
+
+
+def _component_covering_level(
+    normalized: NormalizedPII,
+    level: str,
+    skip: Iterable[NormalizedAddressComponent] | None = None,
+) -> NormalizedAddressComponent | None:
+    """返回 level 元组中包含 level 且未被 skip 的第一个 component。
+
+    admin 场景的查找入口：优先按 level 查找；兼容旧 component（level 为空）时
+    退回按 component_type == level 匹配。non-admin 场景仍用 _ordered_component_by_type。
+    """
+    skip_ids: set[int] = {id(c) for c in skip} if skip else set()
+    for component in normalized.ordered_components:
+        if id(component) in skip_ids:
+            continue
+        if level in component.level or (not component.level and component.component_type == level):
             return component
     return None
 
@@ -588,6 +633,407 @@ def _admin_text_subset_either(a: str, b: str) -> bool:
         return False
     shorter, longer = sorted((a, b), key=len)
     return shorter in longer
+
+
+# ---------------------------------------------------------------------------
+# PR #6：suspect 3 步 OR 链（带第 1 步失败旗标）+ has_admin Case 2 累计
+# ---------------------------------------------------------------------------
+
+def _entry_level_all_admin(entry: NormalizedAddressSuspectEntry) -> bool:
+    """entry.level 是否完全落在 admin 层（参与 has_admin 判定）。"""
+    return bool(entry.levels) and all(lvl in _HAS_ADMIN_LEVEL_KEYS for lvl in entry.levels)
+
+
+def _suspect_group_matches_with_flag(
+    entry: NormalizedAddressSuspectEntry,
+    other_component: NormalizedAddressComponent | None,
+    other_normalized: NormalizedPII,
+) -> tuple[bool | None, bool]:
+    """三步 OR 链（返回 step1_failed 供 has_admin Case 2 使用）。
+
+    返回 (match_result, step1_failed)。
+    - step1：surface = entry.value+entry.key，与对侧同 component_type peer.value 双向子串；
+      任一为空时也记 step1 失败（保守计 Case 2）。
+    - step2：对侧 peer 组件的 suspected 中同 level 的 entry，value 精确相等（策略 A）。
+    - step3：对侧按 level 查找覆盖组件，surface 与其 value 双向子串（策略 C）。
+    - 三步皆无从判定 → 不否决，返回 True。
+    """
+    surface = f"{entry.value}{entry.key}".strip()
+    other_value = _component_value_text(other_component)
+
+    # 第 1 步：同 component_type peer 双向子串
+    if surface and other_value and _admin_text_subset_either(surface, other_value):
+        return True, False
+
+    step1_failed = True
+
+    # 第 2 步：对侧 peer suspected 同 level 精确等值
+    for level in entry.levels:
+        peer_suspected = _suspect_entry_by_level(other_component, level)
+        if peer_suspected is not None:
+            return (peer_suspected.value.strip() == entry.value.strip()), step1_failed
+
+    # 第 3 步：对侧按 level 查找任一覆盖组件，surface 与其 value 双向子串
+    for level in entry.levels:
+        other_level_component = _component_covering_level(other_normalized, level)
+        if other_level_component is None:
+            continue
+        other_level_value = _component_value_text(other_level_component)
+        if not other_level_value:
+            continue
+        return (
+            _admin_text_subset_either(surface, other_level_value),
+            step1_failed,
+        )
+
+    # 无从判定 → 不否决
+    return True, step1_failed
+
+
+def _suspect_chain_and_case2(
+    component: NormalizedAddressComponent | None,
+    other_component: NormalizedAddressComponent | None,
+    other_normalized: NormalizedPII,
+) -> tuple[bool, bool]:
+    """遍历 component.suspected；返回 (chain_ok, admin_hit)。
+
+    - chain_ok：任一 entry 的 OR 链结果 False 即整组失败。
+    - admin_hit：any-entry 聚合——entry step1 失败且 entry.level ⊂ admin 集合时累计 Case 2。
+    """
+    if component is None or not component.suspected:
+        return True, False
+    chain_ok = True
+    admin_hit = False
+    for entry in component.suspected:
+        result, step1_failed = _suspect_group_matches_with_flag(
+            entry, other_component, other_normalized,
+        )
+        if step1_failed and _entry_level_all_admin(entry):
+            admin_hit = True
+        if result is False:
+            chain_ok = False
+    return chain_ok, admin_hit
+
+
+def _compare_peer_with_suspect_case2(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    component_type: str,
+) -> tuple[bool, bool, bool]:
+    """非 admin 层级（road / poi / building / detail / subdistrict）的同 component_type 比较。
+
+    返回 (match_ok, left_admin_from_suspect, right_admin_from_suspect)。
+    - match_ok：对应 _compare_component_with_suspected 语义（值层子串 + 双侧 suspect 链）。
+    - left_admin_from_suspect / right_admin_from_suspect：各侧在本层遍历中聚合的 Case 2 信号。
+    """
+    left_component = _ordered_component_by_type(left, component_type)
+    right_component = _ordered_component_by_type(right, component_type)
+
+    if left_component is None and right_component is None:
+        return True, False, False
+
+    # 值层比较：任一为 None 时跳过，双边都有则双向子串
+    if left_component is not None and right_component is not None:
+        if not _admin_text_subset_either(
+            _component_value_text(left_component),
+            _component_value_text(right_component),
+        ):
+            return False, False, False
+
+    left_ok, left_admin_hit = _suspect_chain_and_case2(
+        left_component, right_component, right,
+    )
+    right_ok, right_admin_hit = _suspect_chain_and_case2(
+        right_component, left_component, left,
+    )
+    if not left_ok or not right_ok:
+        return False, left_admin_hit, right_admin_hit
+
+    return True, left_admin_hit, right_admin_hit
+
+
+# ---------------------------------------------------------------------------
+# PR #6：admin 层三态比较器（多解释枚举 + suspect 补救）
+# ---------------------------------------------------------------------------
+
+def _admin_value_match(a: str, b: str) -> bool:
+    """admin 同层 component↔component 值比较。
+
+    值已剥 KEY，采用双向子串（短串为长串前/子串），允许 "浦东"="浦东新区" 同地判定。
+    多解释枚举下每 component 仅固定一层，不会出现"北京"⊂"北京市朝阳"式跨层假阳。
+    """
+    return _admin_text_subset_either(a, b)
+
+
+def _canonicalize_for_admin_compare(level: str, value: str) -> str:
+    """admin 层级值比较前的 canonical 化：
+    - EN province（state 别名）/ country 统一到短码；
+    - 其他层走 _canonicalize_address_component_value 的通用归一（例如 _compact_component_text）。
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    canon = _canonicalize_address_component_value(level, raw)
+    return canon or raw
+
+
+def _admin_value_at_level(
+    normalized: NormalizedPII,
+    level: str,
+    interpretation: dict,
+) -> str | None:
+    """取本侧在 level 层的 component value（硬值，已 canonicalize）。
+
+    - interpretation 中 multi component 仅在被固定到 level 时才贡献；
+    - 单层 component 只要 level 在其 level 元组里即贡献；兼容旧 component（level 空）按 component_type 匹配。
+    """
+    for c in normalized.ordered_components:
+        if id(c) in interpretation:
+            if interpretation[id(c)] == level:
+                v = _component_value_text(c)
+                return _canonicalize_for_admin_compare(level, v) if v else None
+            continue
+        if level in c.level or (not c.level and c.component_type == level):
+            v = _component_value_text(c)
+            return _canonicalize_for_admin_compare(level, v) if v else None
+    return None
+
+
+def _level_candidates(
+    normalized: NormalizedPII,
+    level: str,
+    interpretation: dict,
+) -> set[str]:
+    """某侧在 level 层的候选值集合 = 硬值（受 interpretation 约束） ∪ suspect 裸 value。
+
+    候选值在入集合前统一 canonicalize，保证 "California" 与 "CA"、"苏州" 与 "苏州市" 等别名可比。
+    """
+    out: set[str] = set()
+
+    def _add(raw: str) -> None:
+        canon = _canonicalize_for_admin_compare(level, raw)
+        if canon:
+            out.add(canon)
+
+    for c in normalized.ordered_components:
+        if id(c) in interpretation:
+            if interpretation[id(c)] == level:
+                _add(_component_value_text(c))
+        else:
+            if level in c.level or (not c.level and c.component_type == level):
+                _add(_component_value_text(c))
+        for s in c.suspected:
+            if level in s.levels and s.value:
+                _add(s.value.strip())
+    return out
+
+
+def _level_suspect_surfaces(
+    normalized: NormalizedPII,
+    level: str,
+) -> set[str]:
+    """某侧在 level 层的 suspect surface 集合（value+key）。"""
+    out: set[str] = set()
+    for c in normalized.ordered_components:
+        for s in c.suspected:
+            if level in s.levels:
+                surface = f"{s.value}{s.key}".strip()
+                if surface:
+                    out.add(surface)
+    return out
+
+
+def _suspect_chain_consistent_at_level(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    level: str,
+    left_interp: dict,
+    right_interp: dict,
+) -> bool:
+    """单侧硬值缺失时的层级一致性判定。
+
+    两侧候选集（硬值 + suspect 裸 value）任一为空视为 True（单缺不证伪）；
+    两侧都有候选则需存在一对满足 _admin_text_subset_either，否则显式冲突。
+    """
+    left_set = _level_candidates(left, level, left_interp)
+    right_set = _level_candidates(right, level, right_interp)
+    if not left_set or not right_set:
+        return True
+    for a in left_set:
+        for b in right_set:
+            if _admin_text_subset_either(a, b):
+                return True
+    return False
+
+
+def _suspect_chain_can_reconcile(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    level: str,
+    left_interp: dict,
+    right_interp: dict,
+) -> bool:
+    """双侧硬值都存在但精确不等时的 suspect 补救。
+
+    仅用 suspect surface 集合相互子串；硬值不参与补救（硬值不等已判）。
+    """
+    # 当前签名保留 interpretation 参数供未来扩展；目前仅看 suspect surfaces。
+    del left_interp, right_interp
+    left_set = _level_suspect_surfaces(left, level)
+    right_set = _level_suspect_surfaces(right, level)
+    if not left_set or not right_set:
+        return False
+    for a in left_set:
+        for b in right_set:
+            if _admin_text_subset_either(a, b):
+                return True
+    return False
+
+
+def _admin_match_under_interpretation(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    left_interp: dict,
+    right_interp: dict,
+) -> str:
+    """某种解释下逐 admin level 比较，返回 match / inconclusive / mismatch。
+
+    单侧硬值缺失时用候选集（硬值 + suspect 裸 value）判定：
+    - 两侧候选集俱空 / 双方都真空 → 本层不贡献也不冲突；
+    - 单侧候选空 → 本层真单缺，不证伪也不命中；
+    - 双方候选都非空 → 必须存在一对子串互容，否则显式冲突。候选互容时计 matched。
+    """
+    matched_any = False
+    for level in _ADMIN_LEVEL_KEYS:
+        left_value = _admin_value_at_level(left, level, left_interp)
+        right_value = _admin_value_at_level(right, level, right_interp)
+
+        if left_value is None and right_value is None:
+            # 双侧硬值均缺：仍要看候选集是否存在显式冲突
+            left_set = _level_candidates(left, level, left_interp)
+            right_set = _level_candidates(right, level, right_interp)
+            if not left_set or not right_set:
+                continue  # 真双缺
+            # 双侧都有候选：需要一对互容
+            if _sets_subset_either(left_set, right_set):
+                matched_any = True
+                continue
+            return "mismatch"
+
+        if left_value is None or right_value is None:
+            left_set = _level_candidates(left, level, left_interp)
+            right_set = _level_candidates(right, level, right_interp)
+            if not left_set or not right_set:
+                continue  # 单侧真缺
+            if _sets_subset_either(left_set, right_set):
+                matched_any = True
+                continue
+            return "mismatch"
+
+        if _admin_value_match(left_value, right_value):
+            matched_any = True
+            continue
+
+        if _suspect_chain_can_reconcile(
+            left, right, level, left_interp, right_interp,
+        ):
+            matched_any = True
+            continue
+        return "mismatch"
+
+    return "match" if matched_any else "inconclusive"
+
+
+def _sets_subset_either(left_set: set[str], right_set: set[str]) -> bool:
+    """双候选集存在一对满足 _admin_text_subset_either 即 True。"""
+    for a in left_set:
+        for b in right_set:
+            if _admin_text_subset_either(a, b):
+                return True
+    return False
+
+
+def _iter_admin_interpretations(
+    multis: list[NormalizedAddressComponent],
+):
+    """逐 MULTI_ADMIN component 在其 level 元组内取一层的笛卡尔积；
+    每次 yield 一个 {id(component): level_str} dict。"""
+    if not multis:
+        yield {}
+        return
+    from itertools import product
+    level_sets = [tuple(m.level) for m in multis]
+    keys = [id(m) for m in multis]
+    for combo in product(*level_sets):
+        yield dict(zip(keys, combo))
+
+
+def _admin_match_simplified(left: NormalizedPII, right: NormalizedPII) -> str:
+    """k 过大时的降级路径：逐 admin level 聚合所有候选值；
+    - 双方都有候选且存在一对子串互容 → 本层命中；
+    - 双方都有候选但无任何对匹配 → 本层 mismatch；
+    - 单侧有候选 → 视为本层无冲突也不命中。
+    聚合后：任一层 mismatch → 整体 mismatch；有命中 → match；否则 inconclusive。
+    """
+    empty_interp: dict = {}
+    any_match = False
+    for level in _ADMIN_LEVEL_KEYS:
+        left_set = _level_candidates(left, level, empty_interp)
+        right_set = _level_candidates(right, level, empty_interp)
+        if not left_set and not right_set:
+            continue
+        if not left_set or not right_set:
+            continue
+        ok = False
+        for a in left_set:
+            for b in right_set:
+                if _admin_text_subset_either(a, b):
+                    ok = True
+                    break
+            if ok:
+                break
+        if ok:
+            any_match = True
+        else:
+            return "mismatch"
+    return "match" if any_match else "inconclusive"
+
+
+def _compare_admin_levels_with_interpretations(
+    left: NormalizedPII,
+    right: NormalizedPII,
+) -> str:
+    """admin 层三态比较（match / mismatch / inconclusive）。
+
+    聚合规则（与 0.2 对齐）：
+    - 任一解释 match → 整体 match；
+    - 否则任一解释 inconclusive → 整体 inconclusive；
+    - 否则（均 mismatch） → 整体 mismatch。
+    """
+    left_multis = [
+        c for c in left.ordered_components
+        if c.component_type == "multi_admin" or len(c.level) >= 2
+    ]
+    right_multis = [
+        c for c in right.ordered_components
+        if c.component_type == "multi_admin" or len(c.level) >= 2
+    ]
+
+    # 枚举量兜底
+    if len(left_multis) + len(right_multis) > _MULTI_ADMIN_INTERP_CAP:
+        return _admin_match_simplified(left, right)
+
+    any_inconclusive = False
+    for left_interp in _iter_admin_interpretations(left_multis):
+        for right_interp in _iter_admin_interpretations(right_multis):
+            result = _admin_match_under_interpretation(
+                left, right, left_interp, right_interp,
+            )
+            if result == "match":
+                return "match"
+            if result == "inconclusive":
+                any_inconclusive = True
+    return "inconclusive" if any_inconclusive else "mismatch"
 
 
 def _compare_poi_list(left: NormalizedPII, right: NormalizedPII) -> bool:
