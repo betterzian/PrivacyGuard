@@ -2195,6 +2195,9 @@ def _en_address_value_matcher() -> AhoMatcher:
     geo_entry_specs: tuple[tuple[AddressComponentType, tuple[GeoEntry, ...]], ...] = (
         (AddressComponentType.PROVINCE, tuple([*lexicon.state_names, *lexicon.state_codes])),
         (AddressComponentType.CITY, lexicon.cities),
+        # Borough/行政区登记为 DISTRICT，与 city 解耦；同一文本若兼具多层级由下游按
+        # (component_type, text) 去重后组合为 MULTI_ADMIN（参见 §6.1）。
+        (AddressComponentType.DISTRICT, lexicon.districts),
     )
     # 国家别名去重后以 SOFT 补入。
     country_names = tuple(

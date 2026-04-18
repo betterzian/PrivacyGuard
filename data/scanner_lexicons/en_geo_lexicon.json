@@ -119,8 +119,6 @@
       "Austin",
       "Baltimore",
       "Boston",
-      "Bronx",
-      "Brooklyn",
       "Charlotte",
       "Chicago",
       "Columbus",
@@ -136,7 +134,6 @@
       "Long Beach",
       "Los Angeles",
       "Louisville",
-      "Manhattan",
       "Memphis",
       "Miami",
       "Milwaukee",
@@ -157,7 +154,6 @@
       "San Francisco",
       "San Jose",
       "Seattle",
-      "Staten Island",
       "Tampa",
       "Virginia Beach",
       "Washington",
@@ -203,7 +199,6 @@
       "Cook",
       "King",
       "Orange",
-      "Queens",
       "Aurora",
       "Boulder",
       "Buffalo",
@@ -215,6 +210,17 @@
       "Mobile",
       "Savannah",
       "Springfield"
+    ]
+  },
+  "districts": {
+    "soft": [
+      "Brooklyn",
+      "Manhattan",
+      "Bronx",
+      "Staten Island"
+    ],
+    "weak": [
+      "Queens"
     ]
   }
 }

@@ -31,6 +31,9 @@ class EnGeoLexicon:
     state_names: tuple[GeoEntry, ...]
     state_codes: tuple[GeoEntry, ...]
     cities: tuple[GeoEntry, ...]
+    # 行政区/城市次级区划（如纽约五个 Borough）。独立承载以与 DISTRICT 组件类型对齐，
+    # 避免与 cities 混淆导致 MULTI_ADMIN 解释路径被迫走 city 层级。
+    districts: tuple[GeoEntry, ...]
 
 
 def _parse_tiered_geo(data: object) -> tuple[GeoEntry, ...]:
@@ -70,4 +73,6 @@ def load_en_geo_lexicon() -> EnGeoLexicon:
         state_names=_parse_tiered_geo(payload.get("state_names", {})),
         state_codes=_parse_tiered_geo(payload.get("state_codes", {})),
         cities=_parse_tiered_geo(payload.get("cities", {})),
+        # districts 字段允许缺省以兼容旧词库；缺失时返回空元组。
+        districts=_parse_tiered_geo(payload.get("districts", {})),
     )
