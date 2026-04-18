@@ -471,11 +471,6 @@ def _suspect_surface_text(entry: _SuspectEntry) -> str:
     return entry.value.strip()
 
 
-def _suspect_group_key(entry: _SuspectEntry) -> tuple[int, int, str, str, str]:
-    """按同一 value 歧义组聚合 suspect。"""
-    return (entry.start, entry.end, entry.value, entry.key, entry.origin)
-
-
 def _suspect_sort_key(entry: _SuspectEntry) -> tuple[int, int, int, str]:
     """同组内按行政层级从高到低稳定排序。
 
@@ -486,30 +481,6 @@ def _suspect_sort_key(entry: _SuspectEntry) -> tuple[int, int, int, str]:
     rank = _ADMIN_RANK.get(primary, 0) if primary is not None else 0
     level_key = "|".join(lvl.value for lvl in entry.level)
     return (entry.start, entry.end, -rank, level_key)
-
-
-def _group_suspected_entries(entries: list[_SuspectEntry]) -> list[list[_SuspectEntry]]:
-    """把同一 span/value/key/origin 的 suspect 聚合成组。
-
-    tuple 化 `_SuspectEntry.level` 后，同 value 多层不再以多条 entry 表达——单条 entry 即
-    承载全部候选层级。此函数退化为"按 group_key 分桶，每桶至多一条"。保留函数是为了与
-    下游（`_recompute_text` 等）的既有签名兼容；未来完全清理后可删除。
-    """
-    grouped: dict[tuple[int, int, str, str, str], list[_SuspectEntry]] = {}
-    ordered_keys: list[tuple[int, int, str, str, str]] = []
-    for entry in entries:
-        group_key = _suspect_group_key(entry)
-        if group_key not in grouped:
-            grouped[group_key] = []
-            ordered_keys.append(group_key)
-        group = grouped[group_key]
-        if any(existing.level == entry.level for existing in group):
-            continue
-        group.append(entry)
-    return [
-        sorted(grouped[group_key], key=_suspect_sort_key)
-        for group_key in ordered_keys
-    ]
 
 
 def _serialize_suspected_entries(entries: list[_SuspectEntry]) -> str:
@@ -1311,14 +1282,19 @@ def _fixup_suspected_info(state: _ParseState) -> None:
 
 
 def _recompute_text(component: _DraftComponent) -> str | list[str]:
-    """从 component.value 中按顺序删除 suspect 表面文本。"""
+    """从 component.value 中按顺序删除 suspect 表面文本。
+
+    tuple 化 level 后，同一 span 的候选层级合并到单条 entry；此处按 suspect entry
+    自然顺序依次剥离表面文本即可，不再需要按 group_key 合桶。
+    """
     if isinstance(component.value, list):
         return component.value
     value = component.value
-    for group in _group_suspected_entries(component.suspected):
-        if not group:
+    for entry in component.suspected:
+        surface = _suspect_surface_text(entry)
+        if not surface:
             continue
-        value = _trim_once(value, _suspect_surface_text(group[0]))
+        value = _trim_once(value, surface)
     return value.strip() or component.value
 
 

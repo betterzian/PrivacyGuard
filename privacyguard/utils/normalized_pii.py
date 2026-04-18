@@ -513,25 +513,6 @@ def _numbers_substantive_pair(left: NormalizedPII, right: NormalizedPII) -> bool
 _MIN_POI_LEN = 2
 
 
-def _compare_component_with_suspected(
-    left: NormalizedPII, right: NormalizedPII, key: str,
-) -> bool:
-    """按组件自身 suspected 比较当前层级。"""
-    left_component = _ordered_component_by_type(left, key)
-    right_component = _ordered_component_by_type(right, key)
-    if left_component is None or right_component is None:
-        return True
-    left_value = _component_value_text(left_component)
-    right_value = _component_value_text(right_component)
-    if not _admin_text_subset_either(left_value, right_value):
-        return False
-    if not _component_suspected_matches(left_component, right_component, right):
-        return False
-    if not _component_suspected_matches(right_component, left_component, left):
-        return False
-    return True
-
-
 def _ordered_component_by_type(
     normalized: NormalizedPII,
     component_type: str,
@@ -579,51 +560,6 @@ def _suspect_entry_by_level(
         if level in entry.levels:
             return entry
     return None
-
-
-def _suspect_group_matches(
-    entry: NormalizedAddressSuspectEntry,
-    other_component: NormalizedAddressComponent,
-    other_normalized: NormalizedPII,
-) -> bool | None:
-    """按三步顺序比较一个 suspect group。"""
-    surface = f"{entry.value}{entry.key}".strip()
-    other_value = _component_value_text(other_component)
-
-    if surface and other_value and surface in other_value:
-        return True
-
-    for level in entry.levels:
-        peer_suspected = _suspect_entry_by_level(other_component, level)
-        if peer_suspected is not None:
-            return peer_suspected.value.strip() == entry.value.strip()
-
-    for level in entry.levels:
-        other_level_component = _ordered_component_by_type(other_normalized, level)
-        if other_level_component is None:
-            continue
-        other_level_value = _component_value_text(other_level_component)
-        if not other_level_value:
-            continue
-        return other_level_value == entry.value.strip()
-
-    return True
-
-
-def _component_suspected_matches(
-    component: NormalizedAddressComponent,
-    other_component: NormalizedAddressComponent,
-    other_normalized: NormalizedPII,
-) -> bool:
-    """逐组比较当前组件自己的 suspected。"""
-    if not component.suspected:
-        return True
-
-    for entry in component.suspected:
-        result = _suspect_group_matches(entry, other_component, other_normalized)
-        if result is False:
-            return False
-    return True
 
 
 def _admin_text_subset_either(a: str, b: str) -> bool:
@@ -723,7 +659,7 @@ def _compare_peer_with_suspect_case2(
     """非 admin 层级（road / poi / building / detail / subdistrict）的同 component_type 比较。
 
     返回 (match_ok, left_admin_from_suspect, right_admin_from_suspect)。
-    - match_ok：对应 _compare_component_with_suspected 语义（值层子串 + 双侧 suspect 链）。
+    - match_ok：值层双向子串通过且双侧 suspect OR 链整体未否决。
     - left_admin_from_suspect / right_admin_from_suspect：各侧在本层遍历中聚合的 Case 2 信号。
     """
     left_component = _ordered_component_by_type(left, component_type)

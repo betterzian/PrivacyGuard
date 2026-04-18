@@ -805,21 +805,6 @@ def _successor_candidate_levels(
     return tuple(ordered)
 
 
-def _key_should_degrade_from_non_pure_value(clue: Clue) -> AddressComponentType | None:
-    """非纯 value 场景下的 key 降级规则。
-
-    §4.2：无左邻 admin value 时——
-    - "省" PROVINCE → None（裸"省"字无法独立成值）
-    - "市" CITY → DISTRICT_CITY（县级市是"市" KEY 唯一可独立存在的语义落点）
-    其他保持不变。
-    """
-    if clue.text == "省" and clue.component_type == AddressComponentType.PROVINCE:
-        return None
-    if clue.text == "市" and clue.component_type == AddressComponentType.CITY:
-        return AddressComponentType.DISTRICT_CITY
-    return clue.component_type
-
-
 def _routing_left_value_start(
     context: _RoutingContext,
     clue_index: int,
@@ -908,7 +893,10 @@ def _routed_key_clue(context: _RoutingContext, clue_index: int, clue: Clue) -> C
     §4.2 KEY 多层级 intersection 路由：
     - adjacent VALUE span 存在：与 `key_levels(clue)` 求有序交集。
         空→ None；单层→ 该 level；≥2 层→ MULTI_ADMIN（交集信息后续在 flush 路径重算）。
-    - 无 adjacent：按 `_key_should_degrade_from_non_pure_value` 降级（"省"→None、"市"→DISTRICT_CITY）。
+    - 无 adjacent：按非纯 value 降级规则处理——
+        "省" PROVINCE → None（裸"省"字无法独立成值）；
+        "市" CITY → DISTRICT_CITY（县级市是"市" KEY 唯一可独立存在的语义落点）；
+        其他保持不变。
     """
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
@@ -927,11 +915,10 @@ def _routed_key_clue(context: _RoutingContext, clue_index: int, clue: Clue) -> C
             # 直接早退避免后续动态重路由覆盖该决策。
             return replace(clue, component_type=AddressComponentType.MULTI_ADMIN)
     else:
-        downgraded_type = _key_should_degrade_from_non_pure_value(clue)
-        if downgraded_type is None:
+        if clue.text == "省" and clue.component_type == AddressComponentType.PROVINCE:
             return None
-        if downgraded_type != clue.component_type:
-            clue = replace(clue, component_type=downgraded_type)
+        if clue.text == "市" and clue.component_type == AddressComponentType.CITY:
+            clue = replace(clue, component_type=AddressComponentType.DISTRICT_CITY)
     left_start = _effective_left_value_start(context, clue_index, clue)
     raw_left_start = left_start
     if clue.text == "楼" and clue.component_type == AddressComponentType.DETAIL and raw_left_start == clue.start:
