@@ -46,6 +46,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _DETAIL_COMPONENTS,
     _DraftComponent,
     _ParseState,
+    _address_strength,
     _address_metadata,
     _append_deferred,
     _clear_pending_community_poi,
@@ -601,12 +602,13 @@ class BaseAddressStack(BaseStack):
     ) -> StackRun | None:
         """证据阈值通过后，用 component 并集 span 构造 `CandidateDraft` 与 `StackRun`。"""
         components = state.components
+        claim_strength = _address_strength(components)
         if not _meets_commit_threshold(
             state.evidence_count,
             components,
             self._value_locale(),
             protection_level=self.context.protection_level,
-            max_clue_strength=state.max_clue_strength,
+            claim_strength=claim_strength,
         ):
             return None
         raw_text = self.context.stream.text
@@ -630,7 +632,7 @@ class BaseAddressStack(BaseStack):
             text=text,
             source=self.context.stream.source,
             source_kind=self.clue.source_kind,
-            claim_strength=state.max_clue_strength,
+            claim_strength=claim_strength,
             metadata=_address_metadata(self.clue, components),
             label_clue_ids=set(handled_labels),
             label_driven=(self.clue.role == ClueRole.LABEL),

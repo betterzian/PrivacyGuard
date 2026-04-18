@@ -415,6 +415,53 @@ def _pending_group_exists(
     )
 
 
+def _upsert_pending_suspect_group(
+    state: _ParseState,
+    *,
+    levels: Iterable[AddressComponentType],
+    start: int,
+    end: int,
+    value: str,
+    key: str,
+    origin: str,
+) -> bool:
+    """把同一 span 的 suspect 合并为单条 tuple-level entry。"""
+    merged_levels = tuple(_ordered_component_types(levels))
+    if not merged_levels:
+        return False
+
+    existing_levels: list[AddressComponentType] = []
+    kept: list[_SuspectEntry] = []
+    for entry in state.pending_suspects:
+        if _same_pending_suspect_group(
+            entry,
+            start=start,
+            end=end,
+            value=value,
+            key=key,
+            origin=origin,
+        ):
+            existing_levels.extend(entry.level)
+            continue
+        kept.append(entry)
+
+    combined_levels = tuple(_ordered_component_types([*existing_levels, *merged_levels]))
+    if existing_levels and tuple(_ordered_component_types(existing_levels)) == combined_levels:
+        return False
+
+    kept.append(_SuspectEntry(
+        level=combined_levels,
+        value=value,
+        key=key,
+        origin=origin,
+        start=start,
+        end=end,
+    ))
+    state.pending_suspects = kept
+    state.last_piece_end = end
+    return True
+
+
 def _pending_level_exists_on_other_group(
     entries: list[_SuspectEntry],
     level: AddressComponentType,
@@ -437,6 +484,45 @@ def _pending_level_exists_on_other_group(
             origin=origin,
         )
         for entry in entries
+    )
+
+
+def _freeze_value_suspect(
+    state: _ParseState,
+    clues: tuple[Clue, ...],
+    clue_index: int,
+    stream: StreamInput,
+) -> bool:
+    """行政 VALUE 入链后主动冻结 suspect，供后续 ROAD/POI/细节组件吸收。"""
+    span = collect_admin_value_span(clues, clue_index)
+    if span is None:
+        return False
+
+    same_group_exists = _pending_group_exists(
+        state.pending_suspects,
+        start=span.start,
+        end=span.end,
+        value=span.text,
+        key="",
+        origin="value",
+    )
+    if not same_group_exists and not _suspect_eligible_after_last_piece(state, clues[clue_index], stream):
+        return False
+
+    available_levels = _available_admin_levels_for_state(
+        state,
+        span,
+        origin="value",
+        require_segment_admit=False,
+    )
+    return _upsert_pending_suspect_group(
+        state,
+        levels=available_levels,
+        start=span.start,
+        end=span.end,
+        value=span.text,
+        key="",
+        origin="value",
     )
 
 
@@ -480,43 +566,15 @@ def _freeze_value_suspect_for_mismatched_admin_key(
         origin="value",
         require_segment_admit=False,
     )
-    appended = False
-    for level in available_levels:
-        if _pending_group_exists(
-            state.pending_suspects,
-            start=span.start,
-            end=span.end,
-            value=span.text,
-            key="",
-            origin="value",
-        ) and any(
-            # entry.level 为 tuple；判断本 level 是否已登记。
-            level in entry.level
-            and _same_pending_suspect_group(
-                entry,
-                start=span.start,
-                end=span.end,
-                value=span.text,
-                key="",
-                origin="value",
-            )
-            for entry in state.pending_suspects
-        ):
-            continue
-        state.pending_suspects.append(_SuspectEntry(
-            # 单层 suspect：level 传 tuple；后续若有其他层同 span 加入也会作为另一条 entry，
-            # 由 canonical 比较或上游合并处理（tuple 合并在 §3 MULTI_ADMIN 阶段引入）。
-            level=(level,),
-            value=span.text,
-            key="",
-            origin="value",
-            start=span.start,
-            end=span.end,
-        ))
-        appended = True
-    if appended:
-        state.last_piece_end = span.end
-    return appended
+    return _upsert_pending_suspect_group(
+        state,
+        levels=available_levels,
+        start=span.start,
+        end=span.end,
+        value=span.text,
+        key="",
+        origin="value",
+    )
 
 
 def _freeze_key_suspect_from_previous_key(
@@ -542,16 +600,7 @@ def _freeze_key_suspect_from_previous_key(
         text=value_text,
         levels=(level,),
     )
-    # 与存储端对齐：新建 key-driven suspect 时 key 置空（KEY 由 span 推导，不存入 entry），
-    # 查询 pending 组是否已存在也用 key="" 做 key 维度的对齐。
-    same_group_exists = _pending_group_exists(
-        state.pending_suspects,
-        start=span.start,
-        end=span.end,
-        value=value_text,
-        key="",
-        origin="key",
-    )
+    # 与存储端对齐：新建 key-driven suspect 时 key 置空（KEY 由 span 推导，不存入 entry）。
     available_levels = _available_admin_levels_for_state(
         state,
         span,
@@ -562,33 +611,18 @@ def _freeze_key_suspect_from_previous_key(
     )
     if not available_levels:
         return False
-    if same_group_exists and any(
-        # 只要 tuple 中已含第一候选层，即视为重复登记。
-        available_levels[0] in entry.level
-        and _same_pending_suspect_group(
-            entry,
-            start=span.start,
-            end=span.end,
-            value=value_text,
-            key="",
-            origin="key",
-        )
-        for entry in state.pending_suspects
-    ):
-        return False
     # 按 §9.5：surface = entry.value + entry.key 要与 ROAD/POI 主 value 兼容地 trim；
     # 把 KEY（"市"/"省"/"区"）从 entry.key 挪出（置空），所有候选层放进 level 元组——
     # 这样 _fixup_suspected_info 用 "北京" 而非 "北京市" 去 trim "北京中山"。
-    state.pending_suspects.append(_SuspectEntry(
-        level=tuple(available_levels),
+    return _upsert_pending_suspect_group(
+        state,
+        levels=available_levels,
+        start=span.start,
+        end=span.end,
         value=value_text,
         key="",
         origin="key",
-        start=span.start,
-        end=span.end,
-    ))
-    state.last_piece_end = span.end
-    return True
+    )
 
 
 def _remove_last_value_suspect(
@@ -988,27 +1022,36 @@ def _comma_char_index_in_gap(raw_text: str, last_end: int, clue_start: int) -> i
     return None
 
 
-def _prior_max_admin_from_components(components: list[_DraftComponent]) -> AddressComponentType | None:
-    """已提交 component 中行政类型的最高一层。"""
-    types = [component.component_type for component in components if component.component_type in _ADMIN_TYPES]
-    if not types:
+def _comma_tail_admin_levels(levels: Iterable[AddressComponentType]) -> tuple[AddressComponentType, ...]:
+    """过滤出逗号尾准入允许比较的 concrete admin levels。"""
+    return tuple(level for level in _ordered_component_types(levels) if level in _COMMA_TAIL_ADMIN_TYPES)
+
+
+def _prior_max_admin_from_components(components: list[_DraftComponent]) -> int | None:
+    """已提交 admin component 的 floor 上界。"""
+    floors: list[int] = []
+    for component in components:
+        component_levels = _comma_tail_admin_levels(component.level)
+        if not component_levels:
+            continue
+        floors.append(min(_ADMIN_RANK[level] for level in component_levels))
+    if not floors:
         return None
-    return max(types, key=lambda component_type: _ADMIN_RANK.get(component_type, 0))
+    return max(floors)
 
 
 def _comma_tail_first_admits(
-    prior_max: AddressComponentType | None,
+    prior_floor: int | None,
     first_component_levels: tuple[AddressComponentType, ...],
 ) -> bool:
-    """逗号后首个真正 component 必须是区及以上行政层，且要高于左侧最高层。"""
-    for first_component_type in first_component_levels:
-        if first_component_type not in _COMMA_TAIL_ADMIN_TYPES:
-            continue
-        if prior_max is None:
-            return True
-        if _ADMIN_RANK[first_component_type] > _ADMIN_RANK[prior_max]:
-            return True
-    return False
+    """逗号后首个真正 component 仅按 concrete level 做统一准入。"""
+    allowed_levels = _comma_tail_admin_levels(first_component_levels)
+    if not allowed_levels:
+        return False
+    if prior_floor is None:
+        return True
+    current_ceiling = max(_ADMIN_RANK[level] for level in allowed_levels)
+    return current_ceiling > prior_floor
 
 
 def _preview_first_component_levels_from_chain(
@@ -1018,12 +1061,25 @@ def _preview_first_component_levels_from_chain(
     """把预演链映射为首个真正会提交的 component 类型。"""
     if not chain:
         return ()
-    for clue in reversed(chain):
+    for key_index in range(len(chain) - 1, -1, -1):
+        clue = chain[key_index]
         if clue.role != ClueRole.KEY:
             continue
         comp_type = clue.component_type or AddressComponentType.POI
         if comp_type == AddressComponentType.NUMBER and previous_component_type in _DETAIL_COMPONENTS:
             return (AddressComponentType.DETAIL,)
+        admin_value_chain = tuple(item for item in chain[:key_index] if item.role == ClueRole.VALUE)
+        if admin_value_chain:
+            span = _build_admin_value_span(admin_value_chain)
+            if span is not None:
+                matched_levels = _ordered_component_types(
+                    level for level in span.levels if level in set(key_levels(clue))
+                )
+                if matched_levels:
+                    return tuple(matched_levels)
+        candidate_levels = _ordered_component_types(key_levels(clue))
+        if candidate_levels:
+            return tuple(candidate_levels)
         return (comp_type,)
     first_span = _collect_chain_edge_admin_value_span(chain, edge="left")
     if first_span is not None:

@@ -27,6 +27,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _resolve_standalone_admin_value_group,
     collect_admin_value_span,
     _freeze_key_suspect_from_previous_key,
+    _freeze_value_suspect,
     _freeze_value_suspect_for_mismatched_admin_key,
     _has_reasonable_successor_key,
     _key_left_expand_start_if_deferrable,
@@ -147,16 +148,6 @@ class ZhAddressStack(BaseAddressStack):
         raw_text = self.context.stream.text
         stream = self.context.stream
         admin_span = collect_admin_value_span(clues, clue_index) if comp_type in _ADMIN_TYPES else None
-        trailing_deferred = state.deferred_chain[-1][1] if state.deferred_chain else None
-        same_trailing_admin_span = (
-            admin_span is not None
-            and trailing_deferred is not None
-            and trailing_deferred.role == ClueRole.VALUE
-            and trailing_deferred.attr_type == clue.attr_type
-            and trailing_deferred.component_type in _ADMIN_TYPES
-            and trailing_deferred.start == admin_span.start
-            and trailing_deferred.end == admin_span.end
-        )
 
         if state.pending_comma_value_right_scan:
             state.pending_comma_value_right_scan = False
@@ -174,30 +165,6 @@ class ZhAddressStack(BaseAddressStack):
                 if _normalize_address_value(comp_type, merged):
                     state.value_char_end_override[clue.clue_id] = value_end
 
-        if (
-            state.segment_state.comma_tail_active
-            and not state.pending_comma_first_component
-            and state.deferred_chain
-            and state.deferred_chain[-1][1].role == ClueRole.VALUE
-            and not same_trailing_admin_span
-        ):
-            self._flush_chain(state, clue_index=clue_index)
-            if state.split_at is not None:
-                return _SENTINEL_STOP
-        # 新的 admin VALUE 组到达（与链尾 admin VALUE 组不同 span）：
-        # 先冲洗链把前一个 admin 组 commit，才能让 §5.2.1 collision 在同值冲突时生效；
-        # 否则多个 admin VALUE 组会在链中堆积，最终被尾部 KEY 的 left-expand 整体吞掉。
-        if (
-            admin_span is not None
-            and trailing_deferred is not None
-            and trailing_deferred.role == ClueRole.VALUE
-            and trailing_deferred.attr_type == clue.attr_type
-            and trailing_deferred.component_type in _ADMIN_TYPES
-            and not same_trailing_admin_span
-        ):
-            self._flush_chain(state, clue_index=clue_index)
-            if state.split_at is not None:
-                return _SENTINEL_STOP
         if state.deferred_chain and not _chain_can_accept([c for _, c in state.deferred_chain], clue, stream):
             self._flush_chain(state, clue_index=clue_index)
             if state.split_at is not None:
@@ -277,6 +244,8 @@ class ZhAddressStack(BaseAddressStack):
             anchor_base = state.last_piece_end if state.last_piece_end is not None else state.last_end
             anchor_start = _start_after_component_end(stream, anchor_base)
         _append_deferred(state, clue_index, clue, record_suspect=False, anchor_start=anchor_start)
+        if comp_type in _ADMIN_TYPES:
+            _freeze_value_suspect(state, clues, clue_index, stream)
         state.last_value = clue
         state.last_end = max(state.last_end, clue.end)
         return None

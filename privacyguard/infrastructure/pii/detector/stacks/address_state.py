@@ -405,7 +405,6 @@ class _ParseState:
     comma_tail_checkpoint: _CommaTailCheckpoint | None = None
     ignored_address_key_indices: set[int] = field(default_factory=set)
     last_piece_end: int | None = None
-    max_clue_strength: ClaimStrength = ClaimStrength.WEAK
 
 
 # §3.4 resolver 返回视图；此处不显式 import 以避免与 policy 的循环依赖，
@@ -514,11 +513,6 @@ def _recompute_last_piece_end(state: _ParseState) -> None:
     state.last_piece_end = None
 
 
-def _pending_suspect_level(entry: _SuspectEntry) -> AddressComponentType | None:
-    """返回 entry 的主层级（`level` 元组的第一个 = 最高 rank）。"""
-    return entry.level[0] if entry.level else None
-
-
 def _remove_pending_suspect_by_level(
     state: _ParseState,
     level: AddressComponentType,
@@ -572,10 +566,6 @@ def _remove_pending_suspect_group_by_span(
     state.pending_suspects = kept
     _recompute_last_piece_end(state)
     return removed
-
-
-def _has_pending_suspect_level(entries: list[_SuspectEntry], level: AddressComponentType) -> bool:
-    return any(_pending_suspect_level(entry) == level for entry in entries)
 
 
 def _trim_once(text: str, token: str) -> str:
@@ -758,7 +748,7 @@ def _rollback_invalid_comma_tail_component(state: _ParseState, component: _Draft
     """逗号尾一旦落到区以下层级，就回滚到最近逗号左侧并停止。"""
     if not state.segment_state.comma_tail_active:
         return False
-    if component.component_type in _COMMA_TAIL_ADMIN_TYPES:
+    if any(level in _COMMA_TAIL_ADMIN_TYPES for level in component.level):
         return False
     checkpoint = state.comma_tail_checkpoint
     if checkpoint is None:
@@ -870,13 +860,30 @@ def _commit_poi(state: _ParseState, component: _DraftComponent) -> _DraftCompone
 
 
 def _prune_prior_component_suspects(state: _ParseState, new_component: _DraftComponent) -> None:
-    """后续真实组件一旦落地，只删除旧组件里同层级的 suspect。"""
-    new_type = new_component.component_type
-    if new_type not in _ADMIN_TYPES:
+    """后续真实组件一旦落地，按层级交集缩减旧组件上的 suspect。"""
+    overlap_levels = frozenset(_admin_levels_of(new_component))
+    if not overlap_levels:
         return
     for prior in state.components[:-1]:
-        kept = [entry for entry in prior.suspected if _pending_suspect_level(entry) != new_type]
-        if len(kept) != len(prior.suspected):
+        changed = False
+        kept: list[_SuspectEntry] = []
+        for entry in prior.suspected:
+            remaining_levels = tuple(lvl for lvl in entry.level if lvl not in overlap_levels)
+            if len(remaining_levels) == len(entry.level):
+                kept.append(entry)
+                continue
+            changed = True
+            if not remaining_levels:
+                continue
+            kept.append(_SuspectEntry(
+                level=remaining_levels,
+                value=entry.value,
+                key=entry.key,
+                origin=entry.origin,
+                start=entry.start,
+                end=entry.end,
+            ))
+        if changed:
             prior.suspected = kept
             prior.suspect_demoted = True
 
@@ -1008,9 +1015,6 @@ def _commit(
     state.last_end = max(state.last_end, committed.end)
     state.last_piece_end = committed.end
     state.evidence_count += 1
-    for clue in committed.raw_chain:
-        if not strength_ge(state.max_clue_strength, clue.strength):
-            state.max_clue_strength = clue.strength
     state.committed_clue_ids |= committed.clue_ids
     _mark_consumed_indices(state, committed.clue_indices)
     _prune_prior_component_suspects(state, committed)
@@ -1303,7 +1307,7 @@ def _meets_commit_threshold(
     components: list[_DraftComponent],
     locale: str,
     protection_level: ProtectionLevel = ProtectionLevel.STRONG,
-    max_clue_strength: ClaimStrength = ClaimStrength.SOFT,
+    claim_strength: ClaimStrength = ClaimStrength.SOFT,
 ) -> bool:
     """strength 感知的地址提交阈值。
 
@@ -1315,21 +1319,65 @@ def _meets_commit_threshold(
     if evidence_count <= 0:
         return False
     if protection_level == ProtectionLevel.STRONG:
-        if strength_ge(max_clue_strength, ClaimStrength.SOFT):
+        if strength_ge(claim_strength, ClaimStrength.SOFT):
             return True
         return evidence_count >= 2
     if protection_level == ProtectionLevel.BALANCED:
-        if max_clue_strength == ClaimStrength.HARD:
+        if claim_strength == ClaimStrength.HARD:
             return True
-        if max_clue_strength == ClaimStrength.SOFT:
+        if claim_strength == ClaimStrength.SOFT:
             if evidence_count >= 2:
                 return True
             return any(c.component_type in _SINGLE_EVIDENCE_ADMIN for c in components)
         return False
     # ProtectionLevel.WEAK
-    if max_clue_strength == ClaimStrength.HARD:
+    if claim_strength == ClaimStrength.HARD:
         return True
-    return max_clue_strength == ClaimStrength.SOFT and evidence_count >= 2
+    return claim_strength == ClaimStrength.SOFT and evidence_count >= 2
+
+
+def _sum_strength(parts: Iterable[ClaimStrength]) -> ClaimStrength:
+    """按统一升级规则聚合强度。"""
+    soft_count = 0
+    weak_count = 0
+    for strength in parts:
+        if strength == ClaimStrength.HARD:
+            return ClaimStrength.HARD
+        if strength == ClaimStrength.SOFT:
+            soft_count += 1
+            continue
+        if strength == ClaimStrength.WEAK:
+            weak_count += 1
+    if soft_count >= 2:
+        return ClaimStrength.HARD
+    if soft_count == 1:
+        return ClaimStrength.SOFT
+    if weak_count >= 2:
+        return ClaimStrength.SOFT
+    return ClaimStrength.WEAK
+
+
+def _component_strength(component: _DraftComponent) -> ClaimStrength:
+    """按 VALUE / KEY 两侧证据聚合单个 component 的强度。"""
+    parts: list[ClaimStrength] = []
+    value_strength: ClaimStrength | None = None
+    for clue in component.raw_chain:
+        if clue.role != ClueRole.VALUE:
+            continue
+        if value_strength is None or not strength_ge(value_strength, clue.strength):
+            value_strength = clue.strength
+    if value_strength is not None:
+        parts.append(value_strength)
+    for clue in reversed(component.raw_chain):
+        if clue.role == ClueRole.KEY:
+            parts.append(clue.strength)
+            break
+    return _sum_strength(parts)
+
+
+def _address_strength(components: list[_DraftComponent]) -> ClaimStrength:
+    """按 component 聚合整段地址的 claim_strength。"""
+    return _sum_strength(_component_strength(component) for component in components)
 
 
 def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> dict[str, list[str]]:
@@ -1445,7 +1493,6 @@ def _rebuild_component_derived_state(
     state.pending_community_poi_index = None
     state.comma_tail_checkpoint = None
     state.last_piece_end = None
-    state.max_clue_strength = ClaimStrength.WEAK
 
     for index, component in enumerate(state.components):
         component_type = component.component_type
@@ -1467,9 +1514,6 @@ def _rebuild_component_derived_state(
         state.last_end = max(state.last_end, component.end)
         state.last_piece_end = component.end
         state.segment_state.group_last_type = component_type
-        for clue in component.raw_chain:
-            if not strength_ge(state.max_clue_strength, clue.strength):
-                state.max_clue_strength = clue.strength
 
     _recompute_last_consumed_index(state)
     if 0 <= state.last_consumed_clue_index < len(clues):
