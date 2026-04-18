@@ -24,6 +24,11 @@ class NormalizedAddressComponent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     component_type: str
+    # 组件真实承担的行政层级（按 rank 降序的字符串元组）。
+    # 单层 component 为 ("road",) / ("province",) 等；
+    # MULTI_ADMIN 为 ("province", "city") 等按 rank 降序排列；
+    # 非地址/未提供 trace 时保持空元组。
+    level: tuple[str, ...] = ()
     value: str | tuple[str, ...]
     key: str | tuple[str, ...] = ""
     suspected: tuple[NormalizedAddressSuspectEntry, ...] = Field(default_factory=tuple)
@@ -48,6 +53,10 @@ class NormalizedPII(BaseModel):
     keyed_numbers: dict[str, str] = Field(default_factory=dict)
     # 地址专属：按 detector/结构化输入顺序保存的组件级结果。
     ordered_components: tuple[NormalizedAddressComponent, ...] = Field(default_factory=tuple)
+    # 地址专属：预计算标志——是否存在可判定"行政层级"的组件
+    # （province / city / district / district_city；subdistrict 偏 detail 不计入）。
+    # 在 _normalize_address 构造时基于 ordered_components 的 level 计算。
+    has_admin_static: bool = False
 
 
 __all__ = [

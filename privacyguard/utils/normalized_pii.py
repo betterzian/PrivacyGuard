@@ -28,9 +28,11 @@ from privacyguard.utils.pii_value import parse_name_components
 _NAME_COMPONENT_KEYS = ("full", "family", "given", "alias", "middle")
 _ADDRESS_COMPONENT_KEYS = (
     "country",
+    "multi_admin",
     "province",
     "city",
     "district",
+    "district_city",
     "subdistrict",
     "road",
     "house_number",
@@ -40,14 +42,33 @@ _ADDRESS_COMPONENT_KEYS = (
     "detail",
     "postal_code",
 )
-_ADDRESS_MATCH_KEYS = ("province", "city", "district", "subdistrict", "road", "poi")
+_ADDRESS_MATCH_KEYS = (
+    "multi_admin",
+    "province",
+    "city",
+    "district",
+    "district_city",
+    "subdistrict",
+    "road",
+    "poi",
+)
 _ADDRESS_DETAIL_KEYS = ("building", "detail")
-_ADDRESS_COMPONENT_COMPARE_KEYS = ("province", "city", "district", "road", "subdistrict")
+_ADDRESS_COMPONENT_COMPARE_KEYS = (
+    "multi_admin",
+    "province",
+    "city",
+    "district",
+    "district_city",
+    "road",
+    "subdistrict",
+)
 _ORDERED_COMPONENT_KEYS = (
     "country",
+    "multi_admin",
     "province",
     "city",
     "district",
+    "district_city",
     "road",
     "house_number",
     "number",
@@ -57,6 +78,19 @@ _ORDERED_COMPONENT_KEYS = (
     "detail",
     "postal_code",
 )
+# 单一行政层级字符串。与 detector 侧 _ADMIN_RANK 对齐：DISTRICT_CITY 与 DISTRICT 同级。
+_ADMIN_LEVEL_KEYS = ("province", "city", "district", "district_city", "subdistrict")
+# 表明"存在行政层级信息"的 key 集合（用于 has_admin_static 预判），subdistrict 语义上偏 detail 不计入。
+_HAS_ADMIN_LEVEL_KEYS = frozenset({"province", "city", "district", "district_city"})
+_ADMIN_LEVEL_RANK: dict[str, int] = {
+    "subdistrict": 1,
+    "district": 2,
+    "district_city": 2,
+    "city": 3,
+    "province": 4,
+}
+# MULTI_ADMIN 解释枚举上限，避免病态 trace 爆炸。
+_MULTI_ADMIN_INTERP_CAP = 4
 # 与 trace 对齐的 POI 终端 key（仅用于 same_entity 比较时剥末尾 key），可选。
 _ADDRESS_OPTIONAL_KEYS = frozenset({"poi_key"})
 # 旧类型到新类型的别名映射，兼容历史 trace 数据。
@@ -261,6 +295,12 @@ def _normalize_address(
         if (value := normalized_components.get(key))
         if (term := _address_match_term(key, value))
     )
+    # has_admin_static：ordered_components 的任一 level 命中 _HAS_ADMIN_LEVEL_KEYS 即为真。
+    # SUBDISTRICT 语义偏 detail，不计入行政层级判定。
+    has_admin_static = any(
+        any(level in _HAS_ADMIN_LEVEL_KEYS for level in component.level)
+        for component in ordered_components
+    )
     return NormalizedPII(
         attr_type=PIIAttributeType.ADDRESS,
         raw_text=raw_text or render_address_text(normalized_components),
@@ -271,6 +311,7 @@ def _normalize_address(
         numbers=tuple(numbers),
         keyed_numbers=keyed_numbers,
         ordered_components=ordered_components,
+        has_admin_static=has_admin_static,
     )
 
 
@@ -720,8 +761,10 @@ def _ordered_components_from_direct_components(
         else:
             value = raw_value
             key = ""
+        # 结构化直传无 trace，level 默认等于 component_type。
         ordered.append(NormalizedAddressComponent(
             component_type=component_type,
+            level=(component_type,),
             value=value,
             key=key,
             suspected=(),
@@ -733,7 +776,9 @@ def _ordered_components_from_metadata(
     metadata: Mapping[str, object] | None,
 ) -> tuple[NormalizedAddressComponent, ...]:
     """从 detector metadata 重建组件顺序与组件级 suspected。"""
-    trace_entries = _parse_address_trace_entries(_metadata_values(metadata, "address_component_trace"))
+    trace_raw = _metadata_values(metadata, "address_component_trace")
+    level_raw = _metadata_values(metadata, "address_component_level")
+    trace_entries = _parse_address_trace_entries_with_levels(trace_raw, level_raw)
     if not trace_entries:
         return ()
     key_entries = _parse_address_trace_entries(_metadata_values(metadata, "address_component_key_trace"))
@@ -745,12 +790,13 @@ def _ordered_components_from_metadata(
     component_index = 0
 
     while trace_index < len(trace_entries):
-        component_type, value = trace_entries[trace_index]
+        component_type, value, level_tuple = trace_entries[trace_index]
         suspected = suspected_entries[component_index] if component_index < len(suspected_entries) else ()
         component_index += 1
 
         if component_type == "poi":
             values = [value]
+            first_level = level_tuple
             trace_index += 1
             while trace_index < len(trace_entries) and trace_entries[trace_index][0] == "poi":
                 values.append(trace_entries[trace_index][1])
@@ -761,6 +807,7 @@ def _ordered_components_from_metadata(
                 key_index += 1
             ordered.append(NormalizedAddressComponent(
                 component_type="poi",
+                level=first_level or ("poi",),
                 value=tuple(values) if len(values) > 1 else values[0],
                 key=tuple(keys) if len(keys) > 1 else (keys[0] if keys else ""),
                 suspected=tuple(suspected),
@@ -773,6 +820,7 @@ def _ordered_components_from_metadata(
             key_index += 1
         ordered.append(NormalizedAddressComponent(
             component_type=component_type,
+            level=level_tuple or (component_type,),
             value=value,
             key=key_value,
             suspected=tuple(suspected),
@@ -793,6 +841,39 @@ def _parse_address_trace_entries(items: tuple[str, ...]) -> list[tuple[str, str]
         value = raw_value.strip()
         if component_type in _ADDRESS_COMPONENT_KEYS and value:
             entries.append((component_type, value))
+    return entries
+
+
+def _parse_address_trace_entries_with_levels(
+    trace_items: tuple[str, ...],
+    level_items: tuple[str, ...],
+) -> list[tuple[str, str, tuple[str, ...]]]:
+    """把 trace 与并行 level 列表解析成带层级的组件项。
+
+    - trace_items 与 level_items 按原始 detector 顺序一一对应；
+      level_items 缺失或短于 trace_items 时，缺位条目回退为空元组（调用方再兜底为 component_type）。
+    - level 字符串格式：单层 "road" / "province"；MULTI_ADMIN 以 `|` 分隔。
+    """
+    entries: list[tuple[str, str, tuple[str, ...]]] = []
+    for idx, item in enumerate(trace_items):
+        if ":" not in item:
+            continue
+        raw_type, raw_value = item.split(":", 1)
+        component_type = _ADDRESS_COMPONENT_ALIASES.get(raw_type.strip(), raw_type.strip())
+        value = raw_value.strip()
+        if component_type not in _ADDRESS_COMPONENT_KEYS or not value:
+            continue
+        level_tuple: tuple[str, ...] = ()
+        if idx < len(level_items):
+            raw_level = str(level_items[idx] or "").strip()
+            if raw_level:
+                parts = tuple(
+                    _ADDRESS_COMPONENT_ALIASES.get(p.strip(), p.strip())
+                    for p in raw_level.split("|")
+                    if p.strip()
+                )
+                level_tuple = tuple(p for p in parts if p in _ADMIN_LEVEL_KEYS or p in _ADDRESS_COMPONENT_KEYS)
+        entries.append((component_type, value, level_tuple))
     return entries
 
 

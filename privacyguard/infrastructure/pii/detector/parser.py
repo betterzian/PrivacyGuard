@@ -85,12 +85,14 @@ _ADDRESS_STRUCTURAL_METADATA_KEYS = frozenset({
     "address_component_key_trace",
     "address_component_suspected",
     "address_component_type",
+    "address_component_level",
 })
 _ADDRESS_STRUCTURAL_SEQUENCE_KEYS = frozenset({
     "address_component_trace",
     "address_component_key_trace",
     "address_component_suspected",
     "address_component_type",
+    "address_component_level",
     "address_details_type",
     "address_details_text",
 })

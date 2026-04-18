@@ -1358,6 +1358,7 @@ def _meets_commit_threshold(
 
 def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> dict[str, list[str]]:
     component_types: list[str] = []
+    component_levels: list[str] = []
     component_trace: list[str] = []
     component_key_trace: list[str] = []
     detail_types: list[str] = []
@@ -1366,10 +1367,22 @@ def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> d
 
     for component in components:
         component_type = component.component_type.value
+        level_tuple = component.level if component.level else (component.component_type,)
+        # 多层级（MULTI_ADMIN）按 _ADMIN_RANK 降序 `|` 分隔；单层级直接取该层 value。
+        if len(level_tuple) >= 2:
+            sorted_levels = sorted(
+                level_tuple,
+                key=lambda ct: _ADMIN_RANK.get(ct, 0),
+                reverse=True,
+            )
+            level_str = "|".join(ct.value for ct in sorted_levels)
+        else:
+            level_str = level_tuple[0].value
         values = component.value if isinstance(component.value, list) else [component.value]
         keys = component.key if isinstance(component.key, list) else [component.key]
         for value in values:
             component_types.append(component_type)
+            component_levels.append(level_str)
             component_trace.append(f"{component_type}:{value}")
         for key in keys:
             if key:
@@ -1387,6 +1400,7 @@ def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> d
             origin_clue.text if origin_clue.role == ClueRole.LABEL else origin_clue.source_kind
         ],
         "address_component_type": component_types,
+        "address_component_level": component_levels,
         "address_component_trace": component_trace,
         "address_component_key_trace": component_key_trace,
         "address_details_type": detail_types,
