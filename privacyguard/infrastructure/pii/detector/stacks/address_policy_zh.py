@@ -37,7 +37,6 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _ADMIN_TYPES,
     _COMMA_TAIL_ADMIN_TYPES,
     _DETAIL_COMPONENTS,
-    _DraftComponent,
     _ParseState,
     _SUSPECT_KEY_TYPES,
     _SuspectEntry,
@@ -1075,38 +1074,6 @@ def _comma_char_index_in_gap(raw_text: str, last_end: int, clue_start: int) -> i
     return None
 
 
-def _comma_tail_admin_levels(levels: Iterable[AddressComponentType]) -> tuple[AddressComponentType, ...]:
-    """过滤出逗号尾准入允许比较的 concrete admin levels。"""
-    return tuple(level for level in _ordered_component_types(levels) if level in _COMMA_TAIL_ADMIN_TYPES)
-
-
-def _prior_max_admin_from_components(components: list[_DraftComponent]) -> int | None:
-    """已提交 admin component 的 floor 上界。"""
-    floors: list[int] = []
-    for component in components:
-        component_levels = _comma_tail_admin_levels(component.level)
-        if not component_levels:
-            continue
-        floors.append(min(_ADMIN_RANK[level] for level in component_levels))
-    if not floors:
-        return None
-    return max(floors)
-
-
-def _comma_tail_first_admits(
-    prior_floor: int | None,
-    first_component_levels: tuple[AddressComponentType, ...],
-) -> bool:
-    """逗号后首个真正 component 仅按 concrete level 做统一准入。"""
-    allowed_levels = _comma_tail_admin_levels(first_component_levels)
-    if not allowed_levels:
-        return False
-    if prior_floor is None:
-        return True
-    current_ceiling = max(_ADMIN_RANK[level] for level in allowed_levels)
-    return current_ceiling > prior_floor
-
-
 def _preview_first_component_levels_from_chain(
     chain: list[Clue],
     previous_component_type: AddressComponentType | None,
@@ -1140,63 +1107,6 @@ def _preview_first_component_levels_from_chain(
     if chain[0].component_type is None:
         return ()
     return (chain[0].component_type,)
-
-
-def _preview_comma_tail_first_component_levels(
-    clues: tuple[Clue, ...],
-    start_index: int,
-    stream: StreamInput,
-    previous_component_type: AddressComponentType | None,
-    previous_component_end: int | None,
-    raw_text: str,
-    *,
-    should_break: Callable[[Clue], bool] = _address_should_break,
-) -> tuple[tuple[AddressComponentType, ...], bool]:
-    """预演逗号尾首段，返回首个 component 类型及是否需保持链打开。"""
-    chain: list[Clue] = []
-    ignored_key_indices: set[int] = set()
-    search_anchor = _start_after_component_end(stream, previous_component_end) if previous_component_end is not None else None
-    for index in range(start_index, len(clues)):
-        clue = clues[index]
-        if not chain and search_anchor is not None and clue.start > search_anchor:
-            if _span_has_search_stop_unit(stream, search_anchor, clue.start):
-                break
-        if should_break(clue):
-            break
-        if is_negative_clue(clue):
-            continue
-        if clue.attr_type is None or clue.role == ClueRole.LABEL:
-            continue
-        if clue.attr_type != PIIAttributeType.ADDRESS or clue.component_type is None:
-            continue
-        context = _RoutingContext(
-            chain=chain,
-            previous_component_type=previous_component_type,
-            previous_component_end=previous_component_end,
-            ignored_key_indices=ignored_key_indices,
-            clues=clues,
-            raw_text=raw_text,
-            stream=stream,
-            search_start=search_anchor,
-            should_break_clue=should_break,
-        )
-        effective = clue
-        if clue.role == ClueRole.KEY:
-            routed_key = _routed_key_clue(context, index, clue)
-            if routed_key is None:
-                ignored_key_indices.add(index)
-                continue
-            effective = routed_key
-            eff_type = effective.component_type
-            if eff_type is not None and not chain and not _key_has_left_value(context, index, effective, eff_type):
-                ignored_key_indices.add(index)
-                continue
-        if chain and not _chain_can_accept(chain, effective, stream):
-            break
-        chain.append(effective)
-    component_levels = _preview_first_component_levels_from_chain(chain, previous_component_type)
-    needs_open_chain = any(clue.role == ClueRole.KEY for clue in chain)
-    return component_levels, needs_open_chain
 
 
 def _comma_value_scan_upper_bound(
@@ -1295,7 +1205,13 @@ def _comma_tail_prehandle(
     materialize_digit_tail_before_comma,
     should_break: Callable[[Clue], bool] = _address_should_break,
 ) -> object | None:
-    """gap 内若有逗号，先断开左链，再按首个真实 component 做准入判定。"""
+    """gap 内若有逗号，先断开左链并冻结快照，由 commit 阶段做准入判定。
+
+    - 不再预演逗号后的首段：所有路由细节由真实主循环跑一次完成。
+    - 准入判定下沉到 `_commit` 内的 `_rollback_invalid_comma_tail_component`：
+      首段 ceiling 必须严格高于 prior_floor；不通过即回滚到 `comma_pos`。
+    """
+    del clues, should_break  # 真流程接管路由，预演路径已废
     comma_pos = _comma_char_index_in_gap(raw_text, state.last_end, clue.start)
     if comma_pos is None:
         return None
@@ -1315,27 +1231,9 @@ def _comma_tail_prehandle(
         state.split_at = comma_pos
         return _SENTINEL_STOP
 
-    first_component_levels, needs_open_chain = _preview_comma_tail_first_component_levels(
-        clues,
-        clue_index,
-        stream,
-        state.last_component_type,
-        state.components[-1].end if state.components else None,
-        raw_text,
-        should_break=should_break,
-    )
-    if not first_component_levels:
-        state.split_at = comma_pos
-        return _SENTINEL_STOP
-
-    prior_max = _prior_max_admin_from_components(state.components)
-    if not _comma_tail_first_admits(prior_max, first_component_levels):
-        state.split_at = comma_pos
-        return _SENTINEL_STOP
-
     state.comma_tail_checkpoint = _make_comma_tail_checkpoint(state, comma_pos)
     state.segment_state.reset()
     state.segment_state.comma_tail_active = True
     state.pending_comma_value_right_scan = True
-    state.pending_comma_first_component = needs_open_chain
+    state.pending_comma_first_component = True
     return None

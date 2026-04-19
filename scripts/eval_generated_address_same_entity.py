@@ -969,6 +969,43 @@ def _evaluate_andlab_case(
     }
 
 
+def _skipped_andlab_result() -> dict[str, Any]:
+    """AndLab 子模块缺失或未启用时的占位结果，结构与 `_evaluate_andlab_case` 一致。"""
+    empty_ctx = {
+        "count": 0,
+        "labels": [],
+        "texts": [],
+        "tokens": [],
+        "any_hit": False,
+        "exact_hit": False,
+        "partial_hit": False,
+    }
+    return {
+        "full_context": dict(empty_ctx),
+        "variant_context": dict(empty_ctx),
+        "registered_tokens": [],
+        "registered_substantial_tokens": [],
+        "reuse": {
+            "any_hit": False,
+            "tokens": [],
+            "texts": [],
+            "labels": [],
+            "same_token_reuse_any": False,
+            "same_token_reuse": False,
+        },
+        "raw": {
+            "full_context_masked": "",
+            "variant_context_masked": "",
+            "reuse_masked": "",
+            "registration_masked": "",
+            "full_context_error": "skipped",
+            "variant_context_error": "skipped",
+            "registration_error": "skipped",
+            "reuse_error": "skipped",
+        },
+    }
+
+
 def _rate(hit: int, total: int) -> str:
     if total <= 0:
         return "0.0%"
@@ -996,6 +1033,9 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
     lines: list[str] = []
     lines.append("# Generated Address Same-Entity Evaluation")
     lines.append("")
+    if payload.get("andlab_skipped"):
+        lines.append("> **说明**：本次未加载 `AndLab_protected`（路径缺失或导入失败），仅保留 **Detector** 与耗时统计；AndLab 小节数值为占位。")
+        lines.append("")
     lines.append("## 数据口径")
     lines.append("")
     lines.append(f"- 随机种子：`{payload['seed']}`。")
@@ -1252,8 +1292,13 @@ def main() -> None:
         "zh_cn": RuleBasedPIIDetector(locale_profile="zh_cn"),
         "en_us": RuleBasedPIIDetector(locale_profile="en_us"),
     }
-    andlab = AndLabEvaluator()
-    andlab.run_prompt("warmup 1200 Harbor Avenue, Seattle, WA 98101", clear=True)
+    andlab: AndLabEvaluator | None
+    try:
+        andlab = AndLabEvaluator()
+        andlab.run_prompt("warmup 1200 Harbor Avenue, Seattle, WA 98101", clear=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠ AndLab 评测已跳过（{type(exc).__name__}: {exc}）")
+        andlab = None
 
     detector_summaries = {locale: _init_detector_summary(locale) for locale in ("zh_cn", "en_us")}
     andlab_summaries = {locale: _init_andlab_summary(locale) for locale in ("zh_cn", "en_us")}
@@ -1295,7 +1340,10 @@ def main() -> None:
             detector_elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
 
             started = time.perf_counter()
-            andlab_result = _evaluate_andlab_case(andlab, full_address, full_context, variant_context, variant_address)
+            if andlab is not None:
+                andlab_result = _evaluate_andlab_case(andlab, full_address, full_context, variant_context, variant_address)
+            else:
+                andlab_result = _skipped_andlab_result()
             andlab_elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
 
             detector_latencies[locale].append(detector_elapsed_ms)
@@ -1370,6 +1418,7 @@ def main() -> None:
         "andlab_summaries": andlab_payload,
         "latency_summaries": latency_payload,
         "cases": cases,
+        "andlab_skipped": andlab is None,
     }
 
     summary_path = OUTPUT_DIR / "generated_address_same_entity_summary.md"

@@ -749,12 +749,70 @@ def _reroute_pending_community_poi_to_subdistrict(state: _ParseState) -> None:
     _clear_pending_community_poi(state)
 
 
+def _comma_tail_admin_levels(
+    levels: Iterable[AddressComponentType],
+) -> tuple[AddressComponentType, ...]:
+    """过滤出逗号尾准入允许比较的 concrete admin levels。
+
+    保持入参顺序，仅保留 `_COMMA_TAIL_ADMIN_TYPES` 内的层级（去重）。
+    """
+    seen: set[AddressComponentType] = set()
+    out: list[AddressComponentType] = []
+    for lvl in levels:
+        if lvl in _COMMA_TAIL_ADMIN_TYPES and lvl not in seen:
+            seen.add(lvl)
+            out.append(lvl)
+    return tuple(out)
+
+
+def _prior_max_admin_from_components(components: list[_DraftComponent]) -> int | None:
+    """已提交 admin component 的 floor 上界。
+
+    每个 component 取其行政层级元组中 rank 最低的一层（即真实"楼层"），
+    再在所有 component 间取最大值，作为后续 incoming 必须严格高于的下界。
+    """
+    floors: list[int] = []
+    for component in components:
+        component_levels = _comma_tail_admin_levels(component.level)
+        if not component_levels:
+            continue
+        floors.append(min(_ADMIN_RANK[level] for level in component_levels))
+    if not floors:
+        return None
+    return max(floors)
+
+
+def _comma_tail_first_admits(
+    prior_floor: int | None,
+    component_levels: tuple[AddressComponentType, ...],
+) -> bool:
+    """逗号尾首段准入：必须是行政层且 ceiling 严格高于 prior_floor。"""
+    allowed_levels = _comma_tail_admin_levels(component_levels)
+    if not allowed_levels:
+        return False
+    if prior_floor is None:
+        return True
+    current_ceiling = max(_ADMIN_RANK[level] for level in allowed_levels)
+    return current_ceiling > prior_floor
+
+
 def _rollback_invalid_comma_tail_component(state: _ParseState, component: _DraftComponent) -> bool:
-    """逗号尾一旦落到区以下层级，就回滚到最近逗号左侧并停止。"""
+    """逗号尾内 component 不满足准入时，回滚到最近逗号左侧并停止。
+
+    分两类判定：
+    - 首段（`pending_comma_first_component=True`）：行政层 ceiling 必须严格高于 prior_floor。
+    - 后续段：保持粗护栏，至少含一层 `_COMMA_TAIL_ADMIN_TYPES` 即放过；
+      段内"应递增"由 `_segment_admit` + `direction` 维护。
+    """
     if not state.segment_state.comma_tail_active:
         return False
-    if any(level in _COMMA_TAIL_ADMIN_TYPES for level in component.level):
-        return False
+    if state.pending_comma_first_component:
+        prior_floor = _prior_max_admin_from_components(state.components)
+        if _comma_tail_first_admits(prior_floor, component.level):
+            return False
+    else:
+        if any(level in _COMMA_TAIL_ADMIN_TYPES for level in component.level):
+            return False
     checkpoint = state.comma_tail_checkpoint
     if checkpoint is None:
         state.deferred_chain.clear()
