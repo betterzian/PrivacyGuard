@@ -609,16 +609,18 @@ def _suspect_group_matches_with_flag(
         if peer_suspected is not None:
             return (peer_suspected.value.strip() == entry.value.strip()), step1_failed
 
-    # 第 3 步：对侧按 level 查找任一覆盖组件，surface 与其 value 双向子串
+    bare_value = entry.value.strip()
+
+    # 第 3 步：对侧按 level 查找任一覆盖组件，bare value 与其 value 双向子串
     for level in entry.levels:
         other_level_component = _component_covering_level(other_normalized, level)
         if other_level_component is None:
             continue
         other_level_value = _component_value_text(other_level_component)
-        if not other_level_value:
+        if not bare_value or not other_level_value:
             continue
         return (
-            _admin_text_subset_either(surface, other_level_value),
+            _admin_text_subset_either(bare_value, other_level_value),
             step1_failed,
         )
 
@@ -764,21 +766,6 @@ def _level_candidates(
     return out
 
 
-def _level_suspect_surfaces(
-    normalized: NormalizedPII,
-    level: str,
-) -> set[str]:
-    """某侧在 level 层的 suspect surface 集合（value+key）。"""
-    out: set[str] = set()
-    for c in normalized.ordered_components:
-        for s in c.suspected:
-            if level in s.levels:
-                surface = f"{s.value}{s.key}".strip()
-                if surface:
-                    out.add(surface)
-    return out
-
-
 def _suspect_chain_consistent_at_level(
     left: NormalizedPII,
     right: NormalizedPII,
@@ -811,19 +798,13 @@ def _suspect_chain_can_reconcile(
 ) -> bool:
     """双侧硬值都存在但精确不等时的 suspect 补救。
 
-    仅用 suspect surface 集合相互子串；硬值不参与补救（硬值不等已判）。
+    仅用裸 value 候选集补救；不再依赖 suspect surface。
     """
-    # 当前签名保留 interpretation 参数供未来扩展；目前仅看 suspect surfaces。
-    del left_interp, right_interp
-    left_set = _level_suspect_surfaces(left, level)
-    right_set = _level_suspect_surfaces(right, level)
+    left_set = _level_candidates(left, level, left_interp)
+    right_set = _level_candidates(right, level, right_interp)
     if not left_set or not right_set:
         return False
-    for a in left_set:
-        for b in right_set:
-            if _admin_text_subset_either(a, b):
-                return True
-    return False
+    return _sets_subset_either(left_set, right_set)
 
 
 def _admin_match_under_interpretation(

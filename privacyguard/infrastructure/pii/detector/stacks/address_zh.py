@@ -16,6 +16,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     _SENTINEL_IGNORE,
     _SENTINEL_STOP,
     _chain_can_accept,
+    _clue_unit_gap,
     _normalize_address_value,
     _scan_forward_value_end,
     _start_after_component_end,
@@ -30,6 +31,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _freeze_value_suspect,
     _freeze_value_suspect_for_mismatched_admin_key,
     _has_reasonable_successor_key,
+    _key_has_admin_levels,
     _key_left_expand_start_if_deferrable,
     _remove_last_value_suspect,
     _routed_key_clue,
@@ -38,7 +40,6 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _ADMIN_TYPES,
     _ParseState,
-    _SUSPECT_KEY_TYPES,
     _VALID_SUCCESSORS,
     _append_deferred,
     _clear_pending_community_poi,
@@ -264,7 +265,15 @@ class ZhAddressStack(BaseAddressStack):
         chain = [item for _, item in state.deferred_chain]
         if chain and _chain_can_accept(chain, clue, stream):
             last_chain_clue = chain[-1]
-            if last_chain_clue.role == ClueRole.KEY and last_chain_clue.component_type in _SUSPECT_KEY_TYPES:
+            should_freeze_previous_key = (
+                last_chain_clue.role == ClueRole.KEY
+                and _key_has_admin_levels(last_chain_clue)
+                and (
+                    _key_has_admin_levels(clue)
+                    or _clue_unit_gap(last_chain_clue, clue, stream) > 0
+                )
+            )
+            if should_freeze_previous_key:
                 _freeze_key_suspect_from_previous_key(state, raw_text, stream, last_chain_clue)
             _remove_last_value_suspect(state, clue, stream)
             _append_deferred(state, clue_index, clue, record_suspect=False)

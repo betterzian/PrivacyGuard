@@ -365,6 +365,11 @@ def _resolve_standalone_admin_value_group(
     )
 
 
+def _key_has_admin_levels(clue: Clue) -> bool:
+    """判断 KEY 是否仍携带行政层级语义。"""
+    return clue.role == ClueRole.KEY and any(level in _ADMIN_TYPES for level in key_levels(clue))
+
+
 def _suspect_eligible_after_last_piece(
     state: _ParseState,
     clue: Clue,
@@ -583,24 +588,39 @@ def _freeze_key_suspect_from_previous_key(
     stream: StreamInput,
     key_clue: Clue,
 ) -> bool:
-    level = key_clue.component_type
-    if level not in _SUSPECT_KEY_TYPES or level is None:
+    if not _key_has_admin_levels(key_clue):
         return False
     if state.chain_left_anchor is None:
+        return False
+    prefix_chain = [deferred for _, deferred in state.deferred_chain[:-1]]
+    adjacent = _collect_chain_edge_admin_value_span(
+        prefix_chain,
+        edge="right",
+        anchor=key_clue,
+        stream=stream,
+        max_gap_units=0,
+        require_entire_chain_same_span=True,
+    )
+    if adjacent is None:
+        return False
+    matched_levels = _ordered_component_types(
+        level for level in adjacent.levels if level in set(key_levels(key_clue))
+    )
+    if not matched_levels:
         return False
     value_start = state.chain_left_anchor
     if state.pending_suspects:
         value_start = _start_after_component_end(stream, state.pending_suspects[-1].end)
-    value_text = _normalize_address_value(level, raw_text[value_start:key_clue.start])
+    primary_level = matched_levels[0]
+    value_text = _normalize_address_value(primary_level, raw_text[value_start:key_clue.start])
     if not value_text:
         return False
     span = _AdminValueSpan(
         start=value_start,
         end=key_clue.end,
         text=value_text,
-        levels=(level,),
+        levels=matched_levels,
     )
-    # 与存储端对齐：新建 key-driven suspect 时 key 置空（KEY 由 span 推导，不存入 entry）。
     available_levels = _available_admin_levels_for_state(
         state,
         span,
@@ -611,16 +631,13 @@ def _freeze_key_suspect_from_previous_key(
     )
     if not available_levels:
         return False
-    # 按 §9.5：surface = entry.value + entry.key 要与 ROAD/POI 主 value 兼容地 trim；
-    # 把 KEY（"市"/"省"/"区"）从 entry.key 挪出（置空），所有候选层放进 level 元组——
-    # 这样 _fixup_suspected_info 用 "北京" 而非 "北京市" 去 trim "北京中山"。
     return _upsert_pending_suspect_group(
         state,
         levels=available_levels,
         start=span.start,
         end=span.end,
         value=value_text,
-        key="",
+        key=key_clue.text,
         origin="key",
     )
 
@@ -639,8 +656,26 @@ def _remove_last_value_suspect(
     )
     if adjacent is None or key_clue.component_type is None:
         return
-    if match_admin_levels((key_clue.component_type,), adjacent.levels) is not None:
+    key_admin_levels = _ordered_component_types(
+        level for level in key_levels(key_clue) if level in _ADMIN_TYPES
+    )
+    if key_admin_levels and match_admin_levels(key_admin_levels, adjacent.levels) is not None:
         _remove_pending_suspect_group_by_span(state, adjacent.start, adjacent.end, origin="value")
+        return
+    exact_adjacent = _collect_chain_edge_admin_value_span(
+        [deferred for _, deferred in state.deferred_chain],
+        edge="right",
+        anchor=key_clue,
+        stream=stream,
+        max_gap_units=0,
+    )
+    if exact_adjacent is not None and not key_admin_levels:
+        _remove_pending_suspect_group_by_span(
+            state,
+            exact_adjacent.start,
+            exact_adjacent.end,
+            origin="value",
+        )
 
 
 def _extend_start_with_adjacent_ignored_keys(

@@ -860,15 +860,22 @@ def _commit_poi(state: _ParseState, component: _DraftComponent) -> _DraftCompone
 
 
 def _prune_prior_component_suspects(state: _ParseState, new_component: _DraftComponent) -> None:
-    """后续真实组件一旦落地，按层级交集缩减旧组件上的 suspect。"""
-    overlap_levels = frozenset(_admin_levels_of(new_component))
-    if not overlap_levels:
+    """后续真实组件一旦落地，移除旧 suspect 中同级或更高的行政层。"""
+    new_admin_levels = _admin_levels_of(new_component)
+    if not new_admin_levels:
+        return
+    cutoff_rank = min((_ADMIN_RANK.get(level, 0) for level in new_admin_levels), default=0)
+    if cutoff_rank <= 0:
         return
     for prior in state.components[:-1]:
         changed = False
         kept: list[_SuspectEntry] = []
         for entry in prior.suspected:
-            remaining_levels = tuple(lvl for lvl in entry.level if lvl not in overlap_levels)
+            remaining_levels = tuple(
+                lvl
+                for lvl in entry.level
+                if _ADMIN_RANK.get(lvl, 0) < cutoff_rank
+            )
             if len(remaining_levels) == len(entry.level):
                 kept.append(entry)
                 continue

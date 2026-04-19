@@ -1,78 +1,11 @@
-8159 Pine Road, Building 7, Bellevue, WA 62431
-7018 Pine Road, Harbor Center, Boston, MA 78062
-3956 Queen Anne Avenue, River Park, Seattle, WA 81496
-6021 Main Street, Block C, Austin, TX 68447
-1693 Queen Anne Avenue, Block C, Chicago, IL 56210
-Room 1203, 6952 Queen Anne Avenue, Austin, TX 77251
-2101 Oak Avenue, River Park, Seattle, WA 40932
-7077 Maple Lane, Tower B, Austin, TX 58760
-6150 Lake Drive, Harbor Center, Seattle, WA 95139
-9482 Main Street, Chicago, IL 60723
-9047 Pine Road, Austin, TX 36237
-2438 Main Street, River Park, Chicago, IL 99381
-Suite 300, 3580 Pine Road, Bellevue, WA 93584
-3275 Lake Drive, Building 7, Austin, TX 41029
-2412 Pine Road, Lake View Residence, Seattle, WA 18617
-2208 Queen Anne Avenue, River Park, Boston, MA 26426
-Suite 300, 3102 Main Street, Bellevue, WA 82260
-Unit 18, 5982 Maple Lane, Chicago, IL 31581
-Suite 300, 2292 Queen Anne Avenue, Austin, TX 42847
-Suite 300, 9740 Lake Drive, Bellevue, WA 22245
-1674 Lake Drive, Portland, OR 13718
-1496 Queen Anne Avenue, Lake View Residence, Seattle, WA 75278
-5873 Pine Road, Bellevue, WA 69446
-Room 1203, 8933 Main Street, Bellevue, WA 70875
-Suite 300, 6658 Lake Drive, Austin, TX 62260
-8642 Lake Drive, Sunset Plaza, Austin, TX 26059
-5754 Oak Avenue, Building 7, Boston, MA 60351
-3610 Oak Avenue, Block C, Chicago, IL 75308
-7442 Pine Road, Building 7, Boston, MA 76249
-5609 Oak Avenue, Building 7, Chicago, IL 74866
-3194 Lake Drive, Sunset Plaza, Austin, TX 44664
-4189 Pine Road, Sunset Plaza, Boston, MA 57516
-3108 Maple Lane, Block C, Seattle, WA 22672
-9341 Pine Road, Austin, TX 62610
-Room 1203, 9508 Main Street, Seattle, WA 69898
-3662 Lake Drive, Harbor Center, Portland, OR 61505
-1272 Pine Road, River Park, Portland, OR 58281
-Apt 205, 8775 Main Street, Bellevue, WA 44803
-Room 1203, 3421 Main Street, Bellevue, WA 99224
-8225 Lake Drive, Tower B, Seattle, WA 51116
-Room 1203, 2020 Maple Lane, Chicago, IL 28098
-3837 Pine Road, River Park, Portland, OR 70249
-5038 Pine Road, Lake View Residence, Portland, OR 46569
-6194 Pine Road, Lake View Residence, Chicago, IL 72888
-9899 Queen Anne Avenue, Block C, Portland, OR 59767
-2294 Oak Avenue, Building 7, Austin, TX 55398
-9824 Pine Road, River Park, Bellevue, WA 45537
-Apt 205, 9700 Main Street, Chicago, IL 39579
-Room 1203, 2647 Main Street, Seattle, WA 99285
-Room 1203, 8822 Lake Drive, Seattle, WA 95267
-4804 Pine Road, Austin, TX 80143
-9116 Maple Lane, Harbor Center, Chicago, IL 34420
-5662 Main Street, Building 7, Seattle, WA 69552
-Unit 18, 2845 Lake Drive, Chicago, IL 53343
-Apt 205, 6523 Maple Lane, Bellevue, WA 48669
-2421 Lake Drive, Chicago, IL 62538
-1111 Oak Avenue, Block C, Chicago, IL 44181
-1187 Maple Lane, Lake View Residence, Chicago, IL 44282
-6026 Oak Avenue, Building 7, Bellevue, WA 30934
-Suite 300, 7021 Lake Drive, Bellevue, WA 90560
-7121 Oak Avenue, Tower B, Chicago, IL 64505
-9609 Queen Anne Avenue, Harbor Center, Portland, OR 68556
-Unit 18, 9792 Lake Drive, Seattle, WA 29641
-9008 Lake Drive, Building 7, Austin, TX 21919
-1945 Maple Lane, House 9, Seattle, WA 83242
-1049 Pine Road, Bellevue, WA 38560
-2130 Maple Lane, Seattle, WA 71875
-7135 Maple Lane, Tower B, Austin, TX 60132
-2943 Maple Lane, Tower B, Boston, MA 33392
-5888 Oak Avenue, Building 7, Portland, OR 70686
-6671 Maple Lane, Harbor Center, Portland, OR 30332
-Room 1203, 1256 Queen Anne Avenue, Chicago, IL 41544
-5009 Main Street, House 9, Seattle, WA 15798
-Unit 18, 9255 Oak Avenue, Boston, MA 47914
-Unit 18, 5944 Lake Drive, Bellevue, WA 28777
+Room 1203, 2314 Maple Lane, Austin, TX 99486
+Room 1203, 9664 Pine Road, Bellevue, WA 26691
+Room 1203, 9715 Main Street, Seattle, WA 59712
+4088 Maple Lane, Chicago, IL 24790
+2102 Maple Lane, Bellevue, WA 23224
+Apt 205, 7590 Lake Drive, Boston, MA 67535
+4836 Oak Avenue, Sunset Plaza, Portland, OR 85511
+Suite 300, 3347 Lake Drive, Portland, OR 96535
 7999 Pine Road, Building 7, Boston, MA 82856
 7688 Pine Road, River Park, Seattle, WA 29558
 5927 Oak Avenue, Tower B, Boston, MA 28920
@@ -298,3 +231,170 @@ Apt 205, 9598 Main Street, Seattle, WA 85582
 1761 Queen Anne Avenue, Chicago, IL 93000
 9689 Maple Lane, House 9, Boston, MA 16366
 2696 Maple Lane, Harbor Center, Portland, OR 60778
+7518 Maple Lane, River Park, Portland, OR 54939
+Suite 300, 9975 Oak Avenue, Boston, MA 51144
+3913 Oak Avenue, Lake View Residence, Chicago, IL 76046
+9747 Main Street, House 9, Bellevue, WA 47477
+3381 Lake Drive, Seattle, WA 16955
+3399 Pine Road, Harbor Center, Chicago, IL 18130
+Room 1203, 2679 Lake Drive, Chicago, IL 90754
+1769 Queen Anne Avenue, Tower B, Bellevue, WA 60014
+5117 Queen Anne Avenue, Building 7, Boston, MA 36619
+Unit 18, 5819 Queen Anne Avenue, Chicago, IL 68827
+7180 Main Street, Tower B, Bellevue, WA 15326
+5178 Lake Drive, Lake View Residence, Austin, TX 10739
+6285 Queen Anne Avenue, Boston, MA 88234
+Suite 300, 2194 Lake Drive, Bellevue, WA 51662
+9897 Lake Drive, Tower B, Chicago, IL 80390
+6424 Pine Road, Harbor Center, Seattle, WA 57290
+Apt 205, 6668 Lake Drive, Chicago, IL 68414
+7248 Lake Drive, Building 7, Bellevue, WA 24860
+9426 Lake Drive, Building 7, Austin, TX 76680
+9419 Main Street, Boston, MA 20793
+4492 Lake Drive, Building 7, Chicago, IL 99837
+1389 Oak Avenue, River Park, Seattle, WA 70191
+5127 Main Street, Seattle, WA 83149
+8391 Oak Avenue, House 9, Portland, OR 92603
+9762 Pine Road, Boston, MA 10773
+9238 Lake Drive, Sunset Plaza, Bellevue, WA 23911
+7249 Pine Road, Bellevue, WA 61788
+Room 1203, 9941 Oak Avenue, Boston, MA 48663
+3019 Queen Anne Avenue, Austin, TX 15475
+Suite 300, 4441 Lake Drive, Portland, OR 55069
+4617 Queen Anne Avenue, Harbor Center, Boston, MA 90856
+2198 Main Street, Chicago, IL 48096
+Suite 300, 6851 Main Street, Austin, TX 26805
+8960 Pine Road, Sunset Plaza, Seattle, WA 69067
+Suite 300, 6182 Queen Anne Avenue, Portland, OR 66139
+Room 1203, 5533 Pine Road, Seattle, WA 57118
+8296 Queen Anne Avenue, Lake View Residence, Bellevue, WA 57020
+Apt 205, 5597 Lake Drive, Boston, MA 28350
+9309 Queen Anne Avenue, Austin, TX 92788
+5269 Lake Drive, Tower B, Portland, OR 81233
+5767 Oak Avenue, House 9, Bellevue, WA 27548
+Suite 300, 9227 Lake Drive, Portland, OR 11388
+Room 1203, 3608 Queen Anne Avenue, Portland, OR 33480
+Apt 205, 4585 Queen Anne Avenue, Bellevue, WA 73916
+4387 Pine Road, Lake View Residence, Seattle, WA 77880
+6309 Maple Lane, River Park, Boston, MA 23529
+6985 Pine Road, Bellevue, WA 87028
+6781 Pine Road, Tower B, Portland, OR 55224
+3713 Lake Drive, Boston, MA 40145
+4062 Queen Anne Avenue, Lake View Residence, Portland, OR 30625
+6410 Queen Anne Avenue, Tower B, Portland, OR 24855
+Unit 18, 7732 Maple Lane, Bellevue, WA 12942
+Apt 205, 3406 Oak Avenue, Seattle, WA 17328
+2404 Oak Avenue, Building 7, Austin, TX 38389
+Unit 18, 7730 Maple Lane, Portland, OR 88753
+8429 Oak Avenue, Portland, OR 88188
+1271 Maple Lane, Tower B, Chicago, IL 36522
+1639 Lake Drive, Chicago, IL 79655
+9553 Maple Lane, Harbor Center, Seattle, WA 65139
+7246 Queen Anne Avenue, Seattle, WA 55943
+2373 Oak Avenue, House 9, Boston, MA 47128
+9515 Oak Avenue, Building 7, Austin, TX 10942
+2746 Oak Avenue, House 9, Bellevue, WA 30287
+6990 Lake Drive, Lake View Residence, Bellevue, WA 90200
+3928 Maple Lane, House 9, Bellevue, WA 58524
+2951 Pine Road, House 9, Austin, TX 40116
+6544 Oak Avenue, Bellevue, WA 82165
+8727 Maple Lane, Building 7, Chicago, IL 88675
+2311 Main Street, Seattle, WA 89826
+3871 Maple Lane, Block C, Bellevue, WA 93924
+Unit 18, 1550 Main Street, Boston, MA 88579
+1004 Oak Avenue, Portland, OR 30636
+4281 Maple Lane, Austin, TX 77861
+6703 Queen Anne Avenue, Sunset Plaza, Bellevue, WA 55544
+Room 1203, 1076 Lake Drive, Chicago, IL 44223
+6570 Lake Drive, Sunset Plaza, Boston, MA 25336
+8923 Lake Drive, Lake View Residence, Portland, OR 41886
+2904 Queen Anne Avenue, Boston, MA 43792
+7757 Queen Anne Avenue, Boston, MA 56281
+7536 Pine Road, Harbor Center, Bellevue, WA 98302
+6792 Lake Drive, Harbor Center, Seattle, WA 38647
+4847 Queen Anne Avenue, Harbor Center, Chicago, IL 41726
+3555 Oak Avenue, Chicago, IL 23983
+8901 Queen Anne Avenue, River Park, Seattle, WA 58653
+9374 Lake Drive, House 9, Boston, MA 46735
+8836 Lake Drive, Chicago, IL 80879
+2972 Pine Road, Tower B, Portland, OR 77922
+7216 Queen Anne Avenue, Austin, TX 86153
+4885 Pine Road, Tower B, Austin, TX 45311
+7945 Pine Road, Tower B, Portland, OR 37594
+Suite 300, 8384 Pine Road, Bellevue, WA 33578
+4863 Queen Anne Avenue, Building 7, Portland, OR 82789
+1159 Oak Avenue, Tower B, Boston, MA 33148
+5111 Oak Avenue, Boston, MA 83680
+5166 Main Street, Boston, MA 72460
+6903 Queen Anne Avenue, Lake View Residence, Boston, MA 83446
+Suite 300, 4259 Main Street, Austin, TX 85609
+2284 Pine Road, Lake View Residence, Austin, TX 59947
+7911 Queen Anne Avenue, Tower B, Boston, MA 92742
+6136 Main Street, Harbor Center, Seattle, WA 51533
+6950 Pine Road, Block C, Bellevue, WA 86928
+4844 Oak Avenue, Harbor Center, Boston, MA 96772
+7505 Queen Anne Avenue, Bellevue, WA 23501
+9584 Maple Lane, Seattle, WA 20911
+Room 1203, 6068 Lake Drive, Austin, TX 40062
+9630 Pine Road, Bellevue, WA 32361
+8654 Queen Anne Avenue, Lake View Residence, Seattle, WA 80855
+8126 Maple Lane, Harbor Center, Portland, OR 78610
+6044 Maple Lane, Building 7, Austin, TX 57943
+9574 Oak Avenue, Lake View Residence, Austin, TX 27865
+5908 Maple Lane, House 9, Austin, TX 11197
+4089 Lake Drive, Building 7, Austin, TX 63967
+4614 Oak Avenue, Boston, MA 44469
+9715 Queen Anne Avenue, Block C, Boston, MA 45235
+2808 Main Street, Tower B, Chicago, IL 93478
+Unit 18, 6253 Maple Lane, Portland, OR 12542
+Apt 205, 5622 Lake Drive, Seattle, WA 45283
+3468 Maple Lane, Tower B, Bellevue, WA 11930
+7084 Pine Road, Chicago, IL 70776
+7429 Main Street, Building 7, Austin, TX 19356
+2998 Oak Avenue, House 9, Chicago, IL 42631
+Room 1203, 2539 Oak Avenue, Boston, MA 78306
+1691 Maple Lane, Boston, MA 82034
+Suite 300, 1853 Maple Lane, Austin, TX 97385
+3742 Oak Avenue, Seattle, WA 46188
+3539 Oak Avenue, Boston, MA 58679
+1983 Oak Avenue, River Park, Chicago, IL 17834
+4812 Oak Avenue, Sunset Plaza, Bellevue, WA 51515
+6868 Queen Anne Avenue, Harbor Center, Boston, MA 27659
+Room 1203, 4109 Maple Lane, Seattle, WA 84278
+Suite 300, 3627 Pine Road, Portland, OR 19027
+1011 Pine Road, Block C, Boston, MA 93627
+6254 Oak Avenue, Block C, Bellevue, WA 18302
+6285 Lake Drive, River Park, Chicago, IL 63713
+Unit 18, 3926 Main Street, Seattle, WA 14099
+7366 Maple Lane, Building 7, Seattle, WA 96235
+4616 Lake Drive, Portland, OR 89423
+1994 Oak Avenue, Building 7, Seattle, WA 57307
+2153 Queen Anne Avenue, Austin, TX 49833
+Unit 18, 9710 Lake Drive, Chicago, IL 60506
+2728 Lake Drive, Harbor Center, Chicago, IL 93705
+3955 Maple Lane, Building 7, Bellevue, WA 82085
+6163 Pine Road, Harbor Center, Portland, OR 82100
+9939 Maple Lane, Block C, Austin, TX 38039
+8331 Queen Anne Avenue, Portland, OR 62047
+5945 Main Street, Lake View Residence, Bellevue, WA 10860
+Suite 300, 9376 Oak Avenue, Chicago, IL 82918
+3267 Main Street, River Park, Seattle, WA 44732
+2505 Oak Avenue, Block C, Portland, OR 84774
+3832 Oak Avenue, Portland, OR 73999
+2285 Queen Anne Avenue, Lake View Residence, Portland, OR 17329
+1187 Maple Lane, Building 7, Austin, TX 93084
+Unit 18, 6354 Pine Road, Seattle, WA 75850
+4638 Main Street, River Park, Chicago, IL 66614
+8796 Oak Avenue, Boston, MA 84899
+Room 1203, 9221 Maple Lane, Portland, OR 66949
+Room 1203, 4212 Maple Lane, Chicago, IL 83553
+2467 Main Street, House 9, Chicago, IL 24749
+6644 Pine Road, Boston, MA 87840
+Unit 18, 8216 Oak Avenue, Austin, TX 15882
+Apt 205, 2841 Queen Anne Avenue, Chicago, IL 17148
+2823 Oak Avenue, Building 7, Portland, OR 49992
+4339 Main Street, Lake View Residence, Boston, MA 81620
+9631 Maple Lane, Harbor Center, Portland, OR 15699
+1869 Main Street, Chicago, IL 70943
+1312 Maple Lane, Block C, Seattle, WA 48337
+Room 1203, 9709 Maple Lane, Chicago, IL 21537
