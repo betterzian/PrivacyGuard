@@ -353,6 +353,7 @@ def main() -> None:
 
     multi_cases: list[dict[str, Any]] = []
     same_cases: list[dict[str, Any]] = []
+    variant_multi_details: list[dict[str, Any]] = []
 
     for locale in ("zh_cn", "en_us"):
         pool = load_pool(locale)
@@ -459,6 +460,50 @@ def main() -> None:
             sb_full[bkey(len(cf_seg))] += 1
             sb_var[bkey(len(cv_seg))] += 1
 
+            if len(cv_seg) > 1:
+
+                def _norm_dump(c: Any) -> dict[str, Any]:
+                    n = c.normalized_source
+                    if n is None:
+                        return {"text": c.text, "span": [c.span_start, c.span_end], "normalized": None}
+                    return {
+                        "text": c.text,
+                        "span": [c.span_start, c.span_end],
+                        "canonical": n.canonical,
+                        "components": dict(n.components),
+                        "identity": dict(n.identity),
+                        "numbers": list(n.numbers),
+                        "keyed_numbers": dict(n.keyed_numbers),
+                        "ordered_components": [
+                            {
+                                "type": oc.component_type,
+                                "level": list(oc.level),
+                                "value": oc.value if not isinstance(oc.value, tuple) else list(oc.value),
+                                "key": oc.key if not isinstance(oc.key, tuple) else list(oc.key),
+                                "suspected": [
+                                    {"levels": list(s.levels), "value": s.value, "key": s.key, "origin": s.origin}
+                                    for s in oc.suspected
+                                ],
+                            }
+                            for oc in n.ordered_components
+                        ],
+                    }
+
+                variant_multi_details.append(
+                    {
+                        "locale": locale,
+                        "variant_style": variant["style"],
+                        "full_address_line": full_addr,
+                        "variant_address_line": var_addr,
+                        "text_full": text_full,
+                        "text_var": text_var,
+                        "span_full": [sf0, sf1],
+                        "span_var": [vf0, vf1],
+                        "all_variant_ADDRESS": [_norm_dump(c) for c in cv],
+                        "overlap_variant_ADDRESS": [_norm_dump(c) for c in cv_seg],
+                    }
+                )
+
             hit = any(
                 same_entity_fn(a.normalized_source, b.normalized_source)
                 for a in cf_seg
@@ -511,6 +556,7 @@ def main() -> None:
         "timing": timing,
         "multi_cases_sample": multi_cases[:40],
         "same_cases_sample": same_cases[:40],
+        "variant_multi_details": variant_multi_details,
     }
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _write_md(out_md, args=args, multi_stats=multi_stats, same_stats=same_stats, timing=timing)

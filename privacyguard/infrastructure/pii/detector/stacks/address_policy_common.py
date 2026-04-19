@@ -412,6 +412,7 @@ class _RoutingContext:
     clues: tuple[Clue, ...]
     raw_text: str
     stream: StreamInput
+    seed_floor: int | None = None
     search_start: int | None = None
     should_break_clue: Callable[[Clue], bool] | None = None
 

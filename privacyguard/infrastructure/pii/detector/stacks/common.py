@@ -6,7 +6,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 
-from privacyguard.infrastructure.pii.detector.models import Clue, ClueFamily, ClueRole, StreamInput, StreamUnit
+from privacyguard.infrastructure.pii.detector.models import (
+    AddressComponentType,
+    Clue,
+    ClueFamily,
+    ClueRole,
+    StreamInput,
+    StreamUnit,
+)
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_name_joiner
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
 
@@ -249,6 +256,45 @@ NONE_NUMERAL = LeftNumeral(kind="none", digit_count=0, char_start=-1, text="")
 _MAX_ZH_NUMERAL_COLLECT = 4
 
 
+@dataclass(frozen=True, slots=True)
+class ZhAddressLeftNumeralRule:
+    """中文地址 key 左侧编号前缀的统一校验窗口。"""
+
+    min_digit_count: int
+    max_digit_count: int
+    min_ascii_alnum_len: int | None = None
+    max_ascii_alnum_len: int | None = None
+
+
+_ZH_ADDRESS_LEFT_NUMERAL_RULES: dict[str, ZhAddressLeftNumeralRule] = {
+    "号": ZhAddressLeftNumeralRule(1, 5, 1, 5),
+    "号楼": ZhAddressLeftNumeralRule(1, 4, 1, 5),
+    "栋": ZhAddressLeftNumeralRule(1, 4, 1, 5),
+    "幢": ZhAddressLeftNumeralRule(1, 4, 1, 5),
+    "座": ZhAddressLeftNumeralRule(1, 4, 1, 5),
+    "单元": ZhAddressLeftNumeralRule(1, 4, 1, 5),
+    "层": ZhAddressLeftNumeralRule(1, 2, 1, 2),
+    "楼": ZhAddressLeftNumeralRule(1, 2, 1, 2),
+    "室": ZhAddressLeftNumeralRule(1, 4, 1, 4),
+    "房": ZhAddressLeftNumeralRule(2, 4, 2, 4),
+    "户": ZhAddressLeftNumeralRule(2, 4, 2, 4),
+    "弄": ZhAddressLeftNumeralRule(1, 3, 1, 3),
+}
+
+_STRICT_ZH_ADDRESS_LEFT_NUMERAL_KEYS = frozenset({
+    "号",
+    "号楼",
+    "栋",
+    "幢",
+    "座",
+    "单元",
+    "层",
+    "室",
+    "房",
+    "户",
+})
+
+
 @lru_cache(maxsize=1)
 def _zh_numeral_lookup() -> tuple[dict[str, tuple[str, str]], tuple[int, ...]]:
     """返回 ``{text: (normalized, kind)}`` + 按长度降序排列的长度列表。"""
@@ -334,3 +380,47 @@ def examine_left_numeral(stream: StreamInput, pos: int) -> LeftNumeral:
             )
 
     return NONE_NUMERAL
+
+
+def zh_address_left_numeral_rule(key_text: str) -> ZhAddressLeftNumeralRule | None:
+    """返回中文地址 key 的统一左前缀校验规则。"""
+
+    return _ZH_ADDRESS_LEFT_NUMERAL_RULES.get(str(key_text or ""))
+
+
+def zh_address_key_requires_strict_left_numeral(key_text: str) -> bool:
+    """判断当前中文地址 key 是否必须独立通过左前缀校验。"""
+
+    return str(key_text or "") in _STRICT_ZH_ADDRESS_LEFT_NUMERAL_KEYS
+
+
+def _left_numeral_matches_rule(
+    prefix: LeftNumeral,
+    rule: ZhAddressLeftNumeralRule,
+) -> bool:
+    if prefix.kind == "none":
+        return False
+    if prefix.kind == "ascii_alnum":
+        text_len = len(prefix.text)
+        if prefix.text.isdigit():
+            return rule.min_digit_count <= prefix.digit_count <= rule.max_digit_count
+        min_len = rule.min_ascii_alnum_len if rule.min_ascii_alnum_len is not None else rule.min_digit_count
+        max_len = rule.max_ascii_alnum_len if rule.max_ascii_alnum_len is not None else rule.max_digit_count
+        return min_len <= text_len <= max_len
+    return rule.min_digit_count <= prefix.digit_count <= rule.max_digit_count
+
+
+def valid_left_numeral_for_zh_address_key(
+    stream: StreamInput,
+    pos: int,
+    key_text: str,
+) -> LeftNumeral:
+    """返回符合指定中文地址 key 规则的左前缀；不合法则返回 `NONE_NUMERAL`。"""
+
+    rule = zh_address_left_numeral_rule(key_text)
+    if rule is None:
+        return NONE_NUMERAL
+    prefix = examine_left_numeral(stream, pos)
+    if not _left_numeral_matches_rule(prefix, rule):
+        return NONE_NUMERAL
+    return prefix

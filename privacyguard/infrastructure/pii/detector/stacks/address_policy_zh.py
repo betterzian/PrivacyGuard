@@ -53,6 +53,8 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     is_ascii_alnum_like_unit,
     is_control_number_value_clue,
     is_negative_clue,
+    valid_left_numeral_for_zh_address_key,
+    zh_address_key_requires_strict_left_numeral,
 )
 
 _NUMBERISH_KEY_COMPONENTS = frozenset({
@@ -809,28 +811,15 @@ def _numberish_left_expand_start(
 ) -> int:
     if context.chain:
         return context.chain[-1].end
-    floor = 0
+    floor = context.seed_floor or 0
     if context.previous_component_end is not None:
-        floor = _start_after_component_end(context.stream, context.previous_component_end)
-    elif context.search_start is not None and context.search_start < clue.start:
-        return context.search_start
-    cursor, left_ui = _skip_inline_gap_left(context.stream, clue.start, floor)
-    if left_ui < 0 or left_ui >= len(context.stream.units):
+        floor = max(floor, _start_after_component_end(context.stream, context.previous_component_end))
+    if context.search_start is not None and context.search_start < clue.start:
+        floor = max(floor, context.search_start)
+    prefix = valid_left_numeral_for_zh_address_key(context.stream, clue.start, clue.text)
+    if prefix.kind == "none" or prefix.char_start < floor:
         return clue.start
-    left_unit = context.stream.units[left_ui]
-    if is_ascii_alnum_like_unit(left_unit):
-        start = _left_expand_adjacent_alnum_for_zh(clue.start, floor, context.stream)
-    else:
-        control_clue = _find_control_value_clue_ending_at(context, clue.start)
-        if control_clue is None:
-            return clue.start
-        start = control_clue.start
-    while True:
-        control_clue = _find_control_value_clue_ending_at(context, start)
-        if control_clue is None:
-            break
-        start = control_clue.start
-    return start
+    return prefix.char_start
 
 
 def _left_value_text_for_routing(context: _RoutingContext, clue: Clue, left_start: int) -> tuple[str, str]:
@@ -882,9 +871,12 @@ def _routing_left_value_start(
     """按中文地址路由规则推导左侧 value 的起点。"""
     if context.chain:
         return context.chain[-1].end
+    floor = context.seed_floor or 0
     if context.previous_component_end is not None:
-        return _start_after_component_end(context.stream, context.previous_component_end)
-    expand_start = _left_expand_zh(clue.start, 0, context.stream)
+        return max(floor, _start_after_component_end(context.stream, context.previous_component_end))
+    if context.search_start is not None and context.search_start < clue.start:
+        floor = max(floor, context.search_start)
+    expand_start = _left_expand_zh(clue.start, floor, context.stream)
     return _extend_start_with_adjacent_ignored_keys(
         context.clues,
         clue_index,
@@ -901,6 +893,32 @@ def _effective_left_value_start(
     if clue.component_type in _NUMBERISH_KEY_COMPONENTS:
         return _numberish_left_expand_start(context, clue)
     return _routing_left_value_start(context, clue_index, clue)
+
+
+def _is_left_numeral_bound_numberish_key(
+    clue: Clue,
+    *,
+    comp_type: AddressComponentType | None = None,
+) -> bool:
+    """判断当前中文 key 是否依赖左侧编号前缀。"""
+    effective_type = comp_type if comp_type is not None else clue.component_type
+    if clue.role != ClueRole.KEY or effective_type not in _NUMBERISH_KEY_COMPONENTS:
+        return False
+    return zh_address_key_requires_strict_left_numeral(clue.text)
+
+
+def _has_valid_left_numeral_for_numberish_key(
+    stream: StreamInput,
+    clue: Clue,
+    *,
+    component_start: int,
+    comp_type: AddressComponentType | None = None,
+) -> bool:
+    """numberish key 独立提交前，要求左侧编号前缀与 component 起点严格对齐。"""
+    if not _is_left_numeral_bound_numberish_key(clue, comp_type=comp_type):
+        return True
+    prefix = valid_left_numeral_for_zh_address_key(stream, clue.start, clue.text)
+    return prefix.kind != "none" and prefix.char_start == component_start
 
 
 def _route_dynamic_key_type(

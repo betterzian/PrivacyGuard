@@ -24,6 +24,8 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _comma_tail_prehandle,
     _comma_value_scan_upper_bound,
+    _has_valid_left_numeral_for_numberish_key,
+    _is_left_numeral_bound_numberish_key,
     _resolve_admin_key_chain_levels,
     _resolve_standalone_admin_value_group,
     collect_admin_value_span,
@@ -67,6 +69,7 @@ def _state_routing_context(
         clues=clues,
         raw_text=raw_text,
         stream=stream,
+        seed_floor=state.seed_floor,
         # 仅在已有已提交组件时才提供 search_start，避免未提交失败链污染 numberish 左扩起点。
         search_start=state.last_end if state.components else None,
         should_break_clue=lambda clue: stack.need_break(clue),
@@ -89,6 +92,23 @@ class ZhAddressStack(BaseAddressStack):
             commit_component=lambda component: self._commit_component(state, component),
             resolve_standalone_admin_group=_resolve_standalone_admin_value_group,
             resolve_admin_key_chain_levels=_resolve_admin_key_chain_levels,
+            validate_key_component=self._validate_key_component_before_commit,
+        )
+
+    def _validate_key_component_before_commit(
+        self,
+        state: _ParseState,
+        used_entries: tuple[tuple[int, Clue], ...],
+        key_clue: Clue,
+        component_start: int,
+        comp_type: AddressComponentType,
+    ) -> bool:
+        del state, used_entries
+        return _has_valid_left_numeral_for_numberish_key(
+            self.context.stream,
+            key_clue,
+            component_start=component_start,
+            comp_type=comp_type,
         )
 
     def _prepare_effective_clue(
@@ -263,7 +283,13 @@ class ZhAddressStack(BaseAddressStack):
         stream = self.context.stream
         state.pending_comma_value_right_scan = False
         chain = [item for _, item in state.deferred_chain]
-        if chain and _chain_can_accept(chain, clue, stream):
+        allow_chain_append = (
+            bool(chain)
+            and _chain_can_accept(chain, clue, stream)
+            and not _is_left_numeral_bound_numberish_key(clue, comp_type=comp_type)
+        )
+        # 需要左侧编号前缀的中文 numberish key 不能继续吸收前链，必须先冲洗再单独验左值。
+        if allow_chain_append:
             last_chain_clue = chain[-1]
             should_freeze_previous_key = (
                 last_chain_clue.role == ClueRole.KEY

@@ -176,12 +176,14 @@ class BaseAddressStack(BaseStack):
             consumed_ids: set[str] = {self.clue.clue_id}
             handled_labels: set[str] = {self.clue.clue_id}
             evidence_count = 1
+            seed_floor = address_start
         else:
             address_start = self.clue.start if self.clue.role in {ClueRole.VALUE, ClueRole.KEY} else None
             scan_index = self.clue_index
             consumed_ids = set()
             handled_labels = set()
             evidence_count = 0
+            seed_floor = None
         if address_start is None:
             return None
 
@@ -192,6 +194,7 @@ class BaseAddressStack(BaseStack):
             consumed_ids=consumed_ids,
             handled_labels=handled_labels,
             evidence_count=evidence_count,
+            seed_floor=seed_floor,
         )
 
     def _run_with_clues(
@@ -203,6 +206,7 @@ class BaseAddressStack(BaseStack):
         consumed_ids: set[str],
         handled_labels: set[str],
         evidence_count: int,
+        seed_floor: int | None,
     ) -> StackRun | None:
         """统一扫描路径：扫描 clue → 尾修复 → 数字尾挑战 → 组装 `StackRun`。"""
         state, index = self._scan_components(
@@ -210,6 +214,7 @@ class BaseAddressStack(BaseStack):
             scan_index=scan_index,
             address_start=address_start,
             evidence_count=evidence_count,
+            seed_floor=seed_floor,
         )
         if not state.components:
             return None
@@ -273,6 +278,7 @@ class BaseAddressStack(BaseStack):
         scan_index: int,
         address_start: int,
         evidence_count: int,
+        seed_floor: int | None,
         stop_char_end: int | None = None,
         absorb_non_address: bool = True,
         relaxed: bool = False,
@@ -283,6 +289,7 @@ class BaseAddressStack(BaseStack):
         state = _ParseState()
         state.last_end = address_start
         state.evidence_count = evidence_count
+        state.seed_floor = seed_floor
         index = scan_index
 
         while index < len(clues):

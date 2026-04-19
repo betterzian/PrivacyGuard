@@ -166,6 +166,10 @@ _ALL_TYPES = frozenset(AddressComponentType)
 _SuccessorMap = Mapping[AddressComponentType, frozenset[AddressComponentType]]
 _CommitFn = Callable[["_DraftComponent"], bool]
 _IndexedClue = tuple[int, Clue]
+_ValidateKeyComponentFn = Callable[
+    ["_ParseState", tuple["_IndexedClue", ...], Clue, int, AddressComponentType],
+    bool,
+]
 
 
 def _ordered_component_level(
@@ -392,6 +396,7 @@ class _ParseState:
     split_at: int | None = None
     absorbed_digit_unit_end: int = 0
     last_component_type: AddressComponentType | None = None
+    seed_floor: int | None = None
     committed_clue_ids: set[str] = field(default_factory=set)
     extra_consumed_clue_ids: set[str] = field(default_factory=set)
     consumed_clue_indices: set[int] = field(default_factory=set)
@@ -1038,6 +1043,7 @@ def _flush_chain(
     commit_component: _CommitFn | None = None,
     resolve_standalone_admin_group: _StandaloneAdminResolver | None = None,
     resolve_admin_key_chain_levels: _AdminKeyChainResolver | None = None,
+    validate_key_component: _ValidateKeyComponentFn | None = None,
 ) -> None:
     """冲洗 deferred_chain。若链中含 KEY，用最后一个 KEY 消费；否则逐个 standalone。"""
     if not state.deferred_chain:
@@ -1052,7 +1058,7 @@ def _flush_chain(
             break
 
     if last_key_idx is not None:
-        used_entries = state.deferred_chain[: last_key_idx + 1]
+        used_entries = tuple(state.deferred_chain[: last_key_idx + 1])
         key_clue = used_entries[-1][1]
         comp_type = key_clue.component_type or AddressComponentType.POI
         if comp_type == AddressComponentType.NUMBER and state.last_component_type in _DETAIL_COMPONENTS:
@@ -1104,31 +1110,38 @@ def _flush_chain(
                         )
                         commit(component)
         else:
-            value = normalize_value(comp_type, raw_text[component_start:key_clue.start])
-            if value:
-                component = _DraftComponent(
-                    component_type=comp_type,
-                    start=component_start,
-                    end=key_clue.end,
-                    value=value,
-                    key=key_clue.text,
-                    is_detail=comp_type in _DETAIL_COMPONENTS,
-                    raw_chain=[clue for _, clue in used_entries],
-                    suspected=[
-                        _SuspectEntry(
-                            level=entry.level,
-                            value=entry.value,
-                            key=entry.key,
-                            origin=entry.origin,
-                            start=entry.start,
-                            end=entry.end,
-                        )
-                        for entry in state.pending_suspects
-                    ],
-                    clue_ids={clue.clue_id for _, clue in used_entries},
-                    clue_indices={index for index, _ in used_entries},
-                )
-                commit(component)
+            if (
+                validate_key_component is not None
+                and not validate_key_component(state, used_entries, key_clue, component_start, comp_type)
+            ):
+                if state.components:
+                    state.split_at = component_start
+            else:
+                value = normalize_value(comp_type, raw_text[component_start:key_clue.start])
+                if value:
+                    component = _DraftComponent(
+                        component_type=comp_type,
+                        start=component_start,
+                        end=key_clue.end,
+                        value=value,
+                        key=key_clue.text,
+                        is_detail=comp_type in _DETAIL_COMPONENTS,
+                        raw_chain=[clue for _, clue in used_entries],
+                        suspected=[
+                            _SuspectEntry(
+                                level=entry.level,
+                                value=entry.value,
+                                key=entry.key,
+                                origin=entry.origin,
+                                start=entry.start,
+                                end=entry.end,
+                            )
+                            for entry in state.pending_suspects
+                        ],
+                        clue_ids={clue.clue_id for _, clue in used_entries},
+                        clue_indices={index for index, _ in used_entries},
+                    )
+                    commit(component)
     else:
         _flush_chain_as_standalone(
             state,
@@ -1316,31 +1329,11 @@ def _meets_commit_threshold(
     protection_level: ProtectionLevel = ProtectionLevel.STRONG,
     claim_strength: ClaimStrength = ClaimStrength.SOFT,
 ) -> bool:
-    """strength 感知的地址提交阈值。
-
-    STRONG：SOFT 及以上单 evidence 即通过；WEAK only 需 >=2 evidence。
-    BALANCED：HARD 单 evidence 通过；SOFT 需 >=2 或含省/市 admin；WEAK 不通过。
-    WEAK（保护等级最宽松）：HARD 单 evidence 通过；SOFT + >=2 通过；其余不通过。
-    """
-    del locale
-    if evidence_count <= 0:
-        return False
+    """地址提交阈值只看 `claim_strength`。"""
+    del evidence_count, components, locale
     if protection_level == ProtectionLevel.STRONG:
-        if strength_ge(claim_strength, ClaimStrength.SOFT):
-            return True
-        return evidence_count >= 2
-    if protection_level == ProtectionLevel.BALANCED:
-        if claim_strength == ClaimStrength.HARD:
-            return True
-        if claim_strength == ClaimStrength.SOFT:
-            if evidence_count >= 2:
-                return True
-            return any(c.component_type in _SINGLE_EVIDENCE_ADMIN for c in components)
-        return False
-    # ProtectionLevel.WEAK
-    if claim_strength == ClaimStrength.HARD:
-        return True
-    return claim_strength == ClaimStrength.SOFT and evidence_count >= 2
+        return strength_ge(claim_strength, ClaimStrength.SOFT)
+    return claim_strength == ClaimStrength.HARD
 
 
 def _sum_strength(parts: Iterable[ClaimStrength]) -> ClaimStrength:

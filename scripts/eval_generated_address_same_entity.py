@@ -83,6 +83,24 @@ EN_BUILDING_ABBREVIATIONS = {
     "tower": "Twr",
     "block": "Blk",
 }
+OCR_BREAK = "  <OCR_BREAK>    "
+MIN_DISTRACTOR_ADDRESSES = 1
+MAX_DISTRACTOR_ADDRESSES = 2
+ZH_NOISE_PIIS = [
+    "收件人王芳",
+    "手机13800138000",
+    "订单号PG20250418001",
+    "备注加急派送",
+    "客户编号CN889921",
+]
+EN_NOISE_PIIS = [
+    "Ship to Alex Rivera",
+    "Tel +1 206 555 0142",
+    "Order REF-OR-50418",
+    "Rush delivery requested",
+    "Account ACCT-772031",
+]
+_OCR_PLACEHOLDER = "\ue000PG_OCR_BREAK\ue000"
 
 
 @dataclass(slots=True)
@@ -129,8 +147,16 @@ class AndLabEvaluator:
 def _normalize_en_text(text: str) -> str:
     """压实英文空白，只保留正常单词间空格。"""
     normalized = re.sub(r"\s+", " ", str(text or "").strip())
-    normalized = re.sub(r"\s*,\s*", ", ", normalized)
-    return normalized.strip()
+    return re.sub(r"\s*,\s*", ", ", normalized).strip()
+
+
+def _normalize_en_preserving_ocr_break(text: str) -> str:
+    """保留 OCR_BREAK 内部空格，其余英文外层空白按单空格压实。"""
+    raw = str(text or "")
+    if OCR_BREAK not in raw:
+        return _normalize_en_text(raw)
+    safe = raw.replace(OCR_BREAK, _OCR_PLACEHOLDER)
+    return _normalize_en_text(safe).replace(_OCR_PLACEHOLDER, OCR_BREAK)
 
 
 def _compact_text(text: str) -> str:
@@ -528,11 +554,124 @@ def _build_variant_case(record: dict[str, Any], rng: random.Random) -> dict[str,
     return {"style": "identity_fallback", "text": original_text, "components": dict(record["components"])}
 
 
-def _compose_context(locale: str, address_text: str) -> str:
-    """地址-only 实验不再拼接其他 PII。"""
+def _build_noise_template(locale: str, rng: random.Random) -> tuple[str, str]:
+    """构造目标地址两侧的噪声 PII 模板。"""
+    pool = ZH_NOISE_PIIS if locale == "zh_cn" else EN_NOISE_PIIS
+    count = rng.randint(1, min(3, len(pool)))
+    fragments = rng.sample(pool, k=count)
+    split = rng.randint(0, len(fragments))
     if locale == "zh_cn":
-        return str(address_text).strip()
-    return _normalize_en_text(address_text)
+        return "".join(fragments[:split]), "".join(fragments[split:])
+    left = (" ".join(fragments[:split]) + " ") if split else ""
+    right = (" " + " ".join(fragments[split:])) if split < len(fragments) else ""
+    return left, right
+
+
+def _sample_distractor_records(
+    records: list[dict[str, Any]],
+    target_record: dict[str, Any],
+    rng: random.Random,
+) -> list[dict[str, Any]]:
+    """从同 locale 地址池里随机挑其他地址，作为 OCR_BREAK 分段噪声。"""
+    target_id = int(target_record["id"])
+    candidates = [record for record in records if int(record["id"]) != target_id]
+    if not candidates:
+        return []
+    max_pick = min(MAX_DISTRACTOR_ADDRESSES, len(candidates))
+    min_pick = min(MIN_DISTRACTOR_ADDRESSES, max_pick)
+    pick_count = rng.randint(min_pick, max_pick)
+    return rng.sample(candidates, k=pick_count)
+
+
+def _locate_segment_spans(full_text: str, segments: list[str], start_cursor: int) -> list[tuple[int, int]]:
+    """按段顺序定位 span，避免重复片段时误命中前文。"""
+    spans: list[tuple[int, int]] = []
+    cursor = start_cursor
+    for segment in segments:
+        index = full_text.find(segment, cursor)
+        if index < 0:
+            raise ValueError(f"无法在合成上下文中定位地址片段：{segment}")
+        spans.append((index, index + len(segment)))
+        cursor = index + len(segment)
+    return spans
+
+
+def _compose_context(
+    locale: str,
+    target_text: str,
+    distractor_texts: list[str],
+    noise_template: tuple[str, str],
+    target_index: int,
+) -> tuple[str, tuple[int, int], list[str]]:
+    """把目标地址放入随机上下文，并返回目标地址 span。"""
+    segments = list(distractor_texts)
+    normalized_target = str(target_text).strip() if locale == "zh_cn" else _normalize_en_text(target_text)
+    segments.insert(target_index, normalized_target)
+    block = OCR_BREAK.join(segments)
+    left_noise, right_noise = noise_template
+    if locale == "zh_cn":
+        full_text = f"{left_noise}{block}{right_noise}"
+    else:
+        full_text = _normalize_en_preserving_ocr_break(f"{left_noise}{block}{right_noise}")
+    block_start = full_text.find(block)
+    if block_start < 0:
+        raise ValueError("无法在合成上下文中定位 OCR_BREAK 地址块。")
+    spans = _locate_segment_spans(full_text, segments, block_start)
+    return full_text, spans[target_index], segments
+
+
+def _build_context_pair(
+    locale: str,
+    target_record: dict[str, Any],
+    variant_record: dict[str, Any],
+    records: list[dict[str, Any]],
+    rng: random.Random,
+) -> dict[str, Any]:
+    """为完整地址与同址变体构造共享模板的上下文。"""
+    distractor_records = _sample_distractor_records(records, target_record, rng)
+    distractor_texts = [str(record["text"]) for record in distractor_records]
+    target_index = rng.randint(0, len(distractor_texts))
+    noise_template = _build_noise_template(locale, rng)
+    full_context, full_span, _ = _compose_context(
+        locale,
+        str(target_record["text"]),
+        distractor_texts,
+        noise_template,
+        target_index,
+    )
+    variant_context, variant_span, _ = _compose_context(
+        locale,
+        str(variant_record["text"]),
+        distractor_texts,
+        noise_template,
+        target_index,
+    )
+    return {
+        "full_context": full_context,
+        "variant_context": variant_context,
+        "full_span": full_span,
+        "variant_span": variant_span,
+        "distractor_addresses": distractor_texts,
+        "target_index": target_index,
+    }
+
+
+def _overlap(left_start: int, left_end: int, right_start: int, right_end: int) -> int:
+    start = max(left_start, right_start)
+    end = min(left_end, right_end)
+    return max(0, end - start)
+
+
+def _target_span_candidates(candidates: list[Any], target_span: tuple[int, int]) -> list[Any]:
+    """只保留和目标地址 span 有重叠的 detector 候选。"""
+    start, end = target_span
+    matched: list[Any] = []
+    for candidate in candidates:
+        if candidate.span_start is None or candidate.span_end is None:
+            continue
+        if _overlap(int(candidate.span_start), int(candidate.span_end), start, end) > 0:
+            matched.append(candidate)
+    return matched
 
 
 def _analyze_detector_candidates(
@@ -671,6 +810,8 @@ def _init_detector_summary(locale: str) -> dict[str, Any]:
         "variant_bucket": Counter(),
         "full_avg_count_total": 0,
         "variant_avg_count_total": 0,
+        "full_context_avg_count_total": 0,
+        "variant_context_avg_count_total": 0,
         "full_complete_best_exact": 0,
         "full_complete_union_exact": 0,
         "variant_complete_best_exact": 0,
@@ -707,6 +848,8 @@ def _finalize_detector_summary(summary: dict[str, Any]) -> dict[str, Any]:
     summary["same_entity_when_both_detected_rate"] = round(summary["same_entity_when_both_detected"] / both_detected, 3)
     summary["full_avg_count"] = round(summary["full_avg_count_total"] / cases, 3)
     summary["variant_avg_count"] = round(summary["variant_avg_count_total"] / cases, 3)
+    summary["full_context_avg_count"] = round(summary["full_context_avg_count_total"] / cases, 3)
+    summary["variant_context_avg_count"] = round(summary["variant_context_avg_count_total"] / cases, 3)
     return summary
 
 
@@ -749,15 +892,26 @@ def _evaluate_detector_case(
     variant_context: str,
     full_expected: dict[str, ComponentValue],
     variant_expected: dict[str, ComponentValue],
+    full_span: tuple[int, int],
+    variant_span: tuple[int, int],
 ) -> dict[str, Any]:
-    full_candidates = [candidate for candidate in detector.detect(full_context, []) if candidate.attr_type == PIIAttributeType.ADDRESS]
-    variant_candidates = [candidate for candidate in detector.detect(variant_context, []) if candidate.attr_type == PIIAttributeType.ADDRESS]
+    full_all_candidates = [candidate for candidate in detector.detect(full_context, []) if candidate.attr_type == PIIAttributeType.ADDRESS]
+    variant_all_candidates = [candidate for candidate in detector.detect(variant_context, []) if candidate.attr_type == PIIAttributeType.ADDRESS]
+    full_candidates = _target_span_candidates(full_all_candidates, full_span)
+    variant_candidates = _target_span_candidates(variant_all_candidates, variant_span)
     full_analysis = _analyze_detector_candidates(full_candidates, full_expected, locale)
     variant_analysis = _analyze_detector_candidates(variant_candidates, variant_expected, locale)
+    full_analysis["context_count"] = len(full_all_candidates)
+    full_analysis["context_all_texts"] = [candidate.text for candidate in full_all_candidates]
+    full_analysis["target_span"] = list(full_span)
+    variant_analysis["context_count"] = len(variant_all_candidates)
+    variant_analysis["context_all_texts"] = [candidate.text for candidate in variant_all_candidates]
+    variant_analysis["target_span"] = list(variant_span)
     same_entity = any(
         same_entity_fn(left.normalized_source, right.normalized_source)
         for left in full_candidates
         for right in variant_candidates
+        if left.normalized_source is not None and right.normalized_source is not None
     )
     return {
         "full": full_analysis,
@@ -845,12 +999,17 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
     lines.append("## 数据口径")
     lines.append("")
     lines.append(f"- 随机种子：`{payload['seed']}`。")
-    lines.append(f"- 每个 locale 抽样：`{payload['sample_size_per_locale']}` 条。")
+    lines.append(
+        f"- 每个 locale 抽样：中文 `{payload['sample_size_per_locale']['zh_cn']}` 条，"
+        f"英文 `{payload['sample_size_per_locale']['en_us']}` 条。"
+    )
     lines.append("- 样本来自 `data/generate_data.py` 生成的 txt/jsonl。")
     lines.append("- 中文地址保持无空格；英文地址保持正常单词间单个空格。")
-    lines.append("- 变体地址由同一条地址的组件重组得到；本实验只输入地址，不拼接其他类型 PII。")
-    lines.append("- `detector` 的“同址”使用 `privacyguard.utils.normalized_pii.same_entity()` 判断。")
-    lines.append("- `AndLab_protected` 的“同址”使用先注册完整地址、再检测变体时是否复用同一 token 判断。")
+    lines.append(f"- 同一上下文中的不同地址固定用 `{OCR_BREAK}` 分隔。")
+    lines.append("- 每条样本都会把目标地址放进随机噪声 PII 与随机其他地址之间；完整地址和变体地址共用同一套上下文模板。")
+    lines.append("- `detector` 只统计与目标地址 span 重叠的候选，避免旁边随机地址污染碎片化和组件统计。")
+    lines.append("- `detector` 的“同址”使用 `privacyguard.utils.normalized_pii.same_entity()` 判断目标 span 候选。")
+    lines.append("- `AndLab_protected` 的“同址”使用先注册完整目标地址、再检测变体上下文时是否复用同一 token 判断。")
     lines.append("- `details` 按顺序数组展示，并要求与同顺序 token 数组比较；`numbers` 仅用于辅助观察，不单独计入组件命中。")
     lines.append("")
 
@@ -866,15 +1025,17 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
         lines.append("")
         lines.append(f"- 样本数：`{detector_summary['cases']}`")
         lines.append(
-            f"- 完整地址输入返回 `0/1/>1` 个地址实体：`{detector_summary['full_bucket'].get('zero', 0)}` / "
+            f"- 完整地址目标 span 返回 `0/1/>1` 个地址实体：`{detector_summary['full_bucket'].get('zero', 0)}` / "
             f"`{detector_summary['full_bucket'].get('one', 0)}` / `{detector_summary['full_bucket'].get('multi', 0)}`"
         )
         lines.append(
-            f"- 变体地址输入返回 `0/1/>1` 个地址实体：`{detector_summary['variant_bucket'].get('zero', 0)}` / "
+            f"- 变体地址目标 span 返回 `0/1/>1` 个地址实体：`{detector_summary['variant_bucket'].get('zero', 0)}` / "
             f"`{detector_summary['variant_bucket'].get('one', 0)}` / `{detector_summary['variant_bucket'].get('multi', 0)}`"
         )
-        lines.append(f"- 完整地址平均地址实体数：`{detector_summary['full_avg_count']}`")
-        lines.append(f"- 变体地址平均地址实体数：`{detector_summary['variant_avg_count']}`")
+        lines.append(f"- 完整地址目标 span 平均地址实体数：`{detector_summary['full_avg_count']}`")
+        lines.append(f"- 变体地址目标 span 平均地址实体数：`{detector_summary['variant_avg_count']}`")
+        lines.append(f"- 完整地址整句上下文平均地址实体数：`{detector_summary['full_context_avg_count']}`")
+        lines.append(f"- 变体地址整句上下文平均地址实体数：`{detector_summary['variant_context_avg_count']}`")
         lines.append(f"- 同址判定命中：`{detector_summary['same_entity']}` / `{detector_summary['cases']}`")
         lines.append(f"- 双方都检测到地址时的同址判定命中率：`{detector_summary['same_entity_when_both_detected_rate'] * 100:.1f}%`")
         lines.append(
@@ -943,18 +1104,26 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
             lines.append(f"- Detector 未判同址：`{case['variant_style']}`")
             lines.append(f"  完整地址：`{case['full_address']}`")
             lines.append(f"  变体地址：`{case['variant_address']}`")
-            lines.append(f"  detector 完整候选：`{case['detector']['full']['all_texts']}`")
-            lines.append(f"  detector 变体候选：`{case['detector']['variant']['all_texts']}`")
+            lines.append(f"  完整上下文：`{case['full_context']}`")
+            lines.append(f"  变体上下文：`{case['variant_context']}`")
+            lines.append(f"  完整目标候选：`{case['detector']['full']['all_texts']}`")
+            lines.append(f"  变体目标候选：`{case['detector']['variant']['all_texts']}`")
         fragmentation_cases = [
             case for case in payload["cases"]
             if case["locale"] == locale and (case["detector"]["full"]["count"] > 1 or case["detector"]["variant"]["count"] > 1)
         ][:3]
         for case in fragmentation_cases:
-            lines.append(f"- Detector 地址碎片化：完整=`{case['detector']['full']['count']}`，变体=`{case['detector']['variant']['count']}`")
+            lines.append(
+                f"- Detector 目标地址碎片化：完整=`{case['detector']['full']['count']}`，"
+                f"变体=`{case['detector']['variant']['count']}`"
+            )
             lines.append(f"  完整地址：`{case['full_address']}`")
             lines.append(f"  变体地址：`{case['variant_address']}`")
-            lines.append(f"  完整候选：`{case['detector']['full']['all_texts']}`")
-            lines.append(f"  变体候选：`{case['detector']['variant']['all_texts']}`")
+            lines.append(f"  干扰地址：`{case['distractor_addresses']}`")
+            lines.append(f"  完整目标候选：`{case['detector']['full']['all_texts']}`")
+            lines.append(f"  变体目标候选：`{case['detector']['variant']['all_texts']}`")
+            lines.append(f"  完整整句候选：`{case['detector']['full']['context_all_texts']}`")
+            lines.append(f"  变体整句候选：`{case['detector']['variant']['context_all_texts']}`")
         andlab_misses = [
             case for case in payload["cases"]
             if case["locale"] == locale and not case["andlab"]["reuse"]["same_token_reuse"]
@@ -983,17 +1152,24 @@ def _write_cases_csv(path: Path, cases: list[dict[str, Any]]) -> None:
                 "variant_address",
                 "full_context",
                 "variant_context",
+                "distractor_addresses",
                 "full_expected",
                 "variant_expected",
                 "detector_same_entity",
                 "detector_full_count",
                 "detector_variant_count",
+                "detector_full_context_count",
+                "detector_variant_context_count",
+                "detector_full_target_span",
+                "detector_variant_target_span",
                 "detector_full_best_text",
                 "detector_variant_best_text",
                 "detector_full_best_components",
                 "detector_variant_best_components",
                 "detector_full_all_texts",
                 "detector_variant_all_texts",
+                "detector_full_context_all_texts",
+                "detector_variant_context_all_texts",
                 "andlab_full_count",
                 "andlab_variant_count",
                 "andlab_same_token_reuse",
@@ -1015,17 +1191,24 @@ def _write_cases_csv(path: Path, cases: list[dict[str, Any]]) -> None:
                     "variant_address": case["variant_address"],
                     "full_context": case["full_context"],
                     "variant_context": case["variant_context"],
+                    "distractor_addresses": json.dumps(case["distractor_addresses"], ensure_ascii=False),
                     "full_expected": json.dumps(case["full_expected"], ensure_ascii=False),
                     "variant_expected": json.dumps(case["variant_expected"], ensure_ascii=False),
                     "detector_same_entity": case["detector"]["same_entity"],
                     "detector_full_count": case["detector"]["full"]["count"],
                     "detector_variant_count": case["detector"]["variant"]["count"],
+                    "detector_full_context_count": case["detector"]["full"]["context_count"],
+                    "detector_variant_context_count": case["detector"]["variant"]["context_count"],
+                    "detector_full_target_span": json.dumps(case["detector"]["full"]["target_span"], ensure_ascii=False),
+                    "detector_variant_target_span": json.dumps(case["detector"]["variant"]["target_span"], ensure_ascii=False),
                     "detector_full_best_text": case["detector"]["full"]["best_text"],
                     "detector_variant_best_text": case["detector"]["variant"]["best_text"],
                     "detector_full_best_components": json.dumps(case["detector"]["full"]["best_components"], ensure_ascii=False),
                     "detector_variant_best_components": json.dumps(case["detector"]["variant"]["best_components"], ensure_ascii=False),
                     "detector_full_all_texts": json.dumps(case["detector"]["full"]["all_texts"], ensure_ascii=False),
                     "detector_variant_all_texts": json.dumps(case["detector"]["variant"]["all_texts"], ensure_ascii=False),
+                    "detector_full_context_all_texts": json.dumps(case["detector"]["full"]["context_all_texts"], ensure_ascii=False),
+                    "detector_variant_context_all_texts": json.dumps(case["detector"]["variant"]["context_all_texts"], ensure_ascii=False),
                     "andlab_full_count": case["andlab"]["full_context"]["count"],
                     "andlab_variant_count": case["andlab"]["variant_context"]["count"],
                     "andlab_same_token_reuse": case["andlab"]["reuse"]["same_token_reuse"],
@@ -1056,9 +1239,13 @@ def main() -> None:
     rng = random.Random(SEED)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    selected_records: dict[str, list[dict[str, Any]]] = {
-        locale: rng.sample(_load_records(locale), SAMPLE_SIZE_PER_LOCALE)
+    all_records: dict[str, list[dict[str, Any]]] = {
+        locale: _load_records(locale)
         for locale in ("zh_cn", "en_us")
+    }
+    selected_records: dict[str, list[dict[str, Any]]] = {
+        locale: rng.sample(records, min(SAMPLE_SIZE_PER_LOCALE, len(records)))
+        for locale, records in all_records.items()
     }
 
     detectors = {
@@ -1081,10 +1268,11 @@ def main() -> None:
 
         for record in selected_records[locale]:
             variant = _build_variant_case(record, rng)
+            context_bundle = _build_context_pair(locale, record, variant, all_records[locale], rng)
             full_address = str(record["text"])
             variant_address = str(variant["text"])
-            full_context = _compose_context(locale, full_address)
-            variant_context = _compose_context(locale, variant_address)
+            full_context = str(context_bundle["full_context"])
+            variant_context = str(context_bundle["variant_context"])
             full_expected_metrics = _normalize_expected_components(dict(record["components"]), locale)
             variant_expected_metrics = _normalize_expected_components(dict(variant["components"]), locale)
             full_expected = _build_display_components(full_expected_metrics, _expected_numbers(dict(record["components"])))
@@ -1101,6 +1289,8 @@ def main() -> None:
                 variant_context,
                 full_expected_metrics,
                 variant_expected_metrics,
+                tuple(context_bundle["full_span"]),
+                tuple(context_bundle["variant_span"]),
             )
             detector_elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
 
@@ -1116,6 +1306,8 @@ def main() -> None:
             detector_summary["variant_bucket"][_bucket_key(detector_result["variant"]["count"])] += 1
             detector_summary["full_avg_count_total"] += detector_result["full"]["count"]
             detector_summary["variant_avg_count_total"] += detector_result["variant"]["count"]
+            detector_summary["full_context_avg_count_total"] += detector_result["full"]["context_count"]
+            detector_summary["variant_context_avg_count_total"] += detector_result["variant"]["context_count"]
             detector_summary["same_entity"] += int(detector_result["same_entity"])
             if detector_result["full"]["count"] > 0 and detector_result["variant"]["count"] > 0:
                 detector_summary["both_detected"] += 1
@@ -1151,6 +1343,7 @@ def main() -> None:
                     "variant_address": variant_address,
                     "full_context": full_context,
                     "variant_context": variant_context,
+                    "distractor_addresses": context_bundle["distractor_addresses"],
                     "full_expected": full_expected,
                     "variant_expected": variant_expected,
                     "detector": detector_result,
@@ -1172,7 +1365,7 @@ def main() -> None:
 
     payload = {
         "seed": SEED,
-        "sample_size_per_locale": SAMPLE_SIZE_PER_LOCALE,
+        "sample_size_per_locale": {locale: len(records) for locale, records in selected_records.items()},
         "detector_summaries": detector_payload,
         "andlab_summaries": andlab_payload,
         "latency_summaries": latency_payload,
