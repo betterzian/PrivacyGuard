@@ -27,6 +27,7 @@ PRESIDIO_SRC = ROOT / "tmp" / "presidio-main" / "presidio-analyzer"
 TAG_OPEN_RE = re.compile(r"【PII:[^】]+】")
 TAG_CLOSE_RE = re.compile(r"【/PII】")
 TOKEN_RE = re.compile(r"\[?([A-Z][A-Z0-9_]*#[0-9a-z]{5})\]?")
+_ATTR_NORMALIZE = {"textual": "alnum", "other": "alnum"}
 
 # 数据集 inventory.type -> 评测用 PIIAttributeType（与 PrivacyGuard 枚举对齐）
 EVAL_LABEL_TO_ATTR: dict[str, PIIAttributeType] = {
@@ -46,6 +47,23 @@ EVAL_LABEL_TO_ATTR: dict[str, PIIAttributeType] = {
     "ACCOUNT_ID": PIIAttributeType.ALNUM,
     "BIRTHDAY": PIIAttributeType.TIME,
 }
+
+
+def _normalize_attr_type(attr: str) -> str:
+    normalized = str(attr or "").strip().lower()
+    return _ATTR_NORMALIZE.get(normalized, normalized)
+
+
+def _coerce_attr_type(attr: PIIAttributeType | str | None) -> PIIAttributeType | None:
+    if attr is None:
+        return None
+    normalized = _normalize_attr_type(attr.value if isinstance(attr, PIIAttributeType) else attr)
+    if not normalized:
+        return None
+    try:
+        return PIIAttributeType(normalized)
+    except Exception:
+        return None
 
 
 def _strip_all_pii_tags(text: str) -> str:
@@ -131,9 +149,9 @@ def _map_presidio_entity(entity_type: str) -> PIIAttributeType | None:
         "ORG": PIIAttributeType.ORGANIZATION,
         "US_SSN": PIIAttributeType.ID_NUMBER,
         "US_ITIN": PIIAttributeType.ID_NUMBER,
-        "MEDICAL_LICENSE": PIIAttributeType.OTHER,
-        "IP_ADDRESS": PIIAttributeType.OTHER,
-        "URL": PIIAttributeType.OTHER,
+        "MEDICAL_LICENSE": PIIAttributeType.ALNUM,
+        "IP_ADDRESS": PIIAttributeType.ALNUM,
+        "URL": PIIAttributeType.ALNUM,
         "CRYPTO": PIIAttributeType.ALNUM,
         "UK_NHS": PIIAttributeType.ID_NUMBER,
         "SG_NRIC_FIN": PIIAttributeType.ID_NUMBER,
@@ -183,9 +201,9 @@ def _map_andlab_label(label: str) -> PIIAttributeType | None:
     if "SSN" in u:
         return PIIAttributeType.ID_NUMBER
     if "IP_ADDRESS" in u or u == "URL" or "PASSWORD" in u:
-        return PIIAttributeType.OTHER
+        return PIIAttributeType.ALNUM
     if "CONDITION" in u or "DRUG" in u or "MEDICAL" in u or "INJURY" in u:
-        return PIIAttributeType.OTHER
+        return PIIAttributeType.ALNUM
     return None
 
 
@@ -378,7 +396,7 @@ def main() -> None:
         for item in row.get("pii_inventory") or []:
             inventory_rows_total += 1
             label = str(item.get("type") or "").strip().upper()
-            mapped = EVAL_LABEL_TO_ATTR.get(label)
+            mapped = _coerce_attr_type(EVAL_LABEL_TO_ATTR.get(label))
             serialized_item = _serialize_inventory_item(item, mapped)
             if mapped is None:
                 label_unmapped[label] += 1
@@ -406,13 +424,16 @@ def main() -> None:
         for c in raw_cands:
             if c.source != PIISourceType.PROMPT:
                 continue
-            pg_items.append((c.attr_type, c.text))
+            mapped_attr = _coerce_attr_type(c.attr_type)
+            if mapped_attr is None:
+                continue
+            pg_items.append((mapped_attr, c.text))
             pg_detail.append(
-                {"engine": "privacyguard", "attr_type": c.attr_type.value, "text": c.text, "source": c.source.value}
+                {"engine": "privacyguard", "attr_type": mapped_attr.value, "text": c.text, "source": c.source.value}
             )
             ej.write(
                 json.dumps(
-                    {"sample_id": sid, "engine": "privacyguard", "attr_type": c.attr_type.value, "text": c.text},
+                    {"sample_id": sid, "engine": "privacyguard", "attr_type": mapped_attr.value, "text": c.text},
                     ensure_ascii=False,
                 )
                 + "\n"
@@ -423,13 +444,16 @@ def main() -> None:
         andlab_detail: list[dict[str, Any]] = []
         if andlab_layer is not None:
             for mapped, frag, raw_label in _run_andlab(andlab_layer, clean):
-                andlab_items.append((mapped, frag))
+                normalized_attr = _coerce_attr_type(mapped)
+                if normalized_attr is None:
+                    continue
+                andlab_items.append((normalized_attr, frag))
                 andlab_detail.append(
-                    {"engine": "andlab", "attr_type": mapped.value, "text": frag, "raw_label": raw_label}
+                    {"engine": "andlab", "attr_type": normalized_attr.value, "text": frag, "raw_label": raw_label}
                 )
                 ej.write(
                     json.dumps(
-                        {"sample_id": sid, "engine": "andlab", "attr_type": mapped.value, "text": frag, "raw_label": raw_label},
+                        {"sample_id": sid, "engine": "andlab", "attr_type": normalized_attr.value, "text": frag, "raw_label": raw_label},
                         ensure_ascii=False,
                     )
                     + "\n"
@@ -441,13 +465,16 @@ def main() -> None:
         presidio_detail: list[dict[str, Any]] = []
         if presidio_engine is not None:
             for mapped, frag, raw_et in _run_presidio(presidio_engine, clean):
-                presidio_items.append((mapped, frag))
+                normalized_attr = _coerce_attr_type(mapped)
+                if normalized_attr is None:
+                    continue
+                presidio_items.append((normalized_attr, frag))
                 presidio_detail.append(
-                    {"engine": "presidio", "attr_type": mapped.value, "text": frag, "entity_type": raw_et}
+                    {"engine": "presidio", "attr_type": normalized_attr.value, "text": frag, "entity_type": raw_et}
                 )
                 ej.write(
                     json.dumps(
-                        {"sample_id": sid, "engine": "presidio", "attr_type": mapped.value, "text": frag, "entity_type": raw_et},
+                        {"sample_id": sid, "engine": "presidio", "attr_type": normalized_attr.value, "text": frag, "entity_type": raw_et},
                         ensure_ascii=False,
                     )
                     + "\n"
@@ -507,7 +534,7 @@ def main() -> None:
         gt_local = []
         for item in inv.get("pii_inventory") or []:
             label = str(item.get("type") or "").strip().upper()
-            mapped = EVAL_LABEL_TO_ATTR.get(label)
+            mapped = _coerce_attr_type(EVAL_LABEL_TO_ATTR.get(label))
             if mapped is None:
                 continue
             val = str(item.get("value") or "").strip()

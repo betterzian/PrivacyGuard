@@ -42,10 +42,8 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueFamily,
     ClueRole,
     DictionaryEntry,
-    InspireEntry,
     StreamInput,
     build_clue_index,
-    build_inspire_index,
     build_negative_unit_index,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
@@ -99,8 +97,6 @@ _PLACEHOLDER_BY_ATTR = {
     PIIAttributeType.EMAIL: "<email>",
     PIIAttributeType.ID_NUMBER: "<id>",
     PIIAttributeType.BANK_NUMBER: "<bank>",
-    PIIAttributeType.PASSPORT_NUMBER: "<passport>",
-    PIIAttributeType.DRIVER_LICENSE: "<driver_license>",
     PIIAttributeType.LICENSE_PLATE: "<license_plate>",
     PIIAttributeType.AMOUNT: "<amount>",
 }
@@ -365,11 +361,10 @@ def build_clue_bundle(
 
     # ── 事件扫描线裁决 ──
     all_clues = [*structured_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_only_spans), *soft_clues]
-    resolved_clues, inspire_entries = _sweep_resolve(stream, all_clues)
+    resolved_clues = _sweep_resolve(stream, all_clues)
     ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, _family_order(item.family), item.end)))
     unit_count = len(stream.units)
     clue_index = build_clue_index(unit_count, ordered_clues)
-    inspire_index = build_inspire_index(unit_count, inspire_entries) if inspire_entries else None
     return ClueBundle(
         all_clues=ordered_clues,
         negative_clues=tuple(deduped_negative_clues),
@@ -377,7 +372,6 @@ def build_clue_bundle(
         negative_prefix_sum=negative_prefix_sum,
         negative_start_weight=negative_start_weight,
         clue_index=clue_index,
-        inspire_index=inspire_index,
     )
 
 
@@ -2335,26 +2329,24 @@ def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
     return sorted(ordered, key=lambda item: (item.start, _family_order(item.family), item.end))
 
 
-def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], list[InspireEntry]]:
+def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
     """事件扫描线裁决所有 clue 重叠。
 
     1. 扫描轮 1：STRUCTURED / BREAK 遮蔽，同时收集 seed 连通块；LABEL 当场做边界判断与 START 转换。
-       不满足边界条件的 label 收集为 InspireEntry。
+       不满足边界条件的 label 直接丢弃（原 InspireEntry 机制已移除）。
     2. Seed 裁决：完全包含→大的覆盖；否则保留 start 更靠后的。
     3. 扫描轮 2：seed 依赖规则。
     4. 姓名组件覆盖。
     5. 地址组件覆盖：ADDRESS family 内仅在严格完全包含时覆盖，部分重叠保留。
     6. Label vs soft content：完全包含→大的覆盖；其余保留。
-
-    返回 (resolved_clues, inspire_entries)。
     """
     if not clues:
-        return [], []
+        return []
     unit_len = len(stream.units)
     deduped = _dedupe_clues(clues)
 
     # ── 轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块 + label 边界/START 转换 ──
-    survivors, seed_groups, inspire_entries = _sweep_pass1(stream, deduped, unit_len)
+    survivors, seed_groups = _sweep_pass1(stream, deduped, unit_len)
 
     # ── Seed 裁决 ──
     seed_winner_ids: set[str] = set()
@@ -2376,7 +2368,7 @@ def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], 
     survivors = _apply_address_component_coverage(survivors)
 
     # ── Label vs soft content ──
-    return _apply_seed_containment_coverage(survivors), inspire_entries
+    return _apply_seed_containment_coverage(survivors)
 
 
 def _build_events(
@@ -2396,20 +2388,19 @@ def _sweep_pass1(
     stream: StreamInput,
     clues: list[Clue],
     unit_len: int,
-) -> tuple[list[Clue], list[list[Clue]], list[InspireEntry]]:
+) -> tuple[list[Clue], list[list[Clue]]]:
     """扫描轮 1（unit 轴）：STRUCTURED / BREAK 遮蔽 + seed 连通块收集 + LABEL 边界/START 转换。
 
     STRUCTURED 和 BREAK 无条件保留并形成活跃区间；
     其他 soft clue 落在活跃区间内则过滤。
     LABEL 先尝试拼接"是"/"is"转 START；否则走边界过滤。
-    不满足边界条件的 label 收集为 InspireEntry，供后续消歧。
+    不满足边界条件的 label 直接丢弃（原 InspireEntry 机制已移除）。
     """
     start_events, end_events = _build_events(clues, unit_len)
 
     active_structured = 0
     active_break = 0
     survivors: list[Clue] = []
-    inspire_entries: list[InspireEntry] = []
 
     seed_groups: list[list[Clue]] = []
     cur_seed_group: list[Clue] = []
@@ -2451,15 +2442,7 @@ def _sweep_pass1(
                     clue = converted
                     role = ClueRole.START
                 elif not _has_label_boundary(stream, clue.start, clue.end):
-                    # 不满足边界条件的 label 降级为 inspire 条目。
-                    if clue.attr_type is not None:
-                        inspire_entries.append(InspireEntry(
-                            attr_type=clue.attr_type,
-                            unit_start=clue.unit_start,
-                            unit_end=clue.unit_end,
-                            text=clue.text,
-                            source_kind=clue.source_kind,
-                        ))
+                    # 不满足边界条件的 label 直接丢弃。
                     continue
 
             survivors.append(clue)
@@ -2476,7 +2459,7 @@ def _sweep_pass1(
     if cur_seed_group:
         seed_groups.append(cur_seed_group)
 
-    return survivors, seed_groups, inspire_entries
+    return survivors, seed_groups
 
 
 def _resolve_seed_group(group: list[Clue]) -> list[Clue]:

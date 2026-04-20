@@ -203,7 +203,7 @@ class RuleBasedPIIDetector:
                         slot.value,
                         normalized.match_terms or ((normalized_primary_text(normalized),) if normalized_primary_text(normalized) else ()),
                     ),
-                    matched_by="dictionary_local",
+                    matched_by="persona",
                     metadata={"local_entity_ids": [persona_id]},
                 )
             )

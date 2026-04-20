@@ -163,6 +163,9 @@ class CandidateDraft:
     bbox: BoundingBox | None = None
     span_start: int | None = None
     span_end: int | None = None
+    # 标记候选的 attr_type 已由 H 档 validator 或 persona 精匹配锁定，
+    # 下游不得再由 label 或启发式路径改写。
+    attr_locked: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -351,93 +354,6 @@ def _get_empty_clue_index() -> ClueIndex:
     return _EMPTY_CLUE_INDEX
 
 
-# ── InspireIndex：label 降级后的反向查询 ──
-
-
-@dataclass(frozen=True, slots=True)
-class InspireEntry:
-    """被降级的 label clue 保留为 inspire 条目，供后续消歧使用。"""
-    attr_type: PIIAttributeType
-    unit_start: int
-    unit_end: int
-    text: str
-    source_kind: str
-
-
-@dataclass(slots=True)
-class InspireIndex:
-    """按 unit 轴的 inspire 条目索引。用于在 STRUCTURED 候选提交时提供上下文暗示。
-
-    - ``_entries_at_unit[unit]``：起始于该 unit 的 InspireEntry 列表。
-    - ``_type_units[attr_type]``：该类型的所有条目所覆盖的 unit 集合（用于快速范围查找）。
-    """
-    _entries_at_unit: tuple[tuple[InspireEntry, ...], ...]
-    _type_units: dict[PIIAttributeType, frozenset[int]]
-    unit_count: int
-
-    def has_inspire_nearby(
-        self,
-        attr_type: PIIAttributeType,
-        unit_start: int,
-        unit_end: int,
-        window: int = 15,
-    ) -> bool:
-        """判断 [unit_start - window, unit_end + window) 范围内是否有指定类型的 inspire 条目。"""
-        covered = self._type_units.get(attr_type)
-        if not covered:
-            return False
-        lo = max(0, unit_start - window)
-        hi = min(self.unit_count, unit_end + window)
-        for u in range(lo, hi):
-            if u in covered:
-                return True
-        return False
-
-    def inspire_entries_in_range(self, unit_start: int, unit_end: int) -> list[InspireEntry]:
-        """返回 [unit_start, unit_end) 范围内起始的所有 inspire 条目。"""
-        result: list[InspireEntry] = []
-        lo = max(0, unit_start)
-        hi = min(len(self._entries_at_unit), unit_end)
-        for u in range(lo, hi):
-            result.extend(self._entries_at_unit[u])
-        return result
-
-
-def build_inspire_index(unit_count: int, entries: Sequence[InspireEntry]) -> InspireIndex:
-    """一次遍历构建 InspireIndex。"""
-    safe_count = max(0, unit_count)
-    buckets: list[list[InspireEntry]] = [[] for _ in range(safe_count)]
-    type_unit_sets: dict[PIIAttributeType, set[int]] = {}
-
-    for entry in entries:
-        us = entry.unit_start
-        if 0 <= us < safe_count:
-            buckets[us].append(entry)
-        # 记录该类型覆盖的所有 unit。
-        covered_lo = max(0, entry.unit_start)
-        covered_hi = min(safe_count, entry.unit_end)
-        unit_set = type_unit_sets.setdefault(entry.attr_type, set())
-        for u in range(covered_lo, covered_hi):
-            unit_set.add(u)
-
-    return InspireIndex(
-        _entries_at_unit=tuple(tuple(b) for b in buckets),
-        _type_units={k: frozenset(v) for k, v in type_unit_sets.items()},
-        unit_count=safe_count,
-    )
-
-
-_EMPTY_INSPIRE_INDEX = None
-
-
-def _get_empty_inspire_index() -> InspireIndex:
-    """惰性创建空 InspireIndex 单例。"""
-    global _EMPTY_INSPIRE_INDEX
-    if _EMPTY_INSPIRE_INDEX is None:
-        _EMPTY_INSPIRE_INDEX = build_inspire_index(0, ())
-    return _EMPTY_INSPIRE_INDEX
-
-
 @dataclass(slots=True)
 class ClueBundle:
     all_clues: tuple[Clue, ...]
@@ -446,7 +362,6 @@ class ClueBundle:
     negative_prefix_sum: list[int] = field(default_factory=lambda: [0])
     negative_start_weight: int = 0
     clue_index: ClueIndex | None = None
-    inspire_index: InspireIndex | None = None
 
     @property
     def label_clues(self) -> tuple[Clue, ...]:

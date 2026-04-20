@@ -47,15 +47,16 @@ def normalize_protection_level(value: ProtectionLevel | str | None = None) -> Pr
 class PIIAttributeType(str, Enum):
     """定义常见 PII 属性类别。
 
-    ``OTHER`` 为兜底：凡无法明确归入其余任一细分类（姓名、电话、地址等语义类，或
-    TIME / NUMERIC / ALNUM / TEXTUAL 等形态类）的，均应使用 ``OTHER``。
+    detector 主路径输出被限定在 13 类（NAME / PHONE / BANK_NUMBER / ID_NUMBER /
+    LICENSE_PLATE / EMAIL / ADDRESS / DETAILS / ORGANIZATION / TIME / AMOUNT /
+    NUMERIC / ALNUM）。``PASSPORT_NUMBER`` 与 ``DRIVER_LICENSE`` 仅由用户本地 persona
+    词典精确匹配产出，detector 规则/正则/label 路径不会输出这两类。
 
     按字符串形态粗分时：
     - 时间/日期时间片段（如 ``14:07``、``08:09:10``）为 ``TIME``
     - 仅数字与少量符号为 ``NUMERIC``
     - 字母与数字并存为 ``ALNUM``
-    - 仅文字与少量符号为 ``TEXTUAL``
-    - 其余（仅符号、空白、空串等）为 ``OTHER``
+    - 仅文字等其余情况不再单列形态类（由语义类或不产出候选承担）。
     """
 
     NAME = "name"
@@ -73,5 +74,3 @@ class PIIAttributeType(str, Enum):
     AMOUNT = "amount"
     NUMERIC = "numeric"
     ALNUM = "alnum"
-    TEXTUAL = "textual"
-    OTHER = "other"

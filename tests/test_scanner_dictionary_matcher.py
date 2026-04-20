@@ -474,6 +474,24 @@ def test_label_seed_metadata_keeps_boundary_signals():
     assert label_b.source_metadata["seed_is_left_edge"] == ["0"]
 
 
+def test_non_boundary_structured_label_is_dropped_instead_of_becoming_hint():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    stream = build_prompt_stream("这里的手机1234")
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+    parsed = StreamParser(locale_profile="mixed", ctx=ctx).parse(stream, bundle)
+
+    assert not any(clue.role == ClueRole.LABEL and clue.text == "手机" for clue in bundle.all_clues)
+    assert len(parsed.candidates) == 1
+    assert parsed.candidates[0].attr_type == PIIAttributeType.NUMERIC
+    assert "label_hint_attr" not in parsed.candidates[0].metadata
+
+
 def test_start_seed_metadata_marks_start_kind():
     ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
     _stream, segment = _first_segment("我叫张三")

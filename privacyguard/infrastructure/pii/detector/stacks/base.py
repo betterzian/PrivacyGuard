@@ -14,7 +14,6 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueIndex,
     Clue,
     ClueRole,
-    InspireIndex,
     StreamInput,
     StreamUnit,
 )
@@ -28,7 +27,6 @@ class StackContextLike(Protocol):
     clues: tuple[Clue, ...]
     negative_clues: tuple[Clue, ...]
     clue_index: ClueIndex
-    inspire_index: InspireIndex
 
     def has_negative_cover(self, unit_start: int, unit_end: int) -> bool: ...
 
@@ -96,6 +94,9 @@ def _build_value_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
         source_kind=clue.source_kind,
         claim_strength=ClaimStrength.HARD,
         metadata=metadata,
+        # 直接 hard clue 代表上游已给出明确类型；NUMERIC/ALNUM 仍允许后续 validator/label
+        # 继续细分，其余类型在 detector 主路径中视为高可信输出。
+        attr_locked=clue.attr_type not in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM},
     )
 
 

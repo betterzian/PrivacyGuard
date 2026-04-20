@@ -16,7 +16,6 @@ class DetectorOverridesModel(BaseModel):
     address: float | None = Field(default=None, ge=0.0, le=1.0)
     details: float | None = Field(default=None, ge=0.0, le=1.0)
     organization: float | None = Field(default=None, ge=0.0, le=1.0)
-    other: float | None = Field(default=None, ge=0.0, le=1.0)
 
     def to_attr_map(self) -> dict[PIIAttributeType, float]:
         mapping = {
@@ -24,7 +23,6 @@ class DetectorOverridesModel(BaseModel):
             "address": PIIAttributeType.ADDRESS,
             "details": PIIAttributeType.DETAILS,
             "organization": PIIAttributeType.ORGANIZATION,
-            "other": PIIAttributeType.OTHER,
         }
         result: dict[PIIAttributeType, float] = {}
         for key, value in self.model_dump(exclude_none=True).items():

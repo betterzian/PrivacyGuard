@@ -357,19 +357,12 @@ class BaseOrganizationStack(BaseStack):
         if self.clue.role == ClueRole.VALUE:
             has_value = True
             value_strength = _max_strength(value_strength, self.clue.strength)
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
-        has_inspire = self.context.inspire_index.has_inspire_nearby(
-            PIIAttributeType.ORGANIZATION,
-            unit_start,
-            unit_end,
-        )
         return _OrgEvidence(
             has_suffix=has_suffix,
             suffix_strength=suffix_strength,
             has_value=has_value,
             value_strength=value_strength,
             has_label=is_label_seed,
-            has_inspire=has_inspire,
             max_clue_strength=_max_strength(suffix_strength, value_strength),
         )
 
@@ -382,7 +375,6 @@ class _OrgEvidence:
     has_value: bool = False
     value_strength: ClaimStrength = ClaimStrength.WEAK
     has_label: bool = False
-    has_inspire: bool = False
     max_clue_strength: ClaimStrength = ClaimStrength.WEAK
 
 
@@ -419,12 +411,12 @@ def _meets_org_commit_threshold(
     if evidence.has_suffix and not evidence.has_value:
         if evidence.suffix_strength == ClaimStrength.SOFT:
             if locale == "zh":
-                return is_strong or (is_balanced and evidence.has_inspire)
+                # inspire 机制移除后，zh + SOFT suffix-only 仅在 STRONG 通过。
+                return is_strong
             return is_strong or is_balanced
         if evidence.suffix_strength == ClaimStrength.WEAK:
-            if locale == "zh":
-                return False
-            return is_strong and evidence.has_inspire
+            # inspire 机制移除后，WEAK suffix-only 一律拒绝。
+            return False
         return False
     if evidence.has_value and not evidence.has_suffix:
         if evidence.value_strength == ClaimStrength.HARD:

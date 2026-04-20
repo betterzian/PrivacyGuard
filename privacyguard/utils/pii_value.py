@@ -193,22 +193,18 @@ class NameComponents:
     middle_text: str | None = None
 
 
-def classify_content_shape_attr(value: str | None) -> PIIAttributeType:
-    """按内容形态粗分为 TIME / NUMERIC / ALNUM / TEXTUAL；其余一律为 OTHER（兜底）。
+def classify_content_shape_attr(value: str | None) -> PIIAttributeType | None:
+    """按内容形态粗分为 TIME / NUMERIC / ALNUM。
 
-    ``OTHER`` 表示未被 TIME / NUMERIC / ALNUM / TEXTUAL 规则容纳的内容：仅符号、空白、空串等。
-
-    - 时间/日期时间片段（如 ``14:07``、``08:09:10``）：TIME
-    - 仅数字与少量符号（无 Unicode 字母）：NUMERIC
-    - 字母与数字并存：ALNUM
-    - 仅文字与少量符号（无数字；字母含拉丁与中日韩等）：TEXTUAL
-    - 其它任意情况：OTHER
+    不再产出 ``TEXTUAL`` / ``OTHER``：
+    - 纯文字、仅符号、空白、空串等返回 ``None``，由调用侧直接跳过。
+    - 仅保留可进入 detector 主路径的 TIME / NUMERIC / ALNUM 三类。
     """
     if value is None:
-        return PIIAttributeType.OTHER
+        return None
     text = str(value)
     if not text.strip():
-        return PIIAttributeType.OTHER
+        return None
     if compact_time_value(text):
         return PIIAttributeType.TIME
     has_letter = any(char.isalpha() for char in text)
@@ -217,9 +213,7 @@ def classify_content_shape_attr(value: str | None) -> PIIAttributeType:
         return PIIAttributeType.ALNUM
     if has_digit and not has_letter:
         return PIIAttributeType.NUMERIC
-    if has_letter and not has_digit:
-        return PIIAttributeType.TEXTUAL
-    return PIIAttributeType.OTHER
+    return None
 
 
 def compact_time_value(value: str) -> str:
@@ -1127,10 +1121,6 @@ def _is_ignorable_match_char(attr_type: PIIAttributeType, char: str) -> bool:
         return char in _ALNUM_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.NUMERIC:
         return char in _ALNUM_MATCH_IGNORABLE
-    if attr_type == PIIAttributeType.OTHER:
-        return char in _ALNUM_MATCH_IGNORABLE
-    if attr_type == PIIAttributeType.TEXTUAL:
-        return char in _ORG_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ADDRESS:
         return char in _ADDRESS_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ORGANIZATION:

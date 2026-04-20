@@ -25,12 +25,10 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueBundle,
     ClueFamily,
     ClueIndex,
-    InspireIndex,
     ParseResult,
     StructuredLookupIndex,
     StreamInput,
     _get_empty_clue_index,
-    _get_empty_inspire_index,
     negative_has_cover,
     negative_has_start,
     negative_is_fully_covered,
@@ -38,7 +36,14 @@ from privacyguard.infrastructure.pii.detector.models import (
     negative_prev_covered_end_unit,
 )
 from privacyguard.infrastructure.pii.detector.stacks import BaseStack, StackManager, StackRun, get_stack_spec
+from privacyguard.infrastructure.pii.detector.stacks.structured import ALLOWED_DETECTOR_OUTPUT_ATTRS
 from privacyguard.utils.normalized_pii import normalize_pii, normalized_primary_text, same_entity
+
+# persona / 本地词典精匹配出口的 source_kind 白名单，豁免 detector 主路径的 attr_type 断言。
+_PERSONA_SOURCE_KINDS = frozenset({
+    "dictionary_session",
+    "persona",
+})
 
 _CandidateIdentityKey = tuple[PIIAttributeType, int, int, int, int, str]
 _FrozenMetadataItems = tuple[tuple[str, tuple[str, ...]], ...]
@@ -259,7 +264,6 @@ class StackContext:
     negative_start_weight: int = 0
     structured_lookup_index: StructuredLookupIndex = field(default_factory=StructuredLookupIndex)
     clue_index: ClueIndex = field(default_factory=_get_empty_clue_index)
-    inspire_index: InspireIndex = field(default_factory=_get_empty_inspire_index)
     commit_ceiling: int = 0
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
@@ -360,7 +364,6 @@ class StreamParser:
             negative_start_weight=bundle.negative_start_weight,
             structured_lookup_index=structured_lookup_index or StructuredLookupIndex(),
             clue_index=bundle.clue_index or _get_empty_clue_index(),
-            inspire_index=bundle.inspire_index or _get_empty_inspire_index(),
         )
         # consumed_ids 仅在 _commit_run 时追加，不在构建 run 时提前标记。
         # 这样 shrink 失败时败方 clue 不会被永久锁死。
@@ -687,31 +690,9 @@ class StreamParser:
     # Commit
     # ------------------------------------------------------------------
 
-    # inspire 消歧：通用 STRUCTURED 候选（NUMERIC/ALNUM）附近有被降级 label 暗示时，
-    # 将 attr_type 提升为 label 指示的具体类型。
-    _INSPIRE_PROMOTABLE_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM})
-    _INSPIRE_TARGET_TYPES = (
-        PIIAttributeType.PHONE,
-        PIIAttributeType.ID_NUMBER,
-        PIIAttributeType.BANK_NUMBER,
-        PIIAttributeType.PASSPORT_NUMBER,
-        PIIAttributeType.DRIVER_LICENSE,
-    )
-
-    def _try_inspire_promote(self, context: StackContext, candidate: CandidateDraft) -> None:
-        """若 STRUCTURED 候选 attr_type 为通用类型且附近有 inspire 暗示，提升 attr_type。"""
-        if candidate.attr_type not in self._INSPIRE_PROMOTABLE_TYPES:
-            return
-        inspire = context.inspire_index
-        for target in self._INSPIRE_TARGET_TYPES:
-            if inspire.has_inspire_nearby(target, candidate.unit_start, candidate.unit_end):
-                candidate.attr_type = target
-                return
-
     def _commit_run(self, context: StackContext, run: StackRun, consumed_ids: set[str]) -> None:
         """提交 run 并将其 consumed_ids 标记为已消费。"""
         consumed_ids |= run.consumed_ids
-        self._try_inspire_promote(context, run.candidate)
         self._commit_candidate(context, run.candidate)
         context.handled_label_clue_ids |= run.handled_label_clue_ids
 
@@ -726,6 +707,12 @@ class StreamParser:
             return
         if self._try_absorb_adjacent_address_candidate(context, candidate):
             return
+        # detector 主路径（非 persona 出口）仅允许产出 ALLOWED_DETECTOR_OUTPUT_ATTRS 内的类型。
+        if candidate.source_kind not in _PERSONA_SOURCE_KINDS:
+            assert candidate.attr_type in ALLOWED_DETECTOR_OUTPUT_ATTRS, (
+                f"detector 主路径产出非法 attr_type: {candidate.attr_type} "
+                f"(source_kind={candidate.source_kind})"
+            )
         context.candidates.append(candidate)
         context.candidate_identity_index[_candidate_identity_key(candidate)] = candidate
         context.claims.append(

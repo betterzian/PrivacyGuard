@@ -11,13 +11,64 @@ from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, Stac
 from privacyguard.infrastructure.pii.detector.stacks.common import is_control_clue
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
 
+# detector 主路径允许产出的 attr_type 集合；persona 精匹配可额外产出 PASSPORT/DRIVER。
+ALLOWED_DETECTOR_OUTPUT_ATTRS = frozenset({
+    PIIAttributeType.NAME,
+    PIIAttributeType.PHONE,
+    PIIAttributeType.BANK_NUMBER,
+    PIIAttributeType.ID_NUMBER,
+    PIIAttributeType.LICENSE_PLATE,
+    PIIAttributeType.EMAIL,
+    PIIAttributeType.ADDRESS,
+    PIIAttributeType.DETAILS,
+    PIIAttributeType.ORGANIZATION,
+    PIIAttributeType.TIME,
+    PIIAttributeType.AMOUNT,
+    PIIAttributeType.NUMERIC,
+    PIIAttributeType.ALNUM,
+})
+PERSONA_ONLY_ATTRS = frozenset({
+    PIIAttributeType.PASSPORT_NUMBER,
+    PIIAttributeType.DRIVER_LICENSE,
+})
+
+# label 分档：H 档 label 绝不改写 attr_type（validator 足以独立成立，误绑风险高）；
+# persona 独占类 label 只记 hint；强形态类（EMAIL）保留 label 驱动的 promote。
+HIGH_TRUST_LABEL_ATTRS = frozenset({
+    PIIAttributeType.PHONE,
+    PIIAttributeType.ID_NUMBER,
+    PIIAttributeType.BANK_NUMBER,
+})
+HIGH_TRUST_ATTRS = HIGH_TRUST_LABEL_ATTRS
+PERSONA_ONLY_LABEL_ATTRS = frozenset({
+    PIIAttributeType.PASSPORT_NUMBER,
+    PIIAttributeType.DRIVER_LICENSE,
+})
+LABEL_PROMOTE_ALLOWED = frozenset({PIIAttributeType.EMAIL})
+
+# 美国 NANP 非法 NPA（N11 服务号）与 NXX 禁用前缀。
+US_NANP_INVALID_NPA = frozenset({
+    "211", "311", "411", "511", "611", "711", "811", "911",
+})
+US_NANP_INVALID_NXX_PREFIX = "555"
+
+# 银行卡 IIN 白名单（prefix, (min_len, max_len)）。
+BANK_IIN_WHITELIST: tuple[tuple[str, tuple[int, int]], ...] = (
+    ("4", (13, 19)),
+    ("51", (16, 16)), ("52", (16, 16)), ("53", (16, 16)),
+    ("54", (16, 16)), ("55", (16, 16)),
+    *[(str(p), (16, 16)) for p in range(2221, 2721)],
+    ("34", (15, 15)), ("37", (15, 15)),
+    ("62", (16, 19)),
+    ("6011", (16, 16)), ("65", (16, 16)),
+    *[(str(p), (16, 16)) for p in range(3528, 3590)],
+)
+
 _LOOKUP_PLACEHOLDER_BY_ATTR = {
     PIIAttributeType.PHONE: "<phone>",
     PIIAttributeType.EMAIL: "<email>",
     PIIAttributeType.ID_NUMBER: "<id>",
     PIIAttributeType.BANK_NUMBER: "<bank>",
-    PIIAttributeType.PASSPORT_NUMBER: "<passport>",
-    PIIAttributeType.DRIVER_LICENSE: "<driver_license>",
     PIIAttributeType.LICENSE_PLATE: "<license_plate>",
     PIIAttributeType.AMOUNT: "<amount>",
 }
@@ -25,7 +76,7 @@ _LOOKUP_PLACEHOLDER_BY_ATTR = {
 _ID_CN_WEIGHTS = (7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2)
 _ID_CN_CHECK_CODES = "10X98765432"
 
-_ValidatorEntry = tuple[PIIAttributeType, int, str]
+_ValidatorEntry = tuple[PIIAttributeType, str]
 
 
 def _luhn_valid(digits: str) -> bool:
@@ -43,27 +94,32 @@ def _luhn_valid(digits: str) -> bool:
     return total % 10 == 0
 
 
-def _luhn_valid_wide(digits: str) -> bool:
-    """宽范围 Luhn 校验。"""
-    if not digits.isdigit() or not (12 <= len(digits) <= 22):
-        return False
-    total = 0
-    for index, ch in enumerate(reversed(digits)):
-        n = ord(ch) - 48
-        if index % 2 == 1:
-            n *= 2
-            if n > 9:
-                n -= 9
-        total += n
-    return total % 10 == 0
-
-
 def _validate_cn_phone(digits: str) -> bool:
     return len(digits) == 11 and digits[0] == "1" and digits[1] in "3456789"
 
 
-def _validate_us_phone(digits: str) -> bool:
-    return len(digits) == 10 and digits[0] in "23456789"
+def _validate_us_phone_strict(digits: str) -> bool:
+    """美国 NANP 严格校验：10 位；首位非 0/1；NPA 不在 N11；NXX 不以 555 开头。"""
+    if len(digits) != 10 or not digits.isdigit():
+        return False
+    if digits[0] in "01":
+        return False
+    npa = digits[:3]
+    nxx = digits[3:6]
+    if npa in US_NANP_INVALID_NPA:
+        return False
+    if nxx.startswith(US_NANP_INVALID_NXX_PREFIX):
+        return False
+    return True
+
+
+def _match_bank_iin(digits: str) -> bool:
+    """按 IIN 白名单匹配银行卡号前缀 + 长度区间。"""
+    n = len(digits)
+    for prefix, (lo, hi) in BANK_IIN_WHITELIST:
+        if lo <= n <= hi and digits.startswith(prefix):
+            return True
+    return False
 
 
 def _normalize_structured_digits_for_phone(digits: str) -> str:
@@ -72,12 +128,10 @@ def _normalize_structured_digits_for_phone(digits: str) -> str:
     这里假设上游已经用 `re.sub(r"\\D", "", ...)` 去掉了空格、连字符、括号等连接符。
     额外处理常见国家码/前缀：
     - +86XXXXXXXXXXX → 86XXXXXXXXXXX（已去掉 +）→ 去掉 86，得到 11 位中国手机号。
-    - +1XXXXXXXXXX → 1XXXXXXXXXX → 若形态像北美 10 位电话的前缀形式，则去掉 1。
+    - 不再盲目把 11 位 `1XXXXXXXXXX` 归一成美式号码，避免中国手机号或普通 11 位数字被误判。
     """
     if len(digits) == 13 and digits.startswith("86") and re.fullmatch(r"1[3-9]\d{9}", digits[2:]):
         return digits[2:]
-    if len(digits) == 11 and digits.startswith("1") and re.fullmatch(r"[2-9]\d{9}", digits[1:]):
-        return digits[1:]
     return digits
 
 
@@ -106,31 +160,34 @@ def _validate_cn_id_15(digits: str) -> bool:
 
 
 def _route_validators(*, digits: str, text: str, fragment_type: str) -> _ValidatorEntry | None:
-    """按数值形态升级为明确的结构化属性。"""
+    """按数值形态升级为明确的结构化属性。
+
+    顺序：CN phone → US phone (严格) → CN ID 18 → CN ID 15 → Luhn + IIN 白名单。
+    宽 Luhn 与无 IIN 白名单的命中一律退化为 NUMERIC（由调用方兜底）。
+    """
     is_cn_id_alnum = fragment_type == "ALNUM" and bool(re.fullmatch(r"\d{17}[Xx]", text))
     if (fragment_type != "NUM" and not is_cn_id_alnum) or not digits:
         return None
 
-    hits: list[_ValidatorEntry] = []
     n = len(digits)
-    if n == 11 and _validate_cn_phone(digits):
-        hits.append((PIIAttributeType.PHONE, 118, "validated_phone_cn"))
-    if n == 10 and _validate_us_phone(digits):
-        hits.append((PIIAttributeType.PHONE, 117, "validated_phone_us"))
+    if fragment_type == "NUM" and n == 11 and _validate_cn_phone(digits):
+        return (PIIAttributeType.PHONE, "validated_phone_cn")
+    if fragment_type == "NUM" and n == 10 and _validate_us_phone_strict(digits):
+        return (PIIAttributeType.PHONE, "validated_phone_us")
     if n == 18 or is_cn_id_alnum:
         id_text = text if len(text) == 18 else digits
         if _validate_cn_id_18(id_text):
-            hits.append((PIIAttributeType.ID_NUMBER, 115, "validated_id_cn_18"))
-    if n == 15 and _validate_cn_id_15(digits):
-        hits.append((PIIAttributeType.ID_NUMBER, 113, "validated_id_cn_15"))
-    if 13 <= n <= 19 and _luhn_valid(digits):
-        hits.append((PIIAttributeType.BANK_NUMBER, 114, "validated_bank_number_pan"))
-    if 12 <= n <= 22 and _luhn_valid_wide(digits):
-        hits.append((PIIAttributeType.BANK_NUMBER, 110, "validated_bank_number_account"))
-    if not hits:
-        return None
-    hits.sort(key=lambda item: -item[1])
-    return hits[0]
+            return (PIIAttributeType.ID_NUMBER, "validated_id_cn_18")
+    if fragment_type == "NUM" and n == 15 and _validate_cn_id_15(digits):
+        return (PIIAttributeType.ID_NUMBER, "validated_id_cn_15")
+    if (
+        fragment_type == "NUM"
+        and 13 <= n <= 19
+        and _luhn_valid(digits)
+        and _match_bank_iin(digits)
+    ):
+        return (PIIAttributeType.BANK_NUMBER, "validated_bank_number_pan")
+    return None
 
 
 def _hard_source_for_entry(entry: DictionaryEntry) -> str:
@@ -173,6 +230,10 @@ class StructuredStack(BaseStack):
         if entry is not None:
             candidate.attr_type = entry.attr_type
             candidate.source_kind = entry.matched_by
+            # persona/本地词典的精匹配被视为高可信出口，锁定 attr_type，
+            # 避免下游 label 或启发式再次改写。
+            if entry.attr_type not in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}:
+                candidate.attr_locked = True
             candidate.metadata = merge_metadata(
                 candidate.metadata,
                 {
@@ -187,9 +248,11 @@ class StructuredStack(BaseStack):
 
         result = _route_validators(digits=pure_digits, text=clue.text, fragment_type=fragment_type)
         if result is not None:
-            attr_type, _priority, source_kind = result
+            attr_type, source_kind = result
             candidate.attr_type = attr_type
             candidate.source_kind = source_kind
+            # H 档 validator 命中直接锁定 attr_type。
+            candidate.attr_locked = True
             candidate.metadata = merge_metadata(
                 candidate.metadata,
                 {"validated_by": [source_kind], "original_fragment_type": [fragment_type]},
@@ -197,6 +260,15 @@ class StructuredStack(BaseStack):
         return candidate
 
     def _try_label_bind(self) -> StackRun | None:
+        """label 绑定紧邻 value。按 label.attr_type 分档控制是否 promote。
+
+        分档规则：
+        - H 档（PHONE/ID/BANK）：不改 attr_type；仅记 label_clue_ids 与 label_hint_attr。
+        - persona 独占类（PASSPORT/DRIVER）：不改 attr_type 且不绑 label_clue_ids，
+          仅在 metadata 留 hint。
+        - LABEL_PROMOTE_ALLOWED（EMAIL）：保留原 promote，attr_locked=True。
+        - 其余 attr_type：不 promote NUMERIC/ALNUM；对已 attr_locked 的候选记 mismatch。
+        """
         raw_text = self.context.stream.text
         cursor = self.clue.end
         for index in range(self.clue_index + 1, len(self.context.clues)):
@@ -214,20 +286,49 @@ class StructuredStack(BaseStack):
                     PIIAttributeType.NUMERIC,
                     PIIAttributeType.ALNUM,
                 } else _build_value_candidate(clue, self.context.stream.source)
-                if (
-                    candidate.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}
-                    and self.clue.attr_type is not None
-                ):
-                    candidate.attr_type = self.clue.attr_type
+
+                target_attr = self.clue.attr_type
+                is_generic = candidate.attr_type in {
+                    PIIAttributeType.NUMERIC,
+                    PIIAttributeType.ALNUM,
+                }
+
+                if is_generic and target_attr in HIGH_TRUST_LABEL_ATTRS:
+                    # H 档：label 仅作信号，不改 attr_type。
+                    candidate.label_clue_ids.add(self.clue.clue_id)
                     candidate.metadata = merge_metadata(
                         candidate.metadata,
-                        {"assigned_by_label_attr": [self.clue.attr_type.value]},
+                        {"label_hint_attr": [target_attr.value]},
                     )
-                candidate.label_clue_ids.add(self.clue.clue_id)
-                candidate.metadata = merge_metadata(
-                    candidate.metadata,
-                    {"bound_label_clue_ids": [self.clue.clue_id]},
-                )
+                elif is_generic and target_attr in PERSONA_ONLY_LABEL_ATTRS:
+                    # persona 独占类：不改 attr_type，也不绑 label_clue_ids。
+                    candidate.metadata = merge_metadata(
+                        candidate.metadata,
+                        {"label_hint_attr": [target_attr.value]},
+                    )
+                elif is_generic and target_attr in LABEL_PROMOTE_ALLOWED:
+                    # EMAIL：形态本身含 @，允许 label 驱动 promote。
+                    candidate.attr_type = target_attr
+                    candidate.attr_locked = True
+                    candidate.label_clue_ids.add(self.clue.clue_id)
+                    candidate.metadata = merge_metadata(
+                        candidate.metadata,
+                        {"assigned_by_label_attr": [target_attr.value]},
+                    )
+                elif candidate.attr_locked:
+                    # H 档 validator 或 persona 已锁定类型：只记 label 信号或 mismatch。
+                    if target_attr == candidate.attr_type:
+                        candidate.label_clue_ids.add(self.clue.clue_id)
+                        candidate.metadata = merge_metadata(
+                            candidate.metadata,
+                            {"bound_label_clue_ids": [self.clue.clue_id]},
+                        )
+                    elif target_attr is not None:
+                        candidate.metadata = merge_metadata(
+                            candidate.metadata,
+                            {"label_attr_mismatch": [target_attr.value]},
+                        )
+
                 return StackRun(
                     attr_type=candidate.attr_type,
                     candidate=candidate,

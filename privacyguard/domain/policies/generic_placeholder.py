@@ -26,8 +26,6 @@ GENERIC_PLACEHOLDER_LABELS_ZH: dict[PIIAttributeType, str] = {
     PIIAttributeType.AMOUNT: "金额",
     PIIAttributeType.NUMERIC: "数字",
     PIIAttributeType.ALNUM: "字母数字",
-    PIIAttributeType.TEXTUAL: "文字",
-    PIIAttributeType.OTHER: "敏感信息",
 }
 
 GENERIC_PLACEHOLDER_LABELS_EN: dict[PIIAttributeType, str] = {
@@ -46,8 +44,6 @@ GENERIC_PLACEHOLDER_LABELS_EN: dict[PIIAttributeType, str] = {
     PIIAttributeType.AMOUNT: "amount",
     PIIAttributeType.NUMERIC: "number",
     PIIAttributeType.ALNUM: "alnum",
-    PIIAttributeType.TEXTUAL: "text",
-    PIIAttributeType.OTHER: "sensitive",
 }
 
 # 兼容旧导入路径；默认暴露中文标签表。
