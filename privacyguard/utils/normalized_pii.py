@@ -117,6 +117,10 @@ _ZH_NUMERAL_CHARS = set("零〇一二三四五六七八九十百千两")
 _AMOUNT_UNIT_RE = re.compile(
     r"(?i)(?:us\$|usd|rmb|cny|eur|gbp|dollars?|yuan|元|美元|欧元|英镑)"
 )
+_PHONE_US_COUNTRY_CODE_PREFIX_RE = re.compile(r"^\s*(?:\(\+?1\)|\+1)")
+_PHONE_US_TRUNK_AREA_PREFIX_RE = re.compile(r"^\s*1[ \-]*\([2-9]\d{2}\)")
+_PHONE_CN_MOBILE_RE = re.compile(r"1[3-9]\d{9}")
+_PHONE_US_TEN_DIGIT_RE = re.compile(r"[2-9]\d{9}")
 
 
 def normalize_pii(
@@ -145,7 +149,7 @@ def normalize_pii(
     }:
         canonical = _digits_only(normalized_raw)
         if attr_type == PIIAttributeType.PHONE:
-            canonical = _normalize_phone_digits(canonical)
+            canonical = _normalize_phone_digits(canonical, raw_text=normalized_raw, metadata=metadata)
         return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
     if attr_type in {PIIAttributeType.PASSPORT_NUMBER, PIIAttributeType.DRIVER_LICENSE, PIIAttributeType.ALNUM}:
         canonical = _alnum_only(normalized_raw).upper()
@@ -1516,12 +1520,39 @@ def _metadata_values(metadata: Mapping[str, object] | None, key: str) -> tuple[s
     return (text,) if text else ()
 
 
-def _normalize_phone_digits(digits: str) -> str:
-    if len(digits) == 13 and digits.startswith("86") and re.fullmatch(r"1[3-9]\d{9}", digits[2:]):
+def _normalize_phone_digits(
+    digits: str,
+    *,
+    raw_text: str = "",
+    metadata: Mapping[str, object] | None = None,
+) -> str:
+    phone_region = (_metadata_values(metadata, "phone_region")[:1] or ("",))[0].lower()
+    if phone_region == "cn":
+        if len(digits) == 13 and digits.startswith("86") and _PHONE_CN_MOBILE_RE.fullmatch(digits[2:]):
+            return digits[2:]
+        return digits
+    if phone_region == "us":
+        if len(digits) == 11 and digits.startswith("1") and _is_valid_us_phone_digits(digits[1:]):
+            return digits[1:]
+        return digits
+    if len(digits) == 13 and digits.startswith("86") and _PHONE_CN_MOBILE_RE.fullmatch(digits[2:]):
         return digits[2:]
-    if len(digits) == 11 and digits.startswith("1") and re.fullmatch(r"[2-9]\d{9}", digits[1:]):
+    normalized_text = unicodedata.normalize("NFKC", raw_text or "")
+    if (
+        len(digits) == 11
+        and digits.startswith("1")
+        and _is_valid_us_phone_digits(digits[1:])
+        and (
+            _PHONE_US_COUNTRY_CODE_PREFIX_RE.match(normalized_text)
+            or _PHONE_US_TRUNK_AREA_PREFIX_RE.match(normalized_text)
+        )
+    ):
         return digits[1:]
     return digits
+
+
+def _is_valid_us_phone_digits(digits: str) -> bool:
+    return len(digits) == 10 and digits.isdigit() and bool(_PHONE_US_TEN_DIGIT_RE.fullmatch(digits))
 
 
 def _organization_canonical(value: str) -> str:

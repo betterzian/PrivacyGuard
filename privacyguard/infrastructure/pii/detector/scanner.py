@@ -172,6 +172,42 @@ def _time_match_adjacent_ok(text: str, start: int, end: int) -> bool:
 # 通用数字片段：允许常见“电话号码写法”的连接符。
 # 目的：把 "+86 139-1234-1234" 这类写法抽成一个片段，后续再在 structured stack 中统一去连接符/去国家码做校验。
 _DIGIT_FRAGMENT_PATTERN = re.compile(r"\+?\d(?:[ \-()]*\d)*")
+_PHONE_JOINER_PATTERN = r"[ \-()]*"
+_CN_PHONE_BODY_PATTERN = rf"1[3-9](?:{_PHONE_JOINER_PATTERN}\d){{9}}"
+_US_PHONE_BODY_PATTERN = rf"[2-9](?:{_PHONE_JOINER_PATTERN}\d){{2}}(?:{_PHONE_JOINER_PATTERN}[2-9])(?:{_PHONE_JOINER_PATTERN}\d){{6}}"
+_US_PHONE_AFTER_AREA_PATTERN = rf"[2-9](?:{_PHONE_JOINER_PATTERN}\d){{2}}(?:{_PHONE_JOINER_PATTERN}\d){{4}}"
+_PHONE_PATTERNS: tuple[tuple[str, str, str, re.Pattern[str]], ...] = (
+    (
+        "cn_country_code_paren",
+        "cn",
+        "86",
+        re.compile(rf"(?<![A-Za-z0-9])\(\+?86\){_PHONE_JOINER_PATTERN}{_CN_PHONE_BODY_PATTERN}(?![A-Za-z0-9])"),
+    ),
+    (
+        "cn_country_code",
+        "cn",
+        "86",
+        re.compile(rf"(?<![A-Za-z0-9])\+?86{_PHONE_JOINER_PATTERN}{_CN_PHONE_BODY_PATTERN}(?![A-Za-z0-9])"),
+    ),
+    (
+        "us_country_code_paren",
+        "us",
+        "1",
+        re.compile(rf"(?<![A-Za-z0-9])\(\+?1\){_PHONE_JOINER_PATTERN}{_US_PHONE_BODY_PATTERN}(?![A-Za-z0-9])"),
+    ),
+    (
+        "us_country_code",
+        "us",
+        "1",
+        re.compile(rf"(?<![A-Za-z0-9])\+1{_PHONE_JOINER_PATTERN}{_US_PHONE_BODY_PATTERN}(?![A-Za-z0-9])"),
+    ),
+    (
+        "us_trunk_area_paren",
+        "us",
+        "1",
+        re.compile(rf"(?<![A-Za-z0-9])1[ \-]*\([2-9]\d{{2}}\){_PHONE_JOINER_PATTERN}{_US_PHONE_AFTER_AREA_PATTERN}(?![A-Za-z0-9])"),
+    ),
+)
 
 # 混合片段：字母数字混合（至少包含一个数字和一个字母），允许中间带 `_` / `-`。
 _ALNUM_FRAGMENT_PATTERN = re.compile(
@@ -500,7 +536,43 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
         )
         excluded_spans.append((match.start(), match.end()))
 
-    # ── 2d: 提取纯数字片段 ──
+    # ── 2d: 先提取带国家码 / 括号结构的 phone-like 数字段，避免被通用数字片段拆碎。 ──
+    for phone_pattern, phone_region, phone_country_code, pattern in _PHONE_PATTERNS:
+        for match in pattern.finditer(text):
+            value = match.group(0)
+            if _overlaps_any(match.start(), match.end(), excluded_spans):
+                continue
+            digits = re.sub(r"\D", "", value)
+            if len(digits) < 10:
+                continue
+            _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.STRUCTURED,
+                    role=ClueRole.VALUE,
+                    attr_type=PIIAttributeType.NUM,
+                    strength=ClaimStrength.HARD,
+                    start=match.start(),
+                    end=match.end(),
+                    text=value,
+                    unit_start=_us,
+                    unit_end=_ue,
+                    source_kind="extract_digit_fragment",
+                    source_metadata={
+                        "hard_source": ["regex"],
+                        "placeholder": ["<num>"],
+                        "fragment_type": ["NUM"],
+                        "pure_digits": [digits],
+                        "phone_region": [phone_region],
+                        "phone_pattern": [phone_pattern],
+                        "phone_country_code": [phone_country_code],
+                    },
+                )
+            )
+            excluded_spans.append((match.start(), match.end()))
+
+    # ── 2e: 提取纯数字片段 ──
     for match in _DIGIT_FRAGMENT_PATTERN.finditer(text):
         value = match.group(0)
         if _overlaps_any(match.start(), match.end(), excluded_spans):

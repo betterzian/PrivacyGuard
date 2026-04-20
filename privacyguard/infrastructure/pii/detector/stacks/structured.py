@@ -106,14 +106,30 @@ def _match_bank_iin(digits: str) -> bool:
     return False
 
 
-def _normalize_structured_digits_for_phone(digits: str) -> str:
+def _normalize_structured_digits_for_phone(
+    digits: str,
+    *,
+    metadata: dict[str, list[str]] | None = None,
+) -> str:
     """结构化片段在进入 validator 前的数字规范化。
 
     这里假设上游已经用 `re.sub(r"\\D", "", ...)` 去掉了空格、连字符、括号等连接符。
     额外处理常见国家码/前缀：
     - +86XXXXXXXXXXX → 86XXXXXXXXXXX（已去掉 +）→ 去掉 86，得到 11 位中国手机号。
-    - 不再盲目把 11 位 `1XXXXXXXXXX` 归一成美式号码，避免中国手机号或普通 11 位数字被误判。
+    - 仅在 scanner 已标记 `phone_region=us` 时，才允许把 trunk-1 去掉。
     """
+    metadata = metadata or {}
+    phone_region = str((metadata.get("phone_region") or [""])[0]).strip().lower()
+    phone_pattern = str((metadata.get("phone_pattern") or [""])[0]).strip().lower()
+    if phone_region == "cn" and len(digits) == 13 and digits.startswith("86") and re.fullmatch(r"1[3-9]\d{9}", digits[2:]):
+        return digits[2:]
+    if phone_region == "us" and phone_pattern in {
+        "us_country_code",
+        "us_country_code_paren",
+        "us_trunk_area_paren",
+    } and len(digits) == 11 and digits.startswith("1"):
+        return digits[1:]
+    # 无显式 region 时仅保留中国国家码兜底，避免把裸 11 位数字误收成美式号码。
     if len(digits) == 13 and digits.startswith("86") and re.fullmatch(r"1[3-9]\d{9}", digits[2:]):
         return digits[2:]
     return digits
@@ -143,7 +159,13 @@ def _validate_cn_id_15(digits: str) -> bool:
     return 1 <= month <= 12 and 1 <= day <= 31
 
 
-def _route_validators(*, digits: str, text: str, fragment_type: str) -> _ValidatorEntry | None:
+def _route_validators(
+    *,
+    digits: str,
+    text: str,
+    fragment_type: str,
+    phone_region: str | None = None,
+) -> _ValidatorEntry | None:
     """按数值形态升级为明确的结构化属性。
 
     顺序：CN phone → US phone (严格) → CN ID 18 → CN ID 15 → Luhn + IIN 白名单。
@@ -154,6 +176,15 @@ def _route_validators(*, digits: str, text: str, fragment_type: str) -> _Validat
         return None
 
     n = len(digits)
+    normalized_region = str(phone_region or "").strip().lower()
+    if fragment_type == "NUM" and normalized_region == "cn":
+        if _validate_cn_phone(digits):
+            return (PIIAttributeType.PHONE, "validated_phone_cn")
+        return None
+    if fragment_type == "NUM" and normalized_region == "us":
+        if _validate_us_phone_strict(digits):
+            return (PIIAttributeType.PHONE, "validated_phone_us")
+        return None
     if fragment_type == "NUM" and n == 11 and _validate_cn_phone(digits):
         return (PIIAttributeType.PHONE, "validated_phone_cn")
     if fragment_type == "NUM" and n == 10 and _validate_us_phone_strict(digits):
@@ -203,7 +234,8 @@ class StructuredStack(BaseStack):
         metadata = dict(clue.source_metadata)
         fragment_type = self._fragment_type(clue)
         pure_digits = (metadata.get("pure_digits") or [re.sub(r"\D", "", clue.text)])[0]
-        pure_digits = _normalize_structured_digits_for_phone(pure_digits)
+        pure_digits = _normalize_structured_digits_for_phone(pure_digits, metadata=metadata)
+        phone_region = str((metadata.get("phone_region") or [""])[0]).strip().lower() or None
 
         candidate = _build_value_candidate(clue, self.context.stream.source)
         entry = self._lookup_dictionary_entry(clue.text, fragment_type, pure_digits)
@@ -226,7 +258,12 @@ class StructuredStack(BaseStack):
             )
             return candidate
 
-        result = _route_validators(digits=pure_digits, text=clue.text, fragment_type=fragment_type)
+        result = _route_validators(
+            digits=pure_digits,
+            text=clue.text,
+            fragment_type=fragment_type,
+            phone_region=phone_region,
+        )
         if result is not None:
             attr_type, source_kind = result
             candidate.attr_type = attr_type

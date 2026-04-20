@@ -23,6 +23,24 @@ def test_phone_canonical_strips_supported_country_codes_only():
     assert keep.canonical == "442079460958"
 
 
+def test_phone_canonical_respects_phone_region_and_keeps_bare_cn_mobile():
+    bare_cn = normalize_pii(PIIAttributeType.PHONE, "13132111111")
+    cn_country = normalize_pii(
+        PIIAttributeType.PHONE,
+        "86 13132111111",
+        metadata={"phone_region": ["cn"]},
+    )
+    us_country = normalize_pii(
+        PIIAttributeType.PHONE,
+        "1(231)2244423",
+        metadata={"phone_region": ["us"]},
+    )
+
+    assert bare_cn.canonical == "13132111111"
+    assert cn_country.canonical == "13132111111"
+    assert us_country.canonical == "2312244423"
+
+
 def test_email_keeps_raw_text_and_only_changes_canonical():
     normalized = normalize_pii(PIIAttributeType.EMAIL, "A.b+c @Example.com")
 

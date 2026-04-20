@@ -141,6 +141,12 @@ def test_prompt_stream_builds_single_layer_units_for_ascii_digit_cjk_and_tokens(
     assert len(set(stream.char_to_unit[ocr_break_start : ocr_break_start + len(OCR_BREAK)])) == 1
 
 
+def test_prompt_stream_normalizes_fullwidth_parentheses_only():
+    stream = build_prompt_stream("备注【测试】（+86）13812345678")
+
+    assert stream.text == "备注【测试】(+86)13812345678"
+
+
 def test_hard_pattern_scan_prefers_alnum_fragment_over_nested_digit_fragment():
     stream = build_prompt_stream("h123 12345678a")
 
@@ -212,6 +218,12 @@ def test_build_ocr_stream_rewrites_cjk_whitespace(raw_text: str, expected_text: 
     prepared = build_ocr_stream([_ocr_block(raw_text, block_id="b1", line_id=0)])
 
     assert prepared.stream.text == expected_text
+
+
+def test_build_ocr_stream_normalizes_fullwidth_parentheses_only():
+    prepared = build_ocr_stream([_ocr_block("备注【测试】（+86）13812345678", block_id="b1", line_id=0)])
+
+    assert prepared.stream.text == "备注【测试】(+86)13812345678"
 
 
 def test_ignored_spans_still_filter_dictionary_matches():
@@ -730,6 +742,37 @@ def test_hard_pattern_scan_matches_amount_before_generic_fragments():
         and clue.text in {"88", "532.00", "12", "181.00"}
         for clue in clues
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_text", "expected_region", "expected_pattern"),
+    [
+        ("（+86）13812345678", "(+86)13812345678", "cn", "cn_country_code_paren"),
+        ("+86 138-1234-5678", "+86 138-1234-5678", "cn", "cn_country_code"),
+        ("8613812345678", "8613812345678", "cn", "cn_country_code"),
+        ("（+1）4152671234", "(+1)4152671234", "us", "us_country_code_paren"),
+        ("+1 4152671234", "+1 4152671234", "us", "us_country_code"),
+        ("1（415）2671234", "1(415)2671234", "us", "us_trunk_area_paren"),
+    ],
+)
+def test_hard_pattern_scan_keeps_phone_structure_as_single_fragment(
+    text: str,
+    expected_text: str,
+    expected_region: str,
+    expected_pattern: str,
+):
+    stream = build_prompt_stream(text)
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert len(clues) == 1
+    clue = clues[0]
+    assert clue.attr_type == PIIAttributeType.NUM
+    assert clue.text == expected_text
+    assert clue.source_metadata["phone_region"] == [expected_region]
+    assert clue.source_metadata["phone_pattern"] == [expected_pattern]
 
 
 def test_hard_pattern_scan_matches_alnum_with_underscore_and_hyphen():

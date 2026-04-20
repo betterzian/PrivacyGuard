@@ -24,6 +24,10 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import (
 )
 
 _ZERO_WIDTH_CHARS = frozenset({"\u200b", "\u200c", "\u200d", "\ufeff", "\u2060"})
+_STREAM_PUNCT_NORMALIZATION = str.maketrans({
+    "（": "(",
+    "）": ")",
+})
 
 
 class OCRSemanticChunkGraphError(RuntimeError):
@@ -38,7 +42,7 @@ class _BlockToken:
 
 
 def build_prompt_stream(text: str) -> StreamInput:
-    clean_text = text or ""
+    clean_text = _normalize_stream_text(text or "")
     units, char_to_unit = _build_stream_units(clean_text)
     char_refs = tuple(
         SourceRef(
@@ -599,6 +603,7 @@ def _normalize_block_chars(text: str) -> tuple[list[str], list[int | None]]:
     chars: list[str] = []
     raw_indices: list[int | None] = []
     for raw_index, raw_char in enumerate(text):
+        raw_char = _normalize_stream_char(raw_char)
         normalized = raw_char if unicodedata.category(raw_char).startswith("P") else unicodedata.normalize("NFKC", raw_char)
         for char in normalized:
             rewritten = _normalize_intermediate_char(char)
@@ -618,6 +623,18 @@ def _normalize_intermediate_char(char: str) -> str:
     if unicodedata.category(char).startswith("C"):
         return ""
     return char
+
+
+def _normalize_stream_text(text: str) -> str:
+    """统一 prompt / OCR 流在 detector 前的最小字符规整。"""
+    if not text:
+        return ""
+    return text.translate(_STREAM_PUNCT_NORMALIZATION)
+
+
+def _normalize_stream_char(char: str) -> str:
+    """按单字符规整全角括号，保持 raw_index 一对一映射。"""
+    return char.translate(_STREAM_PUNCT_NORMALIZATION)
 
 
 def _rewrite_whitespace(chars: list[str], raw_indices: list[int | None]) -> tuple[list[str], list[int | None]]:
