@@ -111,6 +111,20 @@ class ZhNameStack(BaseNameStack):
             return self._run_boundary_candidate()
         return None
 
+    def _trimmed_candidate_has_value_beyond_family(
+        self,
+        *,
+        candidate: CandidateDraft,
+        name_clues: list[tuple[int, Clue]],
+    ) -> bool:
+        """中文姓名裁剪后若只剩可解析的姓，不单独提交。"""
+        if not super()._trimmed_candidate_has_value_beyond_family(candidate=candidate, name_clues=name_clues):
+            return False
+        family_anchor = self._resolve_family_anchor(candidate.start, candidate.end)
+        if family_anchor is None:
+            return True
+        return candidate.end > family_anchor.end
+
     def _run_direct_span(self) -> StackRun | None:
         start = self.clue.start
         end = self.clue.end

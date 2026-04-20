@@ -3,7 +3,7 @@
 冲突裁决策略：
 - 只要冲突涉及 NAME，统一按 claim_strength 裁决；同级保留 NAME。
 - NAME 胜出时仅提交 NAME，本轮从 NAME 的 next_index 继续，失败 challenger 不提前消费。
-- NAME 未赢则提交赢家并消费 NAME。
+- NAME 未赢时，先尝试把 NAME 裁掉冲突区；裁后仍满足姓名提交条件则与赢家一并提交，否则仅提交赢家。
 - parser 维护全局 commit_ceiling；任何后续候选都不能再取到其左侧 unit。
 - 不涉及 NAME 时，沿用现有 hard/soft + soft_priority + fallback 机制。
 """
@@ -466,7 +466,14 @@ class StreamParser:
         if win_key == "b":
             return self._commit_winner_and_drop_loser(context, consumed_ids, run_b, run_a)
         if PIIAttributeType.NAME in {ca.attr_type, cb.attr_type}:
-            return self._resolve_name_conflict(context, consumed_ids, run_a, run_b)
+            return self._resolve_name_conflict(
+                context,
+                consumed_ids,
+                run_a,
+                stack_a,
+                run_b,
+                stack_b,
+            )
 
         hard_a = ca.claim_strength == ClaimStrength.HARD
         hard_b = cb.claim_strength == ClaimStrength.HARD
@@ -509,9 +516,11 @@ class StreamParser:
         context: StackContext,
         consumed_ids: set[str],
         run_a: StackRun,
+        stack_a: BaseStack | None,
         run_b: StackRun,
+        stack_b: BaseStack | None,
     ) -> int:
-        """统一处理 NAME 相关冲突，不做 shrink。"""
+        """统一处理 NAME 相关冲突。NAME 失败时可尝试裁剪保留未冲突片段。"""
         ca, cb = run_a.candidate, run_b.candidate
         rank_a = _claim_strength_rank(ca.claim_strength)
         rank_b = _claim_strength_rank(cb.claim_strength)
@@ -531,7 +540,15 @@ class StreamParser:
 
         if winner_run.candidate.attr_type == PIIAttributeType.NAME:
             return self._commit_name_winner_and_keep_loser(context, consumed_ids, winner_run)
-        return self._commit_winner_and_drop_loser(context, consumed_ids, winner_run, loser_run)
+        loser_stack = stack_a if loser_run is run_a else stack_b
+        return self._commit_winner_and_shrink_loser(
+            context,
+            consumed_ids,
+            winner_run,
+            None,
+            loser_run,
+            loser_stack,
+        )
 
     def _resolve_license_plate_conflict(
         self,
@@ -561,17 +578,24 @@ class StreamParser:
 
         consumed_ids 仅在实际 commit 时追加——shrink 失败则败方 clue 不被锁死。
         """
-        self._commit_run(context, winner_run, consumed_ids)
-
         if loser_stack is None:
+            self._commit_run(context, winner_run, consumed_ids)
             context.handled_label_clue_ids |= loser_run.handled_label_clue_ids
             return winner_run.next_index
 
         wc = winner_run.candidate
         shrunk = loser_stack.shrink(loser_run, wc.unit_start, wc.unit_end)
         if shrunk is not None:
-            self._commit_run(context, shrunk, consumed_ids)
+            sc = shrunk.candidate
+            if sc.unit_end <= wc.unit_start:
+                # 左侧残片若在赢家前面，必须先提交，否则会被 commit_ceiling 误挡掉。
+                self._commit_run(context, shrunk, consumed_ids)
+                self._commit_run(context, winner_run, consumed_ids)
+            else:
+                self._commit_run(context, winner_run, consumed_ids)
+                self._commit_run(context, shrunk, consumed_ids)
         else:
+            self._commit_run(context, winner_run, consumed_ids)
             # shrink 失败：只标记 label，不锁死 clue。
             context.handled_label_clue_ids |= loser_run.handled_label_clue_ids
         return winner_run.next_index

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint, build_name_candidate_from_value
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput, StreamUnit, strength_ge
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput, StreamUnit, strength_ge
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     ExpansionBreakPolicy,
@@ -109,6 +109,29 @@ class BaseNameStack(BaseStack):
             )
             return self._build_name_run(start=start, end=end)
         return None
+
+    def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
+        """姓名候选被其他类型抢占后，尝试提交裁掉冲突区后的剩余片段。"""
+        shrunk = super().shrink(run, blocker_start, blocker_end)
+        if shrunk is None:
+            return None
+        candidate = shrunk.candidate
+        name_clues = self._name_clues_in_span(candidate.start, candidate.end)
+        if not name_clues:
+            return None
+        if not self._trimmed_candidate_has_value_beyond_family(candidate=candidate, name_clues=name_clues):
+            return None
+        if not self._should_commit_candidate(
+            start=candidate.start,
+            end=candidate.end,
+            candidate_unit_start=candidate.unit_start,
+            candidate_unit_end=candidate.unit_end,
+            candidate_text=candidate.text,
+            name_clues=name_clues,
+            has_negative_overlap=self.context.has_negative_cover(candidate.unit_start, candidate.unit_end),
+        ):
+            return None
+        return shrunk
 
     def _build_name_run(self, *, start: int, end: int) -> StackRun | None:
         is_label_seed = self.clue.role == ClueRole.LABEL
@@ -540,6 +563,21 @@ class BaseNameStack(BaseStack):
                     if clue.start < end and clue.end > start:
                         matches.append((idx, clue))
         return matches
+
+    def _trimmed_candidate_has_value_beyond_family(
+        self,
+        *,
+        candidate: CandidateDraft,
+        name_clues: list[tuple[int, Clue]],
+    ) -> bool:
+        """裁剪后的姓名若只剩 family 片段，则不单独提交。"""
+        family_clues = [clue for _index, clue in name_clues if clue.role == ClueRole.FAMILY_NAME]
+        if not family_clues:
+            return True
+        if any(clue.role != ClueRole.FAMILY_NAME for _index, clue in name_clues):
+            return True
+        max_family_len = max(len(str(clue.text).strip()) for clue in family_clues)
+        return len(candidate.text) > max_family_len
 
     def _should_commit_candidate(
         self,

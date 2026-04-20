@@ -458,6 +458,59 @@ def test_parser_commits_winner_when_name_loses_strength_conflict():
     ]
 
 
+def test_parser_keeps_trimmed_name_when_loss_still_leaves_non_family_text():
+    """NAME 输给地址后，裁掉冲突区若仍保留“姓+其余内容”，则允许按门槛提交裁剪结果。"""
+    text = "张三丰路"
+    clues = (
+        _clue("name-1", ClueRole.FULL_NAME, 0, 3, "张三丰", source_kind="dictionary_local", strength=ClaimStrength.SOFT),
+        _clue(
+            "addr-1",
+            ClueRole.VALUE,
+            2,
+            4,
+            "丰路",
+            source_kind="geo_db",
+            attr_type=PIIAttributeType.ADDRESS,
+            family=ClueFamily.ADDRESS,
+            strength=ClaimStrength.HARD,
+            component_type=AddressComponentType.ROAD,
+        ),
+    )
+
+    candidates = _parse_candidates(text, clues)
+
+    assert [(candidate.attr_type, candidate.text) for candidate in candidates] == [
+        (PIIAttributeType.NAME, "张三"),
+        (PIIAttributeType.ADDRESS, "丰路"),
+    ]
+
+
+def test_parser_drops_trimmed_name_when_only_family_name_remains():
+    """中文姓名输给地址后，若裁剪结果只剩 family name，则不单独提交。"""
+    text = "欧阳娜娜路"
+    clues = (
+        _clue("name-1", ClueRole.FULL_NAME, 0, 4, "欧阳娜娜", source_kind="dictionary_local", strength=ClaimStrength.SOFT),
+        _clue(
+            "addr-1",
+            ClueRole.VALUE,
+            2,
+            5,
+            "娜娜路",
+            source_kind="geo_db",
+            attr_type=PIIAttributeType.ADDRESS,
+            family=ClueFamily.ADDRESS,
+            strength=ClaimStrength.HARD,
+            component_type=AddressComponentType.ROAD,
+        ),
+    )
+
+    candidates = _parse_candidates(text, clues)
+
+    assert [(candidate.attr_type, candidate.text) for candidate in candidates] == [
+        (PIIAttributeType.ADDRESS, "娜娜路"),
+    ]
+
+
 def test_family_strong_negative_exits_stack_before_given_expansion():
     """姓片段被 FULLY_COVERED / PARTIAL 强阻断时本栈立即结束（不吞后续名）。"""
     text = "左张右可欣"
