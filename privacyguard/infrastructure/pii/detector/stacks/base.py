@@ -14,6 +14,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueIndex,
     Clue,
     ClueRole,
+    StructuredAnchor,
     StreamInput,
     StreamUnit,
 )
@@ -27,6 +28,7 @@ class StackContextLike(Protocol):
     clues: tuple[Clue, ...]
     negative_clues: tuple[Clue, ...]
     clue_index: ClueIndex
+    recent_structured_anchor: StructuredAnchor | None
 
     def has_negative_cover(self, unit_start: int, unit_end: int) -> bool: ...
 
@@ -50,7 +52,7 @@ class PendingChallenge:
     clue_index: int
     """待判定 clue 在 context.clues 中的索引。"""
     extended_candidate: CandidateDraft
-    """若判定为通用数字（NUMERIC/ALNUM）则使用此扩展候选。"""
+    """若判定为通用数字（NUM/ALNUM）则使用此扩展候选。"""
     extended_consumed_ids: set[str]
     """扩展候选对应的 consumed_ids。"""
     extended_next_index: int
@@ -94,9 +96,9 @@ def _build_value_candidate(clue: Clue, source: PIISourceType) -> CandidateDraft:
         source_kind=clue.source_kind,
         claim_strength=ClaimStrength.HARD,
         metadata=metadata,
-        # 直接 hard clue 代表上游已给出明确类型；NUMERIC/ALNUM 仍允许后续 validator/label
+        # 直接 hard clue 代表上游已给出明确类型；NUM/ALNUM 仍允许后续 validator/label
         # 继续细分，其余类型在 detector 主路径中视为高可信输出。
-        attr_locked=clue.attr_type not in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM},
+        attr_locked=clue.attr_type not in {PIIAttributeType.NUM, PIIAttributeType.ALNUM},
     )
 
 

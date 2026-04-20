@@ -25,7 +25,9 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueBundle,
     ClueFamily,
     ClueIndex,
+    ClueRole,
     ParseResult,
+    StructuredAnchor,
     StructuredLookupIndex,
     StreamInput,
     _get_empty_clue_index,
@@ -270,6 +272,7 @@ class StackContext:
     handled_label_clue_ids: set[str] = field(default_factory=set)
     candidate_identity_index: dict[_CandidateIdentityKey, CandidateDraft] = field(default_factory=dict)
     address_normalized_cache: dict[int, tuple[_AddressNormalizedCacheSignature, object]] = field(default_factory=dict)
+    recent_structured_anchor: StructuredAnchor | None = None
 
     def has_negative_cover(self, unit_start: int, unit_end: int) -> bool:
         """判断给定 unit 区间是否存在任意 negative 覆盖。"""
@@ -378,6 +381,7 @@ class StreamParser:
             ):
                 index += 1
                 continue
+            self._remember_structured_anchor(context, clue, index)
 
             current_run, current_stack = self._try_run_stack(context, index)
             if current_run is None:
@@ -473,11 +477,11 @@ class StreamParser:
         if hard_b and not hard_a:
             return self._commit_winner_and_shrink_loser(context, consumed_ids, run_b, None, run_a, stack_a)
 
-        # 地址若已升级为 HARD，则与通用 numeric HARD 冲突时直接保留地址。
+        # 地址若已升级为 HARD，则与通用 num HARD 冲突时直接保留地址。
         if hard_a and hard_b:
             hard_address_numeric = frozenset({ca.attr_type, cb.attr_type}) == {
                 PIIAttributeType.ADDRESS,
-                PIIAttributeType.NUMERIC,
+                PIIAttributeType.NUM,
             }
             if hard_address_numeric:
                 if ca.attr_type == PIIAttributeType.ADDRESS:
@@ -663,7 +667,7 @@ class StreamParser:
             use_extended = True
         else:
             use_extended = struct_run.candidate.attr_type in {
-                PIIAttributeType.NUMERIC,
+                PIIAttributeType.NUM,
                 PIIAttributeType.ALNUM,
             }
         if use_extended:
@@ -685,6 +689,28 @@ class StreamParser:
         if spec is None:
             return 0
         return spec.soft_priority
+
+    def _remember_structured_anchor(self, context: StackContext, clue: Clue, clue_index: int) -> None:
+        """流式记录最近的结构化 LABEL/START，供 Structured VALUE 直接读取。"""
+        if clue.family != ClueFamily.STRUCTURED or clue.role not in {ClueRole.LABEL, ClueRole.START}:
+            return
+        if clue.attr_type is None:
+            return
+        current = context.recent_structured_anchor
+        if (
+            current is not None
+            and current.unit_end == clue.unit_end
+            and current.role == ClueRole.START
+            and clue.role != ClueRole.START
+        ):
+            return
+        context.recent_structured_anchor = StructuredAnchor(
+            attr_type=clue.attr_type,
+            role=clue.role,
+            unit_end=clue.unit_end,
+            clue_index=clue_index,
+            clue_id=clue.clue_id,
+        )
 
     # ------------------------------------------------------------------
     # Commit

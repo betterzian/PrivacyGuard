@@ -452,7 +452,7 @@ class EnAddressStack(BaseAddressStack):
         if self.clue_index > 0:
             previous = self.context.clues[self.clue_index - 1]
             if (
-                previous.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}
+                previous.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}
                 and previous.end <= self.clue.start
                 and _clue_unit_gap(previous, self.clue, self.context.stream) <= 2
             ):
@@ -551,7 +551,7 @@ class EnAddressStack(BaseAddressStack):
                 continue
             if clue.end > road_key_start:
                 continue
-            if clue.attr_type not in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}:
+            if clue.attr_type not in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
                 continue
             if is_prefix_en_component(component.component_type):
                 continue

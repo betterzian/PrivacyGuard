@@ -37,7 +37,7 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK
 _SENTINEL_STOP = object()
 _SENTINEL_IGNORE = object()
 
-_ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM})
+_ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUM, PIIAttributeType.ALNUM})
 _NUMBERISH_COMPONENTS = frozenset({
     AddressComponentType.NUMBER,
     AddressComponentType.BUILDING,
@@ -621,7 +621,7 @@ def _find_clue_for_digit_run(
         clue = clues[index]
         if clue.start > unit_char_end:
             break
-        if clue.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}:
+        if clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
             if clue.start <= unit_char_start and clue.end >= unit_char_end:
                 return index
     return None

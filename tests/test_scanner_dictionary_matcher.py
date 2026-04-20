@@ -488,7 +488,7 @@ def test_non_boundary_structured_label_is_dropped_instead_of_becoming_hint():
 
     assert not any(clue.role == ClueRole.LABEL and clue.text == "手机" for clue in bundle.all_clues)
     assert len(parsed.candidates) == 1
-    assert parsed.candidates[0].attr_type == PIIAttributeType.NUMERIC
+    assert parsed.candidates[0].attr_type == PIIAttributeType.NUM
     assert "label_hint_attr" not in parsed.candidates[0].metadata
 
 
@@ -726,7 +726,7 @@ def test_hard_pattern_scan_matches_amount_before_generic_fragments():
     amount_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.AMOUNT]
     assert amount_values == ["¥88", "532.00元", "USD 12", "181.00 dollars"]
     assert not any(
-        clue.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}
+        clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}
         and clue.text in {"88", "532.00", "12", "181.00"}
         for clue in clues
     )

@@ -517,7 +517,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 clue_id=ctx.next_clue_id(),
                 family=ClueFamily.STRUCTURED,
                 role=ClueRole.VALUE,
-                attr_type=PIIAttributeType.NUMERIC,
+                attr_type=PIIAttributeType.NUM,
                 strength=ClaimStrength.HARD,
                 start=match.start(),
                 end=match.end(),
@@ -527,7 +527,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 source_kind="extract_digit_fragment",
                 source_metadata={
                     "hard_source": ["regex"],
-                    "placeholder": ["<numeric>"],
+                    "placeholder": ["<num>"],
                     "fragment_type": ["NUM"],
                     "pure_digits": [digits],
                 },

@@ -172,7 +172,7 @@ class LicensePlateStack(BaseStack):
             normalized = re.sub(r"[^0-9A-Za-z]", "", clue.text or "")
             if not 5 <= len(normalized) <= 6:
                 return None
-            if clue.attr_type == PIIAttributeType.NUMERIC:
+            if clue.attr_type == PIIAttributeType.NUM:
                 return _SuffixMatch(
                     kind="digit",
                     start=clue.start,

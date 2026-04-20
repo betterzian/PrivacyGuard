@@ -24,7 +24,7 @@ GENERIC_PLACEHOLDER_LABELS_ZH: dict[PIIAttributeType, str] = {
     PIIAttributeType.ORGANIZATION: "机构",
     PIIAttributeType.TIME: "时间",
     PIIAttributeType.AMOUNT: "金额",
-    PIIAttributeType.NUMERIC: "数字",
+    PIIAttributeType.NUM: "数字",
     PIIAttributeType.ALNUM: "字母数字",
 }
 
@@ -42,7 +42,7 @@ GENERIC_PLACEHOLDER_LABELS_EN: dict[PIIAttributeType, str] = {
     PIIAttributeType.ORGANIZATION: "organization",
     PIIAttributeType.TIME: "time",
     PIIAttributeType.AMOUNT: "amount",
-    PIIAttributeType.NUMERIC: "number",
+    PIIAttributeType.NUM: "num",
     PIIAttributeType.ALNUM: "alnum",
 }
 

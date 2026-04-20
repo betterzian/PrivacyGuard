@@ -401,6 +401,17 @@ class StructuredLookupIndex:
 
 
 @dataclass(frozen=True, slots=True)
+class StructuredAnchor:
+    """parser 流式维护的最近结构化 LABEL/START 锚点。"""
+
+    attr_type: PIIAttributeType
+    role: ClueRole
+    unit_end: int
+    clue_index: int
+    clue_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class OCRSceneBlock:
     block: OCRTextBlock
     block_id: str

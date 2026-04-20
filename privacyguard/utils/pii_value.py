@@ -194,11 +194,11 @@ class NameComponents:
 
 
 def classify_content_shape_attr(value: str | None) -> PIIAttributeType | None:
-    """按内容形态粗分为 TIME / NUMERIC / ALNUM。
+    """按内容形态粗分为 TIME / NUM / ALNUM。
 
     不再产出 ``TEXTUAL`` / ``OTHER``：
     - 纯文字、仅符号、空白、空串等返回 ``None``，由调用侧直接跳过。
-    - 仅保留可进入 detector 主路径的 TIME / NUMERIC / ALNUM 三类。
+    - 仅保留可进入 detector 主路径的 TIME / NUM / ALNUM 三类。
     """
     if value is None:
         return None
@@ -212,7 +212,7 @@ def classify_content_shape_attr(value: str | None) -> PIIAttributeType | None:
     if has_letter and has_digit:
         return PIIAttributeType.ALNUM
     if has_digit and not has_letter:
-        return PIIAttributeType.NUMERIC
+        return PIIAttributeType.NUM
     return None
 
 
@@ -1119,7 +1119,7 @@ def _is_ignorable_match_char(attr_type: PIIAttributeType, char: str) -> bool:
         return char in _AMOUNT_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ALNUM:
         return char in _ALNUM_MATCH_IGNORABLE
-    if attr_type == PIIAttributeType.NUMERIC:
+    if attr_type == PIIAttributeType.NUM:
         return char in _ALNUM_MATCH_IGNORABLE
     if attr_type == PIIAttributeType.ADDRESS:
         return char in _ADDRESS_MATCH_IGNORABLE

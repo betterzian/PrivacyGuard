@@ -27,7 +27,7 @@ PRESIDIO_SRC = ROOT / "tmp" / "presidio-main" / "presidio-analyzer"
 TAG_OPEN_RE = re.compile(r"【PII:[^】]+】")
 TAG_CLOSE_RE = re.compile(r"【/PII】")
 TOKEN_RE = re.compile(r"\[?([A-Z][A-Z0-9_]*#[0-9a-z]{5})\]?")
-_ATTR_NORMALIZE = {"textual": "alnum", "other": "alnum"}
+_ATTR_NORMALIZE = {"textual": "alnum", "other": "alnum", "numeric": "num"}
 
 # 数据集 inventory.type -> 评测用 PIIAttributeType（与 PrivacyGuard 枚举对齐）
 EVAL_LABEL_TO_ATTR: dict[str, PIIAttributeType] = {

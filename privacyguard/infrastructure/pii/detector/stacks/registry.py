@@ -23,7 +23,7 @@ class StackSpec:
 
 # —— 各 family 允许起栈的 role 集合 ——
 
-_STRUCTURED_ROLES = frozenset({ClueRole.LABEL, ClueRole.VALUE})
+_STRUCTURED_ROLES = frozenset({ClueRole.VALUE})
 _NAME_ROLES = frozenset({
     ClueRole.LABEL,
     ClueRole.START,

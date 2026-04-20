@@ -8,8 +8,6 @@ from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueRole, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun, _build_value_candidate
-from privacyguard.infrastructure.pii.detector.stacks.common import is_control_clue
-from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
 
 # detector 主路径允许产出的 attr_type 集合；persona 精匹配可额外产出 PASSPORT/DRIVER。
 ALLOWED_DETECTOR_OUTPUT_ATTRS = frozenset({
@@ -24,27 +22,13 @@ ALLOWED_DETECTOR_OUTPUT_ATTRS = frozenset({
     PIIAttributeType.ORGANIZATION,
     PIIAttributeType.TIME,
     PIIAttributeType.AMOUNT,
-    PIIAttributeType.NUMERIC,
+    PIIAttributeType.NUM,
     PIIAttributeType.ALNUM,
 })
 PERSONA_ONLY_ATTRS = frozenset({
     PIIAttributeType.PASSPORT_NUMBER,
     PIIAttributeType.DRIVER_LICENSE,
 })
-
-# label 分档：H 档 label 绝不改写 attr_type（validator 足以独立成立，误绑风险高）；
-# persona 独占类 label 只记 hint；强形态类（EMAIL）保留 label 驱动的 promote。
-HIGH_TRUST_LABEL_ATTRS = frozenset({
-    PIIAttributeType.PHONE,
-    PIIAttributeType.ID_NUMBER,
-    PIIAttributeType.BANK_NUMBER,
-})
-HIGH_TRUST_ATTRS = HIGH_TRUST_LABEL_ATTRS
-PERSONA_ONLY_LABEL_ATTRS = frozenset({
-    PIIAttributeType.PASSPORT_NUMBER,
-    PIIAttributeType.DRIVER_LICENSE,
-})
-LABEL_PROMOTE_ALLOWED = frozenset({PIIAttributeType.EMAIL})
 
 # 美国 NANP 非法 NPA（N11 服务号）与 NXX 禁用前缀。
 US_NANP_INVALID_NPA = frozenset({
@@ -163,7 +147,7 @@ def _route_validators(*, digits: str, text: str, fragment_type: str) -> _Validat
     """按数值形态升级为明确的结构化属性。
 
     顺序：CN phone → US phone (严格) → CN ID 18 → CN ID 15 → Luhn + IIN 白名单。
-    宽 Luhn 与无 IIN 白名单的命中一律退化为 NUMERIC（由调用方兜底）。
+    宽 Luhn 与无 IIN 白名单的命中一律退化为 NUM（由调用方兜底）。
     """
     is_cn_id_alnum = fragment_type == "ALNUM" and bool(re.fullmatch(r"\d{17}[Xx]", text))
     if (fragment_type != "NUM" and not is_cn_id_alnum) or not digits:
@@ -200,15 +184,11 @@ class StructuredStack(BaseStack):
     """统一处理 STRUCTURED family 的明确值、通用片段与标签绑定。"""
 
     def run(self) -> StackRun | None:
-        if self.clue.strength == ClaimStrength.HARD:
-            if self.clue.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}:
-                return self._run_fragment()
-            return self._build_direct_run()
-
-        if self.clue.role == ClueRole.LABEL:
-            return self._try_label_bind()
-
-        return None
+        if self.clue.role != ClueRole.VALUE or self.clue.strength != ClaimStrength.HARD:
+            return None
+        if self.clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
+            return self._run_fragment()
+        return self._build_direct_run()
 
     def _run_fragment(self) -> StackRun | None:
         candidate = self._resolve_fragment_candidate(self.clue)
@@ -232,7 +212,7 @@ class StructuredStack(BaseStack):
             candidate.source_kind = entry.matched_by
             # persona/本地词典的精匹配被视为高可信出口，锁定 attr_type，
             # 避免下游 label 或启发式再次改写。
-            if entry.attr_type not in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}:
+            if entry.attr_type not in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
                 candidate.attr_locked = True
             candidate.metadata = merge_metadata(
                 candidate.metadata,
@@ -257,87 +237,35 @@ class StructuredStack(BaseStack):
                 candidate.metadata,
                 {"validated_by": [source_kind], "original_fragment_type": [fragment_type]},
             )
+            candidate = self._try_label_bind(candidate, fragment_type=fragment_type)
         return candidate
 
-    def _try_label_bind(self) -> StackRun | None:
-        """label 绑定紧邻 value。按 label.attr_type 分档控制是否 promote。
-
-        分档规则：
-        - H 档（PHONE/ID/BANK）：不改 attr_type；仅记 label_clue_ids 与 label_hint_attr。
-        - persona 独占类（PASSPORT/DRIVER）：不改 attr_type 且不绑 label_clue_ids，
-          仅在 metadata 留 hint。
-        - LABEL_PROMOTE_ALLOWED（EMAIL）：保留原 promote，attr_locked=True。
-        - 其余 attr_type：不 promote NUMERIC/ALNUM；对已 attr_locked 的候选记 mismatch。
-        """
-        raw_text = self.context.stream.text
-        cursor = self.clue.end
-        for index in range(self.clue_index + 1, len(self.context.clues)):
-            clue = self.context.clues[index]
-            if is_control_clue(clue):
-                cursor = max(cursor, clue.end)
-                continue
-            gap_text = raw_text[cursor:clue.start]
-            if gap_text and not all(ch.isspace() or is_soft_break(ch) for ch in gap_text):
-                return None
-            if clue.role == ClueRole.LABEL:
-                return None
-            if clue.strength == ClaimStrength.HARD and clue.role == ClueRole.VALUE:
-                candidate = self._resolve_fragment_candidate(clue) if clue.attr_type in {
-                    PIIAttributeType.NUMERIC,
-                    PIIAttributeType.ALNUM,
-                } else _build_value_candidate(clue, self.context.stream.source)
-
-                target_attr = self.clue.attr_type
-                is_generic = candidate.attr_type in {
-                    PIIAttributeType.NUMERIC,
-                    PIIAttributeType.ALNUM,
-                }
-
-                if is_generic and target_attr in HIGH_TRUST_LABEL_ATTRS:
-                    # H 档：label 仅作信号，不改 attr_type。
-                    candidate.label_clue_ids.add(self.clue.clue_id)
-                    candidate.metadata = merge_metadata(
-                        candidate.metadata,
-                        {"label_hint_attr": [target_attr.value]},
-                    )
-                elif is_generic and target_attr in PERSONA_ONLY_LABEL_ATTRS:
-                    # persona 独占类：不改 attr_type，也不绑 label_clue_ids。
-                    candidate.metadata = merge_metadata(
-                        candidate.metadata,
-                        {"label_hint_attr": [target_attr.value]},
-                    )
-                elif is_generic and target_attr in LABEL_PROMOTE_ALLOWED:
-                    # EMAIL：形态本身含 @，允许 label 驱动 promote。
-                    candidate.attr_type = target_attr
-                    candidate.attr_locked = True
-                    candidate.label_clue_ids.add(self.clue.clue_id)
-                    candidate.metadata = merge_metadata(
-                        candidate.metadata,
-                        {"assigned_by_label_attr": [target_attr.value]},
-                    )
-                elif candidate.attr_locked:
-                    # H 档 validator 或 persona 已锁定类型：只记 label 信号或 mismatch。
-                    if target_attr == candidate.attr_type:
-                        candidate.label_clue_ids.add(self.clue.clue_id)
-                        candidate.metadata = merge_metadata(
-                            candidate.metadata,
-                            {"bound_label_clue_ids": [self.clue.clue_id]},
-                        )
-                    elif target_attr is not None:
-                        candidate.metadata = merge_metadata(
-                            candidate.metadata,
-                            {"label_attr_mismatch": [target_attr.value]},
-                        )
-
-                return StackRun(
-                    attr_type=candidate.attr_type,
-                    candidate=candidate,
-                    consumed_ids={self.clue.clue_id, clue.clue_id},
-                    handled_label_clue_ids={self.clue.clue_id},
-                    next_index=index + 1,
-                )
-            cursor = max(cursor, clue.end)
-        return None
+    def _try_label_bind(self, candidate: CandidateDraft, *, fragment_type: str) -> CandidateDraft:
+        """读取 parser 维护的最近结构化锚点，决定绑定还是退化。"""
+        anchor = self.context.recent_structured_anchor
+        if anchor is None:
+            return candidate
+        distance = self.clue.unit_start - anchor.unit_end
+        if distance < 0 or distance > 5:
+            return candidate
+        anchor_clue = self.context.clues[anchor.clue_index]
+        if anchor_clue.attr_type is None:
+            return candidate
+        if anchor_clue.attr_type == candidate.attr_type:
+            candidate.label_clue_ids.add(anchor_clue.clue_id)
+            candidate.metadata = merge_metadata(
+                candidate.metadata,
+                {"bound_label_clue_ids": [anchor_clue.clue_id]},
+            )
+            return candidate
+        candidate.attr_type = PIIAttributeType.ALNUM if fragment_type == "ALNUM" else PIIAttributeType.NUM
+        candidate.source_kind = self.clue.source_kind
+        candidate.attr_locked = False
+        candidate.metadata = merge_metadata(
+            candidate.metadata,
+            {"label_attr_mismatch": [anchor_clue.attr_type.value]},
+        )
+        return candidate
 
     def _lookup_dictionary_entry(self, text: str, fragment_type: str, digits: str) -> DictionaryEntry | None:
         index = self.context.structured_lookup_index
