@@ -389,10 +389,25 @@ class StreamParser:
                 continue
 
             if current_run.pending_challenge is not None:
-                current_run = self._resolve_pending_challenge(context, current_run)
-                if context.blocks_unit_start(current_run.candidate.unit_start):
-                    index += 1
-                    continue
+                if current_run.pending_challenge.challenge_kind == "name_address_conflict":
+                    resolved_next_index = self._resolve_name_address_pending_challenge(
+                        context,
+                        consumed_ids,
+                        current_run,
+                        current_stack,
+                    )
+                    if resolved_next_index is not None:
+                        index = self._next_unconsumed_index(
+                            context,
+                            resolved_next_index,
+                            consumed_ids,
+                        ) or len(context.clues)
+                        continue
+                if current_run.pending_challenge is not None:
+                    current_run = self._resolve_pending_challenge(context, current_run)
+                    if context.blocks_unit_start(current_run.candidate.unit_start):
+                        index += 1
+                        continue
 
             # 查找下一个不在 current_run 中、不同类型的 clue 作为 challenger。
             challenger_run, challenger_stack = None, None
@@ -705,6 +720,61 @@ class StreamParser:
             )
         run.pending_challenge = None
         return run
+
+    def _resolve_name_address_pending_challenge(
+        self,
+        context: StackContext,
+        consumed_ids: set[str],
+        name_run: StackRun,
+        name_stack: BaseStack | None,
+    ) -> int | None:
+        """在 commit 前直接裁决 NAME 与内部 ADDRESS 候选，避免单姓保守抢跑。"""
+        challenge = name_run.pending_challenge
+        assert challenge is not None
+        if name_stack is None:
+            name_run.pending_challenge = None
+            return None
+
+        address_run, _ = self._try_run_stack(context, challenge.clue_index)
+        if address_run is None or address_run.candidate.attr_type != PIIAttributeType.ADDRESS:
+            name_run.pending_challenge = None
+            return None
+        if address_run.pending_challenge is not None:
+            address_run = self._resolve_pending_challenge(context, address_run)
+        if not _candidates_overlap(name_run.candidate, address_run.candidate):
+            name_run.pending_challenge = None
+            return None
+
+        name_run.pending_challenge = None
+        win_key = _strict_unit_container_winner_key(name_run.candidate, address_run.candidate)
+        if win_key == "a":
+            self._commit_run(context, name_run, consumed_ids)
+            return name_run.next_index
+        if win_key == "b":
+            self._commit_run(context, address_run, consumed_ids)
+            return address_run.next_index
+
+        shrunk = BaseStack.shrink(
+            name_stack,
+            name_run,
+            address_run.candidate.unit_start,
+            address_run.candidate.unit_end,
+        )
+        if shrunk is not None and (shrunk.candidate.unit_end - shrunk.candidate.unit_start) > 1:
+            if shrunk.candidate.unit_end <= address_run.candidate.unit_start:
+                self._commit_run(context, shrunk, consumed_ids)
+                self._commit_run(context, address_run, consumed_ids)
+            else:
+                self._commit_run(context, address_run, consumed_ids)
+                self._commit_run(context, shrunk, consumed_ids)
+            return address_run.next_index
+
+        if _claim_strength_rank(name_run.candidate.claim_strength) >= _claim_strength_rank(address_run.candidate.claim_strength):
+            self._commit_run(context, name_run, consumed_ids)
+            return name_run.next_index
+
+        self._commit_run(context, address_run, consumed_ids)
+        return address_run.next_index
 
     def _soft_priority(self, attr_type: PIIAttributeType) -> int:
         """按 attr_type 推导 family 后查询 soft_priority。"""

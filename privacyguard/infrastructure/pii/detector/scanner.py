@@ -109,6 +109,7 @@ _EMAIL_PATTERN = re.compile(
 _TIME_CLOCK_STRICT = r"(?:[01]?\d|2[0-3])[:：][0-5]\d(?:[:：][0-5]\d)?"
 _TIME_DATE_YMD = r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}"
 _TIME_DATE_MDY = r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}"
+_TIME_DATE_MD_CLOCK = rf"\d{{1,2}}/\d{{1,2}}\s+{_TIME_CLOCK_STRICT}"
 _TIME_DATE_ZH_YMD = r"\d{4}年\d{1,2}月\d{1,2}日"
 _TIME_DATE_ZH_MD = r"\d{1,2}月\d{1,2}日"
 
@@ -116,6 +117,7 @@ _TIME_DATE_ZH_MD = r"\d{1,2}月\d{1,2}日"
 _TIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("time_datetime", re.compile(rf"{_TIME_DATE_YMD}(?:[T ]{_TIME_CLOCK_STRICT})?")),
     ("time_date_mdy", re.compile(_TIME_DATE_MDY)),
+    ("time_md_clock", re.compile(_TIME_DATE_MD_CLOCK)),
     ("time_zh_datetime", re.compile(rf"{_TIME_DATE_ZH_YMD}(?:\s*{_TIME_CLOCK_STRICT})?")),
     ("time_zh_md_datetime", re.compile(rf"{_TIME_DATE_ZH_MD}(?:\s*{_TIME_CLOCK_STRICT})?")),
     ("time_clock", re.compile(_TIME_CLOCK_STRICT)),
@@ -123,7 +125,7 @@ _TIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 # 以下模式需在左右两侧满足「空白 / OCR 块界 / 链内间隙」之一（或紧贴文本首尾），避免粘在语句或数值中间。
 _TIME_KINDS_WITH_TOKEN_BOUNDARY = frozenset(
-    {"time_datetime", "time_date_mdy", "time_clock", "time_zh_datetime", "time_zh_md_datetime"}
+    {"time_datetime", "time_date_mdy", "time_md_clock", "time_clock", "time_zh_datetime", "time_zh_md_datetime"}
 )
 
 _AMOUNT_CURRENCY_PREFIX = r"(?i:US\$|USD|RMB|CNY|EUR|GBP|[$¥€£])"
@@ -1225,43 +1227,72 @@ def _scan_license_plate_value_clues(
 
 
 def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, locale_profile: str) -> list[Clue]:
-    if locale_profile not in {"zh_cn", "mixed"}:
-        return []
     clues: list[Clue] = []
-    for match in _zh_control_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        normalized = _normalize_segment_ascii_match(
-            segment,
-            match.start,
-            match.end,
-            match.matched_text,
-            match.pattern_text,
-            match.ascii_boundary,
-        )
-        if normalized is None:
-            continue
-        raw_start, raw_end, matched_text = normalized
-        payload = match.payload
-        _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.CONTROL,
-                role=ClueRole.VALUE,
-                attr_type=None,
-                strength=ClaimStrength.SOFT,
-                start=raw_start,
-                end=raw_end,
-                text=matched_text,
-                unit_start=_us,
-                unit_end=_ue,
-                source_kind="control_value_zh",
-                source_metadata={
-                    "control_kind": ["number"],
-                    "control_value_kind": [payload.kind],
-                    "normalized_number": [payload.normalized_number],
-                },
+    if locale_profile in {"zh_cn", "mixed"}:
+        for match in _zh_control_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+            normalized = _normalize_segment_ascii_match(
+                segment,
+                match.start,
+                match.end,
+                match.matched_text,
+                match.pattern_text,
+                match.ascii_boundary,
             )
-        )
+            if normalized is None:
+                continue
+            raw_start, raw_end, matched_text = normalized
+            payload = match.payload
+            _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.CONTROL,
+                    role=ClueRole.VALUE,
+                    attr_type=None,
+                    strength=ClaimStrength.SOFT,
+                    start=raw_start,
+                    end=raw_end,
+                    text=matched_text,
+                    unit_start=_us,
+                    unit_end=_ue,
+                    source_kind="control_value_zh",
+                    source_metadata={
+                        "control_kind": ["number"],
+                        "control_value_kind": [payload.kind],
+                        "normalized_number": [payload.normalized_number],
+                    },
+                )
+            )
+    if locale_profile in {"en_us", "mixed"}:
+        for match in _en_control_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+            normalized = _normalize_segment_ascii_match(
+                segment,
+                match.start,
+                match.end,
+                match.matched_text,
+                match.pattern_text,
+                match.ascii_boundary,
+            )
+            if normalized is None:
+                continue
+            raw_start, raw_end, matched_text = normalized
+            _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.CONTROL,
+                    role=ClueRole.VALUE,
+                    attr_type=None,
+                    strength=ClaimStrength.SOFT,
+                    start=raw_start,
+                    end=raw_end,
+                    text=matched_text,
+                    unit_start=_us,
+                    unit_end=_ue,
+                    source_kind="control_value_en",
+                    source_metadata={"control_kind": ["copula_en"]},
+                )
+            )
     return _dedupe_clues(clues)
 
 
@@ -2192,6 +2223,20 @@ def _zh_control_value_matcher() -> AhoMatcher:
                 ascii_boundary=False,
             )
             for item in load_zh_control_values()
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _en_control_value_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=text,
+                payload=text,
+                ascii_boundary=True,
+            )
+            for text in ("is", "are", "am")
         )
     )
 

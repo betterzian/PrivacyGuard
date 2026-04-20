@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
+from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint, build_name_candidate_from_value
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput, StreamUnit, strength_ge
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     ExpansionBreakPolicy,
     _char_span_to_unit_span,
-    _label_seed_start_char,
-    _unit_index_at_or_after,
-    _unit_index_left_of,
     is_control_clue,
     need_break,
 )
@@ -19,6 +16,7 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import (
     _is_cjk as _shared_is_cjk,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_name_joiner
+from privacyguard.infrastructure.pii.detector.zh_name_rules import claim_strength_meets_protection
 
 _NAME_COMPONENT_ROLES = frozenset(
     {
@@ -34,81 +32,6 @@ class BaseNameStack(BaseStack):
     """姓名检测 stack 基类。"""
 
     STACK_LOCALE = "zh"
-
-    def need_break(
-        self,
-        subject: Clue | StreamUnit,
-        *,
-        next_unit: StreamUnit | None = None,
-        prev_unit: StreamUnit | None = None,
-        upper: int | None = None,
-        lower: int | None = None,
-        left_char: str | None = None,
-        right_char: str | None = None,
-    ) -> bool:
-        if isinstance(subject, Clue):
-            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
-        locale = self.STACK_LOCALE
-        if locale == "zh":
-            if subject.kind == "cjk_char":
-                return False
-            if subject.kind == "punct":
-                return not is_name_joiner(subject.text, left_char, right_char)
-            return True
-        if subject.kind == "ascii_word":
-            return False
-        if subject.kind == "space":
-            if next_unit is not None:
-                return not (
-                    next_unit.kind == "ascii_word" and (upper is None or next_unit.char_start < upper)
-                )
-            if prev_unit is not None:
-                return not (
-                    prev_unit.kind == "ascii_word" and (lower is None or prev_unit.char_end > lower)
-                )
-            return True
-        if subject.kind == "punct":
-            return not is_name_joiner(subject.text, left_char, right_char)
-        return True
-
-    def run(self) -> StackRun | None:
-        self._name_pending_challenge: tuple[int, int] | None = None
-        if self.clue.strength == ClaimStrength.HARD:
-            return self._build_direct_run()
-        locale = self.STACK_LOCALE
-        if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
-            return self._build_name_run(start=self.clue.start, end=self.clue.end)
-        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            start = _label_seed_start_char(self.context.stream, self.clue.end)
-            if start >= len(self.context.stream.text):
-                return None
-            end = self._expand_seed_right(
-                start=start,
-                end=start,
-                search_index=self.clue_index + 1,
-                locale=locale,
-                ignore_negative=True,
-            )
-            return self._build_name_run(start=start, end=end)
-        if self.clue.role == ClueRole.FAMILY_NAME:
-            end = self._expand_seed_right(
-                start=self.clue.start,
-                end=self.clue.end,
-                search_index=self.clue_index + 1,
-                locale=locale,
-            )
-            return self._build_name_run(start=self.clue.start, end=end)
-        if self.clue.role == ClueRole.GIVEN_NAME:
-            if locale == "zh":
-                return self._build_name_run(start=self.clue.start, end=self.clue.end)
-            start = self._extend_given_left_en(self.clue.start)
-            end = self._extend_given_chain_right_en(
-                start=start,
-                end=self.clue.end,
-                search_index=self.clue_index + 1,
-            )
-            return self._build_name_run(start=start, end=end)
-        return None
 
     def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
         """姓名候选被其他类型抢占后，尝试提交裁掉冲突区后的剩余片段。"""
@@ -206,116 +129,6 @@ class BaseNameStack(BaseStack):
                     )
         return run
 
-    def _extend_given_left_en(self, start: int) -> int:
-        word_span = self._previous_plain_ascii_word(start)
-        if word_span is None:
-            return start
-        word_start, word_end = word_span
-        if self._span_has_any_clue_overlap(word_start, word_end):
-            return start
-        if self._span_has_blocker(word_end, start):
-            return start
-        return word_start
-
-    def _expand_seed_right(
-        self,
-        *,
-        start: int,
-        end: int,
-        search_index: int,
-        locale: str,
-        ignore_negative: bool = False,
-    ) -> int:
-        cursor = end
-        next_index = search_index
-        while True:
-            if self._has_active_stop_overlap(cursor, ignore_negative=ignore_negative):
-                return cursor
-
-            next_component = self._find_next_component_clue(cursor, next_index)
-            next_blocker = self._find_next_right_blocker(
-                cursor,
-                next_index,
-                ignore_negative=ignore_negative,
-            )
-            next_negative_start = self._next_negative_start_char(cursor, ignore_negative=ignore_negative)
-
-            plain_limit = len(self.context.stream.text)
-            if next_component is not None:
-                plain_limit = next_component[1].start
-            if next_blocker is not None and next_blocker[1].start < plain_limit:
-                plain_limit = next_blocker[1].start
-            if next_negative_start is not None and next_negative_start < plain_limit:
-                plain_limit = next_negative_start
-
-            scanned = self._scan_plain_right(start=start, cursor=cursor, upper=plain_limit, locale=locale)
-            cursor = scanned
-            if cursor < plain_limit:
-                return cursor
-
-            if (
-                next_blocker is not None
-                and next_blocker[1].start == cursor
-                and next_blocker[1].attr_type == PIIAttributeType.ADDRESS
-            ):
-                # 同址遇到 ADDRESS blocker：先保守停在 blocker 左侧，交由 parser 挑战裁决。
-                extended_end = next_component[1].end if next_component is not None and next_component[1].start == cursor else cursor
-                self._name_pending_challenge = (next_blocker[0], extended_end)
-                return cursor
-            if next_component is None or next_component[1].start != cursor:
-                return cursor
-
-            component_index, component = next_component
-            cursor = component.end
-            next_index = component_index + 1
-
-            if component.role == ClueRole.FAMILY_NAME:
-                continue
-            if component.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
-                return cursor
-            if locale == "zh":
-                return cursor
-            return self._extend_given_chain_right_en(
-                start=start,
-                end=cursor,
-                search_index=next_index,
-                ignore_negative=ignore_negative,
-            )
-
-    def _extend_given_chain_right_en(
-        self,
-        start: int,
-        end: int,
-        search_index: int,
-        *,
-        ignore_negative: bool = False,
-    ) -> int:
-        cursor = end
-        next_index = search_index
-        while True:
-            if self._has_active_stop_overlap(cursor, ignore_negative=ignore_negative):
-                return cursor
-            next_component = self._find_next_component_clue(cursor, next_index)
-            next_blocker = self._find_next_right_blocker(
-                cursor,
-                next_index,
-                ignore_negative=ignore_negative,
-            )
-            next_negative_start = self._next_negative_start_char(cursor, ignore_negative=ignore_negative)
-            if next_component is None:
-                return cursor
-            component_index, component = next_component
-            if component.role != ClueRole.GIVEN_NAME:
-                return cursor
-            if next_blocker is not None and next_blocker[1].start < component.start:
-                return cursor
-            if next_negative_start is not None and next_negative_start < component.start:
-                return cursor
-            if not self._gap_allows_single_plain_word(cursor, component.start):
-                return cursor
-            cursor = component.end
-            next_index = component_index + 1
-
     def _effective_hint(self, start: int, end: int) -> NameComponentHint:
         base = self._component_hint()
         if base in {NameComponentHint.FAMILY, NameComponentHint.GIVEN, NameComponentHint.MIDDLE}:
@@ -345,68 +158,6 @@ class BaseNameStack(BaseStack):
             except ValueError:
                 pass
         return NameComponentHint.FULL
-
-    def _scan_plain_right(self, *, start: int, cursor: int, upper: int, locale: str) -> int:
-        if upper <= cursor:
-            return cursor
-        raw_text = self.context.stream.text
-        units = self.context.stream.units
-        if not units or cursor >= len(raw_text):
-            return cursor
-
-        if locale == "zh":
-            cjk_count = sum(1 for i in range(start, cursor) if _shared_is_cjk(raw_text[i]))
-            cursor_end = cursor
-            ui = _unit_index_at_or_after(self.context.stream, cursor)
-            while ui < len(units) and cjk_count < 4:
-                unit = units[ui]
-                if unit.char_start >= upper:
-                    break
-                if unit.kind == "cjk_char":
-                    cjk_count += 1
-                    cursor_end = unit.char_end
-                    ui += 1
-                    continue
-                if unit.kind == "punct":
-                    left_char = raw_text[unit.char_start - 1] if unit.char_start > 0 else None
-                    right_char = _peek_unit_first_char(units, ui + 1)
-                    if is_name_joiner(unit.text, left_char, right_char):
-                        cursor_end = unit.char_end
-                        ui += 1
-                        continue
-                break
-            return max(cursor, cursor_end)
-
-        cursor_end = cursor
-        ui = _unit_index_at_or_after(self.context.stream, cursor)
-        while ui < len(units):
-            unit = units[ui]
-            if unit.char_start >= upper:
-                break
-            if unit.char_end - start > 80:
-                break
-            if unit.kind == "ascii_word":
-                cursor_end = unit.char_end
-                ui += 1
-                continue
-            if unit.kind == "space":
-                next_ui = ui + 1
-                while next_ui < len(units) and units[next_ui].kind == "space":
-                    next_ui += 1
-                if next_ui < len(units) and units[next_ui].kind == "ascii_word" and units[next_ui].char_start <= upper:
-                    cursor_end = unit.char_end
-                    ui += 1
-                    continue
-                break
-            if unit.kind == "punct":
-                left_char = raw_text[unit.char_start - 1] if unit.char_start > 0 else None
-                right_char = _peek_unit_first_char(units, ui + 1)
-                if is_name_joiner(unit.text, left_char, right_char):
-                    cursor_end = unit.char_end
-                    ui += 1
-                    continue
-            break
-        return max(cursor, cursor_end)
 
     def _find_next_component_clue(self, cursor: int, search_index: int) -> tuple[int, Clue] | None:
         ci = self.context.clue_index
@@ -492,48 +243,6 @@ class BaseNameStack(BaseStack):
             return False
         return clue.attr_type != PIIAttributeType.NAME or clue.role not in _NAME_COMPONENT_ROLES
 
-    def _gap_allows_single_plain_word(self, start: int, end: int) -> bool:
-        if end <= start:
-            return True
-        if self._span_has_any_clue_overlap(start, end):
-            return False
-        units = self.context.stream.units
-        word_count = 0
-        ui = _unit_index_at_or_after(self.context.stream, start)
-        while ui < len(units):
-            unit = units[ui]
-            if unit.char_start >= end:
-                break
-            if unit.kind == "space":
-                ui += 1
-                continue
-            if unit.kind == "ascii_word":
-                word_count += 1
-                if word_count > 1:
-                    return False
-                ui += 1
-                continue
-            return False
-        return True
-
-    def _previous_plain_ascii_word(self, start: int) -> tuple[int, int] | None:
-        if start <= 0 or not self.context.stream.units:
-            return None
-        units = self.context.stream.units
-        ui = _unit_index_left_of(self.context.stream, start)
-        while ui >= 0 and units[ui].kind == "space":
-            ui -= 1
-        if ui < 0 or units[ui].kind != "ascii_word":
-            return None
-        word = units[ui]
-        for gap_index in range(ui + 1, len(units)):
-            gap_unit = units[gap_index]
-            if gap_unit.char_start >= start:
-                break
-            if gap_unit.kind != "space":
-                return None
-        return (word.char_start, word.char_end)
-
     def _span_has_any_clue_overlap(self, start: int, end: int) -> bool:
         ci = self.context.clue_index
         us, ue = _char_span_to_unit_span(self.context.stream, start, end)
@@ -593,26 +302,12 @@ class BaseNameStack(BaseStack):
         """默认姓名提交判定，供英文路径复用。"""
         del start, end, candidate_unit_start, candidate_unit_end
         current_strength = self._resolve_claim_strength(name_clues=name_clues)
-        required_strength = ClaimStrength.SOFT
-        if self.context.protection_level in {ProtectionLevel.BALANCED, ProtectionLevel.WEAK}:
-            required_strength = ClaimStrength.HARD
-        if not strength_ge(current_strength, required_strength):
+        if not claim_strength_meets_protection(current_strength, self.context.protection_level):
             return False
-        unique_roles = {clue.role for _index, clue in name_clues}
-        if self.clue.role in _NAME_COMPONENT_ROLES:
-            unique_roles.discard(self.clue.role)
-        clue_count = 1 + len(unique_roles)
         negative_exempt = self.clue.role in {ClueRole.LABEL, ClueRole.START}
         if has_negative_overlap and not negative_exempt:
             return False
-        if self.context.protection_level == ProtectionLevel.STRONG:
-            return clue_count >= 2 or len(candidate_text) > 1
-        if self.context.protection_level == ProtectionLevel.BALANCED:
-            if clue_count != 1 or len(candidate_text) <= 1 or len(name_clues) != 1:
-                return False
-            only_clue = name_clues[0][1]
-            return only_clue.role == ClueRole.GIVEN_NAME and only_clue.source_kind.startswith("dictionary_")
-        return clue_count >= 2
+        return bool(candidate_text)
 
     def _resolve_claim_strength(self, *, name_clues: list[tuple[int, Clue]]) -> ClaimStrength:
         """standalone 姓名候选继承参与 clue 中的最高强度。"""

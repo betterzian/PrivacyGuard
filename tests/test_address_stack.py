@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.models import (
@@ -27,6 +29,7 @@ from privacyguard.infrastructure.pii.detector.models import (
 )
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
+from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
 
 
@@ -96,6 +99,20 @@ def _detect_candidates(text: str, clues: tuple[Clue, ...], *, locale_profile: st
     parser = StreamParser(locale_profile=locale_profile, ctx=ctx)
     result = parser.parse(stream, bundle)
     return result.candidates
+
+
+def _detect_candidates_from_scanner(text: str, *, locale_profile: str = "zh_cn"):
+    ctx = DetectContext()
+    stream = build_prompt_stream(text)
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile=locale_profile,
+    )
+    parser = StreamParser(locale_profile=locale_profile, ctx=ctx)
+    return parser.parse(stream, bundle).candidates
 
 
 def test_label_seed_returns_none_when_no_value_and_no_key_within_6_units():
@@ -282,3 +299,71 @@ def test_trailing_admin_blocked_without_comma():
     addr = next((c for c in candidates if c.attr_type.value == "address"), None)
     if addr is not None:
         assert "上海市" not in addr.text
+
+
+def test_name_label_and_start_are_only_counted_as_negative_like_overlap():
+    candidates = _detect_candidates_from_scanner("家属姓名：罗嘉羽。")
+
+    names = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME]
+
+    assert [candidate.text for candidate in names] == ["家属姓名", "罗嘉羽"]
+    assert names[0].metadata.get("negative_overlap_kind") == ["negative_fully_inside"]
+
+
+def test_regular_name_label_path_remains_unchanged():
+    candidates = _detect_candidates_from_scanner("姓名：罗嘉羽。")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["罗嘉羽"]
+    assert candidates[0].claim_strength == ClaimStrength.HARD
+
+
+def test_same_start_name_address_conflict_prefers_full_name_when_name_contains_city():
+    candidates = _detect_candidates_from_scanner("登记的姓名是陈南宁。")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["陈南宁"]
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_address"),
+    [
+        ("景明路187号", "景明路187号"),
+        ("住址道路：景明路187号。", "景明路187号"),
+        ("南京市鼓楼区景明路46号", "南京市鼓楼区景明路46号"),
+    ],
+)
+def test_road_and_hao_chain_commit_full_address(text: str, expected_address: str):
+    candidates = _detect_candidates_from_scanner(text)
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [expected_address]
+    assert addresses[0].claim_strength == ClaimStrength.HARD
+
+
+def test_partial_overlap_keeps_trimmed_multi_unit_name_and_full_address():
+    candidates = _detect_candidates_from_scanner("欧阳南京路88号")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["欧阳"]
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == ["南京路88号"]
+
+
+def test_partial_overlap_with_single_unit_residual_falls_back_to_strength_compare():
+    candidates = _detect_candidates_from_scanner("陈南宁路88号")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == []
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == ["南宁路88号"]
+
+
+def test_plain_hao_fragment_is_not_promoted_without_context():
+    candidates = _detect_candidates_from_scanner("187号")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == []
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NUM] == ["187"]
+
+
+@pytest.mark.parametrize("text", ["国际广场1号楼", "10号楼"])
+def test_existing_building_shapes_still_parse_as_address(text: str):
+    candidates = _detect_candidates_from_scanner(text)
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == [text]

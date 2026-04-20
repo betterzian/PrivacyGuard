@@ -98,7 +98,14 @@ def _split_negative_clues(
     )
 
 
-def _run_name_stack(text: str, clue_index: int, clues: tuple[Clue, ...], *, protection_level: ProtectionLevel) -> NameStack:
+def _run_name_stack(
+    text: str,
+    clue_index: int,
+    clues: tuple[Clue, ...],
+    *,
+    protection_level: ProtectionLevel,
+    locale_profile: str = "mixed",
+) -> NameStack:
     stream = build_prompt_stream(text)
     fixed, negative_clues, index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(
         stream,
@@ -107,7 +114,7 @@ def _run_name_stack(text: str, clue_index: int, clues: tuple[Clue, ...], *, prot
     target = clues[clue_index]
     context = StackContext(
         stream=stream,
-        locale_profile="mixed",
+        locale_profile=locale_profile,
         protection_level=protection_level,
         clues=fixed,
         negative_clues=negative_clues,
@@ -125,6 +132,7 @@ def _parse_candidates(
     clues: tuple[Clue, ...],
     *,
     protection_level: ProtectionLevel = ProtectionLevel.STRONG,
+    locale_profile: str = "mixed",
 ):
     ctx = DetectContext(protection_level=protection_level)
     stream = build_prompt_stream(text)
@@ -132,7 +140,7 @@ def _parse_candidates(
         stream,
         clues,
     )
-    parser = StreamParser(locale_profile="mixed", ctx=ctx)
+    parser = StreamParser(locale_profile=locale_profile, ctx=ctx)
     result = parser.parse(
         stream,
         ClueBundle(
@@ -147,10 +155,21 @@ def _parse_candidates(
     return result.candidates
 
 
-def _name_texts(text: str, clues: tuple[Clue, ...], *, protection_level: ProtectionLevel = ProtectionLevel.STRONG) -> list[str]:
+def _name_texts(
+    text: str,
+    clues: tuple[Clue, ...],
+    *,
+    protection_level: ProtectionLevel = ProtectionLevel.STRONG,
+    locale_profile: str = "mixed",
+) -> list[str]:
     return [
         candidate.text
-        for candidate in _parse_candidates(text, clues, protection_level=protection_level)
+        for candidate in _parse_candidates(
+            text,
+            clues,
+            protection_level=protection_level,
+            locale_profile=locale_profile,
+        )
         if candidate.attr_type == PIIAttributeType.NAME
     ]
 
@@ -548,3 +567,106 @@ def test_parser_family_stack_exits_then_given_name_direct_still_parsed():
     )
 
     assert _name_texts(text, clues, protection_level=ProtectionLevel.STRONG) == ["可欣"]
+
+
+def test_en_given_path_blocks_copula_and_absorbs_family_name():
+    """英文 given path 左侧遇到 copula 时应截断，并继续向右吸收 family name。"""
+    text = "the name on file is Wyatt Bell"
+    is_start = text.index(" is ") + 1
+    wyatt_start = text.index("Wyatt")
+    bell_start = text.index("Bell")
+    clues = (
+        _clue(
+            "control-1",
+            ClueRole.VALUE,
+            is_start,
+            is_start + 2,
+            "is",
+            source_kind="control_value_en",
+            attr_type=None,
+            family=ClueFamily.CONTROL,
+            source_metadata={"control_kind": ["copula_en"]},
+        ),
+        _clue("given-1", ClueRole.GIVEN_NAME, wyatt_start, wyatt_start + 5, "Wyatt", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+        _clue("family-1", ClueRole.FAMILY_NAME, bell_start, bell_start + 4, "Bell", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+
+    run = _run_name_stack(
+        text,
+        1,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    ).run()
+
+    assert run is not None
+    assert run.candidate.text == "Wyatt Bell"
+
+
+def test_en_given_path_does_not_absorb_lowercase_plain_unit():
+    """英文 plain unit 只有首字母大写时才能并入姓名。"""
+    text = "the name on file is little Wyatt Bell"
+    is_start = text.index(" is ") + 1
+    wyatt_start = text.index("Wyatt")
+    bell_start = text.index("Bell")
+    clues = (
+        _clue(
+            "control-1",
+            ClueRole.VALUE,
+            is_start,
+            is_start + 2,
+            "is",
+            source_kind="control_value_en",
+            attr_type=None,
+            family=ClueFamily.CONTROL,
+            source_metadata={"control_kind": ["copula_en"]},
+        ),
+        _clue("given-1", ClueRole.GIVEN_NAME, wyatt_start, wyatt_start + 5, "Wyatt", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+        _clue("family-1", ClueRole.FAMILY_NAME, bell_start, bell_start + 4, "Bell", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+
+    assert _name_texts(
+        text,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    ) == ["Wyatt Bell"]
+
+
+def test_en_label_seed_keeps_joiner_name_parts():
+    """英文 label seed 右扩时应保留连字符姓名片段。"""
+    text = "Name: Mary-Jane Watson"
+    mary_start = text.index("Mary")
+    watson_start = text.index("Watson")
+    clues = (
+        _clue("label-1", ClueRole.LABEL, 0, 4, "Name", source_kind="context_name_field"),
+        _clue("given-1", ClueRole.GIVEN_NAME, mary_start, mary_start + 4, "Mary", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+        _clue("family-1", ClueRole.FAMILY_NAME, watson_start, watson_start + 6, "Watson", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+
+    assert _name_texts(
+        text,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    ) == ["Mary-Jane Watson"]
+
+
+def test_en_given_name_respects_same_protection_gate_as_zh():
+    """英文单 given 的提交门槛与中文 protection gate 对齐。"""
+    clues = (
+        _clue("given-1", ClueRole.GIVEN_NAME, 0, 4, "Liam", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+    )
+
+    assert _name_texts(
+        "Liam",
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    ) == ["Liam"]
+    assert _name_texts(
+        "Liam",
+        clues,
+        protection_level=ProtectionLevel.BALANCED,
+        locale_profile="en_us",
+    ) == []

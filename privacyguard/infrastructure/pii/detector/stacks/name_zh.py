@@ -295,32 +295,18 @@ class ZhNameStack(BaseNameStack):
         if candidate is None:
             return None
         overlap_index = self._first_address_overlap_clue_index(start, candidate_end)
+        run = self._finalize_run(start, candidate_end, candidate)
+        if run is None:
+            return None
         if overlap_index is not None and family_anchor.end > start:
-            conservative = self._build_candidate(
-                start=start,
-                end=family_anchor.end,
-                claim_strength=final_strength,
-                route=route,
-                negative_overlap_kind=dominant_negative_overlap_kind(candidate_overlaps),
-                extra_metadata={
-                    "name_route": [route],
-                    "family_claim_strength_before_negative": [family_strength_before.value],
-                    "family_claim_strength_after_negative": [family_strength_after.value],
-                    "negative_overlap_kind": [dominant_negative_overlap_kind(candidate_overlaps).value],
-                    "family_anchor_text": [family_anchor.text],
-                },
+            run.pending_challenge = PendingChallenge(
+                clue_index=overlap_index,
+                extended_candidate=candidate,
+                extended_consumed_ids={*run.consumed_ids},
+                extended_next_index=max(run.next_index, overlap_index + 1),
+                challenge_kind="name_address_conflict",
             )
-            if conservative is not None:
-                run = self._finalize_run(start, family_anchor.end, conservative)
-                run.pending_challenge = PendingChallenge(
-                    clue_index=overlap_index,
-                    extended_candidate=candidate,
-                    extended_consumed_ids={*run.consumed_ids},
-                    extended_next_index=max(run.next_index, overlap_index + 1),
-                    challenge_kind="name_same_start_blocker",
-                )
-                return run
-        return self._finalize_run(start, candidate_end, candidate)
+        return run
 
     def _first_address_overlap_clue_index(self, start: int, end: int) -> int | None:
         for idx, clue in enumerate(self.context.clues):
@@ -639,7 +625,10 @@ class ZhNameStack(BaseNameStack):
             other_clues=tuple(
                 clue
                 for clue in self.context.clues
-                if clue.attr_type is not None and clue.attr_type != PIIAttributeType.NAME
+                if clue.attr_type is not None and (
+                    clue.attr_type != PIIAttributeType.NAME
+                    or clue.role in {ClueRole.LABEL, ClueRole.START}
+                )
             ),
         )
 

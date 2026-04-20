@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
@@ -42,7 +42,10 @@ from privacyguard.infrastructure.pii.detector.models import (
     StreamInput,
     strength_ge,
 )
-from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after
+from privacyguard.infrastructure.pii.detector.stacks.common import (
+    _unit_index_at_or_after,
+    valid_left_numeral_for_zh_address_key,
+)
 
 SINGLE_OCCUPY = frozenset({
     AddressComponentType.COUNTRY,
@@ -148,6 +151,8 @@ _DETAIL_COMPONENTS = frozenset({
     AddressComponentType.BUILDING,
     AddressComponentType.DETAIL,
 })
+
+_ROOM_LEVEL_DETAIL_KEYS = frozenset({"室", "房", "户"})
 
 _DIGIT_TAIL_TRIGGER_TYPES = frozenset({
     AddressComponentType.ROAD,
@@ -1415,7 +1420,57 @@ def _sum_strength(parts: Iterable[ClaimStrength]) -> ClaimStrength:
     return ClaimStrength.WEAK
 
 
-def _component_strength(component: _DraftComponent) -> ClaimStrength:
+def _component_key_clue(component: _DraftComponent) -> Clue | None:
+    """返回 component 最右侧的 key clue。"""
+    for clue in reversed(component.raw_chain):
+        if clue.role == ClueRole.KEY:
+            return clue
+    return None
+
+
+def _is_room_level_detail_component(component: _DraftComponent) -> bool:
+    """房/室/户这类 room 粒度 detail 不参与“号”提强上下文。"""
+    if component.component_type == AddressComponentType.BUILDING:
+        return False
+    key_clue = _component_key_clue(component)
+    return key_clue is not None and key_clue.text in _ROOM_LEVEL_DETAIL_KEYS
+
+
+def _has_hao_hard_context(previous_components: Sequence[_DraftComponent]) -> bool:
+    """判断“号”左侧是否已形成可把整段地址抬到 HARD 的上下文。"""
+    for component in previous_components:
+        if component.component_type == AddressComponentType.ROAD:
+            return True
+        if component.component_type == AddressComponentType.BUILDING:
+            return True
+        if component.component_type == AddressComponentType.DETAIL and not _is_room_level_detail_component(component):
+            return True
+    return False
+
+
+def _should_promote_hao_key_to_hard(
+    component: _DraftComponent,
+    *,
+    previous_components: Sequence[_DraftComponent],
+    stream: StreamInput | None,
+) -> bool:
+    """仅在 road / 非 room detail 上下文里，把门牌“号”视为 HARD 证据。"""
+    if stream is None:
+        return False
+    key_clue = _component_key_clue(component)
+    if key_clue is None or key_clue.text != "号":
+        return False
+    if valid_left_numeral_for_zh_address_key(stream, key_clue.start, key_clue.text).kind == "none":
+        return False
+    return _has_hao_hard_context(previous_components)
+
+
+def _component_strength(
+    component: _DraftComponent,
+    *,
+    previous_components: Sequence[_DraftComponent] = (),
+    stream: StreamInput | None = None,
+) -> ClaimStrength:
     """按 VALUE / KEY 两侧证据聚合单个 component 的强度。"""
     parts: list[ClaimStrength] = []
     value_strength: ClaimStrength | None = None
@@ -1426,16 +1481,33 @@ def _component_strength(component: _DraftComponent) -> ClaimStrength:
             value_strength = clue.strength
     if value_strength is not None:
         parts.append(value_strength)
-    for clue in reversed(component.raw_chain):
-        if clue.role == ClueRole.KEY:
-            parts.append(clue.strength)
-            break
+    key_clue = _component_key_clue(component)
+    if key_clue is not None:
+        key_strength = key_clue.strength
+        if _should_promote_hao_key_to_hard(
+            component,
+            previous_components=previous_components,
+            stream=stream,
+        ):
+            key_strength = ClaimStrength.HARD
+        parts.append(key_strength)
     return _sum_strength(parts)
 
 
-def _address_strength(components: list[_DraftComponent]) -> ClaimStrength:
+def _address_strength(
+    components: list[_DraftComponent],
+    *,
+    stream: StreamInput | None = None,
+) -> ClaimStrength:
     """按 component 聚合整段地址的 claim_strength。"""
-    return _sum_strength(_component_strength(component) for component in components)
+    return _sum_strength(
+        _component_strength(
+            component,
+            previous_components=components[:index],
+            stream=stream,
+        )
+        for index, component in enumerate(components)
+    )
 
 
 def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> dict[str, list[str]]:

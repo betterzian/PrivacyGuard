@@ -708,6 +708,40 @@ def test_build_clue_bundle_emits_control_value_number_clues_for_zh_address_token
     assert ("子", ("子",)) in payloads
 
 
+def test_scan_control_value_clues_emits_en_copula_words_before_conflict_resolution():
+    _stream, segment = _first_segment("This is Liam, they are James, and I am Noah")
+
+    control_values = scanner_module._scan_control_value_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        segment,
+        locale_profile="en_us",
+    )
+
+    assert [clue.text.lower() for clue in control_values] == ["is", "are", "am"]
+    assert all(clue.source_metadata.get("control_kind") == ["copula_en"] for clue in control_values)
+
+
+def test_build_clue_bundle_allows_name_start_to_cover_is_and_am():
+    prepared = build_prompt_stream("This is Liam, they are James, and I am Noah")
+
+    bundle = build_clue_bundle(
+        prepared,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="en_us",
+    )
+
+    control_values = [
+        clue
+        for clue in bundle.all_clues
+        if clue.source_kind == "control_value_en"
+    ]
+
+    assert [clue.text.lower() for clue in control_values] == ["are"]
+    assert all(clue.source_metadata.get("control_kind") == ["copula_en"] for clue in control_values)
+
+
 @pytest.mark.parametrize(
     ("text", "expected_value"),
     [
@@ -726,6 +760,32 @@ def test_hard_pattern_scan_matches_expanded_time_formats(text: str, expected_val
 
     time_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.TIME]
     assert expected_value in time_values
+
+
+def test_hard_pattern_scan_matches_md_clock_without_inner_clock_duplicate():
+    stream = build_prompt_stream("arrival 03/13 16:50 update")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    time_clues = [clue for clue in clues if clue.attr_type == PIIAttributeType.TIME]
+
+    assert [clue.text for clue in time_clues] == ["03/13 16:50"]
+    assert not any(clue.source_kind == "time_clock" for clue in time_clues)
+
+
+def test_hard_pattern_scan_does_not_match_standalone_md():
+    stream = build_prompt_stream("arrival 03/13 only")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert not any(
+        clue.attr_type == PIIAttributeType.TIME and clue.text == "03/13"
+        for clue in clues
+    )
 
 
 def test_hard_pattern_scan_matches_amount_before_generic_fragments():

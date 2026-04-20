@@ -609,7 +609,7 @@ class BaseAddressStack(BaseStack):
     ) -> StackRun | None:
         """证据阈值通过后，用 component 并集 span 构造 `CandidateDraft` 与 `StackRun`。"""
         components = state.components
-        claim_strength = _address_strength(components)
+        claim_strength = _address_strength(components, stream=self.context.stream)
         if not _meets_commit_threshold(
             state.evidence_count,
             components,
