@@ -185,13 +185,7 @@ class ZhNameStack(BaseNameStack):
             start,
             explicit_given_end=explicit_given.end if explicit_given is not None else None,
         )
-        exact_standalone_four = (
-            family_anchor.char_count == 1
-            and standalone.start == start
-            and standalone.unit_width <= 4
-            and self._count_name_chars(start, standalone.end) == 4
-        )
-        allow_single_four = explicit_given is not None or exact_standalone_four
+        allow_single_four = explicit_given is not None
         max_name_chars = 4 if family_anchor.char_count >= 2 or allow_single_four else 3
         candidate_end = self._resolve_candidate_end(
             start=start,

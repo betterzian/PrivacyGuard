@@ -269,6 +269,18 @@ def test_compound_surname_path_allows_four_chars():
     assert run.candidate.text == "欧阳娜娜"
 
 
+def test_single_family_standalone_no_longer_extends_to_four_chars_without_explicit_given():
+    text = "王小明明,"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "王", source_kind="family_name", strength=ClaimStrength.SOFT),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "王小明"
+
+
 def test_family_path_same_start_cover_can_drop_weak_family_component():
     text = "王国庆"
     clues = (
