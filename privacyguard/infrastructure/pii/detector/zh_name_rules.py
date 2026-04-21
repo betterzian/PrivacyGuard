@@ -29,19 +29,15 @@ def compact_zh_name_text(text: str) -> str:
 
 class NegativeOverlapKind(str, Enum):
     NONE = "none"
-    EXACT_HIT = "exact_hit"
-    SAME_START_COVER = "same_start_cover"
     FULLY_COVERED = "fully_covered"
     PARTIAL_OVERLAP = "partial_overlap"
     NEGATIVE_FULLY_INSIDE = "negative_fully_inside"
 
 
 _NEGATIVE_KIND_PRIORITY = {
-    NegativeOverlapKind.SAME_START_COVER: 5,
-    NegativeOverlapKind.FULLY_COVERED: 5,
-    NegativeOverlapKind.PARTIAL_OVERLAP: 5,
-    NegativeOverlapKind.EXACT_HIT: 4,
-    NegativeOverlapKind.NEGATIVE_FULLY_INSIDE: 3,
+    NegativeOverlapKind.FULLY_COVERED: 3,
+    NegativeOverlapKind.PARTIAL_OVERLAP: 2,
+    NegativeOverlapKind.NEGATIVE_FULLY_INSIDE: 1,
     NegativeOverlapKind.NONE: 0,
 }
 
@@ -66,40 +62,6 @@ class ZhNameCommitDecision:
     route: str
     negative_overlap_kind: NegativeOverlapKind = NegativeOverlapKind.NONE
     reasons: tuple[str, ...] = ()
-
-
-_NEGATIVE_OVERLAP_ALLOWED_KINDS = frozenset(
-    {
-        NegativeOverlapKind.NONE,
-        NegativeOverlapKind.EXACT_HIT,
-    }
-)
-
-_NEGATIVE_OVERLAP_ALLOWED_KINDS_WITH_NEGATIVE_FULLY_INSIDE = frozenset(
-    {
-        NegativeOverlapKind.NONE,
-        NegativeOverlapKind.EXACT_HIT,
-        NegativeOverlapKind.NEGATIVE_FULLY_INSIDE,
-    }
-)
-
-# 姓片段：完全包住或部分重叠 → 本栈立即结束，不吞名、不提交。
-_FAMILY_IMMEDIATE_EXIT_KINDS = frozenset(
-    {
-        NegativeOverlapKind.FULLY_COVERED,
-        NegativeOverlapKind.PARTIAL_OVERLAP,
-    }
-)
-
-# 名或隐式尾部：同上两类 → 整段姓名候选取消提交。
-_GIVEN_OR_IMPLICIT_TAIL_CANCEL_KINDS = _FAMILY_IMMEDIATE_EXIT_KINDS
-
-# 仍仅通过降一级 strength 消化的 overlap（与 blacklist 同起点向右延伸等）。
-_CLAIM_STRENGTH_DEMOTION_KINDS = frozenset(
-    {
-        NegativeOverlapKind.SAME_START_COVER,
-    }
-)
 
 
 def upgrade_claim_strength(strength: ClaimStrength) -> ClaimStrength:
@@ -162,18 +124,10 @@ def classify_negative_overlap(
         return NegativeOverlapKind.NONE
     if negative_end <= candidate_start or negative_start >= candidate_end:
         return NegativeOverlapKind.NONE
-    if (
-        candidate_start == negative_start
-        and candidate_end == negative_end
-        and candidate_raw_text == negative_text
-    ):
-        return NegativeOverlapKind.EXACT_HIT
-    if negative_start == candidate_start and negative_end >= candidate_end:
-        return NegativeOverlapKind.SAME_START_COVER
-    if negative_start <= candidate_start and negative_end >= candidate_end:
-        return NegativeOverlapKind.FULLY_COVERED
     if candidate_start <= negative_start and candidate_end >= negative_end:
         return NegativeOverlapKind.NEGATIVE_FULLY_INSIDE
+    if negative_start <= candidate_start and negative_end >= candidate_end:
+        return NegativeOverlapKind.FULLY_COVERED
     return NegativeOverlapKind.PARTIAL_OVERLAP
 
 
@@ -266,44 +220,27 @@ def has_any_negative_overlap(overlaps: Sequence[NegativeOverlap]) -> bool:
     return bool(overlaps)
 
 
-def negative_fully_inside_allowed_for_strength(strength: ClaimStrength) -> bool:
-    """当前有效强度是否允许放行 ``NEGATIVE_FULLY_INSIDE``。"""
-    return strength == ClaimStrength.HARD
-
-
-def direct_submit_negative_allowed(overlaps: Sequence[NegativeOverlap], *, effective_strength: ClaimStrength) -> bool:
-    """直接提交路径是否允许当前 effective strength 的 negative 命中集合。"""
-    allowed_kinds = _NEGATIVE_OVERLAP_ALLOWED_KINDS
-    if negative_fully_inside_allowed_for_strength(effective_strength):
-        allowed_kinds = _NEGATIVE_OVERLAP_ALLOWED_KINDS_WITH_NEGATIVE_FULLY_INSIDE
-    return all(item.kind in allowed_kinds for item in overlaps)
-
-
-def family_negative_blocks_stack_immediately(overlaps: Sequence[NegativeOverlap], *, effective_strength: ClaimStrength) -> bool:
-    """姓片段是否命中强阻断（应立刻结束本栈，不再扩张）。"""
-    if not negative_fully_inside_allowed_for_strength(effective_strength) and any(
-        item.kind == NegativeOverlapKind.NEGATIVE_FULLY_INSIDE for item in overlaps
-    ):
-        return True
-    return any(item.kind in _FAMILY_IMMEDIATE_EXIT_KINDS for item in overlaps)
-
-
-def given_or_implicit_tail_negative_cancels_candidate(
+def apply_negative_overlap_strength(
     overlaps: Sequence[NegativeOverlap],
     *,
     effective_strength: ClaimStrength,
-) -> bool:
-    """显式名或隐式尾部是否命中强阻断（应取消整段姓名提交）。"""
-    if not negative_fully_inside_allowed_for_strength(effective_strength) and any(
-        item.kind == NegativeOverlapKind.NEGATIVE_FULLY_INSIDE for item in overlaps
-    ):
-        return True
-    return any(item.kind in _GIVEN_OR_IMPLICIT_TAIL_CANCEL_KINDS for item in overlaps)
+) -> ClaimStrength | None:
+    """按统一优先级应用 negative 对当前 strength 的影响。
 
-
-def component_negative_demotes_claim_strength(overlaps: Sequence[NegativeOverlap]) -> bool:
-    """是否仅通过 claim_strength 降一级即可继续（不含强阻断类）。"""
-    return any(item.kind in _CLAIM_STRENGTH_DEMOTION_KINDS for item in overlaps)
+    优先级：
+    1. ``FULLY_COVERED``：直接失败。
+    2. ``PARTIAL_OVERLAP``：降一级；``WEAK`` 再降则失败。
+    3. ``NEGATIVE_FULLY_INSIDE``：``HARD`` 保持不变，其余降一级。
+    """
+    if any(item.kind == NegativeOverlapKind.FULLY_COVERED for item in overlaps):
+        return None
+    if any(item.kind == NegativeOverlapKind.PARTIAL_OVERLAP for item in overlaps):
+        return downgrade_claim_strength(effective_strength)
+    if any(item.kind == NegativeOverlapKind.NEGATIVE_FULLY_INSIDE for item in overlaps):
+        if effective_strength == ClaimStrength.HARD:
+            return effective_strength
+        return downgrade_claim_strength(effective_strength)
+    return effective_strength
 
 
 __all__ = [
@@ -312,18 +249,14 @@ __all__ = [
     "ZhNameCommitDecision",
     "claim_strength_meets_protection",
     "claim_strength_required_for_protection",
+    "apply_negative_overlap_strength",
     "classify_negative_overlap",
     "collect_blocking_overlaps",
     "collect_negative_overlaps",
     "compact_zh_name_text",
-    "component_negative_demotes_claim_strength",
-    "direct_submit_negative_allowed",
     "dominant_negative_overlap_kind",
     "downgrade_claim_strength",
-    "family_negative_blocks_stack_immediately",
-    "given_or_implicit_tail_negative_cancels_candidate",
     "has_any_negative_overlap",
-    "negative_fully_inside_allowed_for_strength",
     "stronger_claim_strength",
     "upgrade_claim_strength",
 ]

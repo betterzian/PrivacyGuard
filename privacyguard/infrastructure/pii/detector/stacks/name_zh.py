@@ -21,17 +21,11 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
 from privacyguard.infrastructure.pii.detector.stacks.name_base import BaseNameStack
 from privacyguard.infrastructure.pii.detector.zh_name_rules import (
     NegativeOverlapKind,
+    apply_negative_overlap_strength,
     claim_strength_meets_protection,
     collect_blocking_overlaps,
-    collect_negative_overlaps,
     compact_zh_name_text,
-    component_negative_demotes_claim_strength,
-    direct_submit_negative_allowed,
     dominant_negative_overlap_kind,
-    downgrade_claim_strength,
-    family_negative_blocks_stack_immediately,
-    given_or_implicit_tail_negative_cancels_candidate,
-    stronger_claim_strength,
     upgrade_claim_strength,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_name_joiner
@@ -109,11 +103,16 @@ class ZhNameStack(BaseNameStack):
         return True
 
     def run(self) -> StackRun | None:
-        if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS, ClueRole.GIVEN_NAME}:
-            return self._run_direct_span()
-        if self.clue.role in {ClueRole.LABEL, ClueRole.START, ClueRole.FAMILY_NAME}:
-            return self._run_boundary_candidate()
-        return None
+        if self.clue.role not in {
+            ClueRole.FULL_NAME,
+            ClueRole.ALIAS,
+            ClueRole.GIVEN_NAME,
+            ClueRole.LABEL,
+            ClueRole.START,
+            ClueRole.FAMILY_NAME,
+        }:
+            return None
+        return self._run_name_candidate()
 
     def _trimmed_candidate_has_value_beyond_family(
         self,
@@ -129,145 +128,104 @@ class ZhNameStack(BaseNameStack):
             return True
         return candidate.end > family_anchor.end
 
-    def _run_direct_span(self) -> StackRun | None:
-        start = self.clue.start
-        end = self.clue.end
-        raw_text = self.context.stream.text[start:end]
-        compact_text = compact_zh_name_text(raw_text)
-        if not compact_text:
-            return None
+    def _run_name_candidate(self) -> StackRun | None:
+        if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS, ClueRole.GIVEN_NAME}:
+            return self._run_single_stage_candidate(
+                start=self.clue.start,
+                end=self.clue.end,
+                initial_strength=self.clue.strength,
+                route=self.clue.role.value,
+            )
 
-        # 直接 span 仅按 negative clue 判定；其它类型 PII 与 parser 层「严格包含」裁决交互。
-        overlaps = collect_negative_overlaps(
-            candidate_start=start,
-            candidate_end=end,
-            candidate_raw_text=raw_text,
-            negative_clues=self.context.negative_clues,
-        )
-        dominant_kind = dominant_negative_overlap_kind(overlaps)
-        if not direct_submit_negative_allowed(overlaps, effective_strength=self.clue.strength):
-            return None
-
-        final_strength = self.clue.strength
-        if not claim_strength_meets_protection(final_strength, self.context.protection_level):
-            return None
-
-        candidate = self._build_candidate(
-            start=start,
-            end=end,
-            claim_strength=final_strength,
-            route=self.clue.role.value,
-            negative_overlap_kind=dominant_kind,
-            extra_metadata={
-                "name_route": [self.clue.role.value],
-            },
-        )
-        if candidate is None:
-            return None
-        return self._finalize_run(start, end, candidate)
-
-    def _run_boundary_candidate(self) -> StackRun | None:
         start = self._resolve_boundary_start()
         if start >= len(self.context.stream.text):
             return None
 
         initial_standalone = self._resolve_standalone_range(start)
-        family_anchor = self._resolve_family_anchor(start, initial_standalone.end)
-        if family_anchor is None:
-            return None
+        upper_bound = initial_standalone.end
+        explicit_family = self._resolve_explicit_family_anchor(start, upper_bound)
+        inferred_family = self._resolve_family_anchor(start, upper_bound)
+        route = self._route_name()
 
-        family_overlaps = self._collect_blocking_overlaps(
-            candidate_start=family_anchor.start,
-            candidate_end=family_anchor.end,
-            candidate_raw_text=self.context.stream.text[family_anchor.start : family_anchor.end],
-        )
-        family_negative_strength = self._negative_fully_inside_effective_strength(family_anchor.claim_strength)
-        if family_negative_blocks_stack_immediately(
-            family_overlaps,
-            effective_strength=family_negative_strength,
-        ):
-            return None
+        family_anchor_for_upgrade = inferred_family
+        family_strength_before: ClaimStrength | None = None
+        family_strength_after: ClaimStrength | None = None
+        given_strength_before: ClaimStrength | None = None
+        given_strength_after: ClaimStrength | None = None
+        final_end: int | None = None
 
-        explicit_given = self._resolve_explicit_given(family_anchor.end, initial_standalone.end)
-        standalone = self._resolve_standalone_range(
-            start,
-            explicit_given_end=explicit_given.end if explicit_given is not None else None,
-        )
-        allow_single_four = explicit_given is not None
-        max_name_chars = 4 if family_anchor.char_count >= 2 or allow_single_four else 3
-        candidate_end = self._resolve_candidate_end(
-            start=start,
-            family_anchor=family_anchor,
-            explicit_given=explicit_given,
-            upper_bound=standalone.end,
-            max_name_chars=max_name_chars,
-        )
-        if candidate_end <= family_anchor.end:
-            return None
-
-        candidate_raw_text = self.context.stream.text[start:candidate_end]
-        candidate_char_count = self._count_name_chars(start, candidate_end)
-        if (
-            candidate_char_count is None
-            or candidate_char_count <= family_anchor.char_count
-            or candidate_char_count > max_name_chars
-        ):
-            return None
-
-        family_strength_before = family_anchor.claim_strength
-        family_strength_after = family_anchor.claim_strength
-        if component_negative_demotes_claim_strength(family_overlaps):
-            family_strength_after = downgrade_claim_strength(family_strength_after)
+        if explicit_family is not None:
+            family_anchor_for_upgrade = explicit_family
+            family_strength_before = (
+                ClaimStrength.HARD if self.clue.role in {ClueRole.LABEL, ClueRole.START} else explicit_family.claim_strength
+            )
+            family_strength_after, _family_overlaps = self._apply_negative_span(
+                start=explicit_family.start,
+                end=explicit_family.end,
+                effective_strength=family_strength_before,
+            )
             if family_strength_after is None:
                 return None
 
-        given_strength_before: ClaimStrength | None = None
-        given_strength_after: ClaimStrength | None = None
-        if explicit_given is not None:
-            given_strength_before = explicit_given.strength
-            given_strength_after = explicit_given.strength
-            explicit_given_overlaps = self._collect_blocking_overlaps(
-                candidate_start=explicit_given.start,
-                candidate_end=explicit_given.end,
-                candidate_raw_text=self.context.stream.text[explicit_given.start:explicit_given.end],
+            tail_clue = self._resolve_second_stage_name_clue(
+                name_start=start,
+                family_anchor=explicit_family,
+                upper_bound=upper_bound,
             )
-            explicit_given_negative_strength = self._negative_fully_inside_effective_strength(given_strength_after)
-            if given_or_implicit_tail_negative_cancels_candidate(
-                explicit_given_overlaps,
-                effective_strength=explicit_given_negative_strength,
-            ):
+            tail_span = self._resolve_second_stage_tail_span(
+                family_anchor=explicit_family,
+                explicit_name_clue=tail_clue,
+                upper_bound=upper_bound,
+            )
+            if tail_span is None:
                 return None
-            if component_negative_demotes_claim_strength(explicit_given_overlaps):
-                given_strength_after = downgrade_claim_strength(given_strength_after)
+
+            given_strength_before = family_strength_after
+            given_strength_after, _tail_overlaps = self._apply_negative_span(
+                start=tail_span[0],
+                end=tail_span[1],
+                effective_strength=given_strength_before,
+            )
+            if given_strength_after is None:
+                return None
+            final_end = tail_span[2]
+            final_strength = given_strength_after
         else:
-            implicit_tail_overlaps = self._collect_blocking_overlaps(
-                candidate_start=family_anchor.end,
-                candidate_end=candidate_end,
-                candidate_raw_text=self.context.stream.text[family_anchor.end:candidate_end],
-            )
-            implicit_tail_negative_strength = self._negative_fully_inside_effective_strength(family_strength_after)
-            if given_or_implicit_tail_negative_cancels_candidate(
-                implicit_tail_overlaps,
-                effective_strength=implicit_tail_negative_strength,
-            ):
-                return None
-            if component_negative_demotes_claim_strength(implicit_tail_overlaps):
-                family_strength_after = downgrade_claim_strength(family_strength_after)
-                if family_strength_after is None:
+            single_stage_clue = self._resolve_explicit_name_clue(start, upper_bound)
+            if single_stage_clue is not None:
+                span_start = single_stage_clue.start
+                span_end = single_stage_clue.end
+            else:
+                span_start = start
+                span_end = self._resolve_required_name_chars_end(start, upper_bound=upper_bound, char_count=2)
+                if span_end is None:
                     return None
+            initial_strength = ClaimStrength.HARD if self.clue.role in {ClueRole.LABEL, ClueRole.START} else self.clue.strength
+            final_strength, _single_overlaps = self._apply_negative_span(
+                start=span_start,
+                end=span_end,
+                effective_strength=initial_strength,
+            )
+            if final_strength is None:
+                return None
+            final_end = span_end
 
-        final_strength = family_strength_after
-        if given_strength_after is not None:
-            final_strength = stronger_claim_strength(final_strength, given_strength_after)
+        if final_end is None or final_end <= start:
+            return None
 
+        candidate_raw_text = self.context.stream.text[start:final_end]
         candidate_overlaps = self._collect_blocking_overlaps(
             candidate_start=start,
-            candidate_end=candidate_end,
+            candidate_end=final_end,
             candidate_raw_text=candidate_raw_text,
         )
-        if self._should_upgrade_by_family_candidate_boundaries(
-            family_anchor=family_anchor,
-            candidate_end=candidate_end,
+
+        if (
+            family_anchor_for_upgrade is not None
+            and self._should_upgrade_by_family_candidate_boundaries(
+                family_anchor=family_anchor_for_upgrade,
+                candidate_end=final_end,
+            )
         ):
             final_strength = upgrade_claim_strength(final_strength)
 
@@ -277,38 +235,36 @@ class ZhNameStack(BaseNameStack):
         if not claim_strength_meets_protection(final_strength, self.context.protection_level):
             return None
 
-        route = self._route_name()
+        extra_metadata = {
+            "name_route": [route],
+            "negative_overlap_kind": [dominant_negative_overlap_kind(candidate_overlaps).value],
+        }
+        if family_strength_before is not None and family_strength_after is not None and family_anchor_for_upgrade is not None:
+            extra_metadata |= {
+                "family_claim_strength_before_negative": [family_strength_before.value],
+                "family_claim_strength_after_negative": [family_strength_after.value],
+                "family_anchor_text": [family_anchor_for_upgrade.text],
+            }
+        if given_strength_before is not None:
+            extra_metadata["given_claim_strength_before_negative"] = [given_strength_before.value]
+        if given_strength_after is not None:
+            extra_metadata["given_claim_strength_after_negative"] = [given_strength_after.value]
+
         candidate = self._build_candidate(
             start=start,
-            end=candidate_end,
+            end=final_end,
             claim_strength=final_strength,
             route=route,
             negative_overlap_kind=dominant_negative_overlap_kind(candidate_overlaps),
-            extra_metadata={
-                "name_route": [route],
-                "family_claim_strength_before_negative": [family_strength_before.value],
-                "family_claim_strength_after_negative": [family_strength_after.value],
-                "negative_overlap_kind": [dominant_negative_overlap_kind(candidate_overlaps).value],
-                "family_anchor_text": [family_anchor.text],
-            }
-            | (
-                {"given_claim_strength_before_negative": [given_strength_before.value]}
-                if given_strength_before is not None
-                else {}
-            )
-            | (
-                {"given_claim_strength_after_negative": [given_strength_after.value]}
-                if given_strength_after is not None
-                else {}
-            ),
+            extra_metadata=extra_metadata,
         )
         if candidate is None:
             return None
-        overlap_index = self._first_address_overlap_clue_index(start, candidate_end)
-        run = self._finalize_run(start, candidate_end, candidate)
+        overlap_index = self._first_address_overlap_clue_index(start, final_end)
+        run = self._finalize_run(start, final_end, candidate)
         if run is None:
             return None
-        if overlap_index is not None and family_anchor.end > start:
+        if overlap_index is not None and family_anchor_for_upgrade is not None and family_anchor_for_upgrade.end > start:
             run.pending_challenge = PendingChallenge(
                 clue_index=overlap_index,
                 extended_candidate=candidate,
@@ -316,6 +272,38 @@ class ZhNameStack(BaseNameStack):
                 challenge_kind="name_address_conflict",
             )
         return run
+
+    def _run_single_stage_candidate(
+        self,
+        *,
+        start: int,
+        end: int,
+        initial_strength: ClaimStrength,
+        route: str,
+    ) -> StackRun | None:
+        final_strength, overlaps = self._apply_negative_span(
+            start=start,
+            end=end,
+            effective_strength=initial_strength,
+        )
+        if final_strength is None:
+            return None
+        if not claim_strength_meets_protection(final_strength, self.context.protection_level):
+            return None
+
+        candidate = self._build_candidate(
+            start=start,
+            end=end,
+            claim_strength=final_strength,
+            route=route,
+            negative_overlap_kind=dominant_negative_overlap_kind(overlaps),
+            extra_metadata={
+                "name_route": [route],
+            },
+        )
+        if candidate is None:
+            return None
+        return self._finalize_run(start, end, candidate)
 
     def _first_address_overlap_clue_index(self, start: int, end: int) -> int | None:
         for idx, clue in enumerate(self.context.clues):
@@ -378,35 +366,85 @@ class ZhNameStack(BaseNameStack):
                 )
         return None
 
-    def _resolve_explicit_given(self, start: int, upper_bound: int) -> Clue | None:
-        given_clues = [
+    def _resolve_explicit_family_anchor(self, start: int, upper_bound: int) -> _FamilyAnchor | None:
+        family_clues = [
             clue
-            for _index, clue in self._name_clues_starting_at(start, role=ClueRole.GIVEN_NAME)
+            for _index, clue in self._name_clues_starting_at(start, role=ClueRole.FAMILY_NAME)
             if clue.end <= upper_bound
         ]
-        if not given_clues:
+        if not family_clues:
             return None
-        return max(given_clues, key=lambda clue: (clue.end - clue.start, _claim_strength_rank(clue.strength)))
+        clue = max(family_clues, key=lambda item: (item.end - item.start, _claim_strength_rank(item.strength)))
+        return _FamilyAnchor(
+            start=clue.start,
+            end=clue.end,
+            text=clue.text,
+            claim_strength=clue.strength,
+            clue_id=clue.clue_id,
+        )
 
-    def _resolve_candidate_end(
+    def _resolve_explicit_name_clue(self, start: int, upper_bound: int) -> Clue | None:
+        direct_roles = {
+            ClueRole.FULL_NAME: 3,
+            ClueRole.ALIAS: 2,
+            ClueRole.GIVEN_NAME: 1,
+        }
+        matches: list[Clue] = []
+        for role in direct_roles:
+            matches.extend(
+                clue
+                for _index, clue in self._name_clues_starting_at(start, role=role)
+                if clue.end <= upper_bound
+            )
+        if not matches:
+            return None
+        return max(
+            matches,
+            key=lambda clue: (
+                clue.end - clue.start,
+                _claim_strength_rank(clue.strength),
+                direct_roles[clue.role],
+            ),
+        )
+
+    def _resolve_second_stage_name_clue(
         self,
         *,
-        start: int,
+        name_start: int,
         family_anchor: _FamilyAnchor,
-        explicit_given: Clue | None,
         upper_bound: int,
-        max_name_chars: int,
-    ) -> int:
-        if explicit_given is not None:
-            explicit_chars = self._count_name_chars(start, explicit_given.end)
-            if explicit_chars is not None and explicit_chars <= max_name_chars:
-                return explicit_given.end
-        limited_end = self._char_after_name_chars(start, upper_bound=upper_bound, char_count=max_name_chars)
-        if limited_end is None:
-            return family_anchor.end
-        return limited_end
+    ) -> Clue | None:
+        whole_name_clue = self._resolve_explicit_name_clue(name_start, upper_bound)
+        if whole_name_clue is not None and whole_name_clue.end > family_anchor.end:
+            return whole_name_clue
+        return self._resolve_explicit_name_clue(family_anchor.end, upper_bound)
 
-    def _resolve_standalone_range(self, start: int, *, explicit_given_end: int | None = None) -> _StandaloneRange:
+    def _resolve_second_stage_tail_span(
+        self,
+        *,
+        family_anchor: _FamilyAnchor,
+        explicit_name_clue: Clue | None,
+        upper_bound: int,
+    ) -> tuple[int, int, int] | None:
+        if explicit_name_clue is not None:
+            return (explicit_name_clue.start, explicit_name_clue.end, explicit_name_clue.end)
+        tail_end = self._char_after_name_chars(family_anchor.end, upper_bound=upper_bound, char_count=2)
+        if tail_end is None:
+            return None
+        tail_char_count = self._count_name_chars(family_anchor.end, tail_end)
+        if tail_char_count is None or tail_char_count <= 0:
+            return None
+        return (family_anchor.end, tail_end, tail_end)
+
+    def _resolve_required_name_chars_end(self, start: int, *, upper_bound: int, char_count: int) -> int | None:
+        end = self._char_after_name_chars(start, upper_bound=upper_bound, char_count=char_count)
+        if end is None:
+            return None
+        if self._count_name_chars(start, end) != char_count:
+            return None
+        return end
+
+    def _resolve_standalone_range(self, start: int) -> _StandaloneRange:
         left = start
         ui = _unit_index_left_of(self.context.stream, start)
         while ui >= 0:
@@ -420,17 +458,16 @@ class ZhNameStack(BaseNameStack):
                 continue
             break
 
-        right = max(start, explicit_given_end) if explicit_given_end is not None else start
-        if explicit_given_end is None:
-            ui = _unit_index_at_or_after(self.context.stream, start)
-            while ui < len(self.context.stream.units):
-                unit = self.context.stream.units[ui]
-                if unit.kind in {"space", "inline_gap"}:
-                    break
-                if not self._unit_is_name_like(ui):
-                    break
-                right = unit.char_end
-                ui += 1
+        right = start
+        ui = _unit_index_at_or_after(self.context.stream, start)
+        while ui < len(self.context.stream.units):
+            unit = self.context.stream.units[ui]
+            if unit.kind in {"space", "inline_gap"}:
+                break
+            if not self._unit_is_name_like(ui):
+                break
+            right = unit.char_end
+            ui += 1
 
         unit_start, unit_last = _char_span_to_unit_span(self.context.stream, left, right)
         return _StandaloneRange(start=left, end=right, unit_start=unit_start, unit_last=unit_last)
@@ -561,11 +598,25 @@ class ZhNameStack(BaseNameStack):
             return "label_seed"
         return "start_seed"
 
-    def _negative_fully_inside_effective_strength(self, current_strength: ClaimStrength) -> ClaimStrength:
-        """LABEL/START 在 ``NEGATIVE_FULLY_INSIDE`` 判定时按 hard 视角处理。"""
-        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            return ClaimStrength.HARD
-        return current_strength
+    def _apply_negative_span(
+        self,
+        *,
+        start: int,
+        end: int,
+        effective_strength: ClaimStrength,
+    ) -> tuple[ClaimStrength | None, tuple]:
+        raw_text = self.context.stream.text[start:end]
+        if not compact_zh_name_text(raw_text):
+            return None, ()
+        overlaps = self._collect_blocking_overlaps(
+            candidate_start=start,
+            candidate_end=end,
+            candidate_raw_text=raw_text,
+        )
+        return (
+            apply_negative_overlap_strength(overlaps, effective_strength=effective_strength),
+            overlaps,
+        )
 
     def _build_candidate(
         self,

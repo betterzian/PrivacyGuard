@@ -18,9 +18,7 @@ from privacyguard.infrastructure.pii.detector.stacks import NameStack
 from privacyguard.infrastructure.pii.detector.zh_name_rules import (
     NegativeOverlap,
     NegativeOverlapKind,
-    component_negative_demotes_claim_strength,
-    downgrade_claim_strength,
-    given_or_implicit_tail_negative_cancels_candidate,
+    apply_negative_overlap_strength,
 )
 from tests._detector_negative_index import split_negative_clues
 
@@ -140,7 +138,7 @@ def _name_texts(
     ]
 
 
-def test_full_name_direct_submit_accepts_none_exact_and_negative_fully_inside():
+def test_full_name_single_stage_accepts_none_exact_and_negative_fully_inside():
     assert _name_texts(
         "张三",
         (
@@ -163,7 +161,7 @@ def test_full_name_direct_submit_accepts_none_exact_and_negative_fully_inside():
     ) == ["张三丰"]
 
 
-def test_full_name_direct_submit_allows_local_vault_name_containing_negative_subspan():
+def test_full_name_single_stage_allows_local_vault_name_containing_negative_subspan():
     """本地 FULL_NAME 可包含 blacklist 子串（如「三丰」嵌在「张三丰」内），仍允许直接提交。"""
     assert _name_texts(
         "张三丰",
@@ -196,7 +194,7 @@ def test_full_name_parser_drops_name_when_address_span_strictly_contains():
     ) == []
 
 
-def test_alias_direct_submit_allows_negative_fully_inside():
+def test_alias_single_stage_allows_negative_fully_inside():
     assert _name_texts(
         "阿宝",
         (
@@ -206,7 +204,7 @@ def test_alias_direct_submit_allows_negative_fully_inside():
     ) == ["阿宝"]
 
 
-def test_given_name_direct_submit_rejects_negative_fully_inside():
+def test_given_name_single_stage_rejects_negative_fully_inside_when_soft():
     assert _name_texts(
         "可欣",
         (
@@ -216,7 +214,7 @@ def test_given_name_direct_submit_rejects_negative_fully_inside():
     ) == []
 
 
-def test_given_name_hard_direct_submit_allows_negative_fully_inside():
+def test_given_name_single_stage_allows_negative_fully_inside_when_hard():
     assert _name_texts(
         "可欣",
         (
@@ -226,17 +224,17 @@ def test_given_name_hard_direct_submit_allows_negative_fully_inside():
     ) == ["可欣"]
 
 
-def test_given_name_direct_submit_still_allows_exact_hit():
+def test_given_name_single_stage_treats_exact_equal_as_negative_fully_inside():
     assert _name_texts(
         "可欣",
         (
             _clue("given-1", ClueRole.GIVEN_NAME, 0, 2, "可欣", source_kind="zh_given_name", strength=ClaimStrength.SOFT),
             _clue("neg-1", ClueRole.NEGATIVE, 0, 2, "可欣", source_kind="negative_name_word", attr_type=None),
         ),
-    ) == ["可欣"]
+    ) == []
 
 
-def test_given_name_direct_submit_still_respects_protection_gate():
+def test_given_name_single_stage_still_respects_protection_gate():
     assert _name_texts(
         "可欣",
         (
@@ -270,7 +268,7 @@ def test_single_family_standalone_no_longer_extends_to_four_chars_without_explic
     assert run.candidate.text == "王小明"
 
 
-def test_family_path_same_start_cover_can_drop_weak_family_component():
+def test_family_path_fully_covered_drops_weak_family_component():
     text = "王国庆"
     clues = (
         _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "王", source_kind="family_name", strength=ClaimStrength.WEAK),
@@ -401,6 +399,36 @@ def test_label_seed_outputs_hard_candidate():
     assert run.candidate.claim_strength == ClaimStrength.HARD
 
 
+def test_label_seed_without_explicit_family_uses_full_name_clue_span():
+    text = "姓名: 张三丰"
+    clues = (
+        _clue("label-1", ClueRole.LABEL, 0, 2, "姓名", source_kind="context_name_field"),
+        _clue("full-1", ClueRole.FULL_NAME, 4, 7, "张三丰", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "张三丰"
+    assert run.candidate.claim_strength == ClaimStrength.HARD
+
+
+def test_label_seed_with_explicit_family_prefers_full_name_clue_for_second_stage():
+    text = "姓名: 张三丰"
+    clues = (
+        _clue("label-1", ClueRole.LABEL, 0, 2, "姓名", source_kind="context_name_field"),
+        _clue("family-1", ClueRole.FAMILY_NAME, 4, 5, "张", source_kind="family_name", strength=ClaimStrength.WEAK),
+        _clue("full-1", ClueRole.FULL_NAME, 4, 7, "张三丰", source_kind="dictionary_local", strength=ClaimStrength.HARD),
+        _clue("neg-1", ClueRole.NEGATIVE, 5, 6, "三", source_kind="negative_name_word", attr_type=None),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "张三丰"
+    assert run.candidate.claim_strength == ClaimStrength.HARD
+
+
 def test_family_route_hard_allows_negative_fully_inside():
     text = "张三丰"
     clues = (
@@ -415,7 +443,7 @@ def test_family_route_hard_allows_negative_fully_inside():
     assert run.candidate.claim_strength == ClaimStrength.HARD
 
 
-def test_family_route_soft_rejects_negative_fully_inside():
+def test_family_route_soft_negative_fully_inside_can_be_rescued_by_boundary_upgrade():
     text = "张三丰"
     clues = (
         _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "张", source_kind="family_name", strength=ClaimStrength.SOFT),
@@ -424,41 +452,68 @@ def test_family_route_soft_rejects_negative_fully_inside():
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
-    assert run is None
+    assert run is not None
+    assert run.candidate.text == "张三丰"
+    assert run.candidate.claim_strength == ClaimStrength.SOFT
 
 
-def test_negative_fully_inside_uses_current_effective_strength_after_demote():
-    family_overlaps = (
-        NegativeOverlap(
-            kind=NegativeOverlapKind.SAME_START_COVER,
-            clue_id="neg-family",
-            start=0,
-            end=2,
-            text="国三",
-        ),
-    )
-    tail_overlaps = (
+def test_negative_helper_partial_overlap_has_higher_priority_than_inside():
+    overlaps = (
         NegativeOverlap(
             kind=NegativeOverlapKind.NEGATIVE_FULLY_INSIDE,
-            clue_id="neg-tail",
+            clue_id="neg-inside",
+            start=1,
+            end=2,
+            text="三",
+        ),
+        NegativeOverlap(
+            kind=NegativeOverlapKind.PARTIAL_OVERLAP,
+            clue_id="neg-partial",
+            start=0,
+            end=2,
+            text="张三",
+        ),
+    )
+
+    assert apply_negative_overlap_strength(overlaps, effective_strength=ClaimStrength.HARD) == ClaimStrength.SOFT
+
+
+def test_negative_helper_non_hard_inside_downgrades_to_failure_from_weak():
+    overlaps = (
+        NegativeOverlap(
+            kind=NegativeOverlapKind.NEGATIVE_FULLY_INSIDE,
+            clue_id="neg-inside",
             start=1,
             end=2,
             text="三",
         ),
     )
 
-    family_strength_after = ClaimStrength.HARD
-    assert component_negative_demotes_claim_strength(family_overlaps) is True
-    family_strength_after = downgrade_claim_strength(family_strength_after)
-
-    assert family_strength_after == ClaimStrength.SOFT
-    assert given_or_implicit_tail_negative_cancels_candidate(
-        tail_overlaps,
-        effective_strength=family_strength_after,
-    ) is True
+    assert apply_negative_overlap_strength(overlaps, effective_strength=ClaimStrength.WEAK) is None
 
 
-def test_guobu_non_regression_still_dropped_by_same_start_cover_and_tail_cover():
+def test_negative_helper_fully_covered_cancels_immediately():
+    overlaps = (
+        NegativeOverlap(
+            kind=NegativeOverlapKind.FULLY_COVERED,
+            clue_id="neg-covered",
+            start=0,
+            end=2,
+            text="张三",
+        ),
+        NegativeOverlap(
+            kind=NegativeOverlapKind.NEGATIVE_FULLY_INSIDE,
+            clue_id="neg-inside",
+            start=1,
+            end=2,
+            text="三",
+        ),
+    )
+
+    assert apply_negative_overlap_strength(overlaps, effective_strength=ClaimStrength.HARD) is None
+
+
+def test_guobu_non_regression_still_dropped_by_fully_covered_family():
     text = "国补"
     clues = (
         _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "国", source_kind="family_name", strength=ClaimStrength.HARD),
@@ -468,6 +523,26 @@ def test_guobu_non_regression_still_dropped_by_same_start_cover_and_tail_cover()
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
     assert run is None
+
+
+def test_heng_wuliu_regression_no_longer_commits_name():
+    text = "单位填远衡物流服务有限公司"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 3, 4, "衡", source_kind="family_name", strength=ClaimStrength.SOFT),
+        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "物流", source_kind="negative_name_word", attr_type=None),
+    )
+
+    assert "衡物流" not in _name_texts(text, clues)
+
+
+def test_ning_xinxi_regression_no_longer_commits_name():
+    text = "单位填川宁信息技术有限公司"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 3, 4, "宁", source_kind="family_name", strength=ClaimStrength.SOFT),
+        _clue("neg-1", ClueRole.NEGATIVE, 4, 6, "信息", source_kind="negative_name_word", attr_type=None),
+    )
+
+    assert "宁信息" not in _name_texts(text, clues)
 
 
 def test_parser_span_containment_address_wins_over_name_prefix():
@@ -588,8 +663,8 @@ def test_parser_commits_winner_when_name_loses_strength_conflict():
     ]
 
 
-def test_parser_keeps_trimmed_name_when_loss_still_leaves_non_family_text():
-    """NAME 输给地址后，裁掉冲突区若仍保留“姓+其余内容”，则允许按门槛提交裁剪结果。"""
+def test_parser_drops_direct_name_before_trim_when_other_attr_partial_overlap_hits_helper():
+    """direct whole-name 先吃统一 helper，命中非 NAME 的 PARTIAL_OVERLAP 时不会再留给 parser 裁剪。"""
     text = "张三丰路"
     clues = (
         _clue("name-1", ClueRole.FULL_NAME, 0, 3, "张三丰", source_kind="dictionary_local", strength=ClaimStrength.SOFT),
@@ -610,7 +685,6 @@ def test_parser_keeps_trimmed_name_when_loss_still_leaves_non_family_text():
     candidates = _parse_candidates(text, clues)
 
     assert [(candidate.attr_type, candidate.text) for candidate in candidates] == [
-        (PIIAttributeType.NAME, "张三"),
         (PIIAttributeType.ADDRESS, "丰路"),
     ]
 
