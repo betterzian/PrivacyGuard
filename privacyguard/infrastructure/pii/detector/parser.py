@@ -983,6 +983,7 @@ class StreamParser:
         """为当前起栈 clue 查找可用的 inspire 锚点。"""
         if (
             clue.family == ClueFamily.STRUCTURED
+            or clue.family == ClueFamily.ADDRESS
             or clue.role in {ClueRole.LABEL, ClueRole.START}
             or clue.attr_type is None
         ):

@@ -209,6 +209,30 @@ def test_value_seed_before_organization_value_floor_is_rejected():
     assert run is None
 
 
+def test_suffix_seed_left_expansion_respects_organization_value_floor():
+    text = "蓝河科技有限公司"
+    stream, fixed, index_by_id, context = _build_organization_context(
+        text,
+        (
+            _clue(
+                "suffix-1",
+                ClueRole.SUFFIX,
+                text.index("有限公司"),
+                len(text),
+                "有限公司",
+                source_kind="company_suffix",
+            ),
+        ),
+        protection_level=ProtectionLevel.WEAK,
+    )
+    context.raise_stack_value_floor(ClueFamily.ORGANIZATION, stream.char_to_unit[text.index("蓝")])
+
+    stack = OrganizationStack(clue=fixed[index_by_id["suffix-1"]], clue_index=index_by_id["suffix-1"], context=context)
+    localized_stack = stack._delegate()
+
+    assert localized_stack._resolve_suffix_start(locale=localized_stack.STACK_LOCALE) == text.index("河")
+
+
 def test_label_seed_prefers_suffix_within_ten_non_space_units():
     text = "company name: Blue River Labs Ltd"
     label = "company name"

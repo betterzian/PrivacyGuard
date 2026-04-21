@@ -70,6 +70,7 @@ def _state_routing_context(
         raw_text=raw_text,
         stream=stream,
         seed_floor=state.seed_floor,
+        value_floor=stack._value_floor_char(),
         # 仅在已有已提交组件时才提供 search_start，避免未提交失败链污染 numberish 左扩起点。
         search_start=state.last_end if state.components else None,
         should_break_clue=lambda clue: stack.need_break(clue),

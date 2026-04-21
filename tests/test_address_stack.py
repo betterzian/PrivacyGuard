@@ -157,6 +157,30 @@ def test_value_seed_before_address_value_floor_is_rejected():
     assert run is None
 
 
+def test_key_seed_left_expansion_respects_address_value_floor():
+    text = "住址楼"
+    stream, fixed, context = _build_address_context(
+        text,
+        (
+            _clue(
+                "key",
+                role=ClueRole.KEY,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=2,
+                end=3,
+                text="楼",
+                component_type=AddressComponentType.DETAIL,
+            ),
+        ),
+    )
+    context.raise_stack_value_floor(ClueFamily.ADDRESS, stream.char_to_unit[text.index("址")])
+
+    run = AddressStack(clue=fixed[0], clue_index=0, context=context).run()
+
+    assert stream.text == text
+    assert run is None
+
+
 def test_label_seed_value_hit_includes_value_last_unit():
     stream = build_prompt_stream("上海")
     clues = (

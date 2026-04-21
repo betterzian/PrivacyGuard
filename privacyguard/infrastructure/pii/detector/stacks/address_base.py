@@ -191,7 +191,7 @@ class BaseAddressStack(BaseStack):
             scan_index = self.clue_index
             handled_labels = set()
             evidence_count = 0
-            seed_floor = None
+            seed_floor = floor_char
         if address_start is None:
             return None
 
@@ -549,6 +549,7 @@ class BaseAddressStack(BaseStack):
         *,
         component_start: int,
     ) -> _DraftComponent | None:
+        component_start = max(component_start, self._value_floor_char())
         value = _normalize_address_value(comp_type, raw_text[component_start:clue.start])
         if not value:
             return None

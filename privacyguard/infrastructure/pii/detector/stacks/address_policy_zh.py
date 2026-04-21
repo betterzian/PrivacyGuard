@@ -817,8 +817,8 @@ def _numberish_left_expand_start(
     clue: Clue,
 ) -> int:
     if context.chain:
-        return context.chain[-1].end
-    floor = context.seed_floor or 0
+        return max(context.chain[-1].end, context.value_floor)
+    floor = max(context.seed_floor or 0, context.value_floor)
     if context.previous_component_end is not None:
         floor = max(floor, _start_after_component_end(context.stream, context.previous_component_end))
     if context.search_start is not None and context.search_start < clue.start:
@@ -877,8 +877,8 @@ def _routing_left_value_start(
 ) -> int:
     """按中文地址路由规则推导左侧 value 的起点。"""
     if context.chain:
-        return context.chain[-1].end
-    floor = context.seed_floor or 0
+        return max(context.chain[-1].end, context.value_floor)
+    floor = max(context.seed_floor or 0, context.value_floor)
     if context.previous_component_end is not None:
         return max(floor, _start_after_component_end(context.stream, context.previous_component_end))
     if context.search_start is not None and context.search_start < clue.start:
@@ -1178,6 +1178,8 @@ def _has_reasonable_successor_key(
             clues=clues,
             raw_text=raw_text,
             stream=stream,
+            seed_floor=state.seed_floor,
+            value_floor=state.seed_floor or 0,
             search_start=_start_after_component_end(stream, previous_component_end) if previous_component_end is not None else None,
             should_break_clue=should_break,
         )

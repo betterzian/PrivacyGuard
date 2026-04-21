@@ -56,6 +56,8 @@ def _state_routing_context(
     clues: tuple[Clue, ...],
     raw_text: str,
     stream: StreamInput,
+    *,
+    value_floor: int,
 ) -> _RoutingContext:
     return _RoutingContext(
         chain=[clue for _, clue in state.deferred_chain],
@@ -65,6 +67,8 @@ def _state_routing_context(
         clues=clues,
         raw_text=raw_text,
         stream=stream,
+        seed_floor=state.seed_floor,
+        value_floor=value_floor,
     )
 
 
@@ -277,7 +281,7 @@ class EnAddressStack(BaseAddressStack):
             state.last_end = max(state.last_end, component.end)
             return None
 
-        context = _state_routing_context(state, clues, raw_text, stream)
+        context = _state_routing_context(state, clues, raw_text, stream, value_floor=self._value_floor_char())
         expand_defer = key_left_expand_start_if_deferrable_en(context, clue, comp_type)
         if expand_defer is not None:
             state.chain_left_anchor = expand_defer

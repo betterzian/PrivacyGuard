@@ -422,6 +422,7 @@ class _RoutingContext:
     raw_text: str
     stream: StreamInput
     seed_floor: int | None = None
+    value_floor: int = 0
     search_start: int | None = None
     should_break_clue: Callable[[Clue], bool] | None = None
 

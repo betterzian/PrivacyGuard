@@ -190,10 +190,11 @@ def _left_expand_en_phrase(pos: int, floor: int, stream: StreamInput) -> int:
 
 def _routing_left_value_start_en(context: _RoutingContext, clue: Clue) -> int:
     if context.chain:
-        return context.chain[-1].end
+        return max(context.chain[-1].end, context.value_floor)
     if context.previous_component_end is not None:
-        return context.previous_component_end
-    return _left_expand_en_phrase(clue.start, 0, context.stream)
+        return max(context.previous_component_end, context.value_floor)
+    floor = max(context.seed_floor or 0, context.value_floor)
+    return _left_expand_en_phrase(clue.start, floor, context.stream)
 
 
 def key_left_expand_start_if_deferrable_en(
