@@ -6,11 +6,13 @@ from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
+    CandidateDraft,
     ClaimStrength,
     Clue,
     ClueBundle,
     ClueFamily,
     ClueRole,
+    InspireEntry,
 )
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
@@ -20,7 +22,8 @@ from privacyguard.infrastructure.pii.detector.zh_name_rules import (
     NegativeOverlapKind,
     apply_negative_overlap_strength,
 )
-from tests._detector_negative_index import split_negative_clues
+from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK
+from tests._detector_negative_index import build_test_bundle_with_inspire, split_negative_clues
 
 
 def _family_for_attr(attr_type: PIIAttributeType | None) -> ClueFamily:
@@ -117,6 +120,292 @@ def _parse_candidates(
         ),
     )
     return result.candidates
+
+
+def _build_context_with_bundle(
+    text: str,
+    clues: tuple[Clue, ...],
+    *,
+    inspire_entries: tuple[InspireEntry, ...] = (),
+    protection_level: ProtectionLevel = ProtectionLevel.STRONG,
+    locale_profile: str = "mixed",
+) -> tuple[object, ClueBundle, StackContext]:
+    stream = build_prompt_stream(text)
+    if inspire_entries:
+        bundle = build_test_bundle_with_inspire(stream, clues, inspire_entries)
+    else:
+        fixed, negative_clues, _index_by_id, unit_index = _split_negative_clues(stream, clues)
+        bundle = ClueBundle(
+            all_clues=fixed,
+            unit_index=unit_index,
+            negative_clues=negative_clues,
+        )
+    context = StackContext(
+        stream=stream,
+        locale_profile=locale_profile,
+        protection_level=protection_level,
+        clues=bundle.all_clues,
+        unit_index=bundle.unit_index,
+        negative_clues=bundle.negative_clues,
+        inspire_entries=bundle.inspire_entries,
+    )
+    return stream, bundle, context
+
+
+def test_stack_context_value_locks_default_to_minus_one_and_commit_syncs_all_floors():
+    stream = build_prompt_stream("张三")
+    context = StackContext(
+        stream=stream,
+        locale_profile="mixed",
+        protection_level=ProtectionLevel.STRONG,
+    )
+    parser = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG))
+
+    assert context.commit_frontier_last_unit == -1
+    assert context.all_candidate_value_cannot_get_this_unit == -1
+    assert context.stack_value_cannot_get_this_unit == {
+        ClueFamily.NAME: -1,
+        ClueFamily.ORGANIZATION: -1,
+        ClueFamily.ADDRESS: -1,
+    }
+
+    parser._commit_candidate(
+        context,
+        CandidateDraft(
+            attr_type=PIIAttributeType.NAME,
+            start=0,
+            end=2,
+            text="张三",
+            source=stream.source,
+            source_kind="test",
+            unit_start=0,
+            unit_last=1,
+            claim_strength=ClaimStrength.HARD,
+        ),
+    )
+
+    assert context.commit_frontier_last_unit == 1
+    assert context.all_candidate_value_cannot_get_this_unit == 1
+    assert context.stack_value_cannot_get_this_unit == {
+        ClueFamily.NAME: 1,
+        ClueFamily.ORGANIZATION: 1,
+        ClueFamily.ADDRESS: 1,
+    }
+
+
+def test_parser_advances_name_value_floor_for_label_only():
+    _stream, bundle, context = _build_context_with_bundle(
+        "姓名张三",
+        (
+            _clue("label-1", ClueRole.LABEL, 0, 2, "姓名", source_kind="context_name_field"),
+        ),
+    )
+    parser = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG))
+
+    parser._advance_semantic_value_locks_at_unit(context, 0)
+
+    assert context.stack_value_cannot_get_this_unit[ClueFamily.NAME] == bundle.all_clues[0].unit_last
+    assert context.stack_value_cannot_get_this_unit[ClueFamily.ORGANIZATION] == -1
+    assert context.stack_value_cannot_get_this_unit[ClueFamily.ADDRESS] == -1
+
+
+def test_parser_advances_name_value_floor_for_inspire_and_keeps_it_after_failed_run():
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 2, 3, "王", source_kind="family_name", strength=ClaimStrength.SOFT),
+    )
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.NAME,
+        family=ClueFamily.NAME,
+        start=0,
+        end=2,
+        unit_start=0,
+        unit_last=1,
+        clue_id="label-1",
+    )
+    _stream, bundle, context = _build_context_with_bundle(
+        "姓名王",
+        clues,
+        inspire_entries=(inspire,),
+    )
+    parser = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG))
+
+    parser._advance_semantic_value_locks_at_unit(context, 0)
+    run, _stack = parser._try_run_stack_at_unit(context, bundle.all_clues[0].unit_start, ClueFamily.NAME)
+
+    assert run is None
+    assert context.stack_value_cannot_get_this_unit[ClueFamily.NAME] == inspire.unit_last
+
+
+def test_name_non_seed_starter_before_value_floor_is_rejected():
+    text = "张三"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "张", source_kind="family_name", strength=ClaimStrength.HARD),
+    )
+    stream, bundle, context = _build_context_with_bundle(text, clues)
+    context.raise_stack_value_floor(ClueFamily.NAME, bundle.all_clues[0].unit_last)
+
+    run = NameStack(clue=bundle.all_clues[0], clue_index=0, context=context).run()
+
+    assert stream.text == text
+    assert run is None
+
+
+def test_parser_inspire_boosts_weak_name_clue_by_two_levels_within_three_units():
+    stream = build_prompt_stream("姓名张三")
+    clues = (
+        _clue(
+            "full-1",
+            ClueRole.FULL_NAME,
+            2,
+            4,
+            "张三",
+            source_kind="dictionary_local",
+            strength=ClaimStrength.WEAK,
+        ),
+    )
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.NAME,
+        family=ClueFamily.NAME,
+        start=0,
+        end=2,
+        unit_start=0,
+        unit_last=1,
+        clue_id="label-1",
+    )
+    bundle = build_test_bundle_with_inspire(stream, clues, (inspire,))
+    parsed = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG)).parse(
+        stream,
+        bundle,
+    )
+
+    assert len(parsed.candidates) == 1
+    assert parsed.candidates[0].attr_type == PIIAttributeType.NAME
+    assert parsed.candidates[0].claim_strength == ClaimStrength.HARD
+
+
+def test_parser_inspire_boosts_weak_name_clue_by_one_level_within_six_units():
+    stream = build_prompt_stream("姓名 这里 张三")
+    clues = (
+        _clue(
+            "full-1",
+            ClueRole.FULL_NAME,
+            6,
+            8,
+            "张三",
+            source_kind="dictionary_local",
+            strength=ClaimStrength.WEAK,
+        ),
+    )
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.NAME,
+        family=ClueFamily.NAME,
+        start=0,
+        end=2,
+        unit_start=0,
+        unit_last=1,
+        clue_id="label-1",
+    )
+    bundle = build_test_bundle_with_inspire(stream, clues, (inspire,))
+    parsed = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG)).parse(
+        stream,
+        bundle,
+    )
+
+    assert len(parsed.candidates) == 1
+    assert parsed.candidates[0].claim_strength == ClaimStrength.SOFT
+
+
+def test_parser_inspire_window_is_based_on_unit_index_difference():
+    stream = build_prompt_stream("姓名 这里 真 张三")
+    clues = (
+        _clue("full-1", ClueRole.FULL_NAME, 8, 10, "张三", source_kind="dictionary_local"),
+    )
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.NAME,
+        family=ClueFamily.NAME,
+        start=0,
+        end=2,
+        unit_start=0,
+        unit_last=1,
+        clue_id="label-1",
+    )
+    bundle = build_test_bundle_with_inspire(stream, clues, (inspire,))
+    parsed = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG)).parse(
+        stream,
+        bundle,
+    )
+
+    assert len(parsed.candidates) == 1
+    assert parsed.candidates[0].claim_strength == ClaimStrength.SOFT
+
+
+def test_parser_inspire_writes_back_boosted_strength_to_original_clue():
+    stream = build_prompt_stream("姓名张三")
+    clues = (
+        _clue(
+            "full-1",
+            ClueRole.FULL_NAME,
+            2,
+            4,
+            "张三",
+            source_kind="dictionary_local",
+            strength=ClaimStrength.WEAK,
+        ),
+    )
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.NAME,
+        family=ClueFamily.NAME,
+        start=0,
+        end=2,
+        unit_start=0,
+        unit_last=1,
+        clue_id="label-1",
+    )
+    bundle = build_test_bundle_with_inspire(stream, clues, (inspire,))
+    parser = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG))
+    context = StackContext(
+        stream=stream,
+        locale_profile="mixed",
+        protection_level=ProtectionLevel.STRONG,
+        clues=bundle.all_clues,
+        unit_index=bundle.unit_index,
+        negative_clues=bundle.negative_clues,
+        inspire_entries=bundle.inspire_entries,
+    )
+
+    run, _stack = parser._try_run_stack_at_unit(
+        context,
+        bundle.all_clues[0].unit_start,
+        ClueFamily.NAME,
+    )
+
+    assert run is not None
+    assert context.clues[0].strength == ClaimStrength.HARD
+
+
+def test_parser_inspire_is_reset_by_ocr_break():
+    text = f"姓名{OCR_BREAK}张三"
+    stream = build_prompt_stream(text)
+    clues = (
+        _clue("full-1", ClueRole.FULL_NAME, len(f"姓名{OCR_BREAK}"), len(text), "张三", source_kind="dictionary_local"),
+    )
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.NAME,
+        family=ClueFamily.NAME,
+        start=0,
+        end=2,
+        unit_start=0,
+        unit_last=1,
+        clue_id="label-1",
+    )
+    bundle = build_test_bundle_with_inspire(stream, clues, (inspire,))
+    parsed = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG)).parse(
+        stream,
+        bundle,
+    )
+
+    assert len(parsed.candidates) == 1
+    assert parsed.candidates[0].claim_strength == ClaimStrength.SOFT
 
 
 def _name_texts(

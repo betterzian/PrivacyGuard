@@ -204,7 +204,9 @@ class UnitBucket:
     name_clues: tuple[int, ...] = ()
     organization_clues: tuple[int, ...] = ()
     covering_clues: tuple[int, ...] = ()
+    inspire_entries: tuple[int, ...] = ()
     can_start_parser: tuple[ClueFamily, ...] = ()
+    break_start: bool = False
     negative_cover: bool = False
     negative_start: bool = False
 
@@ -235,6 +237,7 @@ class ClueBundle:
     all_clues: tuple[Clue, ...]
     unit_index: tuple[UnitBucket, ...] = ()
     negative_clues: tuple[Clue, ...] = ()
+    inspire_entries: tuple["InspireEntry", ...] = ()
 
     @property
     def label_clues(self) -> tuple[Clue, ...]:
@@ -263,6 +266,19 @@ class StructuredAnchor:
     role: ClueRole
     unit_last: int
     clue_index: int
+    clue_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class InspireEntry:
+    """非 STRUCTURED label 降级后的近距离增强锚点。"""
+
+    attr_type: PIIAttributeType
+    family: ClueFamily
+    start: int
+    end: int
+    unit_start: int
+    unit_last: int
     clue_id: str
 
 

@@ -486,6 +486,67 @@ def test_label_seed_metadata_keeps_boundary_signals():
     assert label_b.source_metadata["seed_is_left_edge"] == ["0"]
 
 
+def test_non_structured_label_with_right_space_stays_direct_seed():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    stream = build_prompt_stream("姓名 张三")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    assert any(
+        clue.role == ClueRole.LABEL
+        and clue.attr_type == PIIAttributeType.NAME
+        and clue.text == "姓名"
+        for clue in bundle.all_clues
+    )
+    assert bundle.inspire_entries == ()
+
+
+def test_non_structured_label_without_right_break_becomes_inspire():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    stream = build_prompt_stream("我的姓名你不知道")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    assert not any(clue.role == ClueRole.LABEL and clue.text == "姓名" for clue in bundle.all_clues)
+    assert len(bundle.inspire_entries) == 1
+    inspire = bundle.inspire_entries[0]
+    assert inspire.attr_type == PIIAttributeType.NAME
+    assert inspire.family == scanner_module._attr_to_family(PIIAttributeType.NAME)
+
+
+def test_non_structured_label_with_right_ocr_break_stays_direct_seed():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    stream = build_prompt_stream(f"姓名{OCR_BREAK}张三")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    assert any(
+        clue.role == ClueRole.LABEL
+        and clue.attr_type == PIIAttributeType.NAME
+        and clue.text == "姓名"
+        for clue in bundle.all_clues
+    )
+    assert bundle.inspire_entries == ()
+
+
 def test_non_boundary_structured_label_is_dropped_instead_of_becoming_hint():
     ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
     stream = build_prompt_stream("这里的手机1234")

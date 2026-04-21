@@ -33,6 +33,16 @@ class BaseOrganizationStack(BaseStack):
 
     STACK_LOCALE = "zh"
 
+    def _value_floor_char(self) -> int:
+        """返回 ORGANIZATION 当前生效的 value 起点下界。"""
+        return self.context.effective_value_floor_char(ClueFamily.ORGANIZATION)
+
+    def _starter_is_before_value_floor(self) -> bool:
+        """非 LABEL/START 起栈不得从已锁住的 value 区间左侧开始。"""
+        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
+            return False
+        return self.clue.start < self._value_floor_char()
+
     def need_break(self, subject, **kwargs) -> bool:
         del kwargs
         if isinstance(subject, Clue):
@@ -71,10 +81,13 @@ class BaseOrganizationStack(BaseStack):
         )
 
     def run(self) -> StackRun | None:
+        if self._starter_is_before_value_floor():
+            return None
         is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
         locale = self.STACK_LOCALE
+        floor_char = self._value_floor_char()
         if is_label_seed:
-            start = _label_seed_start_char(self.context.stream, self.clue.end)
+            start = max(_label_seed_start_char(self.context.stream, self.clue.end), floor_char)
             if start >= len(self.context.stream.text):
                 return None
             end = self._resolve_label_end(start=start, locale=locale)
@@ -141,6 +154,7 @@ class BaseOrganizationStack(BaseStack):
 
     def _resolve_suffix_start(self, *, locale: str) -> int:
         floor = _left_expand_text_boundary(self.context, self.clue.start, should_break=self.need_break)
+        floor = max(floor, self._value_floor_char())
         return _extend_organization_left_with_limit(
             self.context.stream,
             floor=floor,
@@ -202,6 +216,8 @@ class BaseOrganizationStack(BaseStack):
 
     def _build_value_seed_run(self, *, locale: str) -> StackRun | None:
         """VALUE seed：已知公司名起栈，向右搜索 suffix 以扩展。"""
+        if self._starter_is_before_value_floor():
+            return None
         value_start = self.clue.start
         value_end = self.clue.end
         # 向右搜索 suffix。

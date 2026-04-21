@@ -84,6 +84,25 @@ def _parse_organization_texts(
     )
     return [candidate.text for candidate in result.candidates if candidate.attr_type == PIIAttributeType.ORGANIZATION]
 
+
+def _build_organization_context(
+    text: str,
+    clues: tuple[Clue, ...],
+    *,
+    protection_level: ProtectionLevel,
+) -> tuple[object, tuple[Clue, ...], dict[str, int], StackContext]:
+    stream = build_prompt_stream(text)
+    fixed, negative_clues, index_by_id, unit_index = _split_negative_clues(stream, clues)
+    context = StackContext(
+        stream=stream,
+        locale_profile="mixed",
+        protection_level=protection_level,
+        clues=fixed,
+        negative_clues=negative_clues,
+        unit_index=unit_index,
+    )
+    return stream, fixed, index_by_id, context
+
 def _split_negative_clues(
     stream,
     clues: tuple[Clue, ...],
@@ -111,6 +130,33 @@ def test_label_seed_skips_separators_and_starts_from_first_value_char():
     assert run.candidate.text == "星河科技"
 
 
+def test_label_seed_respects_organization_value_floor_start():
+    text = "公司名称：蓝河科技有限公司"
+    label = "公司名称"
+    stream, fixed, index_by_id, context = _build_organization_context(
+        text,
+        (
+            _clue(
+                "label-1",
+                ClueRole.LABEL,
+                0,
+                len(label),
+                label,
+                source_kind="context_organization_field",
+            ),
+        ),
+        protection_level=ProtectionLevel.STRONG,
+    )
+    locked_unit = stream.char_to_unit[text.index("蓝")]
+    context.raise_stack_value_floor(ClueFamily.ORGANIZATION, locked_unit)
+
+    run = OrganizationStack(clue=fixed[index_by_id["label-1"]], clue_index=index_by_id["label-1"], context=context).run()
+
+    assert run is not None
+    assert run.candidate.text.startswith("河科技")
+    assert not run.candidate.text.startswith("蓝")
+
+
 def test_suffix_seed_can_start_under_weak():
     text = "星河科技公司"
     suffix = "公司"
@@ -128,6 +174,38 @@ def test_suffix_seed_can_start_under_weak():
 
     run = _run_organization_stack(text, 0, clues, protection_level=ProtectionLevel.WEAK).run()
 
+    assert run is None
+
+
+def test_value_seed_before_organization_value_floor_is_rejected():
+    text = "星河科技有限公司"
+    stream, fixed, index_by_id, context = _build_organization_context(
+        text,
+        (
+            _clue(
+                "value-1",
+                ClueRole.VALUE,
+                0,
+                4,
+                "星河科技",
+                source_kind="dictionary_local",
+            ),
+            _clue(
+                "suffix-1",
+                ClueRole.SUFFIX,
+                4,
+                len(text),
+                "有限公司",
+                source_kind="company_suffix",
+            ),
+        ),
+        protection_level=ProtectionLevel.WEAK,
+    )
+    context.raise_stack_value_floor(ClueFamily.ORGANIZATION, fixed[index_by_id["value-1"]].unit_start)
+
+    run = OrganizationStack(clue=fixed[index_by_id["value-1"]], clue_index=index_by_id["value-1"], context=context).run()
+
+    assert stream.text == text
     assert run is None
 
 

@@ -19,6 +19,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     CandidateDraft,
     ClaimStrength,
     Clue,
+    ClueFamily,
     ClueRole,
     PIIAttributeType,
     StreamInput,
@@ -76,6 +77,10 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
 @dataclass(slots=True)
 class BaseAddressStack(BaseStack):
     """中文/英文地址 stack 的共享骨架。"""
+
+    def _value_floor_char(self) -> int:
+        """返回 ADDRESS 当前生效的 value 起点下界。"""
+        return self.context.effective_value_floor_char(ClueFamily.ADDRESS)
 
     @property
     def valid_successors(self) -> Mapping[AddressComponentType, frozenset[AddressComponentType]]:
@@ -164,9 +169,10 @@ class BaseAddressStack(BaseStack):
         """地址 stack 主入口。"""
         stream = self.context.stream
         is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
+        floor_char = self._value_floor_char()
 
         if is_label_seed:
-            address_start = _label_seed_start_char(stream, self.clue.end)
+            address_start = max(_label_seed_start_char(stream, self.clue.end), floor_char)
             seed_index = _first_address_clue_index_after(
                 self.context.clues,
                 address_start,
@@ -178,7 +184,10 @@ class BaseAddressStack(BaseStack):
             evidence_count = 1
             seed_floor = address_start
         else:
-            address_start = self.clue.start if self.clue.role in {ClueRole.VALUE, ClueRole.KEY} else None
+            if self.clue.role in {ClueRole.VALUE, ClueRole.KEY} and self.clue.start >= floor_char:
+                address_start = self.clue.start
+            else:
+                address_start = None
             scan_index = self.clue_index
             handled_labels = set()
             evidence_count = 0

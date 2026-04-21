@@ -8,9 +8,9 @@ from functools import lru_cache
 
 from privacyguard.infrastructure.pii.detector.models import AddressComponentType, Clue, ClueFamily, ClueRole, StreamInput, StreamUnit
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_name_joiner
-from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
 
 _ASCII_ALNUM_KINDS = frozenset({"digit_run", "alpha_run", "alnum_run", "ascii_word"})
+_LABEL_SEED_SKIPPABLE_SEPARATOR_CHARS = frozenset(":：-—–=|")
 
 
 class ExpansionBreakPolicy(StrEnum):
@@ -183,11 +183,7 @@ def _label_seed_start_char(stream: StreamInput, start_char: int) -> int:
             cursor = unit.char_end
             ui += 1
             continue
-        if unit_text in ",，":
-            cursor = unit.char_end
-            ui += 1
-            continue
-        if len(unit_text) == 1 and is_soft_break(unit_text):
+        if unit.kind == "punct" and unit_text in _LABEL_SEED_SKIPPABLE_SEPARATOR_CHARS:
             cursor = unit.char_end
             ui += 1
             continue

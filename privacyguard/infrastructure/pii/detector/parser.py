@@ -4,7 +4,8 @@
 - 只要冲突涉及 NAME，统一按 claim_strength 裁决；同级保留 NAME。
 - NAME 胜出时仅提交 NAME，本轮只按成功路径的真实 frontier 推进。
 - NAME 未赢时，先尝试把 NAME 裁掉冲突区；裁后仍满足姓名提交条件则与赢家一并提交，否则仅提交赢家。
-- parser 维护全局 commit_frontier_last_unit；任何后续候选都不能再取到其左侧 unit。
+- parser 维护全局 commit_frontier_last_unit；它只负责后续 parser 起栈快进。
+- 语义 value 锁拆成全局锁和按 family 的局部锁，只限制候选取值边界，不阻止 parser 继续尝试。
 - 不涉及 NAME 时，沿用现有 hard/soft + soft_priority + fallback 机制。
 """
 
@@ -12,7 +13,7 @@ from __future__ import annotations
 
 import unicodedata
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.context import DetectContext
@@ -25,6 +26,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueBundle,
     ClueFamily,
     ClueRole,
+    InspireEntry,
     ParseResult,
     StructuredAnchor,
     StructuredLookupIndex,
@@ -41,6 +43,11 @@ _PERSONA_SOURCE_KINDS = frozenset({
     "dictionary_session",
     "persona",
 })
+_SEMANTIC_VALUE_LOCK_FAMILIES = (
+    ClueFamily.NAME,
+    ClueFamily.ORGANIZATION,
+    ClueFamily.ADDRESS,
+)
 
 _CandidateIdentityKey = tuple[PIIAttributeType, int, int, int, int, str]
 _FrozenMetadataItems = tuple[tuple[str, tuple[str, ...]], ...]
@@ -80,6 +87,18 @@ def _claim_strength_rank(strength: ClaimStrength) -> int:
         ClaimStrength.SOFT: 1,
         ClaimStrength.HARD: 2,
     }[strength]
+
+
+def _upgrade_claim_strength_by_levels(strength: ClaimStrength, levels: int) -> ClaimStrength:
+    """把 claim_strength 提升指定层级，最高封顶到 HARD。"""
+    upgraded = strength
+    for _ in range(max(0, levels)):
+        if upgraded == ClaimStrength.WEAK:
+            upgraded = ClaimStrength.SOFT
+            continue
+        upgraded = ClaimStrength.HARD
+        break
+    return upgraded
 
 
 _ADDRESS_STRUCTURAL_METADATA_KEYS = frozenset({
@@ -257,14 +276,21 @@ class StackContext:
     clues: tuple[Clue, ...] = ()
     unit_index: tuple[UnitBucket, ...] = ()
     negative_clues: tuple[Clue, ...] = ()
+    inspire_entries: tuple[InspireEntry, ...] = ()
     structured_lookup_index: StructuredLookupIndex = field(default_factory=StructuredLookupIndex)
     commit_frontier_last_unit: int = -1
+    all_candidate_value_cannot_get_this_unit: int = -1
+    stack_value_cannot_get_this_unit: dict[ClueFamily, int] = field(
+        default_factory=lambda: {family: -1 for family in _SEMANTIC_VALUE_LOCK_FAMILIES}
+    )
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     handled_label_clue_ids: set[str] = field(default_factory=set)
     candidate_identity_index: dict[_CandidateIdentityKey, CandidateDraft] = field(default_factory=dict)
     address_normalized_cache: dict[int, tuple[_AddressNormalizedCacheSignature, object]] = field(default_factory=dict)
     recent_structured_anchor: StructuredAnchor | None = None
+    recent_inspire_anchor: InspireEntry | None = None
+    inspire_boosted_clue_ids: set[str] = field(default_factory=set)
 
     def has_negative_cover(self, unit_start: int, unit_last: int) -> bool:
         """判断给定 unit 区间是否存在任意 negative 覆盖。"""
@@ -324,8 +350,42 @@ class StackContext:
             unit_index += 1
         return unit_index
 
+    def raise_all_value_floor(self, unit_last: int) -> None:
+        """推进全局 value 锁，并同步抬升三个语义 family 的局部锁。"""
+        if unit_last < 0:
+            return
+        self.all_candidate_value_cannot_get_this_unit = max(
+            self.all_candidate_value_cannot_get_this_unit,
+            unit_last,
+        )
+        for family in _SEMANTIC_VALUE_LOCK_FAMILIES:
+            self.raise_stack_value_floor(family, self.all_candidate_value_cannot_get_this_unit)
+
+    def raise_stack_value_floor(self, family: ClueFamily, unit_last: int) -> None:
+        """推进指定语义 family 的局部 value 锁。"""
+        if family not in self.stack_value_cannot_get_this_unit or unit_last < 0:
+            return
+        self.stack_value_cannot_get_this_unit[family] = max(
+            self.stack_value_cannot_get_this_unit[family],
+            unit_last,
+        )
+
+    def effective_value_floor_unit(self, family: ClueFamily) -> int:
+        """返回语义 family 当前生效的 unit 级 value 锁。"""
+        return max(
+            self.all_candidate_value_cannot_get_this_unit,
+            self.stack_value_cannot_get_this_unit.get(family, -1),
+        )
+
+    def effective_value_floor_char(self, family: ClueFamily) -> int:
+        """把 unit 级 value 锁换算成 char 起点下界。"""
+        locked_unit = self.effective_value_floor_unit(family)
+        if locked_unit < 0 or locked_unit >= len(self.stream.units):
+            return 0
+        return self.stream.units[locked_unit].char_end
+
     def blocks_unit_start(self, unit_start: int) -> bool:
-        """判断给定候选起点是否越过已提交候选形成的全局左边界。"""
+        """判断给定候选起点是否越过 parser 的全局起栈锁。"""
         return self.commit_frontier_last_unit >= 0 and unit_start <= self.commit_frontier_last_unit
 
 
@@ -365,15 +425,19 @@ class StreamParser:
             clues=bundle.all_clues,
             unit_index=bundle.unit_index,
             negative_clues=bundle.negative_clues,
+            inspire_entries=bundle.inspire_entries,
             structured_lookup_index=structured_lookup_index or StructuredLookupIndex(),
         )
         unit_cursor = 0
         family_cursor = 0
         while unit_cursor < len(context.unit_index):
             if context.blocks_unit_start(unit_cursor):
+                context.recent_inspire_anchor = None
                 unit_cursor = context.commit_frontier_last_unit + 1
                 family_cursor = 0
                 continue
+            self._advance_semantic_value_locks_at_unit(context, unit_cursor)
+            self._advance_inspire_anchor_at_unit(context, unit_cursor)
             self._remember_structured_anchors_at_unit(context, unit_cursor)
             families = context.unit_index[unit_cursor].can_start_parser
             if not families:
@@ -399,6 +463,7 @@ class StreamParser:
                     )
                     if resolution is not None:
                         if resolution.committed:
+                            context.recent_inspire_anchor = None
                             unit_cursor = resolution.next_unit_cursor
                             family_cursor = 0
                         else:
@@ -415,9 +480,11 @@ class StreamParser:
                 current_run,
                 unit_cursor,
                 family_cursor,
-            )
+                )
             if challenger_run is None or not _candidates_overlap(current_run.candidate, challenger_run.candidate):
                 resolution = self._commit_runs(context, current_run)
+                if resolution.committed:
+                    context.recent_inspire_anchor = None
                 unit_cursor = resolution.next_unit_cursor if resolution.committed else unit_cursor
                 family_cursor = 0 if resolution.committed else family_cursor + 1
                 continue
@@ -430,6 +497,7 @@ class StreamParser:
                 challenger_stack,
             )
             if resolution.committed:
+                context.recent_inspire_anchor = None
                 unit_cursor = resolution.next_unit_cursor
                 family_cursor = 0
             else:
@@ -665,7 +733,11 @@ class StreamParser:
     # Stack 运行
     # ------------------------------------------------------------------
 
-    def _try_run_stack(self, context: StackContext, index: int) -> tuple[StackRun | None, BaseStack | None]:
+    def _try_run_stack(
+        self,
+        context: StackContext,
+        index: int,
+    ) -> tuple[StackRun | None, BaseStack | None]:
         """按 clue index 尝试启动 stack。"""
         clue = context.clues[index]
         spec = get_stack_spec(clue.family)
@@ -693,9 +765,9 @@ class StreamParser:
         if unit_index < 0 or unit_index >= len(context.unit_index):
             return None, None
         for clue_index in bucket_family_clues(context.unit_index[unit_index], family):
-            clue = context.clues[clue_index]
-            if clue.clue_id in suppress_start_clue_ids:
+            if context.clues[clue_index].clue_id in suppress_start_clue_ids:
                 continue
+            self._apply_inspire_boost_to_clue(context, clue_index)
             run, stack = self._try_run_stack(context, clue_index)
             if run is not None:
                 return run, stack
@@ -717,6 +789,7 @@ class StreamParser:
             else frozenset()
         )
         for unit_index in range(start_unit, end_unit + 1):
+            self._advance_semantic_value_locks_at_unit(context, unit_index)
             families = context.unit_index[unit_index].can_start_parser
             family_start = current_family_cursor + 1 if unit_index == current_unit_cursor else 0
             for family in families[family_start:]:
@@ -842,6 +915,118 @@ class StreamParser:
             return 0
         return spec.soft_priority
 
+    def _has_non_structured_direct_seed_at_unit(self, context: StackContext, unit_index: int) -> bool:
+        """判断当前 unit 是否出现新的非结构化 direct LABEL/START。"""
+        if unit_index < 0 or unit_index >= len(context.unit_index):
+            return False
+        for family in (
+            ClueFamily.LICENSE_PLATE,
+            ClueFamily.ADDRESS,
+            ClueFamily.NAME,
+            ClueFamily.ORGANIZATION,
+        ):
+            for clue_index in bucket_family_clues(context.unit_index[unit_index], family):
+                clue = context.clues[clue_index]
+                if clue.role in {ClueRole.LABEL, ClueRole.START}:
+                    return True
+        return False
+
+    def _advance_semantic_value_locks_at_unit(self, context: StackContext, unit_index: int) -> None:
+        """流式维护 NAME / ORG / ADDRESS 的局部 value 锁。"""
+        if unit_index < 0 or unit_index >= len(context.unit_index):
+            return
+        bucket = context.unit_index[unit_index]
+        for family in _SEMANTIC_VALUE_LOCK_FAMILIES:
+            for clue_index in bucket_family_clues(bucket, family):
+                clue = context.clues[clue_index]
+                if clue.role in {ClueRole.LABEL, ClueRole.START}:
+                    context.raise_stack_value_floor(clue.family, clue.unit_last)
+        for inspire_index in bucket.inspire_entries:
+            inspire = context.inspire_entries[inspire_index]
+            context.raise_stack_value_floor(inspire.family, inspire.unit_last)
+
+    def _advance_inspire_anchor_at_unit(self, context: StackContext, unit_index: int) -> None:
+        """流式维护最近的非结构化 inspire 锚点。"""
+        if unit_index < 0 or unit_index >= len(context.unit_index):
+            return
+        bucket = context.unit_index[unit_index]
+        if (
+            bucket.flag == "OCR_BREAK"
+            or bucket.break_start
+            or self._has_non_structured_direct_seed_at_unit(context, unit_index)
+        ):
+            context.recent_inspire_anchor = None
+        for inspire_index in bucket.inspire_entries:
+            context.recent_inspire_anchor = context.inspire_entries[inspire_index]
+
+    def _scan_recent_inspire_anchor_before_unit(
+        self,
+        context: StackContext,
+        unit_start: int,
+    ) -> InspireEntry | None:
+        """按 unit 索引差回看最近 inspire，并应用显式失效条件。"""
+        recent: InspireEntry | None = None
+        start_unit = max(0, unit_start - 6)
+        for unit_index in range(start_unit, min(unit_start, len(context.unit_index))):
+            bucket = context.unit_index[unit_index]
+            if (
+                bucket.flag == "OCR_BREAK"
+                or bucket.break_start
+                or self._has_non_structured_direct_seed_at_unit(context, unit_index)
+            ):
+                recent = None
+            for inspire_index in bucket.inspire_entries:
+                recent = context.inspire_entries[inspire_index]
+        return recent
+
+    def _find_applicable_inspire_anchor(self, context: StackContext, clue: Clue) -> InspireEntry | None:
+        """为当前起栈 clue 查找可用的 inspire 锚点。"""
+        if (
+            clue.family == ClueFamily.STRUCTURED
+            or clue.role in {ClueRole.LABEL, ClueRole.START}
+            or clue.attr_type is None
+        ):
+            return None
+        fallback = self._scan_recent_inspire_anchor_before_unit(context, clue.unit_start)
+        if (
+            fallback is None
+            or fallback.attr_type != clue.attr_type
+            or fallback.unit_last >= clue.unit_start
+            or clue.unit_start - fallback.unit_last > 6
+        ):
+            return None
+        return fallback
+
+    def _inspire_boost_levels(self, clue: Clue, inspire: InspireEntry) -> int:
+        """按 inspire 与 clue 的 unit 距离返回应提升的层级数。"""
+        unit_distance = clue.unit_start - inspire.unit_last
+        if unit_distance <= 0 or unit_distance > 6:
+            return 0
+        if unit_distance <= 3:
+            return 2
+        return 1
+
+    def _apply_inspire_boost_to_clue(self, context: StackContext, clue_index: int) -> Clue:
+        """把 inspire 提升直接回写到 context.clues，避免 stack 再读到旧强度。"""
+        clue = context.clues[clue_index]
+        if clue.strength == ClaimStrength.HARD or clue.clue_id in context.inspire_boosted_clue_ids:
+            return clue
+        inspire = self._find_applicable_inspire_anchor(context, clue)
+        if inspire is None:
+            return clue
+        boosted_strength = _upgrade_claim_strength_by_levels(
+            clue.strength,
+            self._inspire_boost_levels(clue, inspire),
+        )
+        context.inspire_boosted_clue_ids.add(clue.clue_id)
+        if boosted_strength == clue.strength:
+            return clue
+        updated_clue = replace(clue, strength=boosted_strength)
+        updated_clues = list(context.clues)
+        updated_clues[clue_index] = updated_clue
+        context.clues = tuple(updated_clues)
+        return updated_clue
+
     def _remember_structured_anchor(self, context: StackContext, clue: Clue, clue_index: int) -> None:
         """流式记录最近的结构化 LABEL/START，供 Structured VALUE 直接读取。"""
         if clue.family != ClueFamily.STRUCTURED or clue.role not in {ClueRole.LABEL, ClueRole.START}:
@@ -924,6 +1109,7 @@ class StreamParser:
         )
         context.handled_label_clue_ids |= candidate.label_clue_ids
         context.commit_frontier_last_unit = max(context.commit_frontier_last_unit, candidate.unit_last)
+        context.raise_all_value_floor(context.commit_frontier_last_unit)
 
     # ------------------------------------------------------------------
     # 工具方法
@@ -1052,5 +1238,6 @@ class StreamParser:
         context.candidate_identity_index[_candidate_identity_key(previous)] = previous
         context.handled_label_clue_ids |= candidate.label_clue_ids
         context.commit_frontier_last_unit = max(context.commit_frontier_last_unit, previous.unit_last)
+        context.raise_all_value_floor(context.commit_frontier_last_unit)
         return True
 

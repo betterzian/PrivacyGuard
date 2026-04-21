@@ -24,13 +24,14 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueFamily,
     ClueRole,
 )
-from privacyguard.infrastructure.pii.detector.parser import StreamParser
+from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
     _key_key_chain_gap_allowed,
     _label_seed_address_index,
 )
+from privacyguard.infrastructure.pii.detector.stacks.address import AddressStack
 from tests._detector_negative_index import split_negative_clues
 
 
@@ -87,6 +88,19 @@ def _detect_candidates(text: str, clues: tuple[Clue, ...], *, locale_profile: st
     return result.candidates
 
 
+def _build_address_context(text: str, clues: tuple[Clue, ...], *, locale_profile: str = "zh"):
+    stream = build_prompt_stream(text)
+    fixed, negative_clues, unit_index = _split_negative_clues(stream, clues)
+    stack_context = StackContext(
+        stream=stream,
+        locale_profile=locale_profile,
+        clues=fixed,
+        negative_clues=negative_clues,
+        unit_index=unit_index,
+    )
+    return stream, fixed, stack_context
+
+
 def _detect_candidates_from_scanner(text: str, *, locale_profile: str = "zh_cn"):
     ctx = DetectContext()
     stream = build_prompt_stream(text)
@@ -108,6 +122,39 @@ def test_label_seed_returns_none_when_no_value_and_no_key_within_6_units():
     )
     candidates = _detect_candidates(text, clues)
     assert not any(c.attr_type.value == "address" for c in candidates)
+
+
+def test_value_seed_before_address_value_floor_is_rejected():
+    text = "上海路"
+    stream, fixed, context = _build_address_context(
+        text,
+        (
+            _clue(
+                "value",
+                role=ClueRole.VALUE,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=0,
+                end=2,
+                text="上海",
+                component_type=AddressComponentType.CITY,
+            ),
+            _clue(
+                "key",
+                role=ClueRole.KEY,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=2,
+                end=3,
+                text="路",
+                component_type=AddressComponentType.ROAD,
+            ),
+        ),
+    )
+    context.raise_stack_value_floor(ClueFamily.ADDRESS, fixed[0].unit_start)
+
+    run = AddressStack(clue=fixed[0], clue_index=0, context=context).run()
+
+    assert stream.text == text
+    assert run is None
 
 
 def test_label_seed_value_hit_includes_value_last_unit():

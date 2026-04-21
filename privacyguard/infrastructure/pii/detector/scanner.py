@@ -42,6 +42,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueFamily,
     ClueRole,
     DictionaryEntry,
+    InspireEntry,
     StreamInput,
     UnitBucket,
 )
@@ -234,6 +235,7 @@ _DETERMINER_PATTERN = re.compile(
 )
 
 _LABEL_FIELD_SEPARATOR_CHARS = ":：-—–=|"
+_LABEL_DIRECT_SEED_RIGHT_UNIT_KINDS = frozenset({"space", "inline_gap", "ocr_break"})
 # 标签边界：匹配到的 label 前方或后方至少有一侧满足此集合中的 unit kind，
 # 或处于文本起止位置。防止自然语句中嵌入的关键词被误识别为标签。
 _LABEL_BOUNDARY_UNIT_KINDS = frozenset({"punct", "inline_gap", "ocr_break"})
@@ -399,12 +401,18 @@ def build_clue_bundle(
 
     # ── 事件扫描线裁决 ──
     all_clues = [*structured_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_only_spans), *soft_clues]
-    resolved_clues = _sweep_resolve(stream, all_clues)
+    resolved_clues, inspire_entries = _sweep_resolve(stream, all_clues)
     ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, _family_order(item.family), item.end)))
     return ClueBundle(
         all_clues=ordered_clues,
-        unit_index=_build_unit_index(stream, ordered_clues, tuple(deduped_negative_clues)),
+        unit_index=_build_unit_index(
+            stream,
+            ordered_clues,
+            tuple(deduped_negative_clues),
+            tuple(inspire_entries),
+        ),
         negative_clues=tuple(deduped_negative_clues),
+        inspire_entries=tuple(inspire_entries),
     )
 
 
@@ -1815,6 +1823,7 @@ def _build_unit_index(
     stream: StreamInput,
     clues: tuple[Clue, ...],
     negative_clues: tuple[Clue, ...],
+    inspire_entries: tuple[InspireEntry, ...] = (),
 ) -> tuple[UnitBucket, ...]:
     """按 survivor clue 与 negative clue 构建 unit bucket。"""
     unit_count = len(stream.units)
@@ -1827,6 +1836,8 @@ def _build_unit_index(
             "name": [],
             "organization": [],
             "covering": [],
+            "inspire": [],
+            "break_start": False,
             "negative_cover": False,
             "negative_start": False,
         }
@@ -1843,10 +1854,16 @@ def _build_unit_index(
     for clue_index, clue in enumerate(clues):
         if 0 <= clue.unit_start < unit_count and clue.family in family_key:
             builders[clue.unit_start][family_key[clue.family]].append(clue_index)
+        if 0 <= clue.unit_start < unit_count and clue.role == ClueRole.BREAK:
+            builders[clue.unit_start]["break_start"] = True
         if clue.unit_last < clue.unit_start:
             continue
         for ui in range(max(0, clue.unit_start), min(unit_count - 1, clue.unit_last) + 1):
             builders[ui]["covering"].append(clue_index)
+
+    for inspire_index, inspire in enumerate(inspire_entries):
+        if 0 <= inspire.unit_start < unit_count:
+            builders[inspire.unit_start]["inspire"].append(inspire_index)
 
     for clue in negative_clues:
         if clue.unit_last < clue.unit_start:
@@ -1878,7 +1895,9 @@ def _build_unit_index(
                 name_clues=tuple(builder["name"]),
                 organization_clues=tuple(builder["organization"]),
                 covering_clues=tuple(builder["covering"]),
+                inspire_entries=tuple(builder["inspire"]),
                 can_start_parser=can_start_parser,
+                break_start=bool(builder["break_start"]),
                 negative_cover=bool(builder["negative_cover"]),
                 negative_start=bool(builder["negative_start"]),
             )
@@ -1911,6 +1930,31 @@ def _has_label_boundary(stream: StreamInput, raw_start: int, raw_end: int) -> bo
     if unit_last + 1 >= len(stream.units) or stream.units[unit_last + 1].kind in _LABEL_BOUNDARY_UNIT_KINDS:
         return True
     return False
+
+
+def _has_label_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bool:
+    """判断非结构化 label 右侧是否满足 direct seed 条件。"""
+    if not stream.units or clue.unit_last + 1 >= len(stream.units):
+        return False
+    next_unit = stream.units[clue.unit_last + 1]
+    if next_unit.kind in _LABEL_DIRECT_SEED_RIGHT_UNIT_KINDS:
+        return True
+    return next_unit.kind == "punct" and next_unit.text in _LABEL_FIELD_SEPARATOR_CHARS
+
+
+def _build_inspire_entry(clue: Clue) -> InspireEntry | None:
+    """将降级的非结构化 label 转成 inspire side channel。"""
+    if clue.attr_type is None or clue.family in {ClueFamily.STRUCTURED, ClueFamily.CONTROL}:
+        return None
+    return InspireEntry(
+        attr_type=clue.attr_type,
+        family=clue.family,
+        start=clue.start,
+        end=clue.end,
+        unit_start=clue.unit_start,
+        unit_last=clue.unit_last,
+        clue_id=clue.clue_id,
+    )
 
 
 _LABEL_START_CONNECTOR_SKIPPABLE_UNIT_KINDS = frozenset({"space", "inline_gap"})
@@ -2600,15 +2644,15 @@ def _same_attr_overlap_winner(existing: Clue, incoming: Clue) -> str:
     return "incoming"
 
 
-def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
+def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], list[InspireEntry]]:
     """按“跨属性遮蔽 + 同属性裁决”两层规则收敛 clue。"""
     if not clues:
-        return []
+        return [], []
     unit_len = len(stream.units)
     deduped = _dedupe_clues(clues)
 
-    # ── 轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块 + label 边界/START 转换 ──
-    survivors, seed_groups = _sweep_pass1(stream, deduped, unit_len)
+    # ── 轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块 + label direct/inspire 分流 ──
+    survivors, seed_groups, inspire_entries = _sweep_pass1(stream, deduped, unit_len)
 
     # ── Seed 裁决 ──
     seed_winner_ids: set[str] = set()
@@ -2642,7 +2686,7 @@ def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
     ]
 
     # ── seed 严格包含普通 clue ──
-    return _apply_seed_containment_coverage(survivors)
+    return _apply_seed_containment_coverage(survivors), inspire_entries
 
 
 def _build_events(
@@ -2662,19 +2706,22 @@ def _sweep_pass1(
     stream: StreamInput,
     clues: list[Clue],
     unit_len: int,
-) -> tuple[list[Clue], list[list[Clue]]]:
-    """扫描轮 1（unit 轴）：STRUCTURED / BREAK 遮蔽 + seed 连通块收集 + LABEL 边界/START 转换。
+) -> tuple[list[Clue], list[list[Clue]], list[InspireEntry]]:
+    """扫描轮 1（unit 轴）：STRUCTURED / BREAK 遮蔽 + seed 连通块收集 + LABEL direct/inspire 分流。
 
     STRUCTURED 和 BREAK 无条件保留并形成活跃区间；
     其他 soft clue 落在活跃区间内则过滤。
-    LABEL 先尝试拼接"是"/"is"转 START；否则走边界过滤。
-    不满足边界条件的 label 直接丢弃（原 InspireEntry 机制已移除）。
+    LABEL 先尝试拼接"是"/"is"转 START。
+    - STRUCTURED label 继续沿用旧边界过滤。
+    - 非 STRUCTURED label 若右侧满足 direct seed break，则保留为 direct LABEL。
+    - 否则降级为 inspire side channel，不进入 parser seed 流程。
     """
     start_events, end_events = _build_events(clues, unit_len)
 
     active_structured = 0
     active_break = 0
     survivors: list[Clue] = []
+    inspire_entries: list[InspireEntry] = []
 
     seed_groups: list[list[Clue]] = []
     cur_seed_group: list[Clue] = []
@@ -2709,14 +2756,19 @@ def _sweep_pass1(
             if active_break > 0:
                 continue
 
-            # LABEL 当场判定：先尝试拼接"是"/"is"转 START，再走边界过滤。
+            # LABEL 当场判定：先尝试拼接"是"/"is"转 START，再做 direct/inspire 分流。
             if role == ClueRole.LABEL:
                 converted = _try_convert_label_to_start(stream, clue)
                 if converted is not None:
                     clue = converted
                     role = ClueRole.START
-                elif not _has_label_boundary(stream, clue.start, clue.end):
-                    # 不满足边界条件的 label 直接丢弃。
+                elif clue.family == ClueFamily.STRUCTURED:
+                    if not _has_label_boundary(stream, clue.start, clue.end):
+                        continue
+                elif not _has_label_direct_seed_break_after(stream, clue):
+                    inspire = _build_inspire_entry(clue)
+                    if inspire is not None:
+                        inspire_entries.append(inspire)
                     continue
 
             survivors.append(clue)
@@ -2733,7 +2785,7 @@ def _sweep_pass1(
     if cur_seed_group:
         seed_groups.append(cur_seed_group)
 
-    return survivors, seed_groups
+    return survivors, seed_groups, inspire_entries
 
 
 def _resolve_seed_group(group: list[Clue]) -> list[Clue]:

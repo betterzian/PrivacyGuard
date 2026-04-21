@@ -10,7 +10,7 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_zh_compound_surnames,
     load_zh_single_surname_claim_strengths,
 )
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, Clue, ClueRole
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, Clue, ClueFamily, ClueRole
 from privacyguard.infrastructure.pii.detector.stacks.base import PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
@@ -112,7 +112,19 @@ class ZhNameStack(BaseNameStack):
             ClueRole.FAMILY_NAME,
         }:
             return None
+        if self._starter_is_before_value_floor():
+            return None
         return self._run_name_candidate()
+
+    def _value_floor_char(self) -> int:
+        """返回 NAME 当前生效的 value 起点下界。"""
+        return self.context.effective_value_floor_char(ClueFamily.NAME)
+
+    def _starter_is_before_value_floor(self) -> bool:
+        """非 LABEL/START 起栈不得从已锁住的 value 区间左侧开始。"""
+        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
+            return False
+        return self.clue.start < self._value_floor_char()
 
     def _trimmed_candidate_has_value_beyond_family(
         self,
@@ -314,9 +326,10 @@ class ZhNameStack(BaseNameStack):
         return None
 
     def _resolve_boundary_start(self) -> int:
+        floor_char = self._value_floor_char()
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            return _label_seed_start_char(self.context.stream, self.clue.end)
-        return self.clue.start
+            return max(_label_seed_start_char(self.context.stream, self.clue.end), floor_char)
+        return max(self.clue.start, floor_char)
 
     def _resolve_family_anchor(self, start: int, upper_bound: int) -> _FamilyAnchor | None:
         if self.clue.role == ClueRole.FAMILY_NAME and self.clue.start == start:
@@ -445,10 +458,13 @@ class ZhNameStack(BaseNameStack):
         return end
 
     def _resolve_standalone_range(self, start: int) -> _StandaloneRange:
-        left = start
+        floor_char = self._value_floor_char()
+        left = max(start, floor_char)
         ui = _unit_index_left_of(self.context.stream, start)
         while ui >= 0:
             unit = self.context.stream.units[ui]
+            if unit.char_end <= floor_char:
+                break
             if unit.kind in {"space", "inline_gap"}:
                 ui -= 1
                 continue

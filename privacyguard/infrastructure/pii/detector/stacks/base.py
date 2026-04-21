@@ -12,6 +12,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     CandidateDraft,
     ClaimStrength,
     Clue,
+    ClueFamily,
     ClueRole,
     StructuredAnchor,
     StreamInput,
@@ -41,6 +42,8 @@ class StackContextLike(Protocol):
     def previous_negative_end_char(self, char_index: int) -> int | None: ...
 
     def has_negative_cover_left_of_char(self, char_index: int) -> bool: ...
+
+    def effective_value_floor_char(self, family: ClueFamily) -> int: ...
 
 
 @dataclass(slots=True)
