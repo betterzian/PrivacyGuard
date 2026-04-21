@@ -12,8 +12,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
 from privacyguard.domain.enums import PIIAttributeType
@@ -25,12 +23,15 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueBundle,
     ClueFamily,
     ClueRole,
-    build_negative_unit_index,
 )
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
-from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
+from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
+    _key_key_chain_gap_allowed,
+    _label_seed_address_index,
+)
+from tests._detector_negative_index import split_negative_clues
 
 
 def _clue(
@@ -43,6 +44,8 @@ def _clue(
     text: str,
     component_type: AddressComponentType | None = None,
     family: ClueFamily | None = None,
+    unit_start: int = 0,
+    unit_last: int = 0,
 ) -> Clue:
     if family is None:
         family = ClueFamily.ADDRESS if attr_type == PIIAttributeType.ADDRESS else ClueFamily.CONTROL
@@ -57,44 +60,27 @@ def _clue(
         text=text,
         source_kind="test",
         component_type=component_type,
-        unit_start=0,
-        unit_end=0,
+        unit_start=unit_start,
+        unit_last=unit_last,
     )
-
-
-def _with_units(stream, clue: Clue) -> Clue:
-    unit_start, unit_end = _char_span_to_unit_span(stream, clue.start, clue.end)
-    return replace(clue, unit_start=unit_start, unit_end=unit_end)
 
 
 def _split_negative_clues(
     stream,
     clues: tuple[Clue, ...],
-) -> tuple[tuple[Clue, ...], list[int], list[int], int]:
-    fixed_clues: list[Clue] = []
-    negative_spans: list[tuple[int, int]] = []
-    for clue in clues:
-        fixed = _with_units(stream, clue)
-        if fixed.role == ClueRole.NEGATIVE:
-            negative_spans.append((fixed.unit_start, fixed.unit_end))
-            continue
-        fixed_clues.append(fixed)
-    negative_unit_marks, negative_prefix_sum, negative_start_weight = build_negative_unit_index(
-        len(stream.units),
-        negative_spans,
-    )
-    return tuple(fixed_clues), negative_unit_marks, negative_prefix_sum, negative_start_weight
+) -> tuple[tuple[Clue, ...], tuple[Clue, ...], tuple]:
+    fixed, negative_clues, _index_by_id, unit_index = split_negative_clues(stream, clues)
+    return fixed, negative_clues, unit_index
 
 
 def _detect_candidates(text: str, clues: tuple[Clue, ...], *, locale_profile: str = "zh"):
     ctx = DetectContext()
     stream = build_prompt_stream(text)
-    fixed, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
+    fixed, negative_clues, unit_index = _split_negative_clues(stream, clues)
     bundle = ClueBundle(
         all_clues=fixed,
-        negative_unit_marks=negative_unit_marks,
-        negative_prefix_sum=negative_prefix_sum,
-        negative_start_weight=negative_start_weight,
+        unit_index=unit_index,
+        negative_clues=negative_clues,
     )
     parser = StreamParser(locale_profile=locale_profile, ctx=ctx)
     result = parser.parse(stream, bundle)
@@ -122,6 +108,51 @@ def test_label_seed_returns_none_when_no_value_and_no_key_within_6_units():
     )
     candidates = _detect_candidates(text, clues)
     assert not any(c.attr_type.value == "address" for c in candidates)
+
+
+def test_label_seed_value_hit_includes_value_last_unit():
+    stream = build_prompt_stream("上海")
+    clues = (
+        _clue(
+            "value",
+            role=ClueRole.VALUE,
+            attr_type=PIIAttributeType.ADDRESS,
+            start=0,
+            end=2,
+            text="上海",
+            component_type=AddressComponentType.CITY,
+            unit_start=0,
+            unit_last=1,
+        ),
+    )
+    assert _label_seed_address_index(clues, stream, 0, 1, max_units=6) == 0
+
+
+def test_key_key_chain_gap_allows_single_cjk_unit_under_closed_interval():
+    stream = build_prompt_stream("市名路")
+    left = _clue(
+        "city-key",
+        role=ClueRole.KEY,
+        attr_type=PIIAttributeType.ADDRESS,
+        start=0,
+        end=1,
+        text="市",
+        component_type=AddressComponentType.CITY,
+        unit_start=0,
+        unit_last=0,
+    )
+    right = _clue(
+        "road-key",
+        role=ClueRole.KEY,
+        attr_type=PIIAttributeType.ADDRESS,
+        start=2,
+        end=3,
+        text="路",
+        component_type=AddressComponentType.ROAD,
+        unit_start=2,
+        unit_last=2,
+    )
+    assert _key_key_chain_gap_allowed(left, right, stream) is True
 
 
 def test_cross_tier_merge_city_plus_road_key():
@@ -301,13 +332,12 @@ def test_trailing_admin_blocked_without_comma():
         assert "上海市" not in addr.text
 
 
-def test_name_label_and_start_are_only_counted_as_negative_like_overlap():
+def test_name_label_and_start_no_longer_emit_label_text_as_name_candidate():
     candidates = _detect_candidates_from_scanner("家属姓名：罗嘉羽。")
 
     names = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME]
 
-    assert [candidate.text for candidate in names] == ["家属姓名", "罗嘉羽"]
-    assert names[0].metadata.get("negative_overlap_kind") == ["negative_fully_inside"]
+    assert [candidate.text for candidate in names] == ["罗嘉羽"]
 
 
 def test_regular_name_label_path_remains_unchanged():
@@ -330,6 +360,7 @@ def test_same_start_name_address_conflict_prefers_full_name_when_name_contains_c
         ("景明路187号", "景明路187号"),
         ("住址道路：景明路187号。", "景明路187号"),
         ("南京市鼓楼区景明路46号", "南京市鼓楼区景明路46号"),
+        ("苏州市工业园区青年路323号国际广场1号楼5层1581室", "苏州市工业园区青年路323号国际广场1号楼5层1581室"),
     ],
 )
 def test_road_and_hao_chain_commit_full_address(text: str, expected_address: str):
@@ -367,3 +398,4 @@ def test_existing_building_shapes_still_parse_as_address(text: str):
     candidates = _detect_candidates_from_scanner(text)
 
     assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == [text]
+

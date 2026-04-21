@@ -114,6 +114,9 @@
     ]
   },
   "cities": {
+    "hard": [
+      "New York"
+    ],
     "soft": [
       "Atlanta",
       "Austin",
@@ -140,7 +143,6 @@
       "Minneapolis",
       "Nashville",
       "New Orleans",
-      "New York",
       "Oakland",
       "Oklahoma",
       "Omaha",

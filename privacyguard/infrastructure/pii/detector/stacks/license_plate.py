@@ -26,7 +26,7 @@ class _SuffixMatch:
     end: int
     text: str
     unit_start: int
-    unit_end: int
+    unit_last: int
     clue_id: str | None = None
 
 
@@ -60,7 +60,7 @@ class LicensePlateStack(BaseStack):
         suffix = self._match_suffix(prefix_clue.end, prefix_index + 1)
         if suffix is None:
             return None
-        return self._build_run(seed_kind=seed_kind, prefix=prefix_clue, suffix=suffix)
+        return self._build_run(seed_kind=seed_kind, prefix=prefix_clue, prefix_index=prefix_index, suffix=suffix)
 
     def _build_run(
         self,
@@ -68,12 +68,13 @@ class LicensePlateStack(BaseStack):
         seed_kind: str,
         suffix: _SuffixMatch,
         prefix: Clue | None = None,
+        prefix_index: int | None = None,
     ) -> StackRun:
         stream = self.context.stream
         start = prefix.start if prefix is not None else suffix.start
         end = suffix.end
         unit_start = prefix.unit_start if prefix is not None else suffix.unit_start
-        unit_end = suffix.unit_end
+        unit_last = suffix.unit_last
         candidate = CandidateDraft(
             attr_type=PIIAttributeType.LICENSE_PLATE,
             start=start,
@@ -82,7 +83,7 @@ class LicensePlateStack(BaseStack):
             source=stream.source,
             source_kind="validated_license_plate_zh",
             unit_start=unit_start,
-            unit_end=unit_end,
+            unit_last=unit_last,
             claim_strength=ClaimStrength.SOFT,
             metadata={
                 "validated_by": ["validated_license_plate_zh"],
@@ -90,9 +91,7 @@ class LicensePlateStack(BaseStack):
                 "license_plate_suffix_kind": [suffix.kind],
             },
         )
-        consumed_ids = {self.clue.clue_id}
         if prefix is not None:
-            consumed_ids.add(prefix.clue_id)
             candidate.metadata = merge_metadata(
                 candidate.metadata,
                 {
@@ -101,7 +100,6 @@ class LicensePlateStack(BaseStack):
                 },
             )
         if suffix.clue_id is not None:
-            consumed_ids.add(suffix.clue_id)
             candidate.metadata = merge_metadata(
                 candidate.metadata,
                 {"license_plate_suffix_clue_id": [suffix.clue_id]},
@@ -118,9 +116,8 @@ class LicensePlateStack(BaseStack):
         return StackRun(
             attr_type=PIIAttributeType.LICENSE_PLATE,
             candidate=candidate,
-            consumed_ids=consumed_ids,
             handled_label_clue_ids=handled_labels,
-            next_index=max(self.clue_index + 1, self._next_index_after(end)),
+            frontier_last_unit=candidate.unit_last,
         )
 
     def _find_prefix_value(self, cursor: int, start_index: int) -> tuple[int, Clue] | None:
@@ -147,14 +144,14 @@ class LicensePlateStack(BaseStack):
         if raw_match is None:
             return None
         start, end = raw_match.span()
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
+        unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
         return _SuffixMatch(
             kind="ascii",
             start=start,
             end=end,
             text=raw_match.group(0),
             unit_start=unit_start,
-            unit_end=unit_end,
+            unit_last=unit_last,
         )
 
     def _match_hard_suffix_clue(self, cursor: int, start_index: int) -> _SuffixMatch | None:
@@ -179,7 +176,7 @@ class LicensePlateStack(BaseStack):
                     end=clue.end,
                     text=clue.text,
                     unit_start=clue.unit_start,
-                    unit_end=clue.unit_end,
+                    unit_last=clue.unit_last,
                     clue_id=clue.clue_id,
                 )
             if clue.attr_type == PIIAttributeType.ALNUM:
@@ -189,7 +186,7 @@ class LicensePlateStack(BaseStack):
                     end=clue.end,
                     text=clue.text,
                     unit_start=clue.unit_start,
-                    unit_end=clue.unit_end,
+                    unit_last=clue.unit_last,
                     clue_id=clue.clue_id,
                 )
             return None
@@ -217,8 +214,11 @@ class LicensePlateStack(BaseStack):
             break
         return cursor
 
-    def _next_index_after(self, end_char: int) -> int:
-        for index in range(self.clue_index + 1, len(self.context.clues)):
-            if self.context.clues[index].start >= end_char:
+    def _clue_index_by_id(self, clue_id: str | None) -> int:
+        if not clue_id:
+            return -1
+        for index in range(self.clue_index, len(self.context.clues)):
+            if self.context.clues[index].clue_id == clue_id:
                 return index
-        return len(self.context.clues)
+        return -1
+

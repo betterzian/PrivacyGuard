@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -152,7 +151,7 @@ class CandidateDraft:
     source: PIISourceType
     source_kind: str
     unit_start: int = 0
-    unit_end: int = 0
+    unit_last: int = -1
     canonical_text: str | None = None
     claim_strength: ClaimStrength = ClaimStrength.SOFT
     metadata: dict[str, list[str]] = field(default_factory=dict)
@@ -182,7 +181,7 @@ class Clue:
     end: int
     text: str
     unit_start: int = 0
-    unit_end: int = 0
+    unit_last: int = -1
 
     # —— 来源 ——
     source_kind: str = ""
@@ -190,200 +189,56 @@ class Clue:
 
     # —— family 专属（可选） ——
     component_type: AddressComponentType | None = None
+    component_levels: tuple[AddressComponentType, ...] = ()
     break_type: BreakType | None = None
 
 
-def _normalize_negative_unit_range(unit_count: int, unit_start: int, unit_end: int) -> tuple[int, int]:
-    """裁剪 negative 查询区间，统一转成合法的半开区间。"""
-    if unit_count <= 0:
-        return (0, 0)
-    start = max(0, min(unit_count, int(unit_start)))
-    end = max(0, min(unit_count, int(unit_end)))
-    if end <= start:
-        return (start, start)
-    return (start, end)
+@dataclass(frozen=True, slots=True)
+class UnitBucket:
+    """unit 轴上的唯一运行时索引。"""
+
+    flag: str | None = None
+    structured_clues: tuple[int, ...] = ()
+    license_plate_clues: tuple[int, ...] = ()
+    address_clues: tuple[int, ...] = ()
+    name_clues: tuple[int, ...] = ()
+    organization_clues: tuple[int, ...] = ()
+    covering_clues: tuple[int, ...] = ()
+    can_start_parser: tuple[ClueFamily, ...] = ()
+    negative_cover: bool = False
+    negative_start: bool = False
 
 
-def build_negative_unit_index(
-    unit_count: int,
-    unit_spans: Sequence[tuple[int, int]],
-) -> tuple[list[int], list[int], int]:
-    """按 unit 区间构建 negative 覆盖索引与前缀和。"""
-    safe_unit_count = max(0, int(unit_count))
-    start_weight = safe_unit_count + 1
-    marks = [0] * safe_unit_count
-    for raw_start, raw_end in unit_spans:
-        start, end = _normalize_negative_unit_range(safe_unit_count, raw_start, raw_end)
-        if end <= start:
-            continue
-        marks[start] = max(marks[start], start_weight)
-        for unit_index in range(start + 1, end):
-            if marks[unit_index] < start_weight:
-                marks[unit_index] = 1
-
-    prefix_sum = [0]
-    running = 0
-    for mark in marks:
-        running += mark
-        prefix_sum.append(running)
-    return marks, prefix_sum, start_weight
+def bucket_family_clues(bucket: UnitBucket, family: ClueFamily) -> tuple[int, ...]:
+    """按 family 读取当前 unit 的起始 clue tuple。"""
+    if family == ClueFamily.STRUCTURED:
+        return bucket.structured_clues
+    if family == ClueFamily.LICENSE_PLATE:
+        return bucket.license_plate_clues
+    if family == ClueFamily.ADDRESS:
+        return bucket.address_clues
+    if family == ClueFamily.NAME:
+        return bucket.name_clues
+    if family == ClueFamily.ORGANIZATION:
+        return bucket.organization_clues
+    return ()
 
 
-def negative_has_cover(prefix_sum: Sequence[int], unit_count: int, unit_start: int, unit_end: int) -> bool:
-    """判断 unit 区间内是否存在任意 negative 覆盖。"""
-    start, end = _normalize_negative_unit_range(unit_count, unit_start, unit_end)
-    if end <= start or len(prefix_sum) <= end:
-        return False
-    return prefix_sum[end] - prefix_sum[start] > 0
-
-
-def negative_has_start(
-    prefix_sum: Sequence[int],
-    unit_count: int,
-    unit_start: int,
-    unit_end: int,
-) -> bool:
-    """判断 unit 区间内是否存在 negative 起点。"""
-    start, end = _normalize_negative_unit_range(unit_count, unit_start, unit_end)
-    if end <= start or len(prefix_sum) <= end:
-        return False
-    return prefix_sum[end] - prefix_sum[start] > (end - start)
-
-
-def negative_is_fully_covered(marks: Sequence[int], unit_start: int, unit_end: int) -> bool:
-    """判断给定 unit 区间是否被 negative 完整覆盖。"""
-    start, end = _normalize_negative_unit_range(len(marks), unit_start, unit_end)
-    if end <= start:
-        return False
-    return all(mark > 0 for mark in marks[start:end])
-
-
-def negative_next_start_unit(marks: Sequence[int], start_weight: int, unit_start: int) -> int | None:
-    """返回给定 unit 起，首个 negative 起点所在的 unit 下标。"""
-    start, end = _normalize_negative_unit_range(len(marks), unit_start, len(marks))
-    if end <= start or start_weight <= 0:
-        return None
-    for unit_index in range(start, end):
-        if marks[unit_index] >= start_weight:
-            return unit_index
-    return None
-
-
-def negative_prev_covered_end_unit(marks: Sequence[int], before_unit: int) -> int | None:
-    """返回左侧最近一个被 negative 覆盖 unit 的结束下标。"""
-    unit_count = len(marks)
-    if unit_count <= 0:
-        return None
-    end = max(0, min(unit_count, int(before_unit)))
-    for unit_index in range(end - 1, -1, -1):
-        if marks[unit_index] > 0:
-            return unit_index + 1
-    return None
-
-
-@dataclass(slots=True)
-class ClueIndex:
-    """按 unit 轴的 clue 位置索引。构建 O(n)，查询 O(1)。
-
-    - ``clues_starting_at[unit]``：该 unit 起始的所有 clue 下标。
-    - ``family_starts[family][unit]``：该 family 在 unit 起始的 clue 下标。
-    - ``blocker_prefix_sum[i]``：[0, i) 内被 BREAK/NEGATIVE 覆盖的 unit 计数。
-    - ``cover_prefix_sum[i]``：[0, i) 内被任意 clue 覆盖的 unit 计数。
-    """
-    clues_starting_at: tuple[tuple[int, ...], ...]
-    family_starts: dict[ClueFamily, tuple[tuple[int, ...], ...]]
-    blocker_prefix_sum: tuple[int, ...]
-    cover_prefix_sum: tuple[int, ...]
-    unit_count: int
-
-
-def build_clue_index(unit_count: int, clues: tuple[Clue, ...]) -> ClueIndex:
-    """一次遍历构建 ClueIndex。"""
-    safe_count = max(0, unit_count)
-    all_starting: list[list[int]] = [[] for _ in range(safe_count)]
-    family_buckets: dict[ClueFamily, list[list[int]]] = {
-        f: [[] for _ in range(safe_count)] for f in ClueFamily
-    }
-    # 差分数组用于区间覆盖标记。
-    blocker_diff = [0] * (safe_count + 1)
-    cover_diff = [0] * (safe_count + 1)
-
-    for idx, clue in enumerate(clues):
-        us, ue = clue.unit_start, clue.unit_end
-        if 0 <= us < safe_count:
-            all_starting[us].append(idx)
-            family_buckets[clue.family][us].append(idx)
-        if us < ue:
-            clamped_start = max(0, us)
-            clamped_end = min(ue, safe_count)
-            if clamped_start < clamped_end:
-                cover_diff[clamped_start] += 1
-                cover_diff[clamped_end] -= 1
-                if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE}:
-                    blocker_diff[clamped_start] += 1
-                    blocker_diff[clamped_end] -= 1
-
-    # 从差分构建前缀和：prefix_sum[i] = [0, i) 中被覆盖的 unit 数。
-    blocker_prefix = [0]
-    cover_prefix = [0]
-    b_running = 0
-    c_running = 0
-    for i in range(safe_count):
-        b_running += blocker_diff[i]
-        c_running += cover_diff[i]
-        blocker_prefix.append(blocker_prefix[-1] + (1 if b_running > 0 else 0))
-        cover_prefix.append(cover_prefix[-1] + (1 if c_running > 0 else 0))
-
-    return ClueIndex(
-        clues_starting_at=tuple(tuple(b) for b in all_starting),
-        family_starts={f: tuple(tuple(b) for b in buckets) for f, buckets in family_buckets.items()},
-        blocker_prefix_sum=tuple(blocker_prefix),
-        cover_prefix_sum=tuple(cover_prefix),
-        unit_count=safe_count,
-    )
-
-
-_EMPTY_CLUE_INDEX = None
-
-
-def _get_empty_clue_index() -> ClueIndex:
-    """惰性创建空 ClueIndex 单例。"""
-    global _EMPTY_CLUE_INDEX
-    if _EMPTY_CLUE_INDEX is None:
-        _EMPTY_CLUE_INDEX = build_clue_index(0, ())
-    return _EMPTY_CLUE_INDEX
+def empty_unit_index(unit_count: int) -> tuple[UnitBucket, ...]:
+    """构造固定长度的空 unit 索引。"""
+    safe_count = max(0, int(unit_count))
+    return tuple(UnitBucket() for _ in range(safe_count))
 
 
 @dataclass(slots=True)
 class ClueBundle:
     all_clues: tuple[Clue, ...]
+    unit_index: tuple[UnitBucket, ...] = ()
     negative_clues: tuple[Clue, ...] = ()
-    negative_unit_marks: list[int] = field(default_factory=list)
-    negative_prefix_sum: list[int] = field(default_factory=lambda: [0])
-    negative_start_weight: int = 0
-    clue_index: ClueIndex | None = None
 
     @property
     def label_clues(self) -> tuple[Clue, ...]:
         return tuple(clue for clue in self.all_clues if clue.role == ClueRole.LABEL)
-
-    def has_negative_cover(self, unit_start: int, unit_end: int) -> bool:
-        """判断给定 unit 区间内是否存在任意 negative 覆盖。"""
-        return negative_has_cover(
-            self.negative_prefix_sum,
-            len(self.negative_unit_marks),
-            unit_start,
-            unit_end,
-        )
-
-    def has_negative_start(self, unit_start: int, unit_end: int) -> bool:
-        """判断给定 unit 区间内是否存在 negative 起点。"""
-        return negative_has_start(
-            self.negative_prefix_sum,
-            len(self.negative_unit_marks),
-            unit_start,
-            unit_end,
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,7 +261,7 @@ class StructuredAnchor:
 
     attr_type: PIIAttributeType
     role: ClueRole
-    unit_end: int
+    unit_last: int
     clue_index: int
     clue_id: str
 
@@ -443,3 +298,4 @@ class ParseResult:
     candidates: list[CandidateDraft] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     handled_label_clue_ids: set[str] = field(default_factory=set)
+

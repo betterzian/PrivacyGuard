@@ -55,11 +55,11 @@ class _StandaloneRange:
     start: int
     end: int
     unit_start: int
-    unit_end: int
+    unit_last: int
 
     @property
     def unit_width(self) -> int:
-        return max(0, self.unit_end - self.unit_start)
+        return max(0, self.unit_last - self.unit_start + 1)
 
 
 @lru_cache(maxsize=1)
@@ -83,7 +83,7 @@ class ZhNameStack(BaseNameStack):
 
     def need_break(
         self,
-        subject,
+        flag=None,
         *,
         next_unit=None,
         prev_unit=None,
@@ -92,16 +92,20 @@ class ZhNameStack(BaseNameStack):
         left_char=None,
         right_char=None,
     ) -> bool:
-        if isinstance(subject, Clue):
-            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
+        subject = next_unit if next_unit is not None else prev_unit
+        if subject is None:
+            return flag is not None
         if upper is not None and subject.char_start >= upper:
             return True
         if lower is not None and subject.char_end <= lower:
             return True
+        if flag == "OCR_BREAK":
+            return True
         if subject.kind == "cjk_char":
             return False
         if subject.kind == "punct":
-            return not is_name_joiner(subject.text, left_char, right_char)
+            punct = flag if flag is not None else subject.text
+            return not is_name_joiner(punct, left_char, right_char)
         return True
 
     def run(self) -> StackRun | None:
@@ -141,7 +145,7 @@ class ZhNameStack(BaseNameStack):
             negative_clues=self.context.negative_clues,
         )
         dominant_kind = dominant_negative_overlap_kind(overlaps)
-        if not direct_submit_negative_allowed(overlaps):
+        if not direct_submit_negative_allowed(overlaps, effective_strength=self.clue.strength):
             return None
 
         final_strength = self.clue.strength
@@ -177,7 +181,11 @@ class ZhNameStack(BaseNameStack):
             candidate_end=family_anchor.end,
             candidate_raw_text=self.context.stream.text[family_anchor.start : family_anchor.end],
         )
-        if family_negative_blocks_stack_immediately(family_overlaps):
+        family_negative_strength = self._negative_fully_inside_effective_strength(family_anchor.claim_strength)
+        if family_negative_blocks_stack_immediately(
+            family_overlaps,
+            effective_strength=family_negative_strength,
+        ):
             return None
 
         explicit_given = self._resolve_explicit_given(family_anchor.end, initial_standalone.end)
@@ -223,7 +231,11 @@ class ZhNameStack(BaseNameStack):
                 candidate_end=explicit_given.end,
                 candidate_raw_text=self.context.stream.text[explicit_given.start:explicit_given.end],
             )
-            if given_or_implicit_tail_negative_cancels_candidate(explicit_given_overlaps):
+            explicit_given_negative_strength = self._negative_fully_inside_effective_strength(given_strength_after)
+            if given_or_implicit_tail_negative_cancels_candidate(
+                explicit_given_overlaps,
+                effective_strength=explicit_given_negative_strength,
+            ):
                 return None
             if component_negative_demotes_claim_strength(explicit_given_overlaps):
                 given_strength_after = downgrade_claim_strength(given_strength_after)
@@ -233,7 +245,11 @@ class ZhNameStack(BaseNameStack):
                 candidate_end=candidate_end,
                 candidate_raw_text=self.context.stream.text[family_anchor.end:candidate_end],
             )
-            if given_or_implicit_tail_negative_cancels_candidate(implicit_tail_overlaps):
+            implicit_tail_negative_strength = self._negative_fully_inside_effective_strength(family_strength_after)
+            if given_or_implicit_tail_negative_cancels_candidate(
+                implicit_tail_overlaps,
+                effective_strength=implicit_tail_negative_strength,
+            ):
                 return None
             if component_negative_demotes_claim_strength(implicit_tail_overlaps):
                 family_strength_after = downgrade_claim_strength(family_strength_after)
@@ -296,17 +312,16 @@ class ZhNameStack(BaseNameStack):
             run.pending_challenge = PendingChallenge(
                 clue_index=overlap_index,
                 extended_candidate=candidate,
-                extended_consumed_ids={*run.consumed_ids},
-                extended_next_index=max(run.next_index, overlap_index + 1),
+                extended_last_unit=candidate.unit_last,
                 challenge_kind="name_address_conflict",
             )
         return run
 
     def _first_address_overlap_clue_index(self, start: int, end: int) -> int | None:
         for idx, clue in enumerate(self.context.clues):
-            if clue.attr_type != PIIAttributeType.ADDRESS:
-                continue
-            if clue.start < end and clue.end > start:
+            if clue.start >= end:
+                break
+            if clue.attr_type == PIIAttributeType.ADDRESS and clue.end > start:
                 return idx
         return None
 
@@ -417,8 +432,8 @@ class ZhNameStack(BaseNameStack):
                 right = unit.char_end
                 ui += 1
 
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, left, right)
-        return _StandaloneRange(start=left, end=right, unit_start=unit_start, unit_end=unit_end)
+        unit_start, unit_last = _char_span_to_unit_span(self.context.stream, left, right)
+        return _StandaloneRange(start=left, end=right, unit_start=unit_start, unit_last=unit_last)
 
     def _should_upgrade_by_family_candidate_boundaries(
         self,
@@ -435,14 +450,14 @@ class ZhNameStack(BaseNameStack):
             family_anchor.start,
             family_anchor.end,
         )
-        candidate_unit_start, candidate_unit_end = _char_span_to_unit_span(stream, family_anchor.start, candidate_end)
-        if candidate_unit_end <= candidate_unit_start:
+        candidate_unit_start, candidate_unit_last = _char_span_to_unit_span(stream, family_anchor.start, candidate_end)
+        if candidate_unit_last < candidate_unit_start:
             return False
-        if candidate_unit_end - family_unit_start > 4:
+        if candidate_unit_last - family_unit_start + 1 > 4:
             return False
         if not self._left_boundary_is_break(family_unit_start):
             return False
-        if not self._right_boundary_is_break(candidate_unit_end):
+        if not self._right_boundary_is_break(candidate_unit_last):
             return False
         return True
 
@@ -454,32 +469,30 @@ class ZhNameStack(BaseNameStack):
             return True
         subject_index = family_unit_start - 1
         subject = units[subject_index]
-        prev_unit = units[subject_index - 1] if subject_index - 1 >= 0 else None
         left_char = _peek_unit_last_char(units, subject_index - 1)
         right_char = raw_text[subject.char_end] if subject.char_end < len(raw_text) else None
         return self.need_break(
-            subject,
+            flag=_unit_flag(subject),
             lower=0,
-            prev_unit=prev_unit,
+            prev_unit=subject,
             left_char=left_char,
             right_char=right_char,
         )
 
-    def _right_boundary_is_break(self, candidate_unit_end: int) -> bool:
+    def _right_boundary_is_break(self, candidate_unit_last: int) -> bool:
         """判断候选末端右侧是否形成 break。"""
         units = self.context.stream.units
         raw_text = self.context.stream.text
-        if candidate_unit_end >= len(units):
+        if candidate_unit_last + 1 >= len(units):
             return True
-        subject_index = candidate_unit_end
+        subject_index = candidate_unit_last + 1
         subject = units[subject_index]
-        next_unit = units[subject_index + 1] if subject_index + 1 < len(units) else None
         left_char = raw_text[subject.char_start - 1] if subject.char_start > 0 else None
         right_char = _peek_unit_first_char(units, subject_index + 1)
         return self.need_break(
-            subject,
+            flag=_unit_flag(subject),
             upper=len(raw_text),
-            next_unit=next_unit,
+            next_unit=subject,
             left_char=left_char,
             right_char=right_char,
         )
@@ -535,16 +548,8 @@ class ZhNameStack(BaseNameStack):
         return sum(1 for char in compact_zh_name_text(self.context.stream.text[start:end]) if char not in {"·", "•", "・"})
 
     def _name_clues_starting_at(self, start: int, *, role: ClueRole) -> list[tuple[int, Clue]]:
-        stream = self.context.stream
-        if not stream.char_to_unit or start >= len(stream.text):
-            return []
-        start_unit = _unit_index_at_or_after(stream, start)
-        name_starts = self.context.clue_index.family_starts.get(self.clue.family)
-        if name_starts is None or start_unit >= len(name_starts):
-            return []
         matches: list[tuple[int, Clue]] = []
-        for index in name_starts[start_unit]:
-            clue = self.context.clues[index]
+        for index, clue in enumerate(self.context.clues):
             if clue.start == start and clue.role == role:
                 matches.append((index, clue))
         return matches
@@ -555,6 +560,12 @@ class ZhNameStack(BaseNameStack):
         if self.clue.role == ClueRole.LABEL:
             return "label_seed"
         return "start_seed"
+
+    def _negative_fully_inside_effective_strength(self, current_strength: ClaimStrength) -> ClaimStrength:
+        """LABEL/START 在 ``NEGATIVE_FULLY_INSIDE`` 判定时按 hard 视角处理。"""
+        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
+            return ClaimStrength.HARD
+        return current_strength
 
     def _build_candidate(
         self,
@@ -569,7 +580,7 @@ class ZhNameStack(BaseNameStack):
         text = compact_zh_name_text(self.context.stream.text[start:end])
         if not text:
             return None
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
+        unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
         metadata = {key: list(values) for key, values in self.clue.source_metadata.items()}
         metadata.setdefault("matched_by", [self.clue.source_kind])
         metadata["name_route"] = [route]
@@ -581,7 +592,7 @@ class ZhNameStack(BaseNameStack):
             start=start,
             end=end,
             unit_start=unit_start,
-            unit_end=unit_end,
+            unit_last=unit_last,
             text=text,
             source=self.context.stream.source,
             source_kind=self.clue.source_kind,
@@ -592,16 +603,11 @@ class ZhNameStack(BaseNameStack):
         )
 
     def _finalize_run(self, start: int, end: int, candidate: CandidateDraft) -> StackRun:
-        name_clues = self._name_clues_in_span(start, end)
-        consumed_ids = {self.clue.clue_id}
-        consumed_ids.update(clue.clue_id for _index, clue in name_clues)
-        last_name_index = max((index for index, _clue in name_clues), default=self.clue_index)
         return StackRun(
             attr_type=PIIAttributeType.NAME,
             candidate=candidate,
-            consumed_ids=consumed_ids,
             handled_label_clue_ids={self.clue.clue_id} if self.clue.role == ClueRole.LABEL else set(),
-            next_index=max(self.clue_index + 1, last_name_index + 1),
+            frontier_last_unit=candidate.unit_last,
         )
 
     def _collect_blocking_overlaps(
@@ -645,3 +651,16 @@ def _claim_strength_rank(strength: ClaimStrength) -> int:
         ClaimStrength.SOFT: 1,
         ClaimStrength.HARD: 2,
     }[strength]
+
+
+def _unit_flag(unit) -> str | None:
+    if unit.kind == "ocr_break":
+        return "OCR_BREAK"
+    if unit.kind == "inline_gap":
+        return "INLINE_GAP"
+    if unit.kind == "space":
+        return "SPACE"
+    if unit.kind == "punct":
+        return unit.text
+    return None
+

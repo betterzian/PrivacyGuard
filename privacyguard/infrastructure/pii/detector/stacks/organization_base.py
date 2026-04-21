@@ -39,23 +39,25 @@ class BaseOrganizationStack(BaseStack):
             return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}
         return False
 
-    def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
+    def shrink(self, run: StackRun, blocker_start: int, blocker_last: int) -> StackRun | None:
         """组织名回缩：后缀被截即放弃，前缀被截后需重新校验。"""
         candidate = run.candidate
         stream = self.context.stream
         if blocker_start <= candidate.unit_start:
-            new_unit_start, new_unit_end = blocker_end, candidate.unit_end
-        elif blocker_end >= candidate.unit_end:
-            new_unit_start, new_unit_end = candidate.unit_start, blocker_start
+            new_unit_start, new_unit_last = blocker_last + 1, candidate.unit_last
+        elif blocker_last >= candidate.unit_last:
+            new_unit_start, new_unit_last = candidate.unit_start, blocker_start - 1
         else:
-            new_unit_start, new_unit_end = candidate.unit_start, blocker_start
+            new_unit_start, new_unit_last = candidate.unit_start, blocker_start - 1
+        if new_unit_last < new_unit_start:
+            return None
         trimmed = trim_candidate(
             candidate,
             stream.text,
             start=_unit_char_start(stream, new_unit_start),
-            end=_unit_char_end(stream, new_unit_end),
+            end=_unit_char_end(stream, new_unit_last),
             unit_start=new_unit_start,
-            unit_end=new_unit_end,
+            unit_last=new_unit_last,
         )
         if trimmed is None:
             return None
@@ -64,9 +66,8 @@ class BaseOrganizationStack(BaseStack):
         return StackRun(
             attr_type=run.attr_type,
             candidate=trimmed,
-            consumed_ids=run.consumed_ids,
             handled_label_clue_ids=run.handled_label_clue_ids,
-            next_index=run.next_index,
+            frontier_last_unit=trimmed.unit_last,
         )
 
     def run(self) -> StackRun | None:
@@ -87,7 +88,7 @@ class BaseOrganizationStack(BaseStack):
         else:
             return None
         matches = self._organization_clues_in_span(start, end)
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
+        unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
         candidate = build_organization_candidate_from_value(
             source=self.context.stream.source,
             value_text=self.context.stream.text[start:end],
@@ -95,7 +96,7 @@ class BaseOrganizationStack(BaseStack):
             value_end=end,
             source_kind=self.clue.source_kind,
             unit_start=unit_start,
-            unit_end=unit_end,
+            unit_last=unit_last,
             label_clue_id=self.clue.clue_id if is_label_seed else None,
             label_driven=(self.clue.role == ClueRole.LABEL),
         )
@@ -117,15 +118,11 @@ class BaseOrganizationStack(BaseStack):
         ):
             return None
         candidate.claim_strength = evidence.max_clue_strength
-        consumed_ids = {clue.clue_id for _index, clue in matches}
-        consumed_ids.add(self.clue.clue_id)
-        last_index = max((index for index, _clue in matches), default=self.clue_index)
         return StackRun(
             attr_type=PIIAttributeType.ORGANIZATION,
             candidate=candidate,
-            consumed_ids=consumed_ids,
             handled_label_clue_ids=handled,
-            next_index=last_index + 1,
+            frontier_last_unit=candidate.unit_last,
         )
 
     def _resolve_label_end(self, *, start: int, locale: str) -> int:
@@ -168,32 +165,15 @@ class BaseOrganizationStack(BaseStack):
 
     def _next_label_blocker_start(self, start: int) -> int | None:
         blocker_start = start if self.context.has_negative_cover_left_of_char(start) else self.context.next_negative_start_char(start)
-        ci = self.context.clue_index
-        stream = self.context.stream
-        # 检查 cursor 是否在某个 blocker clue 内部（cover_prefix_sum 快速排除）。
-        if stream.char_to_unit and 0 < start < len(stream.char_to_unit):
-            cursor_unit = stream.char_to_unit[start]
-            if cursor_unit < ci.unit_count and ci.cover_prefix_sum[cursor_unit + 1] - ci.cover_prefix_sum[cursor_unit] > 0:
-                for clue in self.context.clues:
-                    if clue.clue_id == self.clue.clue_id:
-                        continue
-                    if clue.start < start < clue.end and self._is_label_right_blocker(clue):
-                        return start if blocker_start is None else min(blocker_start, start)
-        # 向右查找第一个 blocker。
-        if stream.char_to_unit and start < len(stream.char_to_unit):
-            start_unit = stream.char_to_unit[min(start, len(stream.char_to_unit) - 1)]
-            clues = self.context.clues
-            for u in range(start_unit, ci.unit_count):
-                for idx in ci.clues_starting_at[u]:
-                    if idx <= self.clue_index:
-                        continue
-                    clue = clues[idx]
-                    if clue.end <= start:
-                        continue
-                    if self._is_label_right_blocker(clue):
-                        candidate = max(start, clue.start)
-                        blocker_start = candidate if blocker_start is None else min(blocker_start, candidate)
-                        return blocker_start
+        for clue in self.context.clues:
+            if clue.clue_id == self.clue.clue_id:
+                continue
+            if clue.start < start < clue.end and self._is_label_right_blocker(clue):
+                return start if blocker_start is None else min(blocker_start, start)
+            if clue.end > start and self._is_label_right_blocker(clue):
+                candidate = max(start, clue.start)
+                blocker_start = candidate if blocker_start is None else min(blocker_start, candidate)
+                return blocker_start
         return blocker_start
 
     def _is_label_right_blocker(self, clue: Clue) -> bool:
@@ -209,17 +189,15 @@ class BaseOrganizationStack(BaseStack):
         if start >= upper or not self.context.stream.char_to_unit:
             return None
         start_ui = _unit_index_at_or_after(self.context.stream, start)
-        for index in range(self.clue_index + 1, len(self.context.clues)):
-            clue = self.context.clues[index]
+        for clue in self.context.clues[self.clue_index + 1 :]:
             if clue.start >= upper:
                 break
             if clue.end <= start:
                 continue
-            if clue.attr_type != PIIAttributeType.ORGANIZATION or clue.role != ClueRole.SUFFIX:
-                continue
-            suffix_ui = self.context.stream.char_to_unit[clue.start]
-            if _count_non_space_units(self.context.stream.units, start_ui, suffix_ui + 1) <= 10:
-                return clue.end
+            if clue.attr_type == PIIAttributeType.ORGANIZATION and clue.role == ClueRole.SUFFIX:
+                suffix_ui = self.context.stream.char_to_unit[clue.start]
+                if _count_non_space_units(self.context.stream.units, start_ui, suffix_ui + 1) <= 10:
+                    return clue.end
         return None
 
     def _build_value_seed_run(self, *, locale: str) -> StackRun | None:
@@ -228,16 +206,14 @@ class BaseOrganizationStack(BaseStack):
         value_end = self.clue.end
         # 向右搜索 suffix。
         suffix_clue = self._find_suffix_after_value(value_end, locale=locale)
-        consumed_ids = {self.clue.clue_id}
         if suffix_clue is not None:
             # 有 suffix → 吸收 value ~ suffix 区间。
             end = suffix_clue.end
-            consumed_ids.add(suffix_clue.clue_id)
         else:
             end = value_end
         start = value_start
         matches = self._organization_clues_in_span(start, end)
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
+        unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
         candidate = build_organization_candidate_from_value(
             source=self.context.stream.source,
             value_text=self.context.stream.text[start:end],
@@ -245,7 +221,7 @@ class BaseOrganizationStack(BaseStack):
             value_end=end,
             source_kind=self.clue.source_kind,
             unit_start=unit_start,
-            unit_end=unit_end,
+            unit_last=unit_last,
             value_driven=True,
         )
         if candidate is None:
@@ -264,17 +240,11 @@ class BaseOrganizationStack(BaseStack):
         ):
             return None
         candidate.claim_strength = evidence.max_clue_strength
-        consumed_ids.update(clue_id for _index, clue in matches for clue_id in [clue.clue_id])
-        last_index = max(
-            (index for index, _clue in matches),
-            default=self.clue_index,
-        )
         return StackRun(
             attr_type=PIIAttributeType.ORGANIZATION,
             candidate=candidate,
-            consumed_ids=consumed_ids,
             handled_label_clue_ids=set(),
-            next_index=last_index + 1,
+            frontier_last_unit=candidate.unit_last,
         )
 
     def _find_suffix_after_value(self, value_end: int, *, locale: str) -> Clue | None:
@@ -300,34 +270,24 @@ class BaseOrganizationStack(BaseStack):
                 continue
             break
         # 在窗口范围内搜索 suffix clue。
-        for index in range(self.clue_index + 1, len(self.context.clues)):
-            clue = self.context.clues[index]
+        for clue in self.context.clues[self.clue_index + 1 :]:
             if clue.start > upper_char:
                 break
             if clue.start < value_end:
                 continue
-            if clue.attr_type != PIIAttributeType.ORGANIZATION or clue.role != ClueRole.SUFFIX:
-                continue
-            return clue
+            if clue.attr_type == PIIAttributeType.ORGANIZATION and clue.role == ClueRole.SUFFIX:
+                return clue
         return None
 
     def _organization_clues_in_span(self, start: int, end: int, *, include_hard: bool = False) -> list[tuple[int, Clue]]:
-        ci = self.context.clue_index
-        us, ue = _char_span_to_unit_span(self.context.stream, start, end)
-        org_starts = ci.family_starts.get(ClueFamily.ORGANIZATION)
-        if org_starts is None or ue <= us:
-            return []
-        clues = self.context.clues
         matches: list[tuple[int, Clue]] = []
-        for u in range(max(0, us), min(ue, ci.unit_count)):
-            for idx in org_starts[u]:
-                clue = clues[idx]
-                if clue.attr_type != PIIAttributeType.ORGANIZATION:
-                    continue
-                if clue.strength == ClaimStrength.HARD and not include_hard:
-                    continue
-                if clue.start < end and clue.end > start:
-                    matches.append((idx, clue))
+        for index, clue in enumerate(self.context.clues):
+            if clue.start >= end:
+                break
+            if clue.attr_type == PIIAttributeType.ORGANIZATION:
+                if clue.strength != ClaimStrength.HARD or include_hard:
+                    if clue.end > start:
+                        matches.append((index, clue))
         return matches
 
     def _build_org_evidence(
@@ -549,3 +509,4 @@ def _is_organization_candidate_usable(text: str, *, label_driven: bool) -> bool:
     if not has_organization_suffix(text) and not label_driven:
         return False
     return _organization_has_body_before_suffix(text)
+

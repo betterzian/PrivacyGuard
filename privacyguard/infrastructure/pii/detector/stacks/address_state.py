@@ -268,6 +268,15 @@ def _admin_levels_of(component: _DraftComponent) -> tuple[AddressComponentType, 
     return tuple(lvl for lvl in component.level if lvl in _ADMIN_TYPES)
 
 
+def _clue_admin_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    """读取 clue 的行政层级，兼容 MULTI_ADMIN derived 视图。"""
+    if clue.component_levels:
+        return tuple(level for level in clue.component_levels if level in _ADMIN_TYPES)
+    if clue.component_type in _ADMIN_TYPES:
+        return (clue.component_type,)
+    return ()
+
+
 def _effective_successors(
     prev: _DraftComponent | None,
     *,
@@ -368,11 +377,9 @@ class _CommaTailCheckpoint:
     last_end: int
     committed_clue_ids: set[str]
     consumed_clue_indices: set[int]
-    last_consumed_clue_index: int
     pending_community_poi_index: int | None
     evidence_count: int
     suppress_challenger_clue_ids: set[str]
-    extra_consumed_clue_ids: set[str]
     absorbed_digit_unit_end: int
     ignored_address_key_indices: set[int]
     pending_suspects: list[_SuspectEntry]
@@ -403,9 +410,7 @@ class _ParseState:
     last_component_type: AddressComponentType | None = None
     seed_floor: int | None = None
     committed_clue_ids: set[str] = field(default_factory=set)
-    extra_consumed_clue_ids: set[str] = field(default_factory=set)
     consumed_clue_indices: set[int] = field(default_factory=set)
-    last_consumed_clue_index: int = -1
     suppress_challenger_clue_ids: set[str] = field(default_factory=set)
     value_char_end_override: dict[str, int] = field(default_factory=dict)
     pending_comma_value_right_scan: bool = False
@@ -600,11 +605,9 @@ def _make_comma_tail_checkpoint(state: _ParseState, comma_pos: int) -> _CommaTai
         last_end=state.last_end,
         committed_clue_ids=set(state.committed_clue_ids),
         consumed_clue_indices=set(state.consumed_clue_indices),
-        last_consumed_clue_index=state.last_consumed_clue_index,
         pending_community_poi_index=state.pending_community_poi_index,
         evidence_count=state.evidence_count,
         suppress_challenger_clue_ids=set(state.suppress_challenger_clue_ids),
-        extra_consumed_clue_ids=set(state.extra_consumed_clue_ids),
         absorbed_digit_unit_end=state.absorbed_digit_unit_end,
         ignored_address_key_indices=set(state.ignored_address_key_indices),
         pending_suspects=[
@@ -648,9 +651,7 @@ def _restore_comma_tail_checkpoint(
     state.last_component_type = checkpoint.last_component_type
     state.last_end = checkpoint.last_end
     state.committed_clue_ids = set(checkpoint.committed_clue_ids)
-    state.extra_consumed_clue_ids = set(checkpoint.extra_consumed_clue_ids)
     state.consumed_clue_indices = set(checkpoint.consumed_clue_indices)
-    state.last_consumed_clue_index = checkpoint.last_consumed_clue_index
     state.suppress_challenger_clue_ids = set(checkpoint.suppress_challenger_clue_ids)
     state.value_char_end_override.clear()
     state.pending_comma_value_right_scan = False
@@ -669,7 +670,6 @@ def _mark_consumed_indices(state: _ParseState, clue_indices: Iterable[int]) -> N
     if not indices:
         return
     state.consumed_clue_indices |= indices
-    state.last_consumed_clue_index = max(state.last_consumed_clue_index, max(indices))
 
 
 def _append_deferred(
@@ -685,10 +685,6 @@ def _append_deferred(
     state.deferred_chain.append((clue_index, clue))
     if state.chain_left_anchor is None:
         state.chain_left_anchor = clue.start if anchor_start is None else anchor_start
-
-
-def _recompute_last_consumed_index(state: _ParseState) -> None:
-    state.last_consumed_clue_index = max(state.consumed_clue_indices) if state.consumed_clue_indices else -1
 
 
 def _increment_component_count(state: _ParseState, component_type: AddressComponentType) -> None:
@@ -1246,14 +1242,14 @@ def _flush_chain_as_standalone(
             resolve_standalone_admin_group is not None
             and clue.role == ClueRole.VALUE
             and clue.attr_type == PIIAttributeType.ADDRESS
-            and comp_type in _ADMIN_TYPES
+            and _clue_admin_levels(clue)
         ):
             group_end = cursor + 1
             while (
                 group_end < len(state.deferred_chain)
                 and state.deferred_chain[group_end][1].role == ClueRole.VALUE
                 and state.deferred_chain[group_end][1].attr_type == PIIAttributeType.ADDRESS
-                and state.deferred_chain[group_end][1].component_type in _ADMIN_TYPES
+                and _clue_admin_levels(state.deferred_chain[group_end][1])
                 and state.deferred_chain[group_end][1].start == clue.start
                 and state.deferred_chain[group_end][1].end == clue.end
             ):
@@ -1589,7 +1585,7 @@ def _rightmost_component_key_overlaps_negative(
     for _, clue in reversed(clue_entries):
         if clue.role != ClueRole.KEY:
             continue
-        return has_negative_cover(clue.unit_start, clue.unit_end)
+        return has_negative_cover(clue.unit_start, clue.unit_last)
     return False
 
 
@@ -1615,7 +1611,6 @@ def _rebuild_component_derived_state(
     state.last_component_type = None
     state.committed_clue_ids = set()
     state.consumed_clue_indices = set()
-    state.last_consumed_clue_index = -1
     state.value_char_end_override.clear()
     state.pending_comma_value_right_scan = False
     state.pending_comma_first_component = False
@@ -1645,6 +1640,8 @@ def _rebuild_component_derived_state(
         state.last_piece_end = component.end
         state.segment_state.group_last_type = component_type
 
-    _recompute_last_consumed_index(state)
-    if 0 <= state.last_consumed_clue_index < len(clues):
-        state.last_consumed = clues[state.last_consumed_clue_index]
+    if state.consumed_clue_indices:
+        last_index = max(state.consumed_clue_indices)
+        if 0 <= last_index < len(clues):
+            state.last_consumed = clues[last_index]
+

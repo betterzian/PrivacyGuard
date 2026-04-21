@@ -80,11 +80,19 @@ class _AdminValueSpan:
     last_index: int = -1
 
 
+def _clue_admin_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    """统一读取 clue 上的中文行政层级。"""
+    levels = clue.component_levels if clue.component_levels else (
+        (clue.component_type,) if clue.component_type is not None else ()
+    )
+    return tuple(level for level in levels if level in _ADMIN_TYPES)
+
+
 def _is_admin_value_clue(clue: Clue) -> bool:
     return (
         clue.role == ClueRole.VALUE
         and clue.attr_type == PIIAttributeType.ADDRESS
-        and clue.component_type in _ADMIN_TYPES
+        and bool(_clue_admin_levels(clue))
     )
 
 
@@ -132,9 +140,9 @@ def _build_admin_value_span(
     if any(not _same_admin_value_span(first, current) for current in clues):
         return None
     levels = _ordered_admin_levels(
-        current.component_type
+        level
         for current in clues
-        if current.component_type is not None
+        for level in _clue_admin_levels(current)
     )
     if not levels:
         return None

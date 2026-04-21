@@ -43,8 +43,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueRole,
     DictionaryEntry,
     StreamInput,
-    build_clue_index,
-    build_negative_unit_index,
+    UnitBucket,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks.common import valid_left_numeral_for_zh_address_key
@@ -239,15 +238,20 @@ _LABEL_FIELD_SEPARATOR_CHARS = ":：-—–=|"
 # 或处于文本起止位置。防止自然语句中嵌入的关键词被误识别为标签。
 _LABEL_BOUNDARY_UNIT_KINDS = frozenset({"punct", "inline_gap", "ocr_break"})
 _SEED_ROLES = frozenset({ClueRole.LABEL, ClueRole.START})
-_START_MASKED_SOFT_ROLES = frozenset(
-    {
-        ClueRole.SUFFIX,
-        ClueRole.KEY,
-        ClueRole.VALUE,
-        ClueRole.FAMILY_NAME,
-        ClueRole.GIVEN_NAME,
-    }
+_PARSER_FAMILY_ORDER: tuple[ClueFamily, ...] = (
+    ClueFamily.STRUCTURED,
+    ClueFamily.LICENSE_PLATE,
+    ClueFamily.ADDRESS,
+    ClueFamily.NAME,
+    ClueFamily.ORGANIZATION,
 )
+_START_ROLES_BY_FAMILY: dict[ClueFamily, frozenset[ClueRole]] = {
+    ClueFamily.STRUCTURED: frozenset({ClueRole.VALUE}),
+    ClueFamily.LICENSE_PLATE: frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE}),
+    ClueFamily.ADDRESS: frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE, ClueRole.KEY}),
+    ClueFamily.NAME: frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.FAMILY_NAME, ClueRole.GIVEN_NAME, ClueRole.FULL_NAME, ClueRole.ALIAS, ClueRole.VALUE}),
+    ClueFamily.ORGANIZATION: frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.SUFFIX, ClueRole.VALUE}),
+}
 # 数字的非隐私上下文模式。
 _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\d{4}年"),
@@ -392,24 +396,15 @@ def build_clue_bundle(
         soft_clues.extend(_scan_en_address_postal_clues_full_stream(ctx, stream))
 
     deduped_negative_clues = _dedupe_clues(negative_clues) if negative_clues else []
-    negative_unit_marks, negative_prefix_sum, negative_start_weight = _build_negative_index(
-        stream,
-        deduped_negative_clues,
-    )
 
     # ── 事件扫描线裁决 ──
     all_clues = [*structured_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_only_spans), *soft_clues]
     resolved_clues = _sweep_resolve(stream, all_clues)
     ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, _family_order(item.family), item.end)))
-    unit_count = len(stream.units)
-    clue_index = build_clue_index(unit_count, ordered_clues)
     return ClueBundle(
         all_clues=ordered_clues,
+        unit_index=_build_unit_index(stream, ordered_clues, tuple(deduped_negative_clues)),
         negative_clues=tuple(deduped_negative_clues),
-        negative_unit_marks=negative_unit_marks,
-        negative_prefix_sum=negative_prefix_sum,
-        negative_start_weight=negative_start_weight,
-        clue_index=clue_index,
     )
 
 
@@ -441,7 +436,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 end=match.end(),
                 text=value,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="regex_email",
                 source_metadata={"hard_source": ["regex"], "placeholder": ["<email>"]},
             )
@@ -472,7 +467,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     end=match.end(),
                     text=value,
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind=source_kind,
                     source_metadata={"hard_source": ["regex"], "placeholder": ["<time>"]},
                 )
@@ -499,7 +494,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     end=match.end(),
                     text=value,
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind=source_kind,
                     source_metadata={"hard_source": ["regex"], "placeholder": ["<amount>"]},
                 )
@@ -526,7 +521,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 end=match.end(),
                 text=value,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="extract_alnum_fragment",
                 source_metadata={
                     "hard_source": ["regex"],
@@ -559,7 +554,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     end=match.end(),
                     text=value,
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind="extract_digit_fragment",
                     source_metadata={
                         "hard_source": ["regex"],
@@ -597,7 +592,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 end=match.end(),
                 text=value,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="extract_digit_fragment",
                 source_metadata={
                     "hard_source": ["regex"],
@@ -669,7 +664,7 @@ def _scan_dictionary_hard_clues(
                 end=end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=payload.matched_by,
                 source_metadata=dict_metadata,
             )
@@ -716,7 +711,7 @@ def _scan_org_address_dictionary_clues(
                 end=end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=payload.matched_by,
                 source_metadata=dict_metadata,
             )
@@ -811,7 +806,7 @@ def _scan_name_dictionary_clues(
                 end=end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=payload.matched_by,
                 source_metadata=metadata,
             )
@@ -883,7 +878,7 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
                 end=end,
                 text=spec.keyword,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=spec.source_kind,
                 source_metadata=label_metadata,
             )
@@ -908,7 +903,7 @@ def _scan_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
                     end=raw_end,
                     text=match.group(0),
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind=source_kind,
                     break_type=break_type,
                 )
@@ -943,7 +938,7 @@ def _scan_determiner_break_clues(ctx: DetectContext, segment: _ScanSegment) -> l
                 end=raw_end,
                 text=match.group(0),
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="break_determiner",
                 break_type=BreakType.DETERMINER,
             )
@@ -970,7 +965,7 @@ def _scan_ocr_break_clues(
                 end=end,
                 text=stream.text[start:end],
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="break_ocr",
                 break_type=BreakType.OCR,
             )
@@ -1003,7 +998,7 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=str(match.payload),
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="name_start",
                 source_metadata=metadata,
             )
@@ -1050,7 +1045,7 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
                 end=raw_end,
                 text=surname_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="family_name",
                 source_metadata=metadata,
             )
@@ -1079,7 +1074,7 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="en_surname",
             )
         )
@@ -1107,7 +1102,7 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="en_given_name",
             )
         )
@@ -1134,7 +1129,7 @@ def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> lis
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="company_suffix",
             )
         )
@@ -1164,7 +1159,7 @@ def _scan_company_value_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="company_value",
             )
         )
@@ -1214,7 +1209,7 @@ def _scan_license_plate_value_clues(
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="lexicon_license_plate_prefix_zh",
                 source_metadata={
                     "matched_by": ["lexicon_license_plate_prefix_zh"],
@@ -1254,7 +1249,7 @@ def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, loca
                     end=raw_end,
                     text=matched_text,
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind="control_value_zh",
                     source_metadata={
                         "control_kind": ["number"],
@@ -1288,7 +1283,7 @@ def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, loca
                     end=raw_end,
                     text=matched_text,
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind="control_value_en",
                     source_metadata={"control_kind": ["copula_en"]},
                 )
@@ -1347,7 +1342,7 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=payload.canonical_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="geo_db",
                 component_type=payload.component_type,
             )
@@ -1373,7 +1368,7 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=payload.canonical_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="address_keyword",
                 component_type=payload.component_type,
             )
@@ -1401,7 +1396,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=payload.canonical_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="geo_db",
                 component_type=payload.component_type,
             )
@@ -1424,7 +1419,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="address_keyword",
                 component_type=payload.component_type,
             )
@@ -1443,7 +1438,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=token_match.group(0),
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="postal_value",
                 component_type=AddressComponentType.POSTAL_CODE,
             )
@@ -1467,7 +1462,7 @@ def _scan_en_address_postal_clues_full_stream(ctx: DetectContext, stream: Stream
                 end=token_match.end(),
                 text=token_match.group(0),
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="postal_value",
                 component_type=AddressComponentType.POSTAL_CODE,
             )
@@ -1496,7 +1491,7 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=str(match.payload),
             )
         )
@@ -1516,7 +1511,7 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                     end=raw_end,
                     text=token_match.group(0),
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind="negative_numeric_context",
                 )
             )
@@ -1549,33 +1544,11 @@ def _iter_negative_word_specs() -> tuple[tuple[str, str], ...]:
 
 
 def _resolve_structured_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
-    """hard clue 裁决：仅覆盖“被完全包含”的 clue。
-
-    规则：
-    - 若 A 的区间完全包含 B（含相等区间），则 B 被覆盖（移除）。
-    - 若两条 clue 仅“部分重叠”，但互不完全包含，则两者都保留。
-
-    实现上仍使用“更长 / 更高来源优先级”的排序来稳定地先处理更强的 clue，
-    但冲突判定从“任意重叠即互斥”改为“仅完全包含才覆盖”。
-    """
+    """STRUCTURED 线索也走统一的同属性裁决。"""
     if not clues:
         return ()
-    ranked = sorted(
-        clues,
-        key=lambda c: (
-            -(c.end - c.start),
-            -_HARD_SOURCE_PRIORITY.get((c.source_metadata.get("hard_source") or [""])[0], 0),
-            c.start,
-        ),
-    )
-    accepted: list[Clue] = []
-    for clue in ranked:
-        if any(a.start <= clue.start and clue.end <= a.end for a in accepted):
-            continue
-        accepted = [a for a in accepted if not (clue.start <= a.start and a.end <= clue.end)]
-        accepted.append(clue)
-    accepted.sort(key=lambda c: (c.start, c.end))
-    return tuple(accepted)
+    ordered = sorted(clues, key=lambda c: (c.start, c.end, _family_order(c.family)))
+    return tuple(_resolve_same_attr_clues(ordered))
 
 
 def _build_soft_scan_segments(
@@ -1749,18 +1722,18 @@ def _segment_trimmed_unit_bounds(segment: _ScanSegment) -> tuple[int, int] | Non
     """返回 segment 去掉空白与 inline gap 后的 unit 边界。"""
     stream = segment.stream
     raw_end = _segment_raw_end(segment)
-    unit_start, unit_end = _char_span_to_unit_span(stream, segment.raw_start, raw_end)
-    if unit_start >= unit_end:
+    unit_start, unit_last = _char_span_to_unit_span(stream, segment.raw_start, raw_end)
+    if unit_last < unit_start:
         return None
     left = unit_start
-    while left < unit_end and stream.units[left].kind in {"space", "inline_gap"}:
+    while left <= unit_last and stream.units[left].kind in {"space", "inline_gap"}:
         left += 1
-    right = unit_end - 1
+    right = unit_last
     while right >= left and stream.units[right].kind in {"space", "inline_gap"}:
         right -= 1
     if left > right:
         return None
-    return (left, right + 1)
+    return (left, right)
 
 
 def _seed_side_is_blank_or_boundary(stream: StreamInput, *, unit_index: int, is_left: bool) -> bool:
@@ -1775,8 +1748,8 @@ def _seed_side_is_blank_or_boundary(stream: StreamInput, *, unit_index: int, is_
     return nxt.kind in {"space", *_LABEL_BOUNDARY_UNIT_KINDS}
 
 
-def _has_label_connector_after(stream: StreamInput, unit_end: int) -> bool:
-    scan = unit_end
+def _has_label_connector_after(stream: StreamInput, unit_last: int) -> bool:
+    scan = unit_last + 1
     while scan < len(stream.units) and stream.units[scan].kind in {"space", "inline_gap"}:
         scan += 1
     if scan >= len(stream.units):
@@ -1796,24 +1769,24 @@ def _seed_metadata(
     """为 LABEL/START 生成统一的边界元数据。"""
     stream = segment.stream
     metadata = {key: list(values) for key, values in (extra_metadata or {}).items()}
-    unit_start, unit_end = _char_span_to_unit_span(stream, raw_start, raw_end)
+    unit_start, unit_last = _char_span_to_unit_span(stream, raw_start, raw_end)
     trimmed_bounds = _segment_trimmed_unit_bounds(segment)
     seed_is_left_edge = False
     seed_is_right_edge = False
     seed_segment_ratio = 0.0
     if trimmed_bounds is not None:
-        trimmed_start, trimmed_end = trimmed_bounds
+        trimmed_start, trimmed_last = trimmed_bounds
         seed_is_left_edge = unit_start == trimmed_start
-        seed_is_right_edge = unit_end == trimmed_end
+        seed_is_right_edge = unit_last == trimmed_last
         trimmed_raw_start = stream.units[trimmed_start].char_start
-        trimmed_raw_end = stream.units[trimmed_end - 1].char_end
+        trimmed_raw_end = stream.units[trimmed_last].char_end
         trimmed_length = max(1, trimmed_raw_end - trimmed_raw_start)
         seed_segment_ratio = round((raw_end - raw_start) / trimmed_length, 4)
 
-    seed_has_connector_after = _has_label_connector_after(stream, unit_end)
+    seed_has_connector_after = _has_label_connector_after(stream, unit_last)
     seed_surrounded = _seed_side_is_blank_or_boundary(stream, unit_index=unit_start, is_left=True) and _seed_side_is_blank_or_boundary(
         stream,
-        unit_index=unit_end,
+        unit_index=unit_last + 1,
         is_left=False,
     )
     metadata["seed_is_left_edge"] = ["1" if seed_is_left_edge else "0"]
@@ -1825,23 +1798,98 @@ def _seed_metadata(
     return metadata
 
 
-def _build_negative_index(
+def _unit_flag(unit) -> str | None:
+    """将 stream unit 映射为 unit bucket flag。"""
+    if unit.kind == "ocr_break":
+        return "OCR_BREAK"
+    if unit.kind == "inline_gap":
+        return "INLINE_GAP"
+    if unit.kind == "space" or (unit.text or "").isspace():
+        return "SPACE"
+    if unit.kind == "punct":
+        return unit.text
+    return None
+
+
+def _build_unit_index(
     stream: StreamInput,
-    negative_clues: list[Clue],
-) -> tuple[list[int], list[int], int]:
-    """把 negative clue 列表折叠为 unit 级覆盖索引。"""
-    unit_spans = [
-        (clue.unit_start, clue.unit_end)
-        for clue in negative_clues
-        if clue.role == ClueRole.NEGATIVE and clue.unit_start < clue.unit_end
+    clues: tuple[Clue, ...],
+    negative_clues: tuple[Clue, ...],
+) -> tuple[UnitBucket, ...]:
+    """按 survivor clue 与 negative clue 构建 unit bucket。"""
+    unit_count = len(stream.units)
+    builders = [
+        {
+            "flag": _unit_flag(unit),
+            "structured": [],
+            "license_plate": [],
+            "address": [],
+            "name": [],
+            "organization": [],
+            "covering": [],
+            "negative_cover": False,
+            "negative_start": False,
+        }
+        for unit in stream.units
     ]
-    return build_negative_unit_index(len(stream.units), unit_spans)
+
+    family_key = {
+        ClueFamily.STRUCTURED: "structured",
+        ClueFamily.LICENSE_PLATE: "license_plate",
+        ClueFamily.ADDRESS: "address",
+        ClueFamily.NAME: "name",
+        ClueFamily.ORGANIZATION: "organization",
+    }
+    for clue_index, clue in enumerate(clues):
+        if 0 <= clue.unit_start < unit_count and clue.family in family_key:
+            builders[clue.unit_start][family_key[clue.family]].append(clue_index)
+        if clue.unit_last < clue.unit_start:
+            continue
+        for ui in range(max(0, clue.unit_start), min(unit_count - 1, clue.unit_last) + 1):
+            builders[ui]["covering"].append(clue_index)
+
+    for clue in negative_clues:
+        if clue.unit_last < clue.unit_start:
+            continue
+        start = max(0, clue.unit_start)
+        end = min(unit_count - 1, clue.unit_last)
+        if start >= unit_count:
+            continue
+        builders[start]["negative_start"] = True
+        for ui in range(start, end + 1):
+            builders[ui]["negative_cover"] = True
+
+    buckets: list[UnitBucket] = []
+    for builder in builders:
+        can_start_parser = tuple(
+            family
+            for family in _PARSER_FAMILY_ORDER
+            if any(
+                clues[clue_index].role in _START_ROLES_BY_FAMILY[family]
+                for clue_index in builder[family.value]
+            )
+        )
+        buckets.append(
+            UnitBucket(
+                flag=builder["flag"],
+                structured_clues=tuple(builder["structured"]),
+                license_plate_clues=tuple(builder["license_plate"]),
+                address_clues=tuple(builder["address"]),
+                name_clues=tuple(builder["name"]),
+                organization_clues=tuple(builder["organization"]),
+                covering_clues=tuple(builder["covering"]),
+                can_start_parser=can_start_parser,
+                negative_cover=bool(builder["negative_cover"]),
+                negative_start=bool(builder["negative_start"]),
+            )
+        )
+    return tuple(buckets)
 
 
 def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[int, int]:
     if not stream.char_to_unit or start >= end:
-        return (0, 0)
-    return (stream.char_to_unit[start], stream.char_to_unit[end - 1] + 1)
+        return (0, -1)
+    return (stream.char_to_unit[start], stream.char_to_unit[end - 1])
 
 
 def _has_label_boundary(stream: StreamInput, raw_start: int, raw_end: int) -> bool:
@@ -1853,14 +1901,14 @@ def _has_label_boundary(stream: StreamInput, raw_start: int, raw_end: int) -> bo
     """
     if not stream.char_to_unit:
         return True
-    unit_start, unit_end = _char_span_to_unit_span(stream, raw_start, raw_end)
-    if unit_start >= unit_end:
+    unit_start, unit_last = _char_span_to_unit_span(stream, raw_start, raw_end)
+    if unit_last < unit_start:
         return True
     # 左侧：起始位置或相邻 unit 为边界类型。
     if unit_start == 0 or stream.units[unit_start - 1].kind in _LABEL_BOUNDARY_UNIT_KINDS:
         return True
     # 右侧：末尾位置或相邻 unit 为边界类型。
-    if unit_end >= len(stream.units) or stream.units[unit_end].kind in _LABEL_BOUNDARY_UNIT_KINDS:
+    if unit_last + 1 >= len(stream.units) or stream.units[unit_last + 1].kind in _LABEL_BOUNDARY_UNIT_KINDS:
         return True
     return False
 
@@ -1877,14 +1925,14 @@ def _try_convert_label_to_start(stream: StreamInput, clue: Clue) -> Clue | None:
             clue,
             role=ClueRole.START,
             end=stream.units[target_unit_index].char_end,
-            unit_end=target_unit_index + 1,
+            unit_last=target_unit_index,
             text=stream.text[clue.start : stream.units[target_unit_index].char_end],
             source_metadata=metadata,
         )
 
-    if not stream.units or clue.unit_end >= len(stream.units):
+    if not stream.units or clue.unit_last + 1 >= len(stream.units):
         return None
-    next_idx = clue.unit_end
+    next_idx = clue.unit_last + 1
     # 中文：紧邻的下一个 unit 是"是"。
     if stream.units[next_idx].text == "是":
         return _as_start(next_idx)
@@ -1909,12 +1957,12 @@ def _normalize_ascii_match(
         return (start, end, matched_text)
     if not stream.char_to_unit or start < 0 or end > len(stream.text) or start >= end:
         return None
-    unit_start, unit_end = _char_span_to_unit_span(stream, start, end)
-    if unit_start >= unit_end:
+    unit_start, unit_last = _char_span_to_unit_span(stream, start, end)
+    if unit_last < unit_start:
         return None
     first_unit = stream.units[unit_start]
-    last_unit = stream.units[unit_end - 1]
-    if unit_start == unit_end - 1 and first_unit.kind == "ascii_word":
+    last_unit = stream.units[unit_last]
+    if unit_start == unit_last and first_unit.kind == "ascii_word":
         if not _ascii_unit_text_matches(first_unit.text, pattern_text):
             return None
         return (first_unit.char_start, first_unit.char_end, first_unit.text)
@@ -2371,92 +2419,189 @@ def _en_address_key_matcher() -> AhoMatcher:
 
 
 def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
-    """去重并执行同属性完全包含覆盖。"""
-
-    def _preserve_same_span_zh_admin_value(
-        kept: Clue,
-        current: Clue,
-    ) -> bool:
-        admin_types = {
-            AddressComponentType.PROVINCE,
-            AddressComponentType.CITY,
-            AddressComponentType.DISTRICT,
-            AddressComponentType.SUBDISTRICT,
-        }
-        if (
-            kept.attr_type != PIIAttributeType.ADDRESS
-            or current.attr_type != PIIAttributeType.ADDRESS
-            or kept.role != ClueRole.VALUE
-            or current.role != ClueRole.VALUE
-            or kept.component_type not in admin_types
-            or current.component_type not in admin_types
-            or kept.component_type == current.component_type
-        ):
-            return False
-        if kept.start != current.start or kept.end != current.end:
-            return False
-        if kept.text.lower() != current.text.lower():
-            return False
-        return any("\u4e00" <= char <= "\u9fff" for char in current.text)
+    """只去掉字段完全一致的重复 clue。"""
 
     seen: set[tuple[object, ...]] = set()
     ordered: list[Clue] = []
-    for clue in sorted(
-        clues,
-        key=lambda item: (
-            item.start,
-            -(item.end - item.start),
-            _family_order(item.family),
-            item.role.value,
-            item.attr_type.value if item.attr_type is not None else "",
-            item.component_type or "",
-            item.break_type or "",
-        ),
-    ):
+    for clue in clues:
         key = (
+            clue.family,
             clue.role,
             clue.attr_type,
             clue.component_type,
+            clue.component_levels,
             clue.strength,
             clue.break_type,
             clue.source_kind,
             clue.start,
             clue.end,
-            clue.text.lower(),
+            clue.text,
+            clue.unit_start,
+            clue.unit_last,
+            tuple(
+                (meta_key, tuple(meta_values))
+                for meta_key, meta_values in sorted(clue.source_metadata.items())
+            ),
         )
         if key in seen:
             continue
-        # 通用同属性线索覆盖：若 clue 被已保留 clue 完全包含（含相等），则子 clue 被覆盖丢弃。
-        # ADDRESS 不在这里覆盖，统一交给 _apply_address_component_coverage。
-        # 典型：district KEY “新区” 覆盖 “区”。
-        covered = False
-        for kept in reversed(ordered):
-            if _preserve_same_span_zh_admin_value(kept, clue):
-                continue
-            if _same_attr_full_containment_cover(kept, clue):
-                covered = True
-                break
-            if kept.start < clue.start and kept.end <= clue.start:
-                # 已离开可能覆盖范围。
-                break
-        if covered:
-            continue
         seen.add(key)
         ordered.append(clue)
-    return sorted(ordered, key=lambda item: (item.start, _family_order(item.family), item.end))
+    return ordered
+
+
+def _resolve_same_attr_clues(clues: Sequence[Clue]) -> list[Clue]:
+    """同属性裁决只比较 strength 与 span。"""
+    buckets: dict[PIIAttributeType, list[Clue]] = {}
+    for clue in clues:
+        if clue.attr_type is None:
+            continue
+        buckets.setdefault(clue.attr_type, []).append(clue)
+    if not buckets:
+        return list(clues)
+
+    kept_by_id: dict[str, Clue] = {}
+    for bucket in buckets.values():
+        accepted: list[Clue] = []
+        for incoming in bucket:
+            drop_incoming = False
+            beaten_indices: list[int] = []
+            for index, existing in enumerate(accepted):
+                if not _clues_overlap(existing, incoming):
+                    continue
+                if _clues_same_exact_span(existing, incoming):
+                    existing_rank = _claim_strength_rank(existing.strength)
+                    incoming_rank = _claim_strength_rank(incoming.strength)
+                    if existing_rank > incoming_rank:
+                        drop_incoming = True
+                        break
+                    if incoming_rank > existing_rank:
+                        beaten_indices.append(index)
+                        continue
+                    if existing.attr_type == PIIAttributeType.ADDRESS and existing.role == incoming.role:
+                        accepted[index] = _merge_exact_equal_address_clues(existing, incoming)
+                        drop_incoming = True
+                        break
+                    if existing.role == ClueRole.ALIAS and incoming.role != ClueRole.ALIAS:
+                        beaten_indices.append(index)
+                        continue
+                    drop_incoming = True
+                    break
+                outcome = _same_attr_overlap_winner(existing, incoming)
+                if outcome == "existing":
+                    drop_incoming = True
+                    break
+                if outcome == "incoming":
+                    beaten_indices.append(index)
+            if drop_incoming:
+                continue
+            for index in reversed(beaten_indices):
+                del accepted[index]
+            accepted.append(incoming)
+        for clue in accepted:
+            kept_by_id[clue.clue_id] = clue
+
+    return [
+        kept_by_id.get(clue.clue_id, clue)
+        for clue in clues
+        if clue.attr_type is None or clue.clue_id in kept_by_id
+    ]
+
+
+def _clues_same_exact_span(left: Clue, right: Clue) -> bool:
+    """判断两条 clue 是否命中同一段 char/unit 区间。"""
+    return (
+        left.start == right.start
+        and left.end == right.end
+        and left.unit_start == right.unit_start
+        and left.unit_last == right.unit_last
+    )
+
+
+def _clue_component_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    """统一读取地址 clue 的层级真相。"""
+    if clue.component_levels:
+        return tuple(clue.component_levels)
+    if clue.component_type is None:
+        return ()
+    return (clue.component_type,)
+
+
+def _ordered_component_levels(levels: Sequence[AddressComponentType]) -> tuple[AddressComponentType, ...]:
+    """稳定整理层级顺序：先行政层级，再保留其他首次出现顺序。"""
+    rank = {
+        AddressComponentType.PROVINCE: 0,
+        AddressComponentType.CITY: 1,
+        AddressComponentType.DISTRICT: 2,
+        AddressComponentType.DISTRICT_CITY: 3,
+        AddressComponentType.SUBDISTRICT: 4,
+    }
+    seen: list[AddressComponentType] = []
+    for level in levels:
+        if level not in seen:
+            seen.append(level)
+    admins = sorted((level for level in seen if level in rank), key=lambda item: rank[item])
+    others = [level for level in seen if level not in rank]
+    return tuple([*admins, *others])
+
+
+def _derived_component_type(levels: Sequence[AddressComponentType]) -> AddressComponentType | None:
+    ordered = _ordered_component_levels(levels)
+    if not ordered:
+        return None
+    if len(ordered) == 1:
+        return ordered[0]
+    return AddressComponentType.MULTI_ADMIN
+
+
+def _merge_exact_equal_address_clues(existing: Clue, incoming: Clue) -> Clue:
+    """把 exact-equal 地址 clue 合并成单条 survivor。"""
+    merged_levels = _ordered_component_levels([
+        *_clue_component_levels(existing),
+        *_clue_component_levels(incoming),
+    ])
+    merged_metadata = {
+        key: list(values)
+        for key, values in existing.source_metadata.items()
+    }
+    for key, values in incoming.source_metadata.items():
+        bucket = merged_metadata.setdefault(key, [])
+        for value in values:
+            if value not in bucket:
+                bucket.append(value)
+    return replace(
+        existing,
+        component_type=_derived_component_type(merged_levels),
+        component_levels=merged_levels,
+        source_metadata=merged_metadata,
+    )
+
+
+def _same_attr_overlap_winner(existing: Clue, incoming: Clue) -> str:
+    """返回同属性重叠时应保留的一侧。"""
+    existing_rank = _claim_strength_rank(existing.strength)
+    incoming_rank = _claim_strength_rank(incoming.strength)
+    if existing_rank > incoming_rank:
+        return "existing"
+    if incoming_rank > existing_rank:
+        return "incoming"
+    if existing.start == incoming.start and existing.end == incoming.end:
+        return "both"
+    if _strictly_contains(existing, incoming):
+        return "existing"
+    if _strictly_contains(incoming, existing):
+        return "incoming"
+    existing_len = existing.end - existing.start
+    incoming_len = incoming.end - incoming.start
+    if existing_len > incoming_len:
+        return "existing"
+    if incoming_len > existing_len:
+        return "incoming"
+    return "incoming"
 
 
 def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
-    """事件扫描线裁决所有 clue 重叠。
-
-    1. 扫描轮 1：STRUCTURED / BREAK 遮蔽，同时收集 seed 连通块；LABEL 当场做边界判断与 START 转换。
-       不满足边界条件的 label 直接丢弃（原 InspireEntry 机制已移除）。
-    2. Seed 裁决：完全包含→大的覆盖；否则保留 start 更靠后的。
-    3. 扫描轮 2：seed 依赖规则。
-    4. 姓名组件覆盖。
-    5. 地址组件覆盖：ADDRESS family 内仅在严格完全包含时覆盖，部分重叠保留。
-    6. Label vs soft content：完全包含→大的覆盖；其余保留。
-    """
+    """按“跨属性遮蔽 + 同属性裁决”两层规则收敛 clue。"""
     if not clues:
         return []
     unit_len = len(stream.units)
@@ -2475,16 +2620,28 @@ def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> list[Clue]:
         if clue.role not in _SEED_ROLES or clue.clue_id in seed_winner_ids
     ]
 
-    # ── 轮 2：seed 依赖规则 ──
-    survivors = _sweep_pass2(survivors, unit_len)
+    # ── 普通 clue 的同属性裁决 ──
+    protected_ids = {
+        clue.clue_id
+        for clue in survivors
+        if clue.role in _SEED_ROLES
+        or clue.role == ClueRole.BREAK
+        or clue.family in {ClueFamily.STRUCTURED, ClueFamily.CONTROL}
+    }
+    ordinary = [
+        clue
+        for clue in survivors
+        if clue.clue_id not in protected_ids
+    ]
+    ordinary_resolved = _resolve_same_attr_clues(ordinary)
+    ordinary_by_id = {clue.clue_id: clue for clue in ordinary_resolved}
+    survivors = [
+        ordinary_by_id.get(clue.clue_id, clue)
+        for clue in survivors
+        if clue.clue_id in protected_ids or clue.clue_id in ordinary_by_id
+    ]
 
-    # ── 姓名组件覆盖 ──
-    survivors = _apply_name_component_coverage(survivors)
-
-    # ── 地址组件覆盖（仅完全包含时覆盖）──
-    survivors = _apply_address_component_coverage(survivors)
-
-    # ── Label vs soft content ──
+    # ── seed 严格包含普通 clue ──
     return _apply_seed_containment_coverage(survivors)
 
 
@@ -2497,7 +2654,7 @@ def _build_events(
     end_events: list[list[Clue]] = [[] for _ in range(unit_len + 1)]
     for clue in clues:
         start_events[clue.unit_start].append(clue)
-        end_events[clue.unit_end].append(clue)
+        end_events[clue.unit_last].append(clue)
     return start_events, end_events
 
 
@@ -2571,7 +2728,7 @@ def _sweep_pass1(
                     if cur_seed_group:
                         seed_groups.append(cur_seed_group)
                     cur_seed_group = [clue]
-                seed_group_end = max(seed_group_end, clue.unit_end)
+                seed_group_end = max(seed_group_end, clue.unit_last)
 
     if cur_seed_group:
         seed_groups.append(cur_seed_group)
@@ -2594,123 +2751,6 @@ def _resolve_seed_group(group: list[Clue]) -> list[Clue]:
             continue
         survivors.append(clue)
     return survivors
-
-
-def _sweep_pass2(clues: list[Clue], unit_len: int) -> list[Clue]:
-    """扫描轮 2（unit 轴）：seed 遮蔽 soft_control，START 遮蔽 soft_content。"""
-    start_events, end_events = _build_events(clues, unit_len)
-
-    active_seed = 0
-    active_start = 0
-    survivors: list[Clue] = []
-
-    for pos in range(unit_len + 1):
-        for clue in end_events[pos]:
-            if clue.role in _SEED_ROLES:
-                active_seed -= 1
-                if clue.role == ClueRole.START:
-                    active_start -= 1
-
-        for clue in start_events[pos]:
-            role = clue.role
-
-            if role in _SEED_ROLES:
-                active_seed += 1
-                if role == ClueRole.START:
-                    active_start += 1
-                survivors.append(clue)
-                continue
-
-            if role in _START_MASKED_SOFT_ROLES and active_start > 0:
-                continue
-
-            survivors.append(clue)
-
-    return survivors
-
-
-def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
-    """姓名组件覆盖裁决。
-
-    FULL_NAME / ALIAS / FAMILY_NAME 仅在完全包含时做覆盖，部分重叠都保留。
-    """
-    full_name_winners = _resolve_name_component_overlap_winners(
-        [clue for clue in clues if clue.role == ClueRole.FULL_NAME]
-    )
-    full_name_ids = {clue.clue_id for clue in full_name_winners}
-
-    alias_candidates = [
-        clue
-        for clue in clues
-        if clue.role == ClueRole.ALIAS
-        and not any(_clues_overlap(clue, full_name) for full_name in full_name_winners)
-    ]
-    alias_winners = _resolve_name_component_overlap_winners(alias_candidates)
-    alias_ids = {clue.clue_id for clue in alias_winners}
-
-    family_name_winners = _resolve_name_component_overlap_winners(
-        [clue for clue in clues if clue.role == ClueRole.FAMILY_NAME]
-    )
-    family_name_ids = {clue.clue_id for clue in family_name_winners}
-
-    blocked_name_clues = [*full_name_winners, *alias_winners]
-    survivors: list[Clue] = []
-    for clue in clues:
-        if clue.role == ClueRole.FULL_NAME:
-            if clue.clue_id in full_name_ids:
-                survivors.append(clue)
-            continue
-        if clue.role == ClueRole.ALIAS:
-            if clue.clue_id in alias_ids:
-                survivors.append(clue)
-            continue
-        if clue.role == ClueRole.FAMILY_NAME:
-            if clue.clue_id not in family_name_ids:
-                continue
-            if any(_clues_overlap(clue, blocker) for blocker in blocked_name_clues):
-                continue
-        elif clue.role == ClueRole.GIVEN_NAME:
-            if any(_clues_overlap(clue, blocker) for blocker in blocked_name_clues):
-                continue
-        survivors.append(clue)
-    return survivors
-
-
-def _apply_address_component_coverage(clues: list[Clue]) -> list[Clue]:
-    """地址组件覆盖裁决：仅在 ADDRESS family 内按严格完全包含覆盖。"""
-    address_clues = [clue for clue in clues if clue.family == ClueFamily.ADDRESS]
-    if len(address_clues) <= 1:
-        return clues
-
-    dropped_ids: set[str] = set()
-    for clue in address_clues:
-        if clue.clue_id in dropped_ids:
-            continue
-        for other in address_clues:
-            if clue.clue_id == other.clue_id:
-                continue
-            # ADDRESS 维持专属覆盖规则：严格包含才覆盖，完全相等与部分重叠都保留。
-            if (
-                other.start <= clue.start
-                and clue.end <= other.end
-                and (other.start < clue.start or clue.end < other.end)
-            ):
-                dropped_ids.add(clue.clue_id)
-                break
-
-    return [clue for clue in clues if clue.clue_id not in dropped_ids]
-
-
-def _resolve_name_component_overlap_winners(clues: list[Clue]) -> list[Clue]:
-    """姓名组件重叠裁决：同属性完全包含时覆盖，部分重叠都保留。"""
-    if not clues:
-        return []
-    survivors: list[Clue] = []
-    for clue in clues:
-        if any(_same_attr_full_containment_cover(other, clue) for other in clues if other.clue_id != clue.clue_id):
-            continue
-        survivors.append(clue)
-    return sorted(survivors, key=lambda c: (c.start, c.end))
 
 
 def _apply_seed_containment_coverage(clues: list[Clue]) -> list[Clue]:
@@ -2743,15 +2783,20 @@ def _apply_seed_containment_coverage(clues: list[Clue]) -> list[Clue]:
     return [c for c in clues if c.clue_id not in dropped_ids]
 
 
-def _same_attr_full_containment_cover(container: Clue, contained: Clue) -> bool:
-    """通用同属性完全包含覆盖判定（不包含 ADDRESS）。"""
-    if container.attr_type is None or contained.attr_type is None:
-        return False
-    if container.attr_type != contained.attr_type:
-        return False
-    if container.attr_type == PIIAttributeType.ADDRESS:
-        return False
-    return container.start <= contained.start and contained.end <= container.end
+def _claim_strength_rank(strength: ClaimStrength) -> int:
+    return {
+        ClaimStrength.WEAK: 0,
+        ClaimStrength.SOFT: 1,
+        ClaimStrength.HARD: 2,
+    }[strength]
+
+
+def _strictly_contains(container: Clue, contained: Clue) -> bool:
+    return (
+        container.start <= contained.start
+        and contained.end <= container.end
+        and (container.start < contained.start or contained.end < container.end)
+    )
 
 
 def _skip_whitespace_right(raw_text: str, start: int) -> int:
@@ -2767,3 +2812,4 @@ def _clues_overlap(left: Clue, right: Clue) -> bool:
 
 def _overlaps_any(start: int, end: int, spans: Sequence[tuple[int, int]]) -> bool:
     return any(not (end <= left or start >= right) for left, right in spans)
+

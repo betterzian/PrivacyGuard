@@ -6,14 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 
-from privacyguard.infrastructure.pii.detector.models import (
-    AddressComponentType,
-    Clue,
-    ClueFamily,
-    ClueRole,
-    StreamInput,
-    StreamUnit,
-)
+from privacyguard.infrastructure.pii.detector.models import AddressComponentType, Clue, ClueFamily, ClueRole, StreamInput, StreamUnit
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_name_joiner
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_soft_break
 
@@ -33,8 +26,8 @@ class ExpansionBreakPolicy(StrEnum):
 
 
 def need_break(
-    subject: Clue | StreamUnit,
     policy: ExpansionBreakPolicy,
+    flag: str | None,
     *,
     next_unit: StreamUnit | None = None,
     prev_unit: StreamUnit | None = None,
@@ -47,21 +40,18 @@ def need_break(
 
     仅返回 bool，不维护任何索引。
     """
-    if isinstance(subject, Clue):
-        if policy == ExpansionBreakPolicy.ADDRESS_CLUE:
-            return subject.role == ClueRole.BREAK
-        if policy == ExpansionBreakPolicy.CLUE_SEQUENCE_BLOCKER:
-            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
-        if policy == ExpansionBreakPolicy.ORG_LEFT_BOUNDARY:
-            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}
-        return False
-
     name_unit_policies = {
         ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT,
         ExpansionBreakPolicy.NAME_EN_LEFT_UNIT,
         ExpansionBreakPolicy.NAME_ZH_RIGHT_UNIT,
         ExpansionBreakPolicy.NAME_ZH_LEFT_UNIT,
     }
+    if policy == ExpansionBreakPolicy.ADDRESS_CLUE:
+        return flag not in {None, ",", "，", "SPACE", "INLINE_GAP"}
+    if policy == ExpansionBreakPolicy.CLUE_SEQUENCE_BLOCKER:
+        return flag in {"OCR_BREAK"} or (flag is not None and flag not in {",", "，", "SPACE", "INLINE_GAP"})
+    if policy == ExpansionBreakPolicy.ORG_LEFT_BOUNDARY:
+        return flag in {"OCR_BREAK"} or (flag is not None and flag not in {",", "，", "SPACE", "INLINE_GAP"})
     if policy not in name_unit_policies:
         return False
     is_right_policy = policy in {
@@ -76,19 +66,18 @@ def need_break(
         ExpansionBreakPolicy.NAME_ZH_RIGHT_UNIT,
         ExpansionBreakPolicy.NAME_ZH_LEFT_UNIT,
     }
+    subject = next_unit if is_right_policy else prev_unit
+    if subject is None:
+        return flag is not None
     if is_right_policy and upper is not None and subject.char_start >= upper:
         return True
     if is_left_policy and lower is not None and subject.char_end <= lower:
         return True
-    if is_zh_policy:
-        if subject.kind == "cjk_char":
-            return False
-        if subject.kind == "punct":
-            return not is_name_joiner(subject.text, left_char, right_char)
+    if flag == "OCR_BREAK":
         return True
-    if subject.kind == "ascii_word":
+    if flag == "INLINE_GAP":
         return False
-    if subject.kind == "space":
+    if flag == "SPACE":
         if policy == ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT:
             return not (
                 next_unit is not None
@@ -100,8 +89,18 @@ def need_break(
             and prev_unit.kind == "ascii_word"
             and (lower is None or prev_unit.char_end > lower)
         )
+    if is_zh_policy:
+        if subject.kind == "cjk_char":
+            return False
+        if subject.kind == "punct":
+            punct = flag if flag is not None else subject.text
+            return not is_name_joiner(punct, left_char, right_char)
+        return True
+    if subject.kind == "ascii_word":
+        return False
     if subject.kind == "punct":
-        return not is_name_joiner(subject.text, left_char, right_char)
+        punct = flag if flag is not None else subject.text
+        return not is_name_joiner(punct, left_char, right_char)
     return True
 
 
@@ -132,8 +131,8 @@ def control_value_normalized_number(clue: Clue) -> str:
 
 def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[int, int]:
     if not stream.char_to_unit or start >= end:
-        return (0, 0)
-    return (stream.char_to_unit[start], stream.char_to_unit[end - 1] + 1)
+        return (0, -1)
+    return (stream.char_to_unit[start], stream.char_to_unit[end - 1])
 
 
 def _unit_char_start(stream: StreamInput, unit_index: int) -> int:
@@ -150,10 +149,10 @@ def _unit_char_end(stream: StreamInput, unit_index: int) -> int:
     if not stream.units:
         return 0
     if unit_index <= 0:
-        return 0
-    if unit_index > len(stream.units):
+        return stream.units[0].char_end if unit_index == 0 else 0
+    if unit_index >= len(stream.units):
         return len(stream.text)
-    return stream.units[unit_index - 1].char_end
+    return stream.units[unit_index].char_end
 
 
 def _skip_separators(text: str, start: int) -> int:

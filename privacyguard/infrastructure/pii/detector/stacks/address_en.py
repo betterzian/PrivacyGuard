@@ -13,6 +13,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueRole,
     PIIAttributeType,
     StreamInput,
+    bucket_family_clues,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_base import BaseAddressStack
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
@@ -67,6 +68,31 @@ def _state_routing_context(
     )
 
 
+def _clue_admin_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    """读取 clue 上携带的行政层级，兼容 MULTI_ADMIN derived 视图。"""
+    if clue.component_levels:
+        return tuple(level for level in clue.component_levels if level in _ADMIN_TYPES)
+    if clue.component_type in _ADMIN_TYPES:
+        return (clue.component_type,)
+    return ()
+
+
+def _iter_family_clues_from_unit(
+    clues: tuple[Clue, ...],
+    unit_index,
+    family: ClueFamily,
+    *,
+    start_unit: int,
+    min_clue_index: int,
+):
+    """按 unit 起点顺序枚举 family clue，避免回退到旧 clue-index 导航。"""
+    for unit_cursor in range(max(0, start_unit), len(unit_index)):
+        for clue_index in bucket_family_clues(unit_index[unit_cursor], family):
+            if clue_index < min_clue_index:
+                continue
+            yield clue_index, clues[clue_index]
+
+
 @dataclass(slots=True)
 class EnAddressStack(BaseAddressStack):
     """英文地址专用 stack。"""
@@ -98,6 +124,7 @@ class EnAddressStack(BaseAddressStack):
         if (
             self.clue.role == ClueRole.VALUE
             and self.clue.attr_type == PIIAttributeType.ADDRESS
+            and _clue_admin_levels(self.clue)
         ):
             value_seed_run = self._build_suffix_road_from_value_seed()
             if value_seed_run is not None:
@@ -114,16 +141,17 @@ class EnAddressStack(BaseAddressStack):
     ) -> object | None:
         stream = self.context.stream
         raw_text = self.context.stream.text
+        admin_levels = _clue_admin_levels(clue)
         # §6.2：EN 同 span 多层 admin VALUE 组 —— dual-emit 后按相同 start/end 聚成一个 admin span，
         # 用于 resolver / collision 决策；非 admin 类型继续走单层路径。
-        admin_span = collect_admin_value_span(clues, clue_index) if comp_type in _ADMIN_TYPES else None
+        admin_span = collect_admin_value_span(clues, clue_index) if admin_levels else None
         trailing_deferred = state.deferred_chain[-1][1] if state.deferred_chain else None
         same_trailing_admin_span = (
             admin_span is not None
             and trailing_deferred is not None
             and trailing_deferred.role == ClueRole.VALUE
             and trailing_deferred.attr_type == clue.attr_type
-            and trailing_deferred.component_type in _ADMIN_TYPES
+            and bool(_clue_admin_levels(trailing_deferred))
             and trailing_deferred.start == admin_span.start
             and trailing_deferred.end == admin_span.end
         )
@@ -138,7 +166,7 @@ class EnAddressStack(BaseAddressStack):
             and trailing_deferred is not None
             and trailing_deferred.role == ClueRole.VALUE
             and trailing_deferred.attr_type == clue.attr_type
-            and trailing_deferred.component_type in _ADMIN_TYPES
+            and bool(_clue_admin_levels(trailing_deferred))
             and not same_trailing_admin_span
         ):
             self._flush_chain(state, clue_index=clue_index)
@@ -147,7 +175,7 @@ class EnAddressStack(BaseAddressStack):
 
         if state.components or state.deferred_chain:
             # MULTI_ADMIN 探针：admin_span 存在时逐层用 _segment_admit 试探，任一层通过即可挂。
-            probe_levels: tuple[AddressComponentType, ...] = (comp_type,)
+            probe_levels: tuple[AddressComponentType, ...] = admin_levels or (comp_type,)
             resolved_group = None
             if admin_span is not None:
                 resolved_group = _resolve_standalone_admin_value_group(
@@ -266,29 +294,19 @@ class EnAddressStack(BaseAddressStack):
     def _build_address_run_from_state(
         self,
         state: _ParseState,
-        consumed_ids: set[str],
         handled_labels: set[str],
-        next_index: int,
-        *,
-        use_precise_next_index: bool = True,
     ) -> StackRun | None:
         if self._disable_house_number_promotion:
             return super(EnAddressStack, self)._build_address_run_from_state(
                 state,
-                consumed_ids,
                 handled_labels,
-                next_index,
-                use_precise_next_index=use_precise_next_index,
             )
 
         promotion = self._plan_house_number_promotion(state)
         if promotion is None:
             return super(EnAddressStack, self)._build_address_run_from_state(
                 state,
-                consumed_ids,
                 handled_labels,
-                next_index,
-                use_precise_next_index=use_precise_next_index,
             )
 
         conservative_state = self._clone_state_with_components(
@@ -301,26 +319,15 @@ class EnAddressStack(BaseAddressStack):
             promotion["extended_components"],
             evidence_count=state.evidence_count + 1,
         )
-        extended_consumed_ids = set(consumed_ids)
-        challenge_clue_id = promotion["challenge_clue_id"]
-        if challenge_clue_id:
-            extended_consumed_ids.add(challenge_clue_id)
-
         self._disable_house_number_promotion = True
         try:
             conservative_run = super(EnAddressStack, self)._build_address_run_from_state(
                 conservative_state,
-                consumed_ids,
                 handled_labels,
-                next_index,
-                use_precise_next_index=use_precise_next_index,
             )
             extended_run = super(EnAddressStack, self)._build_address_run_from_state(
                 extended_state,
-                extended_consumed_ids,
                 handled_labels,
-                next_index,
-                use_precise_next_index=use_precise_next_index,
             )
         finally:
             self._disable_house_number_promotion = False
@@ -336,8 +343,7 @@ class EnAddressStack(BaseAddressStack):
             cached_fragment_text=promotion["house_number_text"],
             cached_normalized_fragment=promotion["house_number_value"],
             extended_candidate=extended_run.candidate,
-            extended_consumed_ids=extended_run.consumed_ids,
-            extended_next_index=extended_run.next_index,
+            extended_last_unit=extended_run.frontier_last_unit,
         )
         return conservative_run
 
@@ -351,7 +357,12 @@ class EnAddressStack(BaseAddressStack):
         cloned = _ParseState()
         cloned.components = components
         cloned.evidence_count = evidence_count
-        cloned.last_consumed_clue_index = state.last_consumed_clue_index
+        cloned.consumed_clue_indices = {
+            clue_index
+            for component in components
+            for clue_index in component.clue_indices
+            if clue_index >= 0
+        }
         cloned.suppress_challenger_clue_ids = set(state.suppress_challenger_clue_ids)
         return cloned
 
@@ -371,6 +382,7 @@ class EnAddressStack(BaseAddressStack):
             challenge_info = self._find_leading_house_number_challenge(component, road_key_start)
             challenge_clue_index: int | None = None
             challenge_clue_id: str | None = None
+            challenge_clue: Clue | None = None
             house_number_start: int
             house_number_end: int
             if challenge_info is None:
@@ -405,7 +417,7 @@ class EnAddressStack(BaseAddressStack):
                 value=house_number_value,
                 key="",
                 is_detail=False,
-                raw_chain=[],
+                raw_chain=[challenge_clue] if challenge_clue is not None else [],
                 suspected=[],
                 clue_ids={challenge_clue_id} if challenge_clue_id else set(),
                 clue_indices={challenge_clue_index} if challenge_clue_index is not None else set(),
@@ -434,12 +446,7 @@ class EnAddressStack(BaseAddressStack):
         return None
 
     def _build_suffix_road_from_value_seed(self) -> StackRun | None:
-        if self.clue.component_type not in {
-            AddressComponentType.PROVINCE,
-            AddressComponentType.CITY,
-            AddressComponentType.DISTRICT,
-            AddressComponentType.SUBDISTRICT,
-        }:
+        if not _clue_admin_levels(self.clue):
             return None
         raw_text = self.context.stream.text
         road_key_index, road_key = self._find_suffix_road_key_after_value_seed()
@@ -449,6 +456,7 @@ class EnAddressStack(BaseAddressStack):
         road_start = self.clue.start
         house_number_clue_index: int | None = None
         house_number_clue_id: str | None = None
+        house_number_clue: Clue | None = None
         if self.clue_index > 0:
             previous = self.context.clues[self.clue_index - 1]
             if (
@@ -459,10 +467,14 @@ class EnAddressStack(BaseAddressStack):
                 road_start = previous.start
                 house_number_clue_index = self.clue_index - 1
                 house_number_clue_id = previous.clue_id
+                house_number_clue = previous
 
         road_value = _normalize_address_value(AddressComponentType.ROAD, raw_text[road_start:road_key.start])
         if not road_value:
             return None
+        road_raw_chain = [self.clue, road_key]
+        if house_number_clue is not None:
+            road_raw_chain.insert(0, house_number_clue)
         state = _ParseState()
         state.components = [
             _DraftComponent(
@@ -472,20 +484,28 @@ class EnAddressStack(BaseAddressStack):
                 value=road_value,
                 key=road_key.text,
                 is_detail=False,
-                raw_chain=[],
+                raw_chain=road_raw_chain,
                 suspected=[],
-                clue_ids={self.clue.clue_id, road_key.clue_id},
-                clue_indices={self.clue_index, road_key_index},
+                clue_ids={
+                    clue.clue_id
+                    for clue in road_raw_chain
+                },
+                clue_indices={
+                    index
+                    for index in (
+                        house_number_clue_index,
+                        self.clue_index,
+                        road_key_index,
+                    )
+                    if index is not None
+                },
             )
         ]
         state.evidence_count = 1
-        state.last_consumed_clue_index = road_key_index
-        consumed_ids = {self.clue.clue_id, road_key.clue_id}
+        state.consumed_clue_indices = {self.clue_index, road_key_index}
         return self._build_address_run_from_state(
             state,
-            consumed_ids,
             set(),
-            road_key_index + 1,
         )
 
     def _find_component_key_clue(self, component: _DraftComponent) -> Clue | None:
@@ -504,27 +524,20 @@ class EnAddressStack(BaseAddressStack):
 
     def _find_suffix_road_key_after_value_seed(self) -> tuple[int, Clue] | tuple[None, None]:
         raw_text = self.context.stream.text
-        ci = self.context.clue_index
-        addr_starts = ci.family_starts.get(ClueFamily.ADDRESS)
-        if addr_starts is None:
-            return None, None
-        start_unit = self.clue.unit_end
-        clues = self.context.clues
-        for u in range(start_unit, ci.unit_count):
-            for idx in addr_starts[u]:
-                if idx <= self.clue_index:
-                    continue
-                clue = clues[idx]
-                if clue.attr_type is None or clue.attr_type != PIIAttributeType.ADDRESS:
-                    continue
-                if clue.role != ClueRole.KEY or clue.component_type != AddressComponentType.ROAD:
-                    continue
+        for index, clue in _iter_family_clues_from_unit(
+            self.context.clues,
+            self.context.unit_index,
+            ClueFamily.ADDRESS,
+            start_unit=self.clue.unit_last,
+            min_clue_index=self.clue_index + 1,
+        ):
+            if clue.attr_type == PIIAttributeType.ADDRESS and clue.role == ClueRole.KEY and clue.component_type == AddressComponentType.ROAD:
                 if _clue_unit_gap(self.clue, clue, self.context.stream) > 3:
                     return None, None
                 between = raw_text[self.clue.end:clue.start]
                 if any(char in ",，\r\n" for char in between):
                     return None, None
-                return idx, clue
+                return index, clue
         return None, None
 
     def _find_leading_house_number_challenge(
@@ -534,18 +547,14 @@ class EnAddressStack(BaseAddressStack):
     ) -> tuple[int, Clue] | None:
         raw_text = self.context.stream.text
         component_value_start = _skip_separators(raw_text, component.start)
-        ci = self.context.clue_index
         stream = self.context.stream
         if not stream.char_to_unit or component_value_start >= len(stream.char_to_unit):
             return None
         target_unit = stream.char_to_unit[component_value_start]
-        if target_unit >= ci.unit_count:
-            return None
-        struct_starts = ci.family_starts.get(ClueFamily.STRUCTURED)
-        if struct_starts is None:
+        if target_unit >= len(self.context.unit_index):
             return None
         clues = self.context.clues
-        for idx in struct_starts[target_unit]:
+        for idx in bucket_family_clues(self.context.unit_index[target_unit], ClueFamily.STRUCTURED):
             clue = clues[idx]
             if clue.start != component_value_start:
                 continue
@@ -576,3 +585,4 @@ class EnAddressStack(BaseAddressStack):
         if _skip_separators(raw_text, cursor) >= road_key_start:
             return None
         return start, cursor
+

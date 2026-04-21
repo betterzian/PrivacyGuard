@@ -61,6 +61,8 @@ def key_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
     - 多层级 KEY（目前仅 "市"）返回显式映射表；用于与 adjacent VALUE span levels 求交集。
     - 其他 KEY 直接返回 `(clue.component_type,)`（单层），若 component_type 为空返回空元组。
     """
+    if clue.component_levels:
+        return tuple(clue.component_levels)
     explicit = _MULTI_LEVEL_KEY_LEVELS.get(clue.text)
     if explicit is not None:
         return explicit
@@ -76,17 +78,22 @@ def _is_absorbable_digit_clue(clue: Clue) -> bool:
     return len(digits) <= 5
 
 
+def _unit_frontier_after_last(unit_last: int) -> int:
+    """把闭区间最后一个 unit 下标转成 exclusive frontier。"""
+    return unit_last + 1
+
+
 def _clue_unit_gap(left: Clue, right: Clue, stream: StreamInput | None = None) -> int:
     """两个 clue 之间的有效非空白 unit 数。"""
     if stream is not None and stream.units:
-        gap_start = left.unit_end
+        gap_start = _unit_frontier_after_last(left.unit_last)
         gap_end = right.unit_start
         count = 0
         for ui in range(gap_start, min(gap_end, len(stream.units))):
             if stream.units[ui].kind not in {"space", "inline_gap"}:
                 count += 1
         return count
-    return max(0, right.unit_start - left.unit_end)
+    return max(0, right.unit_start - _unit_frontier_after_last(left.unit_last))
 
 
 def _is_inline_gap_unit(unit: StreamUnit) -> bool:
@@ -165,7 +172,7 @@ def _label_start_route_locale(
     for clue in clues:
         if clue.family != ClueFamily.ADDRESS or clue.role == ClueRole.LABEL:
             continue
-        if clue.unit_start >= probe_unit_end or clue.unit_end <= start_unit:
+        if clue.unit_start >= probe_unit_end or clue.unit_last < start_unit:
             continue
         raw_text = stream.text[max(start_char, clue.start):clue.end]
         clue_text = clue.text or ""
@@ -355,7 +362,8 @@ def _is_key_key_gap_text_unit_allowed(unit: StreamUnit) -> bool:
 
 
 def _last_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit | None:
-    for ui in range(min(clue.unit_end, len(stream.units)) - 1, clue.unit_start - 1, -1):
+    span_end = min(_unit_frontier_after_last(clue.unit_last), len(stream.units))
+    for ui in range(span_end - 1, clue.unit_start - 1, -1):
         unit = stream.units[ui]
         if unit.kind not in {"space", "inline_gap"}:
             return unit
@@ -363,7 +371,8 @@ def _last_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit 
 
 
 def _first_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit | None:
-    for ui in range(clue.unit_start, min(clue.unit_end, len(stream.units))):
+    span_end = min(_unit_frontier_after_last(clue.unit_last), len(stream.units))
+    for ui in range(clue.unit_start, span_end):
         unit = stream.units[ui]
         if unit.kind not in {"space", "inline_gap"}:
             return unit
@@ -384,7 +393,7 @@ def _key_key_chain_gap_allowed(left: Clue, right: Clue, stream: StreamInput | No
         return False
     non_space = [
         stream.units[ui]
-        for ui in range(left.unit_end, min(right.unit_start, len(stream.units)))
+        for ui in range(_unit_frontier_after_last(left.unit_last), min(right.unit_start, len(stream.units)))
         if stream.units[ui].kind != "space"
     ]
     if len(non_space) != 1:
@@ -482,7 +491,7 @@ def _label_seed_address_index(
             continue
         if _span_has_search_stop_unit(stream, start_char, clue.start):
             return None
-        if clue.role == ClueRole.VALUE and clue.unit_start <= start_unit < clue.unit_end:
+        if clue.role == ClueRole.VALUE and clue.unit_start <= start_unit <= clue.unit_last:
             return index
         if clue.role == ClueRole.KEY and clue.unit_start >= start_unit and clue.unit_start - start_unit <= max_units:
             if key_index is None or clue.unit_start < clues[key_index].unit_start:
@@ -518,7 +527,10 @@ def _bridge_last_address_to_next_within_units(
         return False
     if _clue_gap_has_search_stop(state.last_consumed, next_address_clue, stream):
         return False
-    gap_anchor = max(state.last_consumed.unit_end, state.absorbed_digit_unit_end)
+    gap_anchor = max(
+        _unit_frontier_after_last(state.last_consumed.unit_last),
+        _unit_frontier_after_last(state.absorbed_digit_unit_end),
+    )
     return next_address_clue.unit_start - gap_anchor <= 6
 
 
@@ -728,3 +740,4 @@ def _analyze_digit_tail(
         consumed_clue_ids=consumed_clue_ids,
         consumed_clue_indices=consumed_clue_indices,
     )
+

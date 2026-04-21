@@ -261,7 +261,7 @@ def test_ascii_dictionary_match_only_accepts_exact_s_and_es_word_units():
         if clue.strength == ClaimStrength.HARD and clue.source_kind == "dictionary_local"
     ]
     assert [clue.text for clue in dictionary_clues] == ["apple", "apples", "applees"]
-    assert [clue.unit_end - clue.unit_start for clue in dictionary_clues] == [1, 1, 1]
+    assert [clue.unit_last - clue.unit_start + 1 for clue in dictionary_clues] == [1, 1, 1]
     assert [stream.units[clue.unit_start].text for clue in dictionary_clues] == ["apple", "apples", "applees"]
 
 
@@ -588,7 +588,7 @@ def test_parser_keeps_char_span_and_unit_span_for_dictionary_name_candidate():
     assert len(dictionary_candidates) == 1
     candidate = dictionary_candidates[0]
     assert stream.text[candidate.start : candidate.end] == "Jordan Demo"
-    assert [unit.text for unit in stream.units[candidate.unit_start : candidate.unit_end]] == ["Jordan", " ", "Demo"]
+    assert [unit.text for unit in stream.units[candidate.unit_start : candidate.unit_last + 1]] == ["Jordan", " ", "Demo"]
 
 
 def test_session_dictionary_matcher_cache_reuses_same_content_signature():
@@ -719,28 +719,6 @@ def test_scan_control_value_clues_emits_en_copula_words_before_conflict_resoluti
 
     assert [clue.text.lower() for clue in control_values] == ["is", "are", "am"]
     assert all(clue.source_metadata.get("control_kind") == ["copula_en"] for clue in control_values)
-
-
-def test_build_clue_bundle_allows_name_start_to_cover_is_and_am():
-    prepared = build_prompt_stream("This is Liam, they are James, and I am Noah")
-
-    bundle = build_clue_bundle(
-        prepared,
-        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
-        session_entries=(),
-        local_entries=(),
-        locale_profile="en_us",
-    )
-
-    control_values = [
-        clue
-        for clue in bundle.all_clues
-        if clue.source_kind == "control_value_en"
-    ]
-
-    assert [clue.text.lower() for clue in control_values] == ["are"]
-    assert all(clue.source_metadata.get("control_kind") == ["copula_en"] for clue in control_values)
-
 
 @pytest.mark.parametrize(
     ("text", "expected_value"),
@@ -897,4 +875,5 @@ def test_license_plate_start_seed_covers_contained_name_clue():
         clue.role == ClueRole.FAMILY_NAME and clue.text == "车"
         for clue in bundle.all_clues
     )
+
 

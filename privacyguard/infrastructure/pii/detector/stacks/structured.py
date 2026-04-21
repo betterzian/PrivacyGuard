@@ -226,8 +226,7 @@ class StructuredStack(BaseStack):
         return StackRun(
             attr_type=candidate.attr_type,
             candidate=candidate,
-            consumed_ids={self.clue.clue_id},
-            next_index=self.clue_index + 1,
+            frontier_last_unit=candidate.unit_last,
         )
 
     def _resolve_fragment_candidate(self, clue) -> CandidateDraft:
@@ -282,7 +281,7 @@ class StructuredStack(BaseStack):
         anchor = self.context.recent_structured_anchor
         if anchor is None:
             return candidate
-        distance = self.clue.unit_start - anchor.unit_end
+        distance = self.clue.unit_start - anchor.unit_last
         if distance < 0 or distance > 5:
             return candidate
         anchor_clue = self.context.clues[anchor.clue_index]
@@ -323,3 +322,4 @@ class StructuredStack(BaseStack):
         if clue.attr_type == PIIAttributeType.ALNUM:
             return "ALNUM"
         return "NUM"
+

@@ -32,8 +32,6 @@ class StackManager:
         return score
 
     def resolve_conflict(self, context, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
-        if existing.attr_type == incoming.attr_type:
-            return self._resolve_same_attr(existing, incoming)
         if existing.claim_strength == ClaimStrength.HARD and incoming.claim_strength != ClaimStrength.HARD:
             trimmed = self._trim_candidate(context.stream, incoming, existing)
             return ConflictOutcome(incoming=trimmed)
@@ -44,13 +42,6 @@ class StackManager:
         if attr_pair == {PIIAttributeType.ADDRESS, PIIAttributeType.ORGANIZATION}:
             return self._resolve_address_organization(context.stream, existing, incoming)
         return self._resolve_by_score(existing, incoming)
-
-    def _resolve_same_attr(self, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
-        if self.score(incoming) > self.score(existing):
-            return ConflictOutcome(incoming=incoming, drop_existing=True)
-        if (incoming.unit_end - incoming.unit_start) > (existing.unit_end - existing.unit_start):
-            return ConflictOutcome(incoming=incoming, drop_existing=True)
-        return ConflictOutcome(incoming=None)
 
     def _resolve_address_organization(self, stream: StreamInput, existing: CandidateDraft, incoming: CandidateDraft) -> ConflictOutcome:
         organization = incoming if incoming.attr_type == PIIAttributeType.ORGANIZATION else existing
@@ -69,10 +60,10 @@ class StackManager:
         return ConflictOutcome(incoming=None)
 
     def _trim_candidate(self, stream: StreamInput, candidate: CandidateDraft, blocker: CandidateDraft) -> CandidateDraft | None:
-        if blocker.unit_start <= candidate.unit_start and blocker.unit_end >= candidate.unit_end:
+        if blocker.unit_start <= candidate.unit_start and blocker.unit_last >= candidate.unit_last:
             return None
         if blocker.unit_start <= candidate.unit_start:
-            next_unit_start, next_unit_end = blocker.unit_end, candidate.unit_end
+            next_unit_start, next_unit_end = blocker.unit_last, candidate.unit_last
         else:
             next_unit_start, next_unit_end = candidate.unit_start, blocker.unit_start
         return trim_candidate(
@@ -81,7 +72,7 @@ class StackManager:
             start=_unit_char_start(stream, next_unit_start),
             end=_unit_char_end(stream, next_unit_end),
             unit_start=next_unit_start,
-            unit_end=next_unit_end,
+            unit_last=next_unit_end,
         )
 
 
@@ -91,3 +82,4 @@ def _candidate_hard_source_rank(candidate: CandidateDraft) -> int:
         return 0
     source = str(values[0])
     return {"session": 4, "local": 3, "prompt": 2, "regex": 1}.get(source, 0)
+

@@ -168,7 +168,8 @@ class ZhAddressStack(BaseAddressStack):
     ) -> object | None:
         raw_text = self.context.stream.text
         stream = self.context.stream
-        admin_span = collect_admin_value_span(clues, clue_index) if comp_type in _ADMIN_TYPES else None
+        admin_span = collect_admin_value_span(clues, clue_index)
+        has_admin_levels = admin_span is not None
 
         if state.pending_comma_value_right_scan:
             state.pending_comma_value_right_scan = False
@@ -235,7 +236,7 @@ class ZhAddressStack(BaseAddressStack):
                         for lvl in probe_levels
                     )
             if probe_failed:
-                if comp_type in _ADMIN_TYPES and _has_reasonable_successor_key(
+                if has_admin_levels and _has_reasonable_successor_key(
                     state,
                     clues,
                     clue_index,
@@ -258,14 +259,14 @@ class ZhAddressStack(BaseAddressStack):
         anchor_start: int | None = None
         if (
             not state.deferred_chain
-            and comp_type in _ADMIN_TYPES
+            and has_admin_levels
             and (state.components or state.last_piece_end is not None)
             and not _suspect_eligible_after_last_piece(state, clue, stream)
         ):
             anchor_base = state.last_piece_end if state.last_piece_end is not None else state.last_end
             anchor_start = _start_after_component_end(stream, anchor_base)
         _append_deferred(state, clue_index, clue, record_suspect=False, anchor_start=anchor_start)
-        if comp_type in _ADMIN_TYPES:
+        if has_admin_levels:
             _freeze_value_suspect(state, clues, clue_index, stream)
         state.last_value = clue
         state.last_end = max(state.last_end, clue.end)

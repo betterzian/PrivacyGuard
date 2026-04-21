@@ -68,7 +68,14 @@ class ZhNameCommitDecision:
     reasons: tuple[str, ...] = ()
 
 
-_DIRECT_SUBMIT_ALLOWED_KINDS = frozenset(
+_NEGATIVE_OVERLAP_ALLOWED_KINDS = frozenset(
+    {
+        NegativeOverlapKind.NONE,
+        NegativeOverlapKind.EXACT_HIT,
+    }
+)
+
+_NEGATIVE_OVERLAP_ALLOWED_KINDS_WITH_NEGATIVE_FULLY_INSIDE = frozenset(
     {
         NegativeOverlapKind.NONE,
         NegativeOverlapKind.EXACT_HIT,
@@ -259,18 +266,38 @@ def has_any_negative_overlap(overlaps: Sequence[NegativeOverlap]) -> bool:
     return bool(overlaps)
 
 
-def direct_submit_negative_allowed(overlaps: Sequence[NegativeOverlap]) -> bool:
-    """直接提交路径是否允许当前 negative 命中集合。"""
-    return all(item.kind in _DIRECT_SUBMIT_ALLOWED_KINDS for item in overlaps)
+def negative_fully_inside_allowed_for_strength(strength: ClaimStrength) -> bool:
+    """当前有效强度是否允许放行 ``NEGATIVE_FULLY_INSIDE``。"""
+    return strength == ClaimStrength.HARD
 
 
-def family_negative_blocks_stack_immediately(overlaps: Sequence[NegativeOverlap]) -> bool:
+def direct_submit_negative_allowed(overlaps: Sequence[NegativeOverlap], *, effective_strength: ClaimStrength) -> bool:
+    """直接提交路径是否允许当前 effective strength 的 negative 命中集合。"""
+    allowed_kinds = _NEGATIVE_OVERLAP_ALLOWED_KINDS
+    if negative_fully_inside_allowed_for_strength(effective_strength):
+        allowed_kinds = _NEGATIVE_OVERLAP_ALLOWED_KINDS_WITH_NEGATIVE_FULLY_INSIDE
+    return all(item.kind in allowed_kinds for item in overlaps)
+
+
+def family_negative_blocks_stack_immediately(overlaps: Sequence[NegativeOverlap], *, effective_strength: ClaimStrength) -> bool:
     """姓片段是否命中强阻断（应立刻结束本栈，不再扩张）。"""
+    if not negative_fully_inside_allowed_for_strength(effective_strength) and any(
+        item.kind == NegativeOverlapKind.NEGATIVE_FULLY_INSIDE for item in overlaps
+    ):
+        return True
     return any(item.kind in _FAMILY_IMMEDIATE_EXIT_KINDS for item in overlaps)
 
 
-def given_or_implicit_tail_negative_cancels_candidate(overlaps: Sequence[NegativeOverlap]) -> bool:
+def given_or_implicit_tail_negative_cancels_candidate(
+    overlaps: Sequence[NegativeOverlap],
+    *,
+    effective_strength: ClaimStrength,
+) -> bool:
     """显式名或隐式尾部是否命中强阻断（应取消整段姓名提交）。"""
+    if not negative_fully_inside_allowed_for_strength(effective_strength) and any(
+        item.kind == NegativeOverlapKind.NEGATIVE_FULLY_INSIDE for item in overlaps
+    ):
+        return True
     return any(item.kind in _GIVEN_OR_IMPLICIT_TAIL_CANCEL_KINDS for item in overlaps)
 
 
@@ -296,6 +323,7 @@ __all__ = [
     "family_negative_blocks_stack_immediately",
     "given_or_implicit_tail_negative_cancels_candidate",
     "has_any_negative_overlap",
+    "negative_fully_inside_allowed_for_strength",
     "stronger_claim_strength",
     "upgrade_claim_strength",
 ]

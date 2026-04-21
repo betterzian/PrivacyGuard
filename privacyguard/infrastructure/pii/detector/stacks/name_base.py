@@ -33,9 +33,9 @@ class BaseNameStack(BaseStack):
 
     STACK_LOCALE = "zh"
 
-    def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
+    def shrink(self, run: StackRun, blocker_start: int, blocker_last: int) -> StackRun | None:
         """姓名候选被其他类型抢占后，尝试提交裁掉冲突区后的剩余片段。"""
-        shrunk = super().shrink(run, blocker_start, blocker_end)
+        shrunk = super().shrink(run, blocker_start, blocker_last)
         if shrunk is None:
             return None
         candidate = shrunk.candidate
@@ -48,10 +48,10 @@ class BaseNameStack(BaseStack):
             start=candidate.start,
             end=candidate.end,
             candidate_unit_start=candidate.unit_start,
-            candidate_unit_end=candidate.unit_end,
+            candidate_unit_last=candidate.unit_last,
             candidate_text=candidate.text,
             name_clues=name_clues,
-            has_negative_overlap=self.context.has_negative_cover(candidate.unit_start, candidate.unit_end),
+            has_negative_overlap=self.context.has_negative_cover(candidate.unit_start, candidate.unit_last),
         ):
             return None
         return shrunk
@@ -62,7 +62,7 @@ class BaseNameStack(BaseStack):
             return None
 
         component_hint = self._effective_hint(start, end)
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
+        unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
         candidate = build_name_candidate_from_value(
             source=self.context.stream.source,
             value_text=self.context.stream.text[start:end],
@@ -71,7 +71,7 @@ class BaseNameStack(BaseStack):
             source_kind=self.clue.source_kind,
             component_hint=component_hint,
             unit_start=unit_start,
-            unit_end=unit_end,
+            unit_last=unit_last,
             label_clue_id=self.clue.clue_id if is_label_seed else None,
             label_driven=is_label_seed,
         )
@@ -79,29 +79,26 @@ class BaseNameStack(BaseStack):
             return None
 
         name_clues = self._name_clues_in_span(start, end)
-        has_negative_overlap = self.context.has_negative_cover(unit_start, unit_end)
+        has_negative_overlap = self.context.has_negative_cover(unit_start, unit_last)
         candidate.claim_strength = self._resolve_claim_strength(name_clues=name_clues)
 
         if self.clue.role not in {ClueRole.FULL_NAME, ClueRole.ALIAS} and not self._should_commit_candidate(
             start=start,
             end=end,
             candidate_unit_start=unit_start,
-            candidate_unit_end=unit_end,
+            candidate_unit_last=unit_last,
             candidate_text=candidate.text,
             name_clues=name_clues,
             has_negative_overlap=has_negative_overlap,
         ):
             return None
 
-        consumed_ids = {self.clue.clue_id}
-        consumed_ids.update(clue.clue_id for _index, clue in name_clues)
         last_name_index = max((index for index, _clue in name_clues), default=self.clue_index)
         run = StackRun(
             attr_type=PIIAttributeType.NAME,
             candidate=candidate,
-            consumed_ids=consumed_ids,
             handled_label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
-            next_index=max(self.clue_index + 1, last_name_index + 1),
+            frontier_last_unit=candidate.unit_last,
         )
         pending = getattr(self, "_name_pending_challenge", None)
         if pending is not None:
@@ -115,7 +112,7 @@ class BaseNameStack(BaseStack):
                     source_kind=self.clue.source_kind,
                     component_hint=self._effective_hint(start, extended_end),
                     unit_start=unit_start,
-                    unit_end=_char_span_to_unit_span(self.context.stream, start, extended_end)[1],
+                    unit_last=_char_span_to_unit_span(self.context.stream, start, extended_end)[1],
                     label_clue_id=self.clue.clue_id if is_label_seed else None,
                     label_driven=is_label_seed,
                 )
@@ -123,8 +120,7 @@ class BaseNameStack(BaseStack):
                     run.pending_challenge = PendingChallenge(
                         clue_index=blocker_index,
                         extended_candidate=extended_candidate,
-                        extended_consumed_ids=set(consumed_ids),
-                        extended_next_index=max(run.next_index, blocker_index + 1),
+                        extended_last_unit=extended_candidate.unit_last,
                         challenge_kind="name_same_start_blocker",
                     )
         return run
@@ -160,24 +156,11 @@ class BaseNameStack(BaseStack):
         return NameComponentHint.FULL
 
     def _find_next_component_clue(self, cursor: int, search_index: int) -> tuple[int, Clue] | None:
-        ci = self.context.clue_index
-        stream = self.context.stream
-        if not stream.char_to_unit or cursor >= len(stream.text):
-            return None
-        start_unit = stream.char_to_unit[min(cursor, len(stream.char_to_unit) - 1)]
-        name_starts = ci.family_starts.get(ClueFamily.NAME)
-        if name_starts is None:
-            return None
         clues = self.context.clues
-        for u in range(start_unit, ci.unit_count):
-            for idx in name_starts[u]:
-                if idx < search_index:
-                    continue
-                clue = clues[idx]
-                if clue.start < cursor:
-                    continue
-                if clue.attr_type == PIIAttributeType.NAME and clue.role in _NAME_COMPONENT_ROLES:
-                    return (idx, clue)
+        for idx in range(max(0, search_index), len(clues)):
+            clue = clues[idx]
+            if clue.start >= cursor and clue.attr_type == PIIAttributeType.NAME and clue.role in _NAME_COMPONENT_ROLES:
+                return (idx, clue)
         return None
 
     def _find_next_right_blocker(
@@ -187,46 +170,21 @@ class BaseNameStack(BaseStack):
         *,
         ignore_negative: bool = False,
     ) -> tuple[int, Clue] | None:
-        ci = self.context.clue_index
-        stream = self.context.stream
-        if not stream.char_to_unit or cursor >= len(stream.text):
-            return None
-        start_unit = stream.char_to_unit[min(cursor, len(stream.char_to_unit) - 1)]
         clues = self.context.clues
-        for u in range(start_unit, ci.unit_count):
-            for idx in ci.clues_starting_at[u]:
-                if idx < search_index:
-                    continue
-                clue = clues[idx]
-                if clue.start < cursor:
-                    continue
-                if self._is_name_blocker(clue, ignore_negative=ignore_negative):
-                    return (idx, clue)
+        for index in range(max(0, search_index), len(clues)):
+            clue = clues[index]
+            if clue.start >= cursor and self._is_name_blocker(clue, ignore_negative=ignore_negative):
+                return (index, clue)
         return None
 
     def _has_active_stop_overlap(self, cursor: int, *, ignore_negative: bool = False) -> bool:
         if not ignore_negative and self.context.has_negative_cover_left_of_char(cursor):
             return True
-        ci = self.context.clue_index
-        stream = self.context.stream
-        if not stream.char_to_unit or cursor <= 0 or cursor >= len(stream.char_to_unit):
-            return False
-        cursor_unit = stream.char_to_unit[cursor]
-        # blocker_prefix_sum 快速排除：若 cursor 所在 unit 无 blocker 覆盖，则无需逐个检查。
-        if ci.blocker_prefix_sum[cursor_unit + 1] - ci.blocker_prefix_sum[cursor_unit] > 0:
-            # 有 BREAK/NEGATIVE 覆盖 cursor unit，但需精确验证 char 级 overlap。
-            for clue in self.context.clues:
-                if clue.start < cursor < clue.end and self._is_name_blocker(
-                    clue, ignore_negative=ignore_negative,
-                ):
-                    return True
-        # 检查非 BREAK/NEGATIVE 的 blocker（如非 NAME clue），通过 cover_prefix_sum 排除。
-        if ci.cover_prefix_sum[cursor_unit + 1] - ci.cover_prefix_sum[cursor_unit] > 0:
-            for clue in self.context.clues:
-                if clue.start < cursor < clue.end and self._is_name_blocker(
-                    clue, ignore_negative=ignore_negative,
-                ):
-                    return True
+        for clue in self.context.clues:
+            if clue.start < cursor < clue.end and self._is_name_blocker(
+                clue, ignore_negative=ignore_negative,
+            ):
+                return True
         return False
 
     def _next_negative_start_char(self, cursor: int, *, ignore_negative: bool = False) -> int | None:
@@ -244,33 +202,21 @@ class BaseNameStack(BaseStack):
         return clue.attr_type != PIIAttributeType.NAME or clue.role not in _NAME_COMPONENT_ROLES
 
     def _span_has_any_clue_overlap(self, start: int, end: int) -> bool:
-        ci = self.context.clue_index
-        us, ue = _char_span_to_unit_span(self.context.stream, start, end)
-        if ue <= us or ue > ci.unit_count:
-            return False
-        return ci.cover_prefix_sum[ue] - ci.cover_prefix_sum[us] > 0
+        return any(clue.end > start and clue.start < end for clue in self.context.clues)
 
     def _span_has_blocker(self, start: int, end: int) -> bool:
-        ci = self.context.clue_index
-        us, ue = _char_span_to_unit_span(self.context.stream, start, end)
-        if ue <= us or ue > ci.unit_count:
-            return False
-        return ci.blocker_prefix_sum[ue] - ci.blocker_prefix_sum[us] > 0
+        return any(
+            clue.end > start and clue.start < end and self._is_name_blocker(clue)
+            for clue in self.context.clues
+        )
 
     def _name_clues_in_span(self, start: int, end: int) -> list[tuple[int, Clue]]:
-        ci = self.context.clue_index
-        us, ue = _char_span_to_unit_span(self.context.stream, start, end)
-        name_starts = ci.family_starts.get(ClueFamily.NAME)
-        if name_starts is None or ue <= us:
-            return []
-        clues = self.context.clues
         matches: list[tuple[int, Clue]] = []
-        for u in range(max(0, us), min(ue, ci.unit_count)):
-            for idx in name_starts[u]:
-                clue = clues[idx]
-                if clue.attr_type == PIIAttributeType.NAME and clue.role in _NAME_COMPONENT_ROLES:
-                    if clue.start < end and clue.end > start:
-                        matches.append((idx, clue))
+        for index, clue in enumerate(self.context.clues):
+            if clue.start >= end:
+                break
+            if clue.attr_type == PIIAttributeType.NAME and clue.role in _NAME_COMPONENT_ROLES and clue.end > start:
+                matches.append((index, clue))
         return matches
 
     def _trimmed_candidate_has_value_beyond_family(
@@ -294,13 +240,13 @@ class BaseNameStack(BaseStack):
         start: int,
         end: int,
         candidate_unit_start: int,
-        candidate_unit_end: int,
+        candidate_unit_last: int,
         candidate_text: str,
         name_clues: list[tuple[int, Clue]],
         has_negative_overlap: bool,
     ) -> bool:
         """默认姓名提交判定，供英文路径复用。"""
-        del start, end, candidate_unit_start, candidate_unit_end
+        del start, end, candidate_unit_start, candidate_unit_last
         current_strength = self._resolve_claim_strength(name_clues=name_clues)
         if not claim_strength_meets_protection(current_strength, self.context.protection_level):
             return False
@@ -335,7 +281,7 @@ def _extend_name_boundary(
     upper = len(raw_text)
     for index in range(next_clue_index, len(clues)):
         clue = clues[index]
-        if need_break(clue, ExpansionBreakPolicy.CLUE_SEQUENCE_BLOCKER):
+        if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE}:
             upper = min(upper, clue.start)
             break
         if is_control_clue(clue):
@@ -398,8 +344,8 @@ def _extend_name_right_en(
         left_char = raw_text[unit.char_start - 1] if unit.char_start > 0 else None
         right_char = _peek_unit_first_char(units, ui + 1)
         if need_break(
-            unit,
-            ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT,
+            policy=ExpansionBreakPolicy.NAME_EN_RIGHT_UNIT,
+            flag=_unit_flag(unit),
             upper=upper,
             next_unit=next_unit,
             left_char=left_char,
@@ -443,7 +389,7 @@ def _extend_name_boundary_left(
     lower = 0
     for index in range(clue_index - 1, -1, -1):
         clue = clues[index]
-        if need_break(clue, ExpansionBreakPolicy.CLUE_SEQUENCE_BLOCKER):
+        if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE}:
             lower = clue.end
             break
         if is_control_clue(clue):
@@ -506,8 +452,8 @@ def _extend_name_left_en(
         left_char = _peek_unit_last_char(units, ui - 1)
         right_char = raw_text[unit.char_end] if unit.char_end < len(raw_text) else None
         if need_break(
-            unit,
-            ExpansionBreakPolicy.NAME_EN_LEFT_UNIT,
+            policy=ExpansionBreakPolicy.NAME_EN_LEFT_UNIT,
+            flag=_unit_flag(unit),
             lower=lower,
             prev_unit=prev_unit,
             left_char=left_char,
@@ -546,3 +492,16 @@ def _peek_unit_last_char(units: tuple[StreamUnit, ...], ui: int) -> str | None:
     if ui < 0 or ui >= len(units):
         return None
     return units[ui].text[-1] if units[ui].text else None
+
+
+def _unit_flag(unit: StreamUnit) -> str | None:
+    if unit.kind == "ocr_break":
+        return "OCR_BREAK"
+    if unit.kind == "inline_gap":
+        return "INLINE_GAP"
+    if unit.kind == "space":
+        return "SPACE"
+    if unit.kind == "punct":
+        return unit.text
+    return None
+

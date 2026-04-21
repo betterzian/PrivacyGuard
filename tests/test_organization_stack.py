@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, build_clue_index, build_negative_unit_index
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
 from privacyguard.infrastructure.pii.detector.stacks import OrganizationStack
+from tests._detector_negative_index import split_negative_clues
 
 
 def _clue(
@@ -50,17 +48,15 @@ def _run_organization_stack(
     protection_level: ProtectionLevel,
 ) -> OrganizationStack:
     stream = build_prompt_stream(text)
-    fixed, index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
+    fixed, negative_clues, index_by_id, unit_index = _split_negative_clues(stream, clues)
     target = clues[clue_index]
     context = StackContext(
         stream=stream,
         locale_profile="mixed",
         protection_level=protection_level,
         clues=fixed,
-        negative_unit_marks=negative_unit_marks,
-        negative_prefix_sum=negative_prefix_sum,
-        negative_start_weight=negative_start_weight,
-        clue_index=build_clue_index(len(stream.units), fixed),
+        negative_clues=negative_clues,
+        unit_index=unit_index,
     )
     fixed_index = index_by_id[target.clue_id]
     return OrganizationStack(clue=fixed[fixed_index], clue_index=fixed_index, context=context)
@@ -73,7 +69,7 @@ def _parse_organization_texts(
     protection_level: ProtectionLevel,
 ) -> list[str]:
     stream = build_prompt_stream(text)
-    fixed, _, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
+    fixed, negative_clues, _index_by_id, unit_index = _split_negative_clues(stream, clues)
     parser = StreamParser(
         locale_profile="mixed",
         ctx=DetectContext(protection_level=protection_level),
@@ -82,39 +78,17 @@ def _parse_organization_texts(
         stream,
         ClueBundle(
             all_clues=fixed,
-            negative_unit_marks=negative_unit_marks,
-            negative_prefix_sum=negative_prefix_sum,
-            negative_start_weight=negative_start_weight,
-            clue_index=build_clue_index(len(stream.units), fixed),
+            negative_clues=negative_clues,
+            unit_index=unit_index,
         ),
     )
     return [candidate.text for candidate in result.candidates if candidate.attr_type == PIIAttributeType.ORGANIZATION]
 
-
-def _with_units(stream, clue: Clue) -> Clue:
-    unit_start, unit_end = _char_span_to_unit_span(stream, clue.start, clue.end)
-    return replace(clue, unit_start=unit_start, unit_end=unit_end)
-
-
 def _split_negative_clues(
     stream,
     clues: tuple[Clue, ...],
-) -> tuple[tuple[Clue, ...], dict[str, int], list[int], list[int], int]:
-    fixed_clues: list[Clue] = []
-    index_by_id: dict[str, int] = {}
-    negative_spans: list[tuple[int, int]] = []
-    for clue in clues:
-        fixed = _with_units(stream, clue)
-        if fixed.role == ClueRole.NEGATIVE:
-            negative_spans.append((fixed.unit_start, fixed.unit_end))
-            continue
-        index_by_id[fixed.clue_id] = len(fixed_clues)
-        fixed_clues.append(fixed)
-    negative_unit_marks, negative_prefix_sum, negative_start_weight = build_negative_unit_index(
-        len(stream.units),
-        negative_spans,
-    )
-    return tuple(fixed_clues), index_by_id, negative_unit_marks, negative_prefix_sum, negative_start_weight
+) -> tuple[tuple[Clue, ...], tuple[Clue, ...], dict[str, int], tuple]:
+    return split_negative_clues(stream, clues)
 
 
 def test_label_seed_skips_separators_and_starts_from_first_value_char():
@@ -370,3 +344,4 @@ def test_parser_suffix_path_matches_between_weak_and_strong():
 
     assert strong == ["星河科技公司"]
     assert weak == []
+
