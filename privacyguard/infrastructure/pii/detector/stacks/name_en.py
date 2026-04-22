@@ -13,7 +13,7 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     _unit_index_left_of,
 )
 from privacyguard.infrastructure.pii.detector.stacks.name_base import BaseNameStack, _peek_unit_first_char
-from privacyguard.infrastructure.pii.detector.stacks.base import StackRun
+from privacyguard.infrastructure.pii.detector.stacks.base import PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.zh_name_rules import (
     apply_negative_overlap_strength,
     claim_strength_meets_protection,
@@ -36,16 +36,17 @@ class EnNameStack(BaseNameStack):
         return _starter_is_before_family_value_floor(self.context, self.clue, ClueFamily.NAME)
 
     def run(self) -> StackRun | None:
-        self._name_pending_challenge: tuple[int, int] | None = None
         if self._starter_is_before_value_floor():
             return None
         if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
-            return self._build_name_run(start=self.clue.start, end=self.clue.end)
+            return self._attach_name_address_pending_challenge(
+                self._build_name_run(start=self.clue.start, end=self.clue.end)
+            )
         if self.clue.strength == ClaimStrength.HARD and self.clue.role not in {
             ClueRole.FAMILY_NAME,
             ClueRole.GIVEN_NAME,
         }:
-            return self._build_direct_run()
+            return self._attach_name_address_pending_challenge(self._build_direct_run())
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
             start = _floor_clamped_label_seed_start_char(self.context, ClueFamily.NAME, self.clue.end)
             if start >= len(self.context.stream.text):
@@ -56,7 +57,7 @@ class EnNameStack(BaseNameStack):
                 search_index=self.clue_index + 1,
                 ignore_negative=True,
             )
-            return self._build_name_run(start=start, end=end)
+            return self._attach_name_address_pending_challenge(self._build_name_run(start=start, end=end))
         if self.clue.role in {ClueRole.GIVEN_NAME, ClueRole.FAMILY_NAME}:
             start = self._extend_name_left_en(self.clue.start)
             end = self._expand_name_chain_right(
@@ -64,7 +65,7 @@ class EnNameStack(BaseNameStack):
                 end=self.clue.end,
                 search_index=self.clue_index + 1,
             )
-            return self._build_name_run(start=start, end=end)
+            return self._attach_name_address_pending_challenge(self._build_name_run(start=start, end=end))
         return None
 
     def _should_skip_commit_gate(self) -> bool:
@@ -105,15 +106,6 @@ class EnNameStack(BaseNameStack):
             if cursor < plain_limit:
                 return cursor
 
-            if (
-                next_blocker is not None
-                and next_blocker[1].start == cursor
-                and next_blocker[1].attr_type == PIIAttributeType.ADDRESS
-            ):
-                # 同址遇到 ADDRESS blocker：先保守停在 blocker 左侧，交由 parser 挑战裁决。
-                extended_end = next_component[1].end if next_component is not None and next_component[1].start == cursor else cursor
-                self._name_pending_challenge = (next_blocker[0], extended_end)
-                return cursor
             if next_component is None or next_component[1].start != cursor:
                 return cursor
 
@@ -121,6 +113,29 @@ class EnNameStack(BaseNameStack):
             cursor = component.end
             next_index = component_index + 1
             continue
+
+    def _attach_name_address_pending_challenge(self, run: StackRun | None) -> StackRun | None:
+        """英文姓名与中文路径对齐：先产出完整 NAME，再交给 parser 做地址冲突裁决。"""
+        if run is None:
+            return None
+        overlap_index = self._first_address_overlap_clue_index(run.candidate.start, run.candidate.end)
+        if overlap_index is None:
+            return run
+        run.pending_challenge = PendingChallenge(
+            clue_index=overlap_index,
+            extended_candidate=run.candidate,
+            extended_last_unit=run.candidate.unit_last,
+            challenge_kind="name_address_conflict",
+        )
+        return run
+
+    def _first_address_overlap_clue_index(self, start: int, end: int) -> int | None:
+        for index, clue in enumerate(self.context.clues):
+            if clue.start >= end:
+                break
+            if clue.attr_type == PIIAttributeType.ADDRESS and clue.end > start:
+                return index
+        return None
 
     def _extend_name_left_en(self, start: int) -> int:
         cursor = start
@@ -313,16 +328,8 @@ class EnNameStack(BaseNameStack):
             candidate_start=start,
             candidate_end=end,
             candidate_raw_text=candidate_text,
-            negative_clues=self.context.negative_clues,
-            other_clues=tuple(
-                clue
-                for clue in self.context.clues
-                if clue.attr_type is not None
-                and (
-                    clue.attr_type != PIIAttributeType.NAME
-                    or clue.role in {ClueRole.LABEL, ClueRole.START}
-                )
-            ),
+            negative_clues=self._commit_negative_clues(),
+            other_clues=(),
         )
         final_strength = apply_negative_overlap_strength(overlaps, effective_strength=current_strength)
         if final_strength is None or not claim_strength_meets_protection(final_strength, self.context.protection_level):

@@ -689,15 +689,8 @@ class ZhNameStack(BaseNameStack):
             candidate_start=candidate_start,
             candidate_end=candidate_end,
             candidate_raw_text=candidate_raw_text,
-            negative_clues=self.context.negative_clues,
-            other_clues=tuple(
-                clue
-                for clue in self.context.clues
-                if clue.attr_type is not None and (
-                    clue.attr_type != PIIAttributeType.NAME
-                    or clue.role in {ClueRole.LABEL, ClueRole.START}
-                )
-            ),
+            negative_clues=self._commit_negative_clues(),
+            other_clues=(),
         )
 
 

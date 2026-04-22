@@ -960,6 +960,16 @@ def test_hard_pattern_scan_does_not_split_amount_with_thousands_into_fragments()
     )
 
 
+def test_hard_pattern_scan_keeps_amount_currency_before_chinese_sentence_boundary():
+    stream = build_prompt_stream("金额 1055.23元。金额 1055.23。")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [clue.text for clue in clues if clue.attr_type == PIIAttributeType.AMOUNT] == ["1055.23元", "1055.23"]
+
+
 @pytest.mark.parametrize(
     ("text", "expected_text", "expected_region", "expected_pattern"),
     [

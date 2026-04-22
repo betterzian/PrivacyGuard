@@ -86,6 +86,16 @@ class BaseAddressStack(BaseStack):
         """返回 ADDRESS 当前生效的 value 起点下界。"""
         return _family_value_floor_char(self.context, ClueFamily.ADDRESS)
 
+    def _has_address_key_negative_cover(self, unit_start: int, unit_last: int) -> bool:
+        """地址 key 的尾修复把显式 negative、LABEL/START 与 inspire 都视作负向。"""
+        return self._has_semantic_negative_cover(
+            unit_start,
+            unit_last,
+            scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
+            include_seed_roles=True,
+            include_inspire=True,
+        )
+
     @property
     def valid_successors(self) -> Mapping[AddressComponentType, frozenset[AddressComponentType]]:
         raise NotImplementedError
@@ -417,11 +427,7 @@ class BaseAddressStack(BaseStack):
         if not _rightmost_component_key_overlaps_negative(
             ordered_components[-1],
             clues,
-            lambda unit_start, unit_last: self.context.has_negative_cover(
-                unit_start,
-                unit_last,
-                scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
-            ),
+            self._has_address_key_negative_cover,
         ):
             return
         base_evidence_count = max(0, state.evidence_count - len(state.components))
@@ -447,11 +453,7 @@ class BaseAddressStack(BaseStack):
             if not _rightmost_component_key_overlaps_negative(
                 last,
                 clues,
-                lambda unit_start, unit_last: self.context.has_negative_cover(
-                    unit_start,
-                    unit_last,
-                    scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
-                ),
+                self._has_address_key_negative_cover,
             ):
                 return ordered
             repaired = self._repair_rightmost_component_prefix(
@@ -479,11 +481,7 @@ class BaseAddressStack(BaseStack):
             return None
         last_affected_index = -1
         for index, (_, clue) in enumerate(clue_entries):
-            if self.context.has_negative_cover(
-                clue.unit_start,
-                clue.unit_last,
-                scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
-            ):
+            if self._has_address_key_negative_cover(clue.unit_start, clue.unit_last):
                 last_affected_index = index
         if last_affected_index <= 0:
             return None
@@ -499,11 +497,7 @@ class BaseAddressStack(BaseStack):
             if _rightmost_component_key_overlaps_negative(
                 replay_state.components[-1],
                 clues,
-                lambda unit_start, unit_last: self.context.has_negative_cover(
-                    unit_start,
-                    unit_last,
-                    scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
-                ),
+                self._has_address_key_negative_cover,
             ):
                 continue
             return replay_state.components

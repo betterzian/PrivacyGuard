@@ -15,6 +15,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     Clue,
     ClueFamily,
     ClueRole,
+    InspireEntry,
     StructuredAnchor,
     StreamInput,
     StreamUnit,
@@ -30,6 +31,7 @@ class StackContextLike(Protocol):
     clues: tuple[Clue, ...]
     unit_index: tuple[UnitBucket, ...]
     negative_clues: tuple[Clue, ...]
+    inspire_entries: tuple[InspireEntry, ...]
     recent_structured_anchor: StructuredAnchor | None
 
     def has_negative_cover(self, unit_start: int, unit_last: int, scopes: Sequence[str] | None = None) -> bool: ...
@@ -180,4 +182,116 @@ class BaseStack:
             frontier_last_unit=candidate.unit_last,
             suppress_challenger_clue_ids=frozenset(),
         )
+
+    def _is_seed_negative_clue(self, clue: Clue) -> bool:
+        """LABEL / START 视作语义负向；VALUE clue 不参与这条路径。"""
+        return clue.attr_type is not None and clue.role in {ClueRole.LABEL, ClueRole.START}
+
+    def _synthetic_inspire_negative_clues(self) -> tuple[Clue, ...]:
+        """把 inspire 锚点投影成只用于重叠判定的伪 negative clue。"""
+        negatives: list[Clue] = []
+        raw_text = self.context.stream.text
+        for inspire in self.context.inspire_entries:
+            negatives.append(
+                Clue(
+                    clue_id=f"{inspire.clue_id}:inspire-negative",
+                    family=ClueFamily.CONTROL,
+                    role=ClueRole.NEGATIVE,
+                    attr_type=inspire.attr_type,
+                    strength=ClaimStrength.SOFT,
+                    start=inspire.start,
+                    end=inspire.end,
+                    text=raw_text[inspire.start:inspire.end],
+                    unit_start=inspire.unit_start,
+                    unit_last=inspire.unit_last,
+                    source_kind="inspire_negative",
+                )
+            )
+        return tuple(negatives)
+
+    def _semantic_negative_clues(
+        self,
+        *,
+        include_inspire: bool,
+    ) -> tuple[Clue, ...]:
+        """收集 stack 级负向：显式 negative + seed，必要时再加 inspire。"""
+        negatives: list[Clue] = list(self.context.negative_clues)
+        negatives.extend(clue for clue in self.context.clues if self._is_seed_negative_clue(clue))
+        if include_inspire:
+            negatives.extend(self._synthetic_inspire_negative_clues())
+        return tuple(negatives)
+
+    def _has_semantic_negative_cover(
+        self,
+        unit_start: int,
+        unit_last: int,
+        *,
+        scopes: Sequence[str] | None,
+        include_seed_roles: bool,
+        include_inspire: bool,
+    ) -> bool:
+        """统一查询显式 negative 与 seed/inspire 负向是否覆盖指定 unit 区间。"""
+        if self.context.has_negative_cover(unit_start, unit_last, scopes=scopes):
+            return True
+        if include_seed_roles:
+            for clue in self.context.clues:
+                if not self._is_seed_negative_clue(clue):
+                    continue
+                if clue.unit_start <= unit_last and clue.unit_last >= unit_start:
+                    return True
+        if include_inspire:
+            for inspire in self.context.inspire_entries:
+                if inspire.unit_start <= unit_last and inspire.unit_last >= unit_start:
+                    return True
+        return False
+
+    def _has_semantic_negative_cover_left_of_char(
+        self,
+        char_index: int,
+        *,
+        scopes: Sequence[str] | None,
+        include_seed_roles: bool,
+        include_inspire: bool,
+    ) -> bool:
+        """判断 cursor 左邻字符是否落在显式 negative 或 seed/inspire 覆盖内。"""
+        if self.context.has_negative_cover_left_of_char(char_index, scopes=scopes):
+            return True
+        if char_index <= 0:
+            return False
+        left_char = char_index - 1
+        if include_seed_roles:
+            for clue in self.context.clues:
+                if not self._is_seed_negative_clue(clue):
+                    continue
+                if clue.start <= left_char < clue.end:
+                    return True
+        if include_inspire:
+            for inspire in self.context.inspire_entries:
+                if inspire.start <= left_char < inspire.end:
+                    return True
+        return False
+
+    def _next_semantic_negative_start_char(
+        self,
+        char_index: int,
+        *,
+        scopes: Sequence[str] | None,
+        include_seed_roles: bool,
+        include_inspire: bool,
+    ) -> int | None:
+        """返回右侧最近的显式 negative 或 seed/inspire 起点。"""
+        next_start = self.context.next_negative_start_char(char_index, scopes=scopes)
+        if include_seed_roles:
+            for clue in self.context.clues:
+                if not self._is_seed_negative_clue(clue):
+                    continue
+                if clue.start < char_index:
+                    continue
+                next_start = clue.start if next_start is None else min(next_start, clue.start)
+        if include_inspire:
+            for inspire in self.context.inspire_entries:
+                if inspire.start < char_index:
+                    continue
+                next_start = inspire.start if next_start is None else min(next_start, inspire.start)
+        return next_start
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from scripts.eval_detector_en_structured import merge_entities_with_inventory, strip_pii_tags
+
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.models import (
@@ -16,7 +18,9 @@ from privacyguard.infrastructure.pii.detector.models import (
 )
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
+from privacyguard.infrastructure.pii.detector.rule_based import RuleBasedPIIDetector
 from privacyguard.infrastructure.pii.detector.stacks import NameStack
+from privacyguard.infrastructure.pii.detector.stacks.name_en import EnNameStack
 from privacyguard.infrastructure.pii.detector.zh_name_rules import (
     NegativeOverlap,
     NegativeOverlapKind,
@@ -207,6 +211,169 @@ def test_parser_advances_name_value_floor_for_label_only():
     assert context.stack_value_cannot_get_this_unit[ClueFamily.NAME] == bundle.all_clues[0].unit_last
     assert context.stack_value_cannot_get_this_unit[ClueFamily.ORGANIZATION] == -1
     assert context.stack_value_cannot_get_this_unit[ClueFamily.ADDRESS] == -1
+
+
+def test_parser_prefers_name_within_same_start_group_before_other_families():
+    text = "Clark"
+    clues = (
+        _clue(
+            "name-1",
+            ClueRole.FULL_NAME,
+            0,
+            5,
+            "Clark",
+            source_kind="full_name",
+            attr_type=PIIAttributeType.NAME,
+            family=ClueFamily.NAME,
+            strength=ClaimStrength.HARD,
+        ),
+        _clue(
+            "addr-1",
+            ClueRole.VALUE,
+            0,
+            5,
+            "Clark",
+            source_kind="geo_db",
+            attr_type=PIIAttributeType.ADDRESS,
+            family=ClueFamily.ADDRESS,
+            strength=ClaimStrength.HARD,
+        ),
+        _clue(
+            "org-1",
+            ClueRole.VALUE,
+            0,
+            5,
+            "Clark",
+            source_kind="company_value",
+            attr_type=PIIAttributeType.ORGANIZATION,
+            family=ClueFamily.ORGANIZATION,
+            strength=ClaimStrength.HARD,
+        ),
+    )
+
+    candidates = _parse_candidates(text, clues, locale_profile="en_us")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["Clark"]
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == []
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ORGANIZATION] == []
+
+
+def test_english_name_address_overlap_uses_name_address_conflict_resolution():
+    text = "Lucas Clark"
+    clues = (
+        _clue(
+            "name-1",
+            ClueRole.FULL_NAME,
+            0,
+            11,
+            "Lucas Clark",
+            source_kind="full_name",
+            attr_type=PIIAttributeType.NAME,
+            family=ClueFamily.NAME,
+            strength=ClaimStrength.HARD,
+        ),
+        _clue(
+            "addr-1",
+            ClueRole.VALUE,
+            6,
+            11,
+            "Clark",
+            source_kind="geo_db",
+            attr_type=PIIAttributeType.ADDRESS,
+            family=ClueFamily.ADDRESS,
+            strength=ClaimStrength.WEAK,
+        ),
+    )
+
+    candidates = _parse_candidates(text, clues, locale_profile="en_us")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["Lucas Clark"]
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == []
+
+
+def test_detector_keeps_full_english_name_when_surname_overlaps_address():
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect("name: Lucas Clark;", [])
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["Lucas Clark"]
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == []
+
+
+def test_name_commit_negative_sources_include_seed_and_inspire_but_not_value():
+    text = "Lucas Clark Name Addr Hint"
+    stream = build_prompt_stream(text)
+    clues = (
+        _clue(
+            "name-1",
+            ClueRole.FULL_NAME,
+            0,
+            len("Lucas Clark"),
+            "Lucas Clark",
+            source_kind="full_name",
+            attr_type=PIIAttributeType.NAME,
+            family=ClueFamily.NAME,
+            strength=ClaimStrength.SOFT,
+        ),
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            text.index("Name"),
+            text.index("Name") + len("Name"),
+            "Name",
+            source_kind="context_address_field",
+            attr_type=PIIAttributeType.ADDRESS,
+            family=ClueFamily.ADDRESS,
+            strength=ClaimStrength.SOFT,
+        ),
+        _clue(
+            "value-1",
+            ClueRole.VALUE,
+            text.index("Addr"),
+            text.index("Addr") + len("Addr"),
+            "Addr",
+            source_kind="geo_db",
+            attr_type=PIIAttributeType.ADDRESS,
+            family=ClueFamily.ADDRESS,
+            strength=ClaimStrength.SOFT,
+        ),
+        _clue(
+            "start-1",
+            ClueRole.START,
+            text.index("Hint"),
+            text.index("Hint") + len("Hint"),
+            "Hint",
+            source_kind="context_org_start",
+            attr_type=PIIAttributeType.ORGANIZATION,
+            family=ClueFamily.ORGANIZATION,
+            strength=ClaimStrength.SOFT,
+        ),
+    )
+    inspire_start = text.index("Hint")
+    inspire_end = inspire_start + len("Hint")
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.ADDRESS,
+        family=ClueFamily.ADDRESS,
+        start=inspire_start,
+        end=inspire_end,
+        unit_start=stream.char_to_unit[inspire_start],
+        unit_last=stream.char_to_unit[inspire_end - 1],
+        clue_id="hint-inspire",
+    )
+    _stream, bundle, context = _build_context_with_bundle(
+        text,
+        clues,
+        inspire_entries=(inspire,),
+        locale_profile="en_us",
+    )
+    stack = EnNameStack(clue=bundle.all_clues[0], clue_index=0, context=context)
+
+    negative_ids = {clue.clue_id for clue in stack._commit_negative_clues()}
+
+    assert "label-1" in negative_ids
+    assert "start-1" in negative_ids
+    assert "value-1" not in negative_ids
+    assert "hint-inspire:inspire-negative" in negative_ids
 
 
 def test_parser_advances_name_value_floor_for_inspire_and_keeps_it_after_failed_run():
@@ -569,7 +736,7 @@ def test_family_path_fully_covered_drops_weak_family_component():
     assert run is None
 
 
-def test_family_path_other_attr_overlap_demotes_like_negative():
+def test_family_path_other_attr_value_overlap_no_longer_counts_as_negative():
     text = "王国庆"
     clues = (
         _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "王", source_kind="family_name", strength=ClaimStrength.WEAK),
@@ -588,7 +755,10 @@ def test_family_path_other_attr_overlap_demotes_like_negative():
 
     run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
-    assert run is None
+    assert run is not None
+    assert run.candidate.text == "王国庆"
+    assert run.pending_challenge is not None
+    assert run.pending_challenge.challenge_kind == "name_address_conflict"
 
 
 def test_label_seed_dropped_when_given_or_standalone_hits_strong_negative():
@@ -952,8 +1122,8 @@ def test_parser_commits_winner_when_name_loses_strength_conflict():
     ]
 
 
-def test_parser_drops_direct_name_before_trim_when_other_attr_partial_overlap_hits_helper():
-    """direct whole-name 先吃统一 helper，命中非 NAME 的 PARTIAL_OVERLAP 时不会再留给 parser 裁剪。"""
+def test_parser_keeps_trimmed_name_when_other_attr_value_overlap_is_not_negative():
+    """其他类型 VALUE 片段不再直接充当 negative，后续交给 parser 常规裁剪。"""
     text = "张三丰路"
     clues = (
         _clue("name-1", ClueRole.FULL_NAME, 0, 3, "张三丰", source_kind="dictionary_local", strength=ClaimStrength.SOFT),
@@ -974,6 +1144,7 @@ def test_parser_drops_direct_name_before_trim_when_other_attr_partial_overlap_hi
     candidates = _parse_candidates(text, clues)
 
     assert [(candidate.attr_type, candidate.text) for candidate in candidates] == [
+        (PIIAttributeType.NAME, "张三"),
         (PIIAttributeType.ADDRESS, "丰路"),
     ]
 
@@ -1238,4 +1409,25 @@ def test_en_label_seed_single_capitalized_token_without_name_clue_is_rejected():
         protection_level=ProtectionLevel.STRONG,
         locale_profile="en_us",
     ) == []
+
+
+def test_structured_eval_maps_birthday_to_time_for_eval():
+    text, parsed_entities = strip_pii_tags("生日【PII:BIRTHDAY:1】1992年6月6日 【/PII】")
+    merged, mismatches = merge_entities_with_inventory(
+        "sample-1",
+        parsed_entities,
+        [
+            {
+                "type": "BIRTHDAY",
+                "value": "1992年6月6日",
+            }
+        ],
+    )
+
+    assert text == "生日1992年6月6日"
+    assert mismatches == []
+    assert len(merged) == 1
+    assert merged[0].raw_entity_type == "BIRTHDAY"
+    assert merged[0].entity_type == "TIME"
+    assert merged[0].exact_detector_type == "time"
 

@@ -37,6 +37,16 @@ class BaseOrganizationStack(BaseStack):
 
     STACK_LOCALE = "zh"
 
+    def _has_organization_negative_cover(self, unit_start: int, unit_last: int) -> bool:
+        """组织栈的负向由显式 negative、LABEL 与 START 构成，不吸收 inspire。"""
+        return self._has_semantic_negative_cover(
+            unit_start,
+            unit_last,
+            scopes=_ORG_SOFT_NEGATIVE_SCOPES,
+            include_seed_roles=True,
+            include_inspire=False,
+        )
+
     def _value_floor_char(self) -> int:
         """返回 ORGANIZATION 当前生效的 value 起点下界。"""
         return _family_value_floor_char(self.context, ClueFamily.ORGANIZATION)
@@ -367,11 +377,7 @@ class BaseOrganizationStack(BaseStack):
             return start, end
         stream = self.context.stream
         unit_start, unit_last = _char_span_to_unit_span(stream, start, end)
-        while unit_start <= unit_last and self.context.has_negative_cover(
-            unit_start,
-            unit_start,
-            scopes=_ORG_SOFT_NEGATIVE_SCOPES,
-        ):
+        while unit_start <= unit_last and self._has_organization_negative_cover(unit_start, unit_start):
             if _organization_edge_unit_is_protected(
                 stream,
                 self.context.clues,
@@ -380,11 +386,7 @@ class BaseOrganizationStack(BaseStack):
             ):
                 break
             unit_start += 1
-        while unit_last >= unit_start and self.context.has_negative_cover(
-            unit_last,
-            unit_last,
-            scopes=_ORG_SOFT_NEGATIVE_SCOPES,
-        ):
+        while unit_last >= unit_start and self._has_organization_negative_cover(unit_last, unit_last):
             if _organization_edge_unit_is_protected(
                 stream,
                 self.context.clues,

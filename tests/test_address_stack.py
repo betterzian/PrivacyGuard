@@ -23,6 +23,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueBundle,
     ClueFamily,
     ClueRole,
+    InspireEntry,
 )
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
@@ -32,7 +33,8 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     _label_seed_address_index,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address import AddressStack
-from tests._detector_negative_index import split_negative_clues
+from privacyguard.infrastructure.pii.detector.stacks.address_zh import ZhAddressStack
+from tests._detector_negative_index import build_test_bundle_with_inspire, split_negative_clues
 
 
 def _clue(
@@ -496,4 +498,82 @@ def test_existing_building_shapes_still_parse_as_address(text: str):
     candidates = _detect_candidates_from_scanner(text)
 
     assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == [text]
+
+
+def test_address_key_negative_cover_includes_label_and_inspire_but_not_value():
+    text = "提示 景明 路 备注"
+    stream = build_prompt_stream(text)
+    label_start = text.index("提示")
+    value_start = text.index("景明")
+    key_start = text.index("路")
+    note_start = text.index("备注")
+    clues = (
+        _clue(
+            "label",
+            role=ClueRole.LABEL,
+            attr_type=PIIAttributeType.NAME,
+            start=label_start,
+            end=label_start + len("提示"),
+            text="提示",
+            family=ClueFamily.NAME,
+        ),
+        _clue(
+            "value",
+            role=ClueRole.VALUE,
+            attr_type=PIIAttributeType.ADDRESS,
+            start=value_start,
+            end=value_start + len("景明"),
+            text="景明",
+            component_type=AddressComponentType.ROAD,
+        ),
+        _clue(
+            "key",
+            role=ClueRole.KEY,
+            attr_type=PIIAttributeType.ADDRESS,
+            start=key_start,
+            end=key_start + len("路"),
+            text="路",
+            component_type=AddressComponentType.ROAD,
+        ),
+    )
+    fixed, negative_clues, unit_index = _split_negative_clues(stream, clues)
+    index_by_id = {clue.clue_id: idx for idx, clue in enumerate(fixed)}
+    context = StackContext(
+        stream=stream,
+        locale_profile="zh_cn",
+        clues=fixed,
+        negative_clues=negative_clues,
+        unit_index=unit_index,
+    )
+    stack = ZhAddressStack(clue=fixed[index_by_id["key"]], clue_index=index_by_id["key"], context=context)
+
+    assert stack._has_address_key_negative_cover(fixed[index_by_id["label"]].unit_start, fixed[index_by_id["label"]].unit_last) is True
+    assert stack._has_address_key_negative_cover(fixed[index_by_id["value"]].unit_start, fixed[index_by_id["value"]].unit_last) is False
+
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.NAME,
+        family=ClueFamily.NAME,
+        start=note_start,
+        end=note_start + len("备注"),
+        unit_start=stream.char_to_unit[note_start],
+        unit_last=stream.char_to_unit[note_start + len("备注") - 1],
+        clue_id="note-inspire",
+    )
+    inspire_bundle = build_test_bundle_with_inspire(stream, clues, (inspire,))
+    inspire_index_by_id = {clue.clue_id: idx for idx, clue in enumerate(inspire_bundle.all_clues)}
+    inspire_context = StackContext(
+        stream=stream,
+        locale_profile="zh_cn",
+        clues=inspire_bundle.all_clues,
+        negative_clues=inspire_bundle.negative_clues,
+        unit_index=inspire_bundle.unit_index,
+        inspire_entries=inspire_bundle.inspire_entries,
+    )
+    inspire_stack = ZhAddressStack(
+        clue=inspire_bundle.all_clues[inspire_index_by_id["key"]],
+        clue_index=inspire_index_by_id["key"],
+        context=inspire_context,
+    )
+
+    assert inspire_stack._has_address_key_negative_cover(inspire.unit_start, inspire.unit_last) is True
 

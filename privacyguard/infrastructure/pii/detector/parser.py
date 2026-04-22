@@ -452,6 +452,15 @@ class ResolutionResult:
         return cls(committed=False, next_unit_cursor=-1)
 
 
+@dataclass(frozen=True, slots=True)
+class _MaterializedRun:
+    """同一 start group 中已成功起栈的候选。"""
+
+    clue_index: int
+    run: StackRun
+    stack: BaseStack | None
+
+
 class StreamParser:
     def __init__(self, *, locale_profile: str, ctx: DetectContext) -> None:
         self.locale_profile = locale_profile
@@ -480,30 +489,31 @@ class StreamParser:
             structured_lookup_index=structured_lookup_index or StructuredLookupIndex(),
         )
         unit_cursor = 0
-        family_cursor = 0
+        start_group_cursor = 0
         while unit_cursor < len(context.unit_index):
             if context.blocks_unit_start(unit_cursor):
                 context.recent_inspire_anchor = None
                 unit_cursor = context.commit_frontier_last_unit + 1
-                family_cursor = 0
+                start_group_cursor = 0
                 continue
             self._advance_semantic_value_locks_at_unit(context, unit_cursor)
             self._advance_inspire_anchor_at_unit(context, unit_cursor)
             self._remember_structured_anchors_at_unit(context, unit_cursor)
-            families = context.unit_index[unit_cursor].can_start_parser
-            if not families:
+            start_groups = self._start_groups_at_unit(context, unit_cursor)
+            if not start_groups:
                 unit_cursor += 1
-                family_cursor = 0
+                start_group_cursor = 0
                 continue
-            if family_cursor >= len(families):
+            if start_group_cursor >= len(start_groups):
                 unit_cursor += 1
-                family_cursor = 0
+                start_group_cursor = 0
                 continue
-            family = families[family_cursor]
-            current_run, current_stack = self._try_run_stack_at_unit(context, unit_cursor, family)
-            if current_run is None:
-                family_cursor += 1
+            current_start, current_group = start_groups[start_group_cursor]
+            selected = self._select_start_group_run(context, current_group)
+            if selected is None:
+                start_group_cursor += 1
                 continue
+            current_run, current_stack = selected
 
             if current_run.pending_challenge is not None:
                 if current_run.pending_challenge.challenge_kind == "name_address_conflict":
@@ -516,28 +526,28 @@ class StreamParser:
                         if resolution.committed:
                             context.recent_inspire_anchor = None
                             unit_cursor = resolution.next_unit_cursor
-                            family_cursor = 0
+                            start_group_cursor = 0
                         else:
-                            family_cursor += 1
+                            start_group_cursor += 1
                         continue
                 if current_run.pending_challenge is not None:
                     current_run = self._resolve_pending_challenge(context, current_run)
                     if context.blocks_unit_start(current_run.candidate.unit_start):
-                        family_cursor += 1
+                        start_group_cursor += 1
                         continue
 
             challenger_run, challenger_stack = self._find_challenger(
                 context,
                 current_run,
                 unit_cursor,
-                family_cursor,
-                )
+                current_start,
+            )
             if challenger_run is None or not _candidates_overlap(current_run.candidate, challenger_run.candidate):
                 resolution = self._commit_runs(context, current_run)
                 if resolution.committed:
                     context.recent_inspire_anchor = None
                 unit_cursor = resolution.next_unit_cursor if resolution.committed else unit_cursor
-                family_cursor = 0 if resolution.committed else family_cursor + 1
+                start_group_cursor = 0 if resolution.committed else start_group_cursor + 1
                 continue
 
             resolution = self._resolve_with_priority(
@@ -550,9 +560,9 @@ class StreamParser:
             if resolution.committed:
                 context.recent_inspire_anchor = None
                 unit_cursor = resolution.next_unit_cursor
-                family_cursor = 0
+                start_group_cursor = 0
             else:
-                family_cursor += 1
+                start_group_cursor += 1
 
         return ParseResult(
             candidates=context.candidates,
@@ -824,14 +834,133 @@ class StreamParser:
                 return run, stack
         return None, None
 
+    def _start_groups_at_unit(
+        self,
+        context: StackContext,
+        unit_index: int,
+        *,
+        suppress_start_clue_ids: frozenset[str] = frozenset(),
+    ) -> list[tuple[int, tuple[int, ...]]]:
+        """按 clue.start 对当前 unit 的可起栈 clue 分组。"""
+        if unit_index < 0 or unit_index >= len(context.unit_index):
+            return []
+        bucket = context.unit_index[unit_index]
+        startable_indices: list[int] = []
+        for family in bucket.can_start_parser:
+            spec = get_stack_spec(family)
+            if spec is None:
+                continue
+            for clue_index in bucket_family_clues(bucket, family):
+                clue = context.clues[clue_index]
+                if clue.clue_id in suppress_start_clue_ids:
+                    continue
+                if clue.role not in spec.start_roles:
+                    continue
+                startable_indices.append(clue_index)
+        startable_indices.sort(key=lambda clue_index: context.clues[clue_index].start)
+
+        groups: list[tuple[int, tuple[int, ...]]] = []
+        current_start: int | None = None
+        current_group: list[int] = []
+        for clue_index in startable_indices:
+            clue_start = context.clues[clue_index].start
+            if current_start is None or clue_start != current_start:
+                if current_group:
+                    groups.append((current_start, tuple(current_group)))
+                current_start = clue_start
+                current_group = [clue_index]
+                continue
+            current_group.append(clue_index)
+        if current_group and current_start is not None:
+            groups.append((current_start, tuple(current_group)))
+        return groups
+
+    def _same_start_priority_key(self, candidate: CandidateDraft) -> tuple[int, int, int, int, int]:
+        """为同起点候选提供稳定优先级键。"""
+        return (
+            _claim_strength_rank(candidate.claim_strength),
+            1 if candidate.attr_type == PIIAttributeType.NAME else 0,
+            self._soft_priority(candidate.attr_type),
+            candidate.unit_last - candidate.unit_start + 1,
+            candidate.end - candidate.start,
+        )
+
+    def _merge_equivalent_materialized_runs(
+        self,
+        current: _MaterializedRun,
+        challenger: _MaterializedRun,
+    ) -> _MaterializedRun:
+        """同属性同跨度的等价 run 合并 handled clue，避免同组内重复丢失。"""
+        merged_run = StackRun(
+            attr_type=current.run.attr_type,
+            candidate=current.run.candidate,
+            handled_label_clue_ids=current.run.handled_label_clue_ids | challenger.run.handled_label_clue_ids,
+            frontier_last_unit=max(current.run.frontier_last_unit, challenger.run.frontier_last_unit),
+            pending_challenge=current.run.pending_challenge or challenger.run.pending_challenge,
+            suppress_challenger_clue_ids=(
+                current.run.suppress_challenger_clue_ids | challenger.run.suppress_challenger_clue_ids
+            ),
+        )
+        return _MaterializedRun(
+            clue_index=current.clue_index,
+            run=merged_run,
+            stack=current.stack,
+        )
+
+    def _prefer_same_start_materialized_run(
+        self,
+        current: _MaterializedRun,
+        challenger: _MaterializedRun,
+    ) -> _MaterializedRun:
+        """在同一 clue.start 上用轻量规则预选本轮主栈。"""
+        current_candidate = current.run.candidate
+        challenger_candidate = challenger.run.candidate
+        if (
+            current_candidate.attr_type == challenger_candidate.attr_type
+            and current_candidate.start == challenger_candidate.start
+            and current_candidate.end == challenger_candidate.end
+            and current_candidate.unit_start == challenger_candidate.unit_start
+            and current_candidate.unit_last == challenger_candidate.unit_last
+            and current_candidate.text == challenger_candidate.text
+        ):
+            return self._merge_equivalent_materialized_runs(current, challenger)
+        win_key = _strict_unit_container_winner_key(current_candidate, challenger_candidate)
+        if win_key == "a":
+            return current
+        if win_key == "b":
+            return challenger
+        if self._same_start_priority_key(challenger_candidate) > self._same_start_priority_key(current_candidate):
+            return challenger
+        return current
+
+    def _select_start_group_run(
+        self,
+        context: StackContext,
+        clue_indices: Sequence[int],
+    ) -> tuple[StackRun, BaseStack | None] | None:
+        """对同一起点 group 的多个起栈 clue 做局部预选。"""
+        materialized_runs: list[_MaterializedRun] = []
+        for clue_index in clue_indices:
+            self._apply_inspire_boost_to_clue(context, clue_index)
+            run, stack = self._try_run_stack(context, clue_index)
+            if run is None:
+                continue
+            materialized_runs.append(_MaterializedRun(clue_index=clue_index, run=run, stack=stack))
+        if not materialized_runs:
+            return None
+        current = materialized_runs[0]
+        for challenger in materialized_runs[1:]:
+            current = self._prefer_same_start_materialized_run(current, challenger)
+        return current.run, current.stack
+
     def _find_challenger(
         self,
         context: StackContext,
         current_run: StackRun,
         current_unit_cursor: int,
-        current_family_cursor: int,
+        current_start: int,
     ) -> tuple[StackRun | None, BaseStack | None]:
-        """在当前候选覆盖窗内寻找 challenger。"""
+        """在当前候选覆盖窗内寻找更晚起点的 challenger。"""
         start_unit = current_run.candidate.unit_start
         end_unit = min(current_run.candidate.unit_last, len(context.unit_index) - 1)
         suppress_ids = (
@@ -841,17 +970,18 @@ class StreamParser:
         )
         for unit_index in range(start_unit, end_unit + 1):
             self._advance_semantic_value_locks_at_unit(context, unit_index)
-            families = context.unit_index[unit_index].can_start_parser
-            family_start = current_family_cursor + 1 if unit_index == current_unit_cursor else 0
-            for family in families[family_start:]:
-                run, stack = self._try_run_stack_at_unit(
-                    context,
-                    unit_index,
-                    family,
-                    suppress_start_clue_ids=suppress_ids,
-                )
-                if run is None:
+            start_groups = self._start_groups_at_unit(
+                context,
+                unit_index,
+                suppress_start_clue_ids=suppress_ids,
+            )
+            for group_start, clue_indices in start_groups:
+                if unit_index == current_unit_cursor and group_start <= current_start:
                     continue
+                selected = self._select_start_group_run(context, clue_indices)
+                if selected is None:
+                    continue
+                run, stack = selected
                 if _candidates_overlap(current_run.candidate, run.candidate):
                     return run, stack
         if current_run.candidate.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
@@ -874,17 +1004,6 @@ class StreamParser:
         challenge = run.pending_challenge
         assert challenge is not None
         struct_run, _ = self._try_run_stack(context, challenge.clue_index)
-        if challenge.challenge_kind == "name_same_start_blocker":
-            if struct_run is None or struct_run.candidate.attr_type == PIIAttributeType.ADDRESS:
-                run.pending_challenge = None
-                return run
-            return StackRun(
-                attr_type=run.attr_type,
-                candidate=challenge.extended_candidate,
-                handled_label_clue_ids=run.handled_label_clue_ids,
-                frontier_last_unit=challenge.extended_last_unit,
-                suppress_challenger_clue_ids=run.suppress_challenger_clue_ids,
-            )
         use_extended = False
         if struct_run is None:
             use_extended = True

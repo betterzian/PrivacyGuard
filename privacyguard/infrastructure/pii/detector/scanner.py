@@ -172,7 +172,9 @@ def _match_right_boundary_allows_trailing_punct(text: str, end: int) -> bool:
             return True
         if end + 1 + len(OCR_BREAK) <= len(text) and text[end + 1 : end + 1 + len(OCR_BREAK)] == OCR_BREAK:
             return True
-        return False
+        if next_ch.isdigit() or (next_ch.isascii() and (next_ch.isalpha() or next_ch in "._-%+")):
+            return False
+        return True
     if right_ch.isdigit() or (right_ch.isascii() and (right_ch.isalpha() or right_ch in "._-")):
         return False
     return True

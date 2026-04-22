@@ -5,7 +5,7 @@ from __future__ import annotations
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint, build_name_candidate_from_value
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput, StreamUnit, strength_ge
-from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
+from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     ExpansionBreakPolicy,
     _char_span_to_unit_span,
@@ -33,6 +33,36 @@ class BaseNameStack(BaseStack):
 
     STACK_LOCALE = "zh"
 
+    def _has_name_negative_cover(self, unit_start: int, unit_last: int) -> bool:
+        """姓名栈的负向由显式 negative、LABEL/START 与 inspire 共同构成。"""
+        return self._has_semantic_negative_cover(
+            unit_start,
+            unit_last,
+            scopes=None,
+            include_seed_roles=True,
+            include_inspire=True,
+        )
+
+    def _has_name_negative_cover_left_of_char(self, char_index: int) -> bool:
+        return self._has_semantic_negative_cover_left_of_char(
+            char_index,
+            scopes=None,
+            include_seed_roles=True,
+            include_inspire=True,
+        )
+
+    def _next_name_negative_start_char(self, char_index: int) -> int | None:
+        return self._next_semantic_negative_start_char(
+            char_index,
+            scopes=None,
+            include_seed_roles=True,
+            include_inspire=True,
+        )
+
+    def _commit_negative_clues(self) -> tuple[Clue, ...]:
+        """姓名提交 gate 只把显式 negative、seed 与 inspire 当作负向。"""
+        return self._semantic_negative_clues(include_inspire=True)
+
     def shrink(self, run: StackRun, blocker_start: int, blocker_last: int) -> StackRun | None:
         """姓名候选被其他类型抢占后，尝试提交裁掉冲突区后的剩余片段。"""
         shrunk = super().shrink(run, blocker_start, blocker_last)
@@ -51,7 +81,7 @@ class BaseNameStack(BaseStack):
             candidate_unit_last=candidate.unit_last,
             candidate_text=candidate.text,
             name_clues=name_clues,
-            has_negative_overlap=self.context.has_negative_cover(candidate.unit_start, candidate.unit_last),
+            has_negative_overlap=self._has_name_negative_cover(candidate.unit_start, candidate.unit_last),
         ):
             return None
         return shrunk
@@ -79,7 +109,7 @@ class BaseNameStack(BaseStack):
             return None
 
         name_clues = self._name_clues_in_span(start, end)
-        has_negative_overlap = self.context.has_negative_cover(unit_start, unit_last)
+        has_negative_overlap = self._has_name_negative_cover(unit_start, unit_last)
         candidate.claim_strength = self._resolve_claim_strength(name_clues=name_clues)
 
         if not self._should_skip_commit_gate() and not self._should_commit_candidate(
@@ -100,29 +130,6 @@ class BaseNameStack(BaseStack):
             handled_label_clue_ids={self.clue.clue_id} if is_label_seed else set(),
             frontier_last_unit=candidate.unit_last,
         )
-        pending = getattr(self, "_name_pending_challenge", None)
-        if pending is not None:
-            blocker_index, extended_end = pending
-            if extended_end > end:
-                extended_candidate = build_name_candidate_from_value(
-                    source=self.context.stream.source,
-                    value_text=self.context.stream.text[start:extended_end],
-                    value_start=start,
-                    value_end=extended_end,
-                    source_kind=self.clue.source_kind,
-                    component_hint=self._effective_hint(start, extended_end),
-                    unit_start=unit_start,
-                    unit_last=_char_span_to_unit_span(self.context.stream, start, extended_end)[1],
-                    label_clue_id=self.clue.clue_id if is_label_seed else None,
-                    label_driven=is_label_seed,
-                )
-                if extended_candidate is not None:
-                    run.pending_challenge = PendingChallenge(
-                        clue_index=blocker_index,
-                        extended_candidate=extended_candidate,
-                        extended_last_unit=extended_candidate.unit_last,
-                        challenge_kind="name_same_start_blocker",
-                    )
         return run
 
     def _should_skip_commit_gate(self) -> bool:
@@ -182,7 +189,7 @@ class BaseNameStack(BaseStack):
         return None
 
     def _has_active_stop_overlap(self, cursor: int, *, ignore_negative: bool = False) -> bool:
-        if not ignore_negative and self.context.has_negative_cover_left_of_char(cursor):
+        if not ignore_negative and self._has_name_negative_cover_left_of_char(cursor):
             return True
         for clue in self.context.clues:
             if clue.start < cursor < clue.end and self._is_name_blocker(
@@ -194,7 +201,7 @@ class BaseNameStack(BaseStack):
     def _next_negative_start_char(self, cursor: int, *, ignore_negative: bool = False) -> int | None:
         if ignore_negative:
             return None
-        return self.context.next_negative_start_char(cursor)
+        return self._next_name_negative_start_char(cursor)
 
     def _is_name_blocker(self, clue: Clue, *, ignore_negative: bool = False) -> bool:
         if clue.role == ClueRole.NEGATIVE:

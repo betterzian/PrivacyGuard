@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueBundle, ClueFamily, ClueRole, InspireEntry
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks import OrganizationStack
-from tests._detector_negative_index import split_negative_clues
+from privacyguard.infrastructure.pii.detector.stacks.organization_en import EnOrganizationStack
+from tests._detector_negative_index import build_test_bundle_with_inspire, split_negative_clues
 
 
 def _clue(
@@ -485,4 +486,82 @@ def test_parser_suffix_path_matches_between_weak_and_strong():
 
     assert strong == ["星河科技公司"]
     assert weak == []
+
+
+def test_organization_negative_cover_includes_label_start_but_not_inspire():
+    text = "Label Blue River Ltd Hint"
+    label_start = text.index("Label")
+    value_start = text.index("Blue")
+    suffix_start = text.index("Ltd")
+    hint_start = text.index("Hint")
+    stream = build_prompt_stream(text)
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            label_start,
+            label_start + len("Label"),
+            "Label",
+            source_kind="context_name_field",
+            attr_type=PIIAttributeType.NAME,
+        ),
+        _clue(
+            "value-1",
+            ClueRole.VALUE,
+            value_start,
+            value_start + len("Blue River"),
+            "Blue River",
+            source_kind="dictionary_local",
+            attr_type=PIIAttributeType.ORGANIZATION,
+        ),
+        _clue(
+            "suffix-1",
+            ClueRole.SUFFIX,
+            suffix_start,
+            suffix_start + len("Ltd"),
+            "Ltd",
+            source_kind="company_suffix",
+            attr_type=PIIAttributeType.ORGANIZATION,
+        ),
+    )
+    fixed, negative_clues, index_by_id, unit_index = _split_negative_clues(stream, clues)
+    context = StackContext(
+        stream=stream,
+        locale_profile="en_us",
+        protection_level=ProtectionLevel.STRONG,
+        clues=fixed,
+        negative_clues=negative_clues,
+        unit_index=unit_index,
+    )
+    stack = EnOrganizationStack(clue=fixed[index_by_id["value-1"]], clue_index=index_by_id["value-1"], context=context)
+
+    assert stack._has_organization_negative_cover(fixed[index_by_id["label-1"]].unit_start, fixed[index_by_id["label-1"]].unit_last) is True
+
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.NAME,
+        family=ClueFamily.NAME,
+        start=hint_start,
+        end=hint_start + len("Hint"),
+        unit_start=stream.char_to_unit[hint_start],
+        unit_last=stream.char_to_unit[hint_start + len("Hint") - 1],
+        clue_id="hint-1",
+    )
+    inspire_bundle = build_test_bundle_with_inspire(stream, clues, (inspire,))
+    inspire_index_by_id = {clue.clue_id: idx for idx, clue in enumerate(inspire_bundle.all_clues)}
+    inspire_context = StackContext(
+        stream=stream,
+        locale_profile="en_us",
+        protection_level=ProtectionLevel.STRONG,
+        clues=inspire_bundle.all_clues,
+        negative_clues=inspire_bundle.negative_clues,
+        unit_index=inspire_bundle.unit_index,
+        inspire_entries=inspire_bundle.inspire_entries,
+    )
+    inspire_stack = EnOrganizationStack(
+        clue=inspire_bundle.all_clues[inspire_index_by_id["value-1"]],
+        clue_index=inspire_index_by_id["value-1"],
+        context=inspire_context,
+    )
+
+    assert inspire_stack._has_organization_negative_cover(inspire.unit_start, inspire.unit_last) is False
 

@@ -37,7 +37,6 @@ TYPE_DISPLAY_ORDER = (
     "MEMBER_ID",
     "TRACKING_ID",
     "ACCOUNT_ID",
-    "BIRTHDAY",
 )
 DATASET_TYPE_TO_DETECTOR: dict[str, str] = {
     "NAME": "name",
@@ -52,6 +51,7 @@ DATASET_TYPE_TO_DETECTOR: dict[str, str] = {
     "BANK_CARD": "bank_number",
     "PASSPORT_NUMBER": "passport_number",
     "DRIVER_LICENSE": "driver_license",
+    "BIRTHDAY": "time",
 }
 STATUS_ORDER = (
     "exact_complete",
@@ -69,6 +69,7 @@ class TaggedEntity:
     sample_id: str
     occurrence_index: int
     entity_type: str
+    raw_entity_type: str
     value: str
     start: int
     end: int
@@ -120,6 +121,14 @@ def load_dataset(path: Path) -> dict[str, Any]:
 
 def normalize_for_alignment(text: Any) -> str:
     return re.sub(r"\s+", "", str(text or ""))
+
+
+def normalize_dataset_entity_type(entity_type: Any) -> str:
+    """把评测标签归并到 detector 当前使用的类型体系。"""
+    entity_text = str(entity_type or "")
+    if entity_text == "BIRTHDAY":
+        return "TIME"
+    return entity_text
 
 
 def strip_pii_tags(text_with_tags: str) -> tuple[str, list[dict[str, Any]]]:
@@ -200,15 +209,18 @@ def merge_entities_with_inventory(
         else:
             used_indices.add(matched_index)
             candidate = inventory[matched_index]
+        raw_entity_type = str(candidate.get("type") or parsed["entity_type"])
+        entity_type = normalize_dataset_entity_type(raw_entity_type)
         merged.append(
             TaggedEntity(
                 sample_id=sample_id,
                 occurrence_index=int(parsed["occurrence_index"]),
-                entity_type=str(candidate.get("type") or parsed["entity_type"]),
+                entity_type=entity_type,
+                raw_entity_type=raw_entity_type,
                 value=str(candidate.get("value") or parsed["value"]),
                 start=int(parsed["start"]),
                 end=int(parsed["end"]),
-                exact_detector_type=DATASET_TYPE_TO_DETECTOR.get(str(candidate.get("type") or parsed["entity_type"])),
+                exact_detector_type=DATASET_TYPE_TO_DETECTOR.get(entity_type),
                 evaluation_weight=float(candidate.get("evaluation_weight", 0.0) or 0.0),
                 optional_pii=bool(candidate.get("optional_pii", False)),
                 derived_optional=bool(candidate.get("derived_optional", False)),
@@ -364,6 +376,7 @@ def evaluate_gt_entity(entity: TaggedEntity, predictions: list[PredictionSpan]) 
         "sample_id": entity.sample_id,
         "occurrence_index": entity.occurrence_index,
         "entity_type": entity.entity_type,
+        "raw_entity_type": entity.raw_entity_type,
         "exact_detector_type": entity.exact_detector_type,
         "value": entity.value,
         "start": entity.start,
