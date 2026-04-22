@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueRole
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueFamily, ClueRole
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import _label_start_route_locale
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackContextLike
-from privacyguard.infrastructure.pii.detector.stacks.common import _label_seed_start_char, _unit_index_at_or_after
+from privacyguard.infrastructure.pii.detector.stacks.common import (
+    _floor_clamped_label_seed_start_char,
+    _unit_index_at_or_after,
+)
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_hard_break
 
 
@@ -30,7 +33,7 @@ def resolve_stack_locale(
         return profile_locale
     if attr_type == PIIAttributeType.ADDRESS:
         return _resolve_address_stack_locale(clue, clue_index, context)
-    return _resolve_generic_stack_locale(clue, clue_index, context)
+    return _resolve_generic_stack_locale(attr_type, clue, clue_index, context)
 
 
 def route_localized_stack(
@@ -64,7 +67,7 @@ def _resolve_address_stack_locale(clue: Clue, clue_index: int, context: StackCon
         return locale_from_text(stream.text[clue.start:clue.end])
 
     if clue.role in {ClueRole.LABEL, ClueRole.START}:
-        address_start = _label_seed_start_char(stream, clue.end)
+        address_start = _floor_clamped_label_seed_start_char(context, ClueFamily.ADDRESS, clue.end)
         start_unit = _unit_index_at_or_after(stream, address_start)
         return _label_start_route_locale(
             context.clues,
@@ -82,14 +85,20 @@ def _resolve_address_stack_locale(clue: Clue, clue_index: int, context: StackCon
     return locale_from_text(stream.text[window_start:window_end])
 
 
-def _resolve_generic_stack_locale(clue: Clue, clue_index: int, context: StackContextLike) -> str:
+def _resolve_generic_stack_locale(
+    attr_type: PIIAttributeType,
+    clue: Clue,
+    clue_index: int,
+    context: StackContextLike,
+) -> str:
     del clue_index
     stream = context.stream
     if clue.strength == ClaimStrength.HARD:
         return locale_from_text(stream.text[clue.start:clue.end])
 
     if clue.role in {ClueRole.LABEL, ClueRole.START}:
-        value_start = _label_seed_start_char(stream, clue.end)
+        family = _semantic_family_for_attr_type(attr_type)
+        value_start = _floor_clamped_label_seed_start_char(context, family, clue.end)
         sample = _sample_probe_text(context, start=value_start, max_units=6)
         if sample.strip():
             return locale_from_text(sample)
@@ -101,6 +110,16 @@ def _resolve_generic_stack_locale(clue: Clue, clue_index: int, context: StackCon
     window_start = max(0, clue.start - 8)
     window_end = min(len(stream.text), clue.end + 8)
     return locale_from_text(stream.text[window_start:window_end])
+
+
+def _semantic_family_for_attr_type(attr_type: PIIAttributeType) -> ClueFamily:
+    if attr_type == PIIAttributeType.NAME:
+        return ClueFamily.NAME
+    if attr_type == PIIAttributeType.ORGANIZATION:
+        return ClueFamily.ORGANIZATION
+    if attr_type == PIIAttributeType.ADDRESS:
+        return ClueFamily.ADDRESS
+    return ClueFamily.CONTROL
 
 
 def _sample_probe_text(context: StackContextLike, *, start: int, max_units: int) -> str:

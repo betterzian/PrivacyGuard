@@ -1145,3 +1145,65 @@ def test_en_given_name_respects_same_protection_gate_as_zh():
         locale_profile="en_us",
     ) == []
 
+
+def test_en_name_non_seed_starter_before_value_floor_is_rejected():
+    text = "Wyatt Bell"
+    clues = (
+        _clue("given-1", ClueRole.GIVEN_NAME, 0, 5, "Wyatt", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+        _clue("family-1", ClueRole.FAMILY_NAME, 6, 10, "Bell", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+    _stream, bundle, context = _build_context_with_bundle(
+        text,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    )
+    context.raise_stack_value_floor(ClueFamily.NAME, bundle.all_clues[0].unit_last)
+
+    run = NameStack(clue=bundle.all_clues[0], clue_index=0, context=context).run()
+
+    assert run is None
+
+
+def test_en_label_seed_start_respects_name_value_floor():
+    text = "Name: Wyatt Bell"
+    clues = (
+        _clue("label-1", ClueRole.LABEL, 0, 4, "Name", source_kind="context_name_field"),
+        _clue("given-1", ClueRole.GIVEN_NAME, 6, 11, "Wyatt", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+        _clue("family-1", ClueRole.FAMILY_NAME, 12, 16, "Bell", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+    _stream, bundle, context = _build_context_with_bundle(
+        text,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    )
+    context.raise_stack_value_floor(ClueFamily.NAME, bundle.all_clues[1].unit_last)
+
+    run = NameStack(clue=bundle.all_clues[0], clue_index=0, context=context).run()
+
+    assert run is not None
+    assert run.candidate.text == "Bell"
+    assert run.candidate.start >= context.effective_value_floor_char(ClueFamily.NAME)
+
+
+def test_en_given_left_expansion_respects_name_value_floor():
+    text = "Wyatt James Bell"
+    clues = (
+        _clue("given-1", ClueRole.GIVEN_NAME, 6, 11, "James", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+        _clue("family-1", ClueRole.FAMILY_NAME, 12, 16, "Bell", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+    _stream, bundle, context = _build_context_with_bundle(
+        text,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    )
+    context.raise_stack_value_floor(ClueFamily.NAME, context.stream.char_to_unit[text.index("t")])
+
+    run = NameStack(clue=bundle.all_clues[0], clue_index=0, context=context).run()
+
+    assert run is not None
+    assert run.candidate.text == "James Bell"
+    assert run.candidate.start == text.index("James")
+

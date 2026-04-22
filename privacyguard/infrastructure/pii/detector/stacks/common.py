@@ -158,9 +158,16 @@ def _unit_char_end(stream: StreamInput, unit_index: int) -> int:
 def _skip_separators(text: str, start: int) -> int:
     """跳过 label 到 value 之间的空白和轻分隔符。"""
     index = start
-    while index < len(text) and (text[index].isspace() or is_soft_break(text[index])):
+    while index < len(text) and (
+        text[index].isspace() or _is_label_seed_skippable_separator_char(text[index])
+    ):
         index += 1
     return index
+
+
+def _is_label_seed_skippable_separator_char(char: str) -> bool:
+    """统一维护 label/prefix-key 允许跨过的显式分隔符。"""
+    return char in _LABEL_SEED_SKIPPABLE_SEPARATOR_CHARS
 
 
 def _label_seed_start_char(stream: StreamInput, start_char: int) -> int:
@@ -183,12 +190,37 @@ def _label_seed_start_char(stream: StreamInput, start_char: int) -> int:
             cursor = unit.char_end
             ui += 1
             continue
-        if unit.kind == "punct" and unit_text in _LABEL_SEED_SKIPPABLE_SEPARATOR_CHARS:
+        if unit.kind == "punct" and _is_label_seed_skippable_separator_char(unit_text):
             cursor = unit.char_end
             ui += 1
             continue
         break
     return cursor
+
+
+def _family_value_floor_char(context, family: ClueFamily) -> int:
+    """统一读取某个语义 family 当前生效的 value floor。"""
+    return context.effective_value_floor_char(family)
+
+
+def _starter_is_before_family_value_floor(context, clue: Clue, family: ClueFamily) -> bool:
+    """非 LABEL/START starter 若落在 family floor 左侧则拒绝起栈。"""
+    if clue.role in {ClueRole.LABEL, ClueRole.START}:
+        return False
+    return clue.start < _family_value_floor_char(context, family)
+
+
+def _floor_clamped_label_seed_start_char(context, family: ClueFamily, start_char: int) -> int:
+    """统一计算受 family value floor 约束的 LABEL/START seed 起点。"""
+    return max(
+        _label_seed_start_char(context.stream, start_char),
+        _family_value_floor_char(context, family),
+    )
+
+
+def _clamp_left_boundary_to_value_floor(start: int, floor_char: int) -> int:
+    """左扩后的起点不得越过当前 family value floor。"""
+    return max(start, floor_char)
 
 
 def _unit_index_at_or_after(stream: StreamInput, char_index: int) -> int:

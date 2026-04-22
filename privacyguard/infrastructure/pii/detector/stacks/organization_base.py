@@ -16,8 +16,10 @@ from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueF
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
+    _family_value_floor_char,
+    _floor_clamped_label_seed_start_char,
     _count_non_space_units,
-    _label_seed_start_char,
+    _starter_is_before_family_value_floor,
     _unit_char_end,
     _unit_char_start,
     _unit_index_at_or_after,
@@ -35,15 +37,13 @@ class BaseOrganizationStack(BaseStack):
 
     def _value_floor_char(self) -> int:
         """返回 ORGANIZATION 当前生效的 value 起点下界。"""
-        return self.context.effective_value_floor_char(ClueFamily.ORGANIZATION)
+        return _family_value_floor_char(self.context, ClueFamily.ORGANIZATION)
 
     def _starter_is_before_value_floor(self) -> bool:
         """非 LABEL/START 起栈不得从已锁住的 value 区间左侧开始。"""
-        if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            return False
-        return self.clue.start < self._value_floor_char()
+        return _starter_is_before_family_value_floor(self.context, self.clue, ClueFamily.ORGANIZATION)
 
-    def need_break(self, subject, **kwargs) -> bool:
+    def should_break_clue(self, subject, **kwargs) -> bool:
         del kwargs
         if isinstance(subject, Clue):
             return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}
@@ -85,9 +85,8 @@ class BaseOrganizationStack(BaseStack):
             return None
         is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
         locale = self.STACK_LOCALE
-        floor_char = self._value_floor_char()
         if is_label_seed:
-            start = max(_label_seed_start_char(self.context.stream, self.clue.end), floor_char)
+            start = _floor_clamped_label_seed_start_char(self.context, ClueFamily.ORGANIZATION, self.clue.end)
             if start >= len(self.context.stream.text):
                 return None
             end = self._resolve_label_end(start=start, locale=locale)
@@ -153,7 +152,7 @@ class BaseOrganizationStack(BaseStack):
         )
 
     def _resolve_suffix_start(self, *, locale: str) -> int:
-        floor = _left_expand_text_boundary(self.context, self.clue.start, should_break=self.need_break)
+        floor = _left_expand_text_boundary(self.context, self.clue.start, should_break=self.should_break_clue)
         floor = max(floor, self._value_floor_char())
         return _extend_organization_left_with_limit(
             self.context.stream,

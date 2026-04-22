@@ -73,7 +73,7 @@ def _state_routing_context(
         value_floor=stack._value_floor_char(),
         # 仅在已有已提交组件时才提供 search_start，避免未提交失败链污染 numberish 左扩起点。
         search_start=state.last_end if state.components else None,
-        should_break_clue=lambda clue: stack.need_break(clue),
+        should_break_clue=lambda clue: stack.should_break_clue(clue),
     )
 
 
@@ -156,7 +156,7 @@ class ZhAddressStack(BaseAddressStack):
             clue,
             flush_chain=lambda idx: self._flush_chain(state, clue_index=idx),
             materialize_digit_tail_before_comma=lambda idx: self._materialize_digit_tail_before_comma(state, clues, idx),
-            should_break=self.need_break,
+            should_break=self.should_break_clue,
         )
 
     def _handle_value_clue(
@@ -180,7 +180,7 @@ class ZhAddressStack(BaseAddressStack):
                 clue,
                 stream,
                 len(raw_text),
-                should_break=self.need_break,
+                should_break=self.should_break_clue,
             )
             value_end = _scan_forward_value_end(raw_text, clue.end, upper_bound, stream=stream)
             if value_end > clue.end:
@@ -244,7 +244,7 @@ class ZhAddressStack(BaseAddressStack):
                     admin_levels,
                     stream,
                     raw_text,
-                    should_break=self.need_break,
+                    should_break=self.should_break_clue,
                 ):
                     self._flush_chain(state, clue_index=clue_index)
                     if state.split_at is not None:

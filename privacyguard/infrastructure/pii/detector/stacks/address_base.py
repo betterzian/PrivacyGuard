@@ -67,7 +67,9 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
-    _label_seed_start_char,
+    _clamp_left_boundary_to_value_floor,
+    _family_value_floor_char,
+    _floor_clamped_label_seed_start_char,
     _skip_separators,
     _unit_char_end,
     _unit_char_start,
@@ -80,7 +82,7 @@ class BaseAddressStack(BaseStack):
 
     def _value_floor_char(self) -> int:
         """返回 ADDRESS 当前生效的 value 起点下界。"""
-        return self.context.effective_value_floor_char(ClueFamily.ADDRESS)
+        return _family_value_floor_char(self.context, ClueFamily.ADDRESS)
 
     @property
     def valid_successors(self) -> Mapping[AddressComponentType, frozenset[AddressComponentType]]:
@@ -172,7 +174,7 @@ class BaseAddressStack(BaseStack):
         floor_char = self._value_floor_char()
 
         if is_label_seed:
-            address_start = max(_label_seed_start_char(stream, self.clue.end), floor_char)
+            address_start = _floor_clamped_label_seed_start_char(self.context, ClueFamily.ADDRESS, self.clue.end)
             seed_index = _first_address_clue_index_after(
                 self.context.clues,
                 address_start,
@@ -303,7 +305,7 @@ class BaseAddressStack(BaseStack):
                     if _span_has_non_comma_search_stop_unit(stream, search_anchor, clue.start):
                         break
 
-            if self.need_break(clue):
+            if self.should_break_clue(clue):
                 break
             if clue.attr_type is None:
                 index += 1
@@ -350,13 +352,13 @@ class BaseAddressStack(BaseStack):
             _mark_consumed_indices(state, {index})
             return True
         if clue.attr_type in {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
-            nxt_addr = _next_address_clue_index_after(clues, index, should_break=self.need_break)
+            nxt_addr = _next_address_clue_index_after(clues, index, should_break=self.should_break_clue)
             if nxt_addr is not None and _bridge_last_address_to_next_within_units(state, clues[nxt_addr], stream):
                 state.suppress_challenger_clue_ids.add(clue.clue_id)
                 state.absorbed_digit_unit_end = max(state.absorbed_digit_unit_end, clue.unit_last)
         return False
 
-    def need_break(self, subject, **kwargs) -> bool:
+    def should_break_clue(self, subject, **kwargs) -> bool:
         del kwargs
         if isinstance(subject, Clue):
             return subject.role == ClueRole.BREAK
@@ -549,7 +551,7 @@ class BaseAddressStack(BaseStack):
         *,
         component_start: int,
     ) -> _DraftComponent | None:
-        component_start = max(component_start, self._value_floor_char())
+        component_start = _clamp_left_boundary_to_value_floor(component_start, self._value_floor_char())
         value = _normalize_address_value(comp_type, raw_text[component_start:clue.start])
         if not value:
             return None

@@ -5,7 +5,9 @@ from __future__ import annotations
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueFamily, ClueRole, StreamUnit
 from privacyguard.infrastructure.pii.detector.stacks.common import (
-    _label_seed_start_char,
+    _family_value_floor_char,
+    _floor_clamped_label_seed_start_char,
+    _starter_is_before_family_value_floor,
     _unit_index_at_or_after,
     _unit_index_left_of,
 )
@@ -19,37 +21,18 @@ class EnNameStack(BaseNameStack):
 
     STACK_LOCALE = "en"
 
-    def need_break(
-        self,
-        subject: Clue | StreamUnit,
-        *,
-        next_unit: StreamUnit | None = None,
-        prev_unit: StreamUnit | None = None,
-        upper: int | None = None,
-        lower: int | None = None,
-        left_char: str | None = None,
-        right_char: str | None = None,
-    ) -> bool:
-        if isinstance(subject, Clue):
-            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE}
-        if subject.kind == "ascii_word":
-            return False
-        if subject.kind == "space":
-            if next_unit is not None:
-                return not (
-                    next_unit.kind == "ascii_word" and (upper is None or next_unit.char_start < upper)
-                )
-            if prev_unit is not None:
-                return not (
-                    prev_unit.kind == "ascii_word" and (lower is None or prev_unit.char_end > lower)
-                )
-            return True
-        if subject.kind == "punct":
-            return not is_name_joiner(subject.text, left_char, right_char)
-        return True
+    def _value_floor_char(self) -> int:
+        """返回 NAME 当前生效的 value 起点下界。"""
+        return _family_value_floor_char(self.context, ClueFamily.NAME)
+
+    def _starter_is_before_value_floor(self) -> bool:
+        """非 LABEL/START 起栈不得从已锁住的 value 区间左侧开始。"""
+        return _starter_is_before_family_value_floor(self.context, self.clue, ClueFamily.NAME)
 
     def run(self) -> StackRun | None:
         self._name_pending_challenge: tuple[int, int] | None = None
+        if self._starter_is_before_value_floor():
+            return None
         if self.clue.strength == ClaimStrength.HARD and self.clue.role not in {
             ClueRole.FAMILY_NAME,
             ClueRole.GIVEN_NAME,
@@ -58,7 +41,7 @@ class EnNameStack(BaseNameStack):
         if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
             return self._build_name_run(start=self.clue.start, end=self.clue.end)
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
-            start = _label_seed_start_char(self.context.stream, self.clue.end)
+            start = _floor_clamped_label_seed_start_char(self.context, ClueFamily.NAME, self.clue.end)
             if start >= len(self.context.stream.text):
                 return None
             end = self._expand_seed_right(
@@ -149,11 +132,14 @@ class EnNameStack(BaseNameStack):
 
     def _extend_given_left_en(self, start: int) -> int:
         cursor = start
+        floor_char = self._value_floor_char()
         while True:
             previous = self._find_previous_name_piece_en(cursor)
             if previous is None:
                 return cursor
             piece_start, piece_end, _kind = previous
+            if piece_start < floor_char:
+                return cursor
             if self._span_has_blocker(piece_end, cursor):
                 return cursor
             cursor = piece_start
