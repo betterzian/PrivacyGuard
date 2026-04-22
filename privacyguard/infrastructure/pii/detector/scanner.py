@@ -105,7 +105,8 @@ _PLACEHOLDER_BY_ATTR = {
 _EMAIL_PATTERN = re.compile(
     r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,4}"
 )
-_EMAIL_TRAILING_PUNCT_CHARS = ".,;:!?)]}。！？；：，、）】》」』"
+_TRAILING_PUNCT_CHARS = ".,;:!?)]}。！？；：，、）】》」』"
+_DIRECT_DELIMITER_PUNCT_CHARS = ",;，、；)]}）】》」』"
 
 # 与 ``pii_value._TIME_PATTERN`` 一致的时钟片段（时 0–23，分/秒 0–59，冒号半角/全角）。
 _TIME_CLOCK_STRICT = r"(?:[01]?\d|2[0-3])[:：][0-5]\d(?:[:：][0-5]\d)?"
@@ -132,19 +133,49 @@ _TIME_KINDS_WITH_TOKEN_BOUNDARY = frozenset(
 
 _AMOUNT_CURRENCY_PREFIX = r"(?i:US\$|USD|RMB|CNY|EUR|GBP|[$¥€£])"
 _AMOUNT_CURRENCY_SUFFIX = r"(?i:USD|RMB|CNY|EUR|GBP|元|美元|欧元|英镑|dollars?|yuan)"
+_AMOUNT_NUMBER_CORE = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?"
+_AMOUNT_DECIMAL_CORE = r"(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}"
 _AMOUNT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "amount_currency",
         re.compile(
             rf"(?<![A-Za-z0-9.])(?:"
-            rf"{_AMOUNT_CURRENCY_PREFIX}\s*\d+(?:\.\d{{2}})?(?:\s*{_AMOUNT_CURRENCY_SUFFIX})?"
+            rf"{_AMOUNT_CURRENCY_PREFIX}\s*{_AMOUNT_NUMBER_CORE}(?:\s*{_AMOUNT_CURRENCY_SUFFIX})?"
             rf"|"
-            rf"\d+(?:\.\d{{2}})?\s*{_AMOUNT_CURRENCY_SUFFIX}"
-            rf")(?![A-Za-z0-9.])"
+            rf"{_AMOUNT_NUMBER_CORE}\s*{_AMOUNT_CURRENCY_SUFFIX}"
+            rf")"
         ),
     ),
-    ("amount_decimal", re.compile(r"(?<![A-Za-z0-9.])\d+\.\d{2}(?![A-Za-z0-9.])")),
+    ("amount_decimal", re.compile(rf"(?<![A-Za-z0-9.]){_AMOUNT_DECIMAL_CORE}")),
 )
+
+
+def _match_right_boundary_allows_trailing_punct(text: str, end: int) -> bool:
+    """允许右侧是空白、OCR 断点或单个尾随句读标点。"""
+
+    if end < 0 or end > len(text):
+        return False
+    if end == len(text):
+        return True
+    right_ch = text[end]
+    if right_ch.isspace() or right_ch == _OCR_INLINE_GAP_TOKEN:
+        return True
+    if end + len(OCR_BREAK) <= len(text) and text[end : end + len(OCR_BREAK)] == OCR_BREAK:
+        return True
+    if right_ch in _TRAILING_PUNCT_CHARS:
+        if right_ch in _DIRECT_DELIMITER_PUNCT_CHARS:
+            return True
+        if end + 1 == len(text):
+            return True
+        next_ch = text[end + 1]
+        if next_ch.isspace() or next_ch == _OCR_INLINE_GAP_TOKEN:
+            return True
+        if end + 1 + len(OCR_BREAK) <= len(text) and text[end + 1 : end + 1 + len(OCR_BREAK)] == OCR_BREAK:
+            return True
+        return False
+    if right_ch.isdigit() or (right_ch.isascii() and (right_ch.isalpha() or right_ch in "._-")):
+        return False
+    return True
 
 
 def _time_match_adjacent_ok(text: str, start: int, end: int) -> bool:
@@ -161,40 +192,19 @@ def _time_match_adjacent_ok(text: str, start: int, end: int) -> bool:
             return False
         else:
             pass
-    if end < len(text):
+    if not _match_right_boundary_allows_trailing_punct(text, end):
         right_ch = text[end]
-        if right_ch.isspace() or right_ch == _OCR_INLINE_GAP_TOKEN:
-            pass
-        elif end + len(OCR_BREAK) <= len(text) and text[end : end + len(OCR_BREAK)] == OCR_BREAK:
-            pass
-        elif right_ch.isdigit() or (right_ch.isascii() and (right_ch.isalpha() or right_ch in "._-")):
+        if right_ch.isdigit() or (right_ch.isascii() and (right_ch.isalpha() or right_ch in "._-")):
             return False
-        else:
-            pass
     return True
 
 
 def _email_match_right_boundary_ok(text: str, end: int) -> bool:
     """校验邮箱右边界，允许句末标点落在匹配之外。"""
 
-    if end < 0 or end > len(text):
-        return False
-    if end == len(text):
+    if _match_right_boundary_allows_trailing_punct(text, end):
         return True
     right_ch = text[end]
-    if right_ch.isspace() or right_ch == _OCR_INLINE_GAP_TOKEN:
-        return True
-    if end + len(OCR_BREAK) <= len(text) and text[end : end + len(OCR_BREAK)] == OCR_BREAK:
-        return True
-    if right_ch in _EMAIL_TRAILING_PUNCT_CHARS:
-        if end + 1 == len(text):
-            return True
-        next_ch = text[end + 1]
-        if next_ch.isspace() or next_ch == _OCR_INLINE_GAP_TOKEN:
-            return True
-        if end + 1 + len(OCR_BREAK) <= len(text) and text[end + 1 : end + 1 + len(OCR_BREAK)] == OCR_BREAK:
-            return True
-        return False
     if right_ch.isascii() and (right_ch.isalnum() or right_ch in "._%+-"):
         return False
     return True
@@ -497,16 +507,16 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
     # ── 2a: 先行匹配 time/date ──
     for source_kind, pattern in _TIME_PATTERNS:
         for match in pattern.finditer(text):
-            if source_kind in _TIME_KINDS_WITH_TOKEN_BOUNDARY and not _time_match_adjacent_ok(
-                text, match.start(), match.end()
-            ):
+            raw_start = match.start()
+            raw_end = match.end()
+            if source_kind in _TIME_KINDS_WITH_TOKEN_BOUNDARY and not _time_match_adjacent_ok(text, raw_start, raw_end):
                 continue
             value = match.group(0).strip()
             if not value:
                 continue
-            if _overlaps_any(match.start(), match.end(), excluded_spans):
+            if _overlaps_any(raw_start, raw_end, excluded_spans):
                 continue
-            _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+            _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
@@ -514,8 +524,8 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     role=ClueRole.VALUE,
                     attr_type=PIIAttributeType.TIME,
                     strength=ClaimStrength.HARD,
-                    start=match.start(),
-                    end=match.end(),
+                    start=raw_start,
+                    end=raw_end,
                     text=value,
                     unit_start=_us,
                     unit_last=_ue,
@@ -523,17 +533,21 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     source_metadata={"hard_source": ["regex"], "placeholder": ["<time>"]},
                 )
             )
-            excluded_spans.append((match.start(), match.end()))
+            excluded_spans.append((raw_start, raw_end))
 
     # ── 2b: 先行匹配金额，避免金额小数被拆成通用片段。 ──
     for source_kind, pattern in _AMOUNT_PATTERNS:
         for match in pattern.finditer(text):
+            raw_start = match.start()
+            raw_end = match.end()
             value = match.group(0).strip()
             if not value:
                 continue
-            if _overlaps_any(match.start(), match.end(), excluded_spans):
+            if not _match_right_boundary_allows_trailing_punct(text, raw_end):
                 continue
-            _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+            if _overlaps_any(raw_start, raw_end, excluded_spans):
+                continue
+            _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
@@ -541,8 +555,8 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     role=ClueRole.VALUE,
                     attr_type=PIIAttributeType.AMOUNT,
                     strength=ClaimStrength.HARD,
-                    start=match.start(),
-                    end=match.end(),
+                    start=raw_start,
+                    end=raw_end,
                     text=value,
                     unit_start=_us,
                     unit_last=_ue,
@@ -550,7 +564,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     source_metadata={"hard_source": ["regex"], "placeholder": ["<amount>"]},
                 )
             )
-            excluded_spans.append((match.start(), match.end()))
+            excluded_spans.append((raw_start, raw_end))
 
     # ── 2c: 先提取字母数字混合片段，避免其内部数字被提前拆走。 ──
     for match in _ALNUM_FRAGMENT_PATTERN.finditer(text):

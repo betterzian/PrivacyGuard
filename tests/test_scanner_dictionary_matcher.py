@@ -856,6 +856,42 @@ def test_hard_pattern_scan_matches_md_clock_without_inner_clock_duplicate():
     assert not any(clue.source_kind == "time_clock" for clue in time_clues)
 
 
+@pytest.mark.parametrize(
+    ("text", "expected_value"),
+    [
+        ("arrival 03/13 16:50.", "03/13 16:50"),
+        ("arrival 03/13 16:50. Please confirm", "03/13 16:50"),
+        ("arrival 11:15, please join", "11:15"),
+    ],
+)
+def test_hard_pattern_scan_allows_trailing_punctuation_for_time(text: str, expected_value: str):
+    stream = build_prompt_stream(text)
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    time_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.TIME]
+    assert expected_value in time_values
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "arrival 03/13 16:50abc",
+        "arrival 03/13 16:50_foo",
+    ],
+)
+def test_hard_pattern_scan_rejects_time_when_ascii_token_continues_on_right(text: str):
+    stream = build_prompt_stream(text)
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert not any(clue.attr_type == PIIAttributeType.TIME for clue in clues)
+
+
 def test_hard_pattern_scan_does_not_match_standalone_md():
     stream = build_prompt_stream("arrival 03/13 only")
     clues = scanner_module._scan_hard_patterns(
@@ -881,6 +917,45 @@ def test_hard_pattern_scan_matches_amount_before_generic_fragments():
     assert not any(
         clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}
         and clue.text in {"88", "532.00", "12", "181.00"}
+        for clue in clues
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_amount"),
+    [
+        ("amount $581.00.", "$581.00"),
+        ("amount $2,227.00.", "$2,227.00"),
+        ("amount $2,227.00. Thanks", "$2,227.00"),
+        ("amount USD 2,227.00.", "USD 2,227.00"),
+        ("amount 2,227.00 USD.", "2,227.00 USD"),
+    ],
+)
+def test_hard_pattern_scan_matches_amount_with_thousands_and_trailing_punctuation(
+    text: str,
+    expected_amount: str,
+):
+    stream = build_prompt_stream(text)
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    amount_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.AMOUNT]
+    assert expected_amount in amount_values
+
+
+def test_hard_pattern_scan_does_not_split_amount_with_thousands_into_fragments():
+    stream = build_prompt_stream("amount $2,227.00.")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [clue.text for clue in clues if clue.attr_type == PIIAttributeType.AMOUNT] == ["$2,227.00"]
+    assert not any(
+        clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}
+        and clue.text in {"2", "227.00", "2,227.00"}
         for clue in clues
     )
 
