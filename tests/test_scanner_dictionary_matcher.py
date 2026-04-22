@@ -187,6 +187,48 @@ def test_hard_pattern_scan_keeps_plain_email_boundary_behavior():
     ]
 
 
+@pytest.mark.parametrize(
+    "raw_text",
+    [
+        "邮箱 foo_xyz-xyz.xyz@gmail.com",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com.",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com. I am",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com, thanks",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com)",
+    ],
+)
+def test_hard_pattern_scan_accepts_email_with_internal_symbols_and_trailing_punctuation(raw_text: str):
+    stream = build_prompt_stream(raw_text)
+
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [(clue.source_kind, clue.text, clue.attr_type) for clue in clues] == [
+        ("regex_email", "foo_xyz-xyz.xyz@gmail.com", PIIAttributeType.EMAIL),
+    ]
+
+
+@pytest.mark.parametrize(
+    "raw_text",
+    [
+        "邮箱 foo_xyz-xyz.xyz@gmail.comabc",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com_xyz",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com-foo",
+    ],
+)
+def test_hard_pattern_scan_rejects_email_when_ascii_token_continues_on_right(raw_text: str):
+    stream = build_prompt_stream(raw_text)
+
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert not any(clue.attr_type == PIIAttributeType.EMAIL for clue in clues)
+
+
 
 def test_non_ascii_literal_still_matches_substring():
     entry = _entry(text="张三", matched_by="dictionary_local", metadata={"name_component": ["full"]})
