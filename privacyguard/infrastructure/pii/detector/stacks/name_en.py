@@ -5,6 +5,7 @@ from __future__ import annotations
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, Clue, ClueFamily, ClueRole, StreamUnit
 from privacyguard.infrastructure.pii.detector.stacks.common import (
+    _char_span_to_unit_span,
     _family_value_floor_char,
     _floor_clamped_label_seed_start_char,
     _starter_is_before_family_value_floor,
@@ -13,6 +14,11 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
 )
 from privacyguard.infrastructure.pii.detector.stacks.name_base import BaseNameStack, _peek_unit_first_char
 from privacyguard.infrastructure.pii.detector.stacks.base import StackRun
+from privacyguard.infrastructure.pii.detector.zh_name_rules import (
+    apply_negative_overlap_strength,
+    claim_strength_meets_protection,
+    collect_blocking_overlaps,
+)
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_name_joiner
 
 
@@ -33,34 +39,27 @@ class EnNameStack(BaseNameStack):
         self._name_pending_challenge: tuple[int, int] | None = None
         if self._starter_is_before_value_floor():
             return None
+        if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
+            return self._build_name_run(start=self.clue.start, end=self.clue.end)
         if self.clue.strength == ClaimStrength.HARD and self.clue.role not in {
             ClueRole.FAMILY_NAME,
             ClueRole.GIVEN_NAME,
         }:
             return self._build_direct_run()
-        if self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
-            return self._build_name_run(start=self.clue.start, end=self.clue.end)
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
             start = _floor_clamped_label_seed_start_char(self.context, ClueFamily.NAME, self.clue.end)
             if start >= len(self.context.stream.text):
                 return None
-            end = self._expand_seed_right(
+            end = self._expand_name_chain_right(
                 start=start,
                 end=start,
                 search_index=self.clue_index + 1,
                 ignore_negative=True,
             )
             return self._build_name_run(start=start, end=end)
-        if self.clue.role == ClueRole.FAMILY_NAME:
-            end = self._expand_seed_right(
-                start=self.clue.start,
-                end=self.clue.end,
-                search_index=self.clue_index + 1,
-            )
-            return self._build_name_run(start=self.clue.start, end=end)
-        if self.clue.role == ClueRole.GIVEN_NAME:
-            start = self._extend_given_left_en(self.clue.start)
-            end = self._extend_given_chain_right_en(
+        if self.clue.role in {ClueRole.GIVEN_NAME, ClueRole.FAMILY_NAME}:
+            start = self._extend_name_left_en(self.clue.start)
+            end = self._expand_name_chain_right(
                 start=start,
                 end=self.clue.end,
                 search_index=self.clue_index + 1,
@@ -68,7 +67,10 @@ class EnNameStack(BaseNameStack):
             return self._build_name_run(start=start, end=end)
         return None
 
-    def _expand_seed_right(
+    def _should_skip_commit_gate(self) -> bool:
+        return False
+
+    def _expand_name_chain_right(
         self,
         *,
         start: int,
@@ -118,19 +120,9 @@ class EnNameStack(BaseNameStack):
             component_index, component = next_component
             cursor = component.end
             next_index = component_index + 1
+            continue
 
-            if component.role == ClueRole.FAMILY_NAME:
-                continue
-            if component.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}:
-                return cursor
-            return self._extend_given_chain_right_en(
-                start=start,
-                end=cursor,
-                search_index=next_index,
-                ignore_negative=ignore_negative,
-            )
-
-    def _extend_given_left_en(self, start: int) -> int:
+    def _extend_name_left_en(self, start: int) -> int:
         cursor = start
         floor_char = self._value_floor_char()
         while True:
@@ -143,40 +135,6 @@ class EnNameStack(BaseNameStack):
             if self._span_has_blocker(piece_end, cursor):
                 return cursor
             cursor = piece_start
-
-    def _extend_given_chain_right_en(
-        self,
-        start: int,
-        end: int,
-        search_index: int,
-        *,
-        ignore_negative: bool = False,
-    ) -> int:
-        cursor = end
-        next_index = search_index
-        while True:
-            if self._has_active_stop_overlap(cursor, ignore_negative=ignore_negative):
-                return cursor
-            next_component = self._find_next_component_clue(cursor, next_index)
-            next_blocker = self._find_next_right_blocker(
-                cursor,
-                next_index,
-                ignore_negative=ignore_negative,
-            )
-            next_negative_start = self._next_negative_start_char(cursor, ignore_negative=ignore_negative)
-            if next_component is None:
-                return cursor
-            component_index, component = next_component
-            if not self._is_en_name_component_clue(component):
-                return cursor
-            if next_blocker is not None and next_blocker[1].start < component.start:
-                return cursor
-            if next_negative_start is not None and next_negative_start < component.start:
-                return cursor
-            if not self._gap_allows_name_piece_en(cursor, component.start):
-                return cursor
-            cursor = component.end
-            next_index = component_index + 1
 
     def _scan_plain_right(self, *, start: int, cursor: int, upper: int) -> int:
         if upper <= cursor:
@@ -317,6 +275,8 @@ class EnNameStack(BaseNameStack):
         return clue.attr_type == PIIAttributeType.NAME and clue.role in {
             ClueRole.GIVEN_NAME,
             ClueRole.FAMILY_NAME,
+            ClueRole.FULL_NAME,
+            ClueRole.ALIAS,
         }
 
     def _is_capitalized_ascii_name_unit(self, unit: StreamUnit) -> bool:
@@ -333,3 +293,55 @@ class EnNameStack(BaseNameStack):
             return False
         values = clue.source_metadata.get("control_kind")
         return bool(values) and values[0] == "copula_en"
+
+    def _should_commit_candidate(
+        self,
+        *,
+        start: int,
+        end: int,
+        candidate_unit_start: int,
+        candidate_unit_last: int,
+        candidate_text: str,
+        name_clues: list[tuple[int, Clue]],
+        has_negative_overlap: bool,
+    ) -> bool:
+        del candidate_unit_start, candidate_unit_last, has_negative_overlap
+        if not candidate_text:
+            return False
+        current_strength = self._resolve_claim_strength(name_clues=name_clues)
+        overlaps = collect_blocking_overlaps(
+            candidate_start=start,
+            candidate_end=end,
+            candidate_raw_text=candidate_text,
+            negative_clues=self.context.negative_clues,
+            other_clues=tuple(
+                clue
+                for clue in self.context.clues
+                if clue.attr_type is not None
+                and (
+                    clue.attr_type != PIIAttributeType.NAME
+                    or clue.role in {ClueRole.LABEL, ClueRole.START}
+                )
+            ),
+        )
+        final_strength = apply_negative_overlap_strength(overlaps, effective_strength=current_strength)
+        if final_strength is None or not claim_strength_meets_protection(final_strength, self.context.protection_level):
+            return False
+        if name_clues:
+            return True
+        return self._capitalized_body_token_count(start, end) >= 2
+
+    def _capitalized_body_token_count(self, start: int, end: int) -> int:
+        if end <= start or not self.context.stream.units or not self.context.stream.char_to_unit:
+            return 0
+        unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
+        count = 0
+        for ui in range(unit_start, unit_last + 1):
+            unit = self.context.stream.units[ui]
+            if unit.kind == "space":
+                continue
+            if unit.kind == "ascii_word" and self._is_capitalized_ascii_name_unit(unit):
+                count += 1
+                continue
+            return 0
+        return count

@@ -67,6 +67,9 @@ def _resolve_address_stack_locale(clue: Clue, clue_index: int, context: StackCon
         return locale_from_text(stream.text[clue.start:clue.end])
 
     if clue.role in {ClueRole.LABEL, ClueRole.START}:
+        seed_locale = (clue.source_metadata.get("seed_locale") or [None])[0]
+        if seed_locale in {"zh", "en"}:
+            return seed_locale
         address_start = _floor_clamped_label_seed_start_char(context, ClueFamily.ADDRESS, clue.end)
         start_unit = _unit_index_at_or_after(stream, address_start)
         return _label_start_route_locale(
@@ -97,6 +100,9 @@ def _resolve_generic_stack_locale(
         return locale_from_text(stream.text[clue.start:clue.end])
 
     if clue.role in {ClueRole.LABEL, ClueRole.START}:
+        seed_locale = (clue.source_metadata.get("seed_locale") or [None])[0]
+        if seed_locale in {"zh", "en"}:
+            return seed_locale
         family = _semantic_family_for_attr_type(attr_type)
         value_start = _floor_clamped_label_seed_start_char(context, family, clue.end)
         sample = _sample_probe_text(context, start=value_start, max_units=6)

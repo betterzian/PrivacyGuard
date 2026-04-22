@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
@@ -292,55 +292,106 @@ class StackContext:
     recent_inspire_anchor: InspireEntry | None = None
     inspire_boosted_clue_ids: set[str] = field(default_factory=set)
 
-    def has_negative_cover(self, unit_start: int, unit_last: int) -> bool:
-        """判断给定 unit 区间是否存在任意 negative 覆盖。"""
+    def _bucket_matches_negative_scopes(
+        self,
+        bucket_scopes: Sequence[str],
+        scopes: Sequence[str] | None,
+    ) -> bool:
+        """判断 bucket 上记录的 negative scope 是否命中查询集合。"""
+        if not bucket_scopes:
+            return False
+        if scopes is None:
+            return True
+        scope_set = {str(scope) for scope in scopes if str(scope)}
+        if not scope_set:
+            return False
+        return any(scope in scope_set for scope in bucket_scopes)
+
+    def has_negative_cover(
+        self,
+        unit_start: int,
+        unit_last: int,
+        scopes: Sequence[str] | None = None,
+    ) -> bool:
+        """判断给定 unit 区间是否存在指定 scope 的 negative 覆盖。"""
         if not self.unit_index or unit_last < unit_start:
             return False
         start = max(0, unit_start)
         end = min(unit_last, len(self.unit_index) - 1)
-        return any(self.unit_index[ui].negative_cover for ui in range(start, end + 1))
+        return any(
+            self._bucket_matches_negative_scopes(self.unit_index[ui].negative_cover_scopes, scopes)
+            for ui in range(start, end + 1)
+        )
 
-    def has_negative_start(self, unit_start: int, unit_last: int) -> bool:
-        """判断给定 unit 区间是否存在 negative 起点。"""
+    def has_negative_start(
+        self,
+        unit_start: int,
+        unit_last: int,
+        scopes: Sequence[str] | None = None,
+    ) -> bool:
+        """判断给定 unit 区间是否存在指定 scope 的 negative 起点。"""
         if not self.unit_index or unit_last < unit_start:
             return False
         start = max(0, unit_start)
         end = min(unit_last, len(self.unit_index) - 1)
-        return any(self.unit_index[ui].negative_start for ui in range(start, end + 1))
+        return any(
+            self._bucket_matches_negative_scopes(self.unit_index[ui].negative_start_scopes, scopes)
+            for ui in range(start, end + 1)
+        )
 
-    def is_negative_fully_covered(self, unit_start: int, unit_last: int) -> bool:
-        """判断给定 unit 区间是否被 negative 完整覆盖。"""
+    def is_negative_fully_covered(
+        self,
+        unit_start: int,
+        unit_last: int,
+        scopes: Sequence[str] | None = None,
+    ) -> bool:
+        """判断给定 unit 区间是否被指定 scope 的 negative 完整覆盖。"""
         if not self.unit_index or unit_last < unit_start:
             return False
         start = max(0, unit_start)
         end = min(unit_last, len(self.unit_index) - 1)
-        return all(self.unit_index[ui].negative_cover for ui in range(start, end + 1))
+        return all(
+            self._bucket_matches_negative_scopes(self.unit_index[ui].negative_cover_scopes, scopes)
+            for ui in range(start, end + 1)
+        )
 
-    def next_negative_start_char(self, char_index: int) -> int | None:
-        """返回当前位置右侧最近的 negative 起点 char，下游可将其作为边界。"""
+    def next_negative_start_char(
+        self,
+        char_index: int,
+        scopes: Sequence[str] | None = None,
+    ) -> int | None:
+        """返回当前位置右侧最近的指定 scope negative 起点 char。"""
         unit_index = self._unit_index_at_or_after(char_index)
         for ui in range(unit_index, len(self.unit_index)):
-            if self.unit_index[ui].negative_start:
+            if self._bucket_matches_negative_scopes(self.unit_index[ui].negative_start_scopes, scopes):
                 return self.stream.units[ui].char_start
         return None
 
-    def previous_negative_end_char(self, char_index: int) -> int | None:
-        """返回左侧最近一个 negative 覆盖 unit 的结束位置。"""
+    def previous_negative_end_char(
+        self,
+        char_index: int,
+        scopes: Sequence[str] | None = None,
+    ) -> int | None:
+        """返回左侧最近一个指定 scope negative 覆盖 unit 的结束位置。"""
         before_unit = self._unit_index_at_or_after(char_index)
         for ui in range(min(before_unit - 1, len(self.unit_index) - 1), -1, -1):
-            if self.unit_index[ui].negative_cover:
+            if self._bucket_matches_negative_scopes(self.unit_index[ui].negative_cover_scopes, scopes):
                 return self.stream.units[ui].char_end
         return None
 
-    def has_negative_cover_left_of_char(self, char_index: int) -> bool:
-        """判断 cursor 左侧紧邻位置是否处于 negative 覆盖内部。"""
+    def has_negative_cover_left_of_char(
+        self,
+        char_index: int,
+        scopes: Sequence[str] | None = None,
+    ) -> bool:
+        """判断 cursor 左侧紧邻位置是否处于指定 scope 的 negative 覆盖内部。"""
         if char_index <= 0 or not self.stream.char_to_unit or not self.unit_index:
             return False
         left_char = min(char_index - 1, len(self.stream.char_to_unit) - 1)
         unit_index = self.stream.char_to_unit[left_char]
         if unit_index < 0 or unit_index >= len(self.unit_index):
             return False
-        return self.unit_index[unit_index].negative_cover
+        return self._bucket_matches_negative_scopes(self.unit_index[unit_index].negative_cover_scopes, scopes)
 
     def _unit_index_at_or_after(self, char_index: int) -> int:
         if not self.stream.char_to_unit or char_index >= len(self.stream.char_to_unit):

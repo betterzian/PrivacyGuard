@@ -1207,3 +1207,35 @@ def test_en_given_left_expansion_respects_name_value_floor():
     assert run.candidate.text == "James Bell"
     assert run.candidate.start == text.index("James")
 
+
+def test_en_family_path_absorbs_left_capitalized_token_symmetrically():
+    text = "Harper Collins"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 7, 14, "Collins", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+
+    run = _run_name_stack(
+        text,
+        0,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    ).run()
+
+    assert run is not None
+    assert run.candidate.text == "Harper Collins"
+
+
+def test_en_label_seed_single_capitalized_token_without_name_clue_is_rejected():
+    text = "Name: Avery"
+    clues = (
+        _clue("label-1", ClueRole.LABEL, 0, 4, "Name", source_kind="context_name_field"),
+    )
+
+    assert _name_texts(
+        text,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    ) == []
+

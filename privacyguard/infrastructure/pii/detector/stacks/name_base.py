@@ -82,7 +82,7 @@ class BaseNameStack(BaseStack):
         has_negative_overlap = self.context.has_negative_cover(unit_start, unit_last)
         candidate.claim_strength = self._resolve_claim_strength(name_clues=name_clues)
 
-        if self.clue.role not in {ClueRole.FULL_NAME, ClueRole.ALIAS} and not self._should_commit_candidate(
+        if not self._should_skip_commit_gate() and not self._should_commit_candidate(
             start=start,
             end=end,
             candidate_unit_start=unit_start,
@@ -124,6 +124,10 @@ class BaseNameStack(BaseStack):
                         challenge_kind="name_same_start_blocker",
                     )
         return run
+
+    def _should_skip_commit_gate(self) -> bool:
+        """默认 whole-name / alias 走直接提交；英文路径可覆写收紧。"""
+        return self.clue.role in {ClueRole.FULL_NAME, ClueRole.ALIAS}
 
     def _effective_hint(self, start: int, end: int) -> NameComponentHint:
         base = self._component_hint()

@@ -43,6 +43,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueRole,
     DictionaryEntry,
     InspireEntry,
+    NEGATIVE_SCOPES,
     StreamInput,
     UnitBucket,
 )
@@ -235,7 +236,7 @@ _DETERMINER_PATTERN = re.compile(
 )
 
 _LABEL_FIELD_SEPARATOR_CHARS = ":：-—–=|"
-_LABEL_DIRECT_SEED_RIGHT_UNIT_KINDS = frozenset({"space", "inline_gap", "ocr_break"})
+_EN_LABEL_DIRECT_SEPARATOR_CHARS = frozenset(":：-—–")
 # 标签边界：匹配到的 label 前方或后方至少有一侧满足此集合中的 unit kind，
 # 或处于文本起止位置。防止自然语句中嵌入的关键词被误识别为标签。
 _LABEL_BOUNDARY_UNIT_KINDS = frozenset({"punct", "inline_gap", "ocr_break"})
@@ -262,6 +263,13 @@ _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"No\.\d+"),
     re.compile(r"\d+(?:kg|cm|mm|m|km|g|ml|px|pt|em|rem|dp)\b"),
 )
+_NEGATIVE_SCOPE_BY_SOURCE_KIND: dict[str, str] = {
+    "negative_name_word": "name",
+    "negative_address_word": "address",
+    "negative_org_word": "organization",
+    "negative_ui_word": "ui",
+    "negative_numeric_context": "generic",
+}
 
 _ASCII_KEYWORD_CHARS_RE = re.compile(r"[A-Za-z0-9 #.'-]+")
 _ASCII_LITERAL_CHARS_RE = re.compile(r"[A-Za-z0-9 .,'@_+\-#/&()]+")
@@ -401,7 +409,11 @@ def build_clue_bundle(
 
     # ── 事件扫描线裁决 ──
     all_clues = [*structured_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_only_spans), *soft_clues]
-    resolved_clues, inspire_entries = _sweep_resolve(stream, all_clues)
+    resolved_clues, inspire_entries = _sweep_resolve(
+        stream,
+        all_clues,
+        locale_profile=locale_profile,
+    )
     ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, _family_order(item.family), item.end)))
     return ClueBundle(
         all_clues=ordered_clues,
@@ -1501,6 +1513,7 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                 unit_start=_us,
                 unit_last=_ue,
                 source_kind=str(match.payload),
+                source_metadata={"negative_scope": [_negative_scope_for_source_kind(str(match.payload))]},
             )
         )
     # 数字非隐私上下文模式（年份、百分比、序号、计量单位等）。
@@ -1521,6 +1534,7 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                     unit_start=_us,
                     unit_last=_ue,
                     source_kind="negative_numeric_context",
+                    source_metadata={"negative_scope": ["generic"]},
                 )
             )
     return clues
@@ -1538,6 +1552,11 @@ def _negative_word_matcher() -> AhoMatcher:
             for word, source_kind in _iter_negative_word_specs()
         )
     )
+
+
+def _negative_scope_for_source_kind(source_kind: str) -> str:
+    """把 negative source_kind 映射到稳定的运行时 scope。"""
+    return _NEGATIVE_SCOPE_BY_SOURCE_KIND.get(str(source_kind or ""), "generic")
 
 
 def _iter_negative_word_specs() -> tuple[tuple[str, str], ...]:
@@ -1797,12 +1816,19 @@ def _seed_metadata(
         unit_index=unit_last + 1,
         is_left=False,
     )
+    seed_locale = _resolve_seed_locale(
+        stream,
+        raw_start=raw_start,
+        raw_end=raw_end,
+        locale_profile=str(stream.metadata.get("locale_profile", "mixed")),
+    )
     metadata["seed_is_left_edge"] = ["1" if seed_is_left_edge else "0"]
     metadata["seed_is_right_edge"] = ["1" if seed_is_right_edge else "0"]
     metadata["seed_has_connector_after"] = ["1" if seed_has_connector_after else "0"]
     metadata["seed_surrounded_by_boundary"] = ["1" if seed_surrounded else "0"]
     metadata["seed_segment_ratio"] = [f"{seed_segment_ratio:.4f}"]
     metadata["seed_kind"] = [seed_kind]
+    metadata["seed_locale"] = [seed_locale]
     return metadata
 
 
@@ -1819,6 +1845,22 @@ def _unit_flag(unit) -> str | None:
     return None
 
 
+def _negative_scopes_for_clue(clue: Clue) -> tuple[str, ...]:
+    """读取 negative clue 的 scope；缺失时做兼容兜底。"""
+    values = tuple(
+        scope
+        for scope in (clue.source_metadata.get("negative_scope") or ())
+        if scope in NEGATIVE_SCOPES
+    )
+    if values:
+        return values
+    inferred = _NEGATIVE_SCOPE_BY_SOURCE_KIND.get(clue.source_kind)
+    if inferred is not None:
+        return (inferred,)
+    # 手写测试 clue 可能没有 source_kind / metadata，默认保留旧“全局 negative”语义。
+    return NEGATIVE_SCOPES
+
+
 def _build_unit_index(
     stream: StreamInput,
     clues: tuple[Clue, ...],
@@ -1828,21 +1870,21 @@ def _build_unit_index(
     """按 survivor clue 与 negative clue 构建 unit bucket。"""
     unit_count = len(stream.units)
     builders = [
-        {
-            "flag": _unit_flag(unit),
-            "structured": [],
-            "license_plate": [],
-            "address": [],
+            {
+                "flag": _unit_flag(unit),
+                "structured": [],
+                "license_plate": [],
+                "address": [],
             "name": [],
             "organization": [],
-            "covering": [],
-            "inspire": [],
-            "break_start": False,
-            "negative_cover": False,
-            "negative_start": False,
-        }
-        for unit in stream.units
-    ]
+                "covering": [],
+                "inspire": [],
+                "break_start": False,
+                "negative_cover_scopes": set(),
+                "negative_start_scopes": set(),
+            }
+            for unit in stream.units
+        ]
 
     family_key = {
         ClueFamily.STRUCTURED: "structured",
@@ -1872,9 +1914,10 @@ def _build_unit_index(
         end = min(unit_count - 1, clue.unit_last)
         if start >= unit_count:
             continue
-        builders[start]["negative_start"] = True
+        scopes = _negative_scopes_for_clue(clue)
+        builders[start]["negative_start_scopes"].update(scopes)
         for ui in range(start, end + 1):
-            builders[ui]["negative_cover"] = True
+            builders[ui]["negative_cover_scopes"].update(scopes)
 
     buckets: list[UnitBucket] = []
     for builder in builders:
@@ -1898,8 +1941,8 @@ def _build_unit_index(
                 inspire_entries=tuple(builder["inspire"]),
                 can_start_parser=can_start_parser,
                 break_start=bool(builder["break_start"]),
-                negative_cover=bool(builder["negative_cover"]),
-                negative_start=bool(builder["negative_start"]),
+                negative_cover_scopes=tuple(sorted(builder["negative_cover_scopes"])),
+                negative_start_scopes=tuple(sorted(builder["negative_start_scopes"])),
             )
         )
     return tuple(buckets)
@@ -1932,14 +1975,101 @@ def _has_label_boundary(stream: StreamInput, raw_start: int, raw_end: int) -> bo
     return False
 
 
-def _has_label_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bool:
-    """判断非结构化 label 右侧是否满足 direct seed 条件。"""
+def _has_cjk_char(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in str(text or ""))
+
+
+def _is_non_empty_seed_probe_unit(unit) -> bool:
+    if unit.kind in {"space", "inline_gap", "ocr_break", "punct"}:
+        return False
+    return bool(str(unit.text or "").strip())
+
+
+def _resolve_seed_locale(
+    stream: StreamInput,
+    *,
+    raw_start: int,
+    raw_end: int,
+    locale_profile: str,
+) -> str:
+    """按 locale_profile 与邻近脚本，产出 LABEL/START 的 seed_locale。"""
+    profile = str(locale_profile or "mixed").strip().lower()
+    if profile == "zh_cn":
+        return "zh"
+    if profile == "en_us":
+        return "en"
+    if not stream.units or not stream.char_to_unit or raw_start >= raw_end:
+        return "zh" if _has_cjk_char(stream.text[raw_start:raw_end]) else "en"
+
+    unit_start, unit_last = _char_span_to_unit_span(stream, raw_start, raw_end)
+    saw_probe_unit = False
+    left_probe = unit_start - 1
+    while left_probe >= 0:
+        if _is_non_empty_seed_probe_unit(stream.units[left_probe]):
+            saw_probe_unit = True
+            if _has_cjk_char(stream.units[left_probe].text):
+                return "zh"
+            break
+        left_probe -= 1
+
+    right_probe = unit_last + 1
+    while right_probe < len(stream.units):
+        if _is_non_empty_seed_probe_unit(stream.units[right_probe]):
+            saw_probe_unit = True
+            if _has_cjk_char(stream.units[right_probe].text):
+                return "zh"
+            break
+        right_probe += 1
+
+    if saw_probe_unit:
+        return "en"
+    return "zh" if _has_cjk_char(stream.text[raw_start:raw_end]) else "en"
+
+
+def _zh_label_has_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bool:
     if not stream.units or clue.unit_last + 1 >= len(stream.units):
         return False
     next_unit = stream.units[clue.unit_last + 1]
-    if next_unit.kind in _LABEL_DIRECT_SEED_RIGHT_UNIT_KINDS:
+    if next_unit.kind in {"space", "inline_gap", "ocr_break"}:
         return True
     return next_unit.kind == "punct" and next_unit.text in _LABEL_FIELD_SEPARATOR_CHARS
+
+
+def _en_label_has_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bool:
+    """英文 label direct 仅接受明确字段分隔，不把单空格当 direct。"""
+    if not stream.units or clue.unit_last + 1 >= len(stream.units):
+        return False
+    next_units = stream.units[clue.unit_last + 1 : clue.unit_last + 3]
+    if len(next_units) >= 2 and all(unit.kind == "space" for unit in next_units[:2]):
+        return True
+    for unit in next_units:
+        if unit.kind in {"inline_gap", "ocr_break"}:
+            return True
+        if unit.kind == "punct" and unit.text in _EN_LABEL_DIRECT_SEPARATOR_CHARS:
+            return True
+    return False
+
+
+def _has_label_direct_seed_break_after(
+    stream: StreamInput,
+    clue: Clue,
+    *,
+    locale_profile: str,
+) -> bool:
+    """判断非结构化 label 右侧是否满足 direct seed 条件。"""
+    if clue.family not in {ClueFamily.NAME, ClueFamily.ORGANIZATION}:
+        return _zh_label_has_direct_seed_break_after(stream, clue)
+    seed_locale = (clue.source_metadata.get("seed_locale") or [None])[0]
+    if seed_locale not in {"zh", "en"}:
+        seed_locale = _resolve_seed_locale(
+            stream,
+            raw_start=clue.start,
+            raw_end=clue.end,
+            locale_profile=locale_profile,
+        )
+    if seed_locale == "zh":
+        return _zh_label_has_direct_seed_break_after(stream, clue)
+    return _en_label_has_direct_seed_break_after(stream, clue)
 
 
 def _build_inspire_entry(clue: Clue) -> InspireEntry | None:
@@ -2644,7 +2774,12 @@ def _same_attr_overlap_winner(existing: Clue, incoming: Clue) -> str:
     return "incoming"
 
 
-def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], list[InspireEntry]]:
+def _sweep_resolve(
+    stream: StreamInput,
+    clues: list[Clue],
+    *,
+    locale_profile: str = "mixed",
+) -> tuple[list[Clue], list[InspireEntry]]:
     """按“跨属性遮蔽 + 同属性裁决”两层规则收敛 clue。"""
     if not clues:
         return [], []
@@ -2652,7 +2787,12 @@ def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], 
     deduped = _dedupe_clues(clues)
 
     # ── 轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块 + label direct/inspire 分流 ──
-    survivors, seed_groups, inspire_entries = _sweep_pass1(stream, deduped, unit_len)
+    survivors, seed_groups, inspire_entries = _sweep_pass1(
+        stream,
+        deduped,
+        unit_len,
+        locale_profile=locale_profile,
+    )
 
     # ── Seed 裁决 ──
     seed_winner_ids: set[str] = set()
@@ -2706,6 +2846,8 @@ def _sweep_pass1(
     stream: StreamInput,
     clues: list[Clue],
     unit_len: int,
+    *,
+    locale_profile: str = "mixed",
 ) -> tuple[list[Clue], list[list[Clue]], list[InspireEntry]]:
     """扫描轮 1（unit 轴）：STRUCTURED / BREAK 遮蔽 + seed 连通块收集 + LABEL direct/inspire 分流。
 
@@ -2765,7 +2907,11 @@ def _sweep_pass1(
                 elif clue.family == ClueFamily.STRUCTURED:
                     if not _has_label_boundary(stream, clue.start, clue.end):
                         continue
-                elif not _has_label_direct_seed_break_after(stream, clue):
+                elif not _has_label_direct_seed_break_after(
+                    stream,
+                    clue,
+                    locale_profile=locale_profile,
+                ):
                     inspire = _build_inspire_entry(clue)
                     if inspire is not None:
                         inspire_entries.append(inspire)
@@ -2865,3 +3011,4 @@ def _clues_overlap(left: Clue, right: Clue) -> bool:
 def _overlaps_any(start: int, end: int, spans: Sequence[tuple[int, int]]) -> bool:
     return any(not (end <= left or start >= right) for left, right in spans)
 
+    stream.metadata["locale_profile"] = locale_profile

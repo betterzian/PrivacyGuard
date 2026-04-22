@@ -75,6 +75,8 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     _unit_char_start,
 )
 
+_ADDRESS_STRONG_NEGATIVE_SCOPES = ("address", "ui")
+
 
 @dataclass(slots=True)
 class BaseAddressStack(BaseStack):
@@ -415,7 +417,11 @@ class BaseAddressStack(BaseStack):
         if not _rightmost_component_key_overlaps_negative(
             ordered_components[-1],
             clues,
-            self.context.has_negative_cover,
+            lambda unit_start, unit_last: self.context.has_negative_cover(
+                unit_start,
+                unit_last,
+                scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
+            ),
         ):
             return
         base_evidence_count = max(0, state.evidence_count - len(state.components))
@@ -438,7 +444,15 @@ class BaseAddressStack(BaseStack):
         )
         while ordered:
             last = ordered[-1]
-            if not _rightmost_component_key_overlaps_negative(last, clues, self.context.has_negative_cover):
+            if not _rightmost_component_key_overlaps_negative(
+                last,
+                clues,
+                lambda unit_start, unit_last: self.context.has_negative_cover(
+                    unit_start,
+                    unit_last,
+                    scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
+                ),
+            ):
                 return ordered
             repaired = self._repair_rightmost_component_prefix(
                 prefix_components=ordered[:-1],
@@ -465,7 +479,11 @@ class BaseAddressStack(BaseStack):
             return None
         last_affected_index = -1
         for index, (_, clue) in enumerate(clue_entries):
-            if self.context.has_negative_cover(clue.unit_start, clue.unit_last):
+            if self.context.has_negative_cover(
+                clue.unit_start,
+                clue.unit_last,
+                scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
+            ):
                 last_affected_index = index
         if last_affected_index <= 0:
             return None
@@ -481,7 +499,11 @@ class BaseAddressStack(BaseStack):
             if _rightmost_component_key_overlaps_negative(
                 replay_state.components[-1],
                 clues,
-                self.context.has_negative_cover,
+                lambda unit_start, unit_last: self.context.has_negative_cover(
+                    unit_start,
+                    unit_last,
+                    scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
+                ),
             ):
                 continue
             return replay_state.components

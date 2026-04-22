@@ -8,6 +8,14 @@ from enum import Enum
 from privacyguard.domain.enums import PIIAttributeType, PIISourceType
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 
+NEGATIVE_SCOPES: tuple[str, ...] = (
+    "name",
+    "address",
+    "organization",
+    "ui",
+    "generic",
+)
+
 
 class ClaimStrength(str, Enum):
     HARD = "hard"
@@ -207,8 +215,8 @@ class UnitBucket:
     inspire_entries: tuple[int, ...] = ()
     can_start_parser: tuple[ClueFamily, ...] = ()
     break_start: bool = False
-    negative_cover: bool = False
-    negative_start: bool = False
+    negative_cover_scopes: tuple[str, ...] = ()
+    negative_start_scopes: tuple[str, ...] = ()
 
 
 def bucket_family_clues(bucket: UnitBucket, family: ClueFamily) -> tuple[int, ...]:

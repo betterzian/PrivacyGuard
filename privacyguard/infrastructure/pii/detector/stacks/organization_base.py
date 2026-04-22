@@ -28,6 +28,8 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_any_break, is_hard_break
 
+_ORG_SOFT_NEGATIVE_SCOPES = ("organization", "ui")
+
 
 @dataclass(slots=True)
 class BaseOrganizationStack(BaseStack):
@@ -46,7 +48,14 @@ class BaseOrganizationStack(BaseStack):
     def should_break_clue(self, subject, **kwargs) -> bool:
         del kwargs
         if isinstance(subject, Clue):
-            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}
+            if subject.role == ClueRole.BREAK:
+                return True
+            if subject.role in {ClueRole.LABEL, ClueRole.START}:
+                return subject.attr_type != PIIAttributeType.ORGANIZATION
+            return subject.strength == ClaimStrength.HARD and subject.attr_type not in {
+                None,
+                PIIAttributeType.ORGANIZATION,
+            }
         return False
 
     def shrink(self, run: StackRun, blocker_start: int, blocker_last: int) -> StackRun | None:
@@ -98,6 +107,9 @@ class BaseOrganizationStack(BaseStack):
         elif self.clue.role == ClueRole.VALUE:
             return self._build_value_seed_run(locale=locale)
         else:
+            return None
+        start, end = self._soft_trim_negative_edges(start=start, end=end, locale=locale)
+        if end <= start:
             return None
         matches = self._organization_clues_in_span(start, end)
         unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
@@ -177,7 +189,7 @@ class BaseOrganizationStack(BaseStack):
         return upper
 
     def _next_label_blocker_start(self, start: int) -> int | None:
-        blocker_start = start if self.context.has_negative_cover_left_of_char(start) else self.context.next_negative_start_char(start)
+        blocker_start = None
         for clue in self.context.clues:
             if clue.clue_id == self.clue.clue_id:
                 continue
@@ -190,13 +202,13 @@ class BaseOrganizationStack(BaseStack):
         return blocker_start
 
     def _is_label_right_blocker(self, clue: Clue) -> bool:
-        if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}:
+        if clue.role == ClueRole.BREAK:
             return True
-        if clue.strength == ClaimStrength.HARD:
+        if clue.role in {ClueRole.LABEL, ClueRole.START}:
+            return clue.attr_type != PIIAttributeType.ORGANIZATION
+        if clue.strength == ClaimStrength.HARD and clue.attr_type != PIIAttributeType.ORGANIZATION:
             return True
-        if clue.attr_type is None:
-            return False
-        return clue.attr_type != PIIAttributeType.ORGANIZATION
+        return False
 
     def _find_suffix_end_within_window(self, *, start: int, upper: int) -> int | None:
         if start >= upper or not self.context.stream.char_to_unit:
@@ -227,6 +239,9 @@ class BaseOrganizationStack(BaseStack):
         else:
             end = value_end
         start = value_start
+        start, end = self._soft_trim_negative_edges(start=start, end=end, locale=locale)
+        if end <= start:
+            return None
         matches = self._organization_clues_in_span(start, end)
         unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
         candidate = build_organization_candidate_from_value(
@@ -339,7 +354,48 @@ class BaseOrganizationStack(BaseStack):
             value_strength=value_strength,
             has_label=is_label_seed,
             max_clue_strength=_max_strength(suffix_strength, value_strength),
+            capitalized_body_tokens=_max_adjacent_capitalized_body_tokens(
+                self.context.stream,
+                start=start,
+                end=end,
+            ),
         )
+
+    def _soft_trim_negative_edges(self, *, start: int, end: int, locale: str) -> tuple[int, int]:
+        """普通 negative 只在组织候选两端做软裁边，不参与硬拒绝。"""
+        if end <= start or not self.context.stream.units:
+            return start, end
+        stream = self.context.stream
+        unit_start, unit_last = _char_span_to_unit_span(stream, start, end)
+        while unit_start <= unit_last and self.context.has_negative_cover(
+            unit_start,
+            unit_start,
+            scopes=_ORG_SOFT_NEGATIVE_SCOPES,
+        ):
+            if _organization_edge_unit_is_protected(
+                stream,
+                self.context.clues,
+                unit_start,
+                locale=locale,
+            ):
+                break
+            unit_start += 1
+        while unit_last >= unit_start and self.context.has_negative_cover(
+            unit_last,
+            unit_last,
+            scopes=_ORG_SOFT_NEGATIVE_SCOPES,
+        ):
+            if _organization_edge_unit_is_protected(
+                stream,
+                self.context.clues,
+                unit_last,
+                locale=locale,
+            ):
+                break
+            unit_last -= 1
+        if unit_last < unit_start:
+            return start, start
+        return (_unit_char_start(stream, unit_start), _unit_char_end(stream, unit_last))
 
 
 @dataclass(frozen=True, slots=True)
@@ -351,6 +407,7 @@ class _OrgEvidence:
     value_strength: ClaimStrength = ClaimStrength.WEAK
     has_label: bool = False
     max_clue_strength: ClaimStrength = ClaimStrength.WEAK
+    capitalized_body_tokens: int = 0
 
 
 def _max_strength(left: ClaimStrength, right: ClaimStrength) -> ClaimStrength:
@@ -376,7 +433,13 @@ def _meets_org_commit_threshold(
     3) value-only：HARD 在 STRONG/BALANCED 通过，SOFT 仅 STRONG 通过。
     """
     if evidence.has_label:
-        return True
+        if locale != "en":
+            return True
+        return (
+            evidence.has_value
+            or evidence.has_suffix
+            or evidence.capitalized_body_tokens >= 2
+        )
     if evidence.has_suffix and evidence.suffix_strength == ClaimStrength.HARD:
         return True
     if evidence.has_suffix and evidence.has_value:
@@ -406,9 +469,6 @@ def _left_expand_text_boundary(context, start: int, *, should_break) -> int:
     raw_text = context.stream.text
     clues = context.clues
     floor = 0
-    negative_floor = context.previous_negative_end_char(start)
-    if negative_floor is not None:
-        floor = max(floor, negative_floor)
     for clue in reversed(clues):
         if clue.end <= start:
             if should_break(clue):
@@ -516,6 +576,70 @@ def _organization_has_body_before_suffix(text: str) -> bool:
     if suffix_start < 0:
         return bool(clean_value(text))
     return bool(clean_value(text[:suffix_start]))
+
+
+def _organization_edge_unit_is_protected(
+    stream: StreamInput,
+    clues: tuple[Clue, ...],
+    unit_index: int,
+    *,
+    locale: str,
+) -> bool:
+    """负向仅作软裁边时，主体 token / capitalized token / suffix 不应被裁掉。"""
+    if unit_index < 0 or unit_index >= len(stream.units):
+        return False
+    unit = stream.units[unit_index]
+    if unit.kind == "space":
+        return False
+    if unit.kind == "ascii_word" and _is_capitalized_ascii_org_unit(unit.text):
+        return True
+    if _is_organization_count_unit(unit.kind, locale):
+        return True
+    unit_start = unit.char_start
+    unit_end = unit.char_end
+    return any(
+        clue.attr_type == PIIAttributeType.ORGANIZATION
+        and clue.role == ClueRole.SUFFIX
+        and clue.start < unit_end
+        and clue.end > unit_start
+        for clue in clues
+    )
+
+
+def _is_capitalized_ascii_org_unit(text: str) -> bool:
+    token = str(text or "").strip()
+    if not token:
+        return False
+    first_char = token[0]
+    return first_char.isascii() and first_char.isalpha() and first_char.isupper()
+
+
+def _max_adjacent_capitalized_body_tokens(
+    stream: StreamInput,
+    *,
+    start: int,
+    end: int,
+) -> int:
+    """统计候选内部最长的连续首字母大写 ASCII token 片段。"""
+    if end <= start or not stream.units or not stream.char_to_unit:
+        return 0
+    unit_start, unit_last = _char_span_to_unit_span(stream, start, end)
+    current = 0
+    best = 0
+    awaiting_next_token = False
+    for ui in range(unit_start, unit_last + 1):
+        unit = stream.units[ui]
+        if unit.kind == "space":
+            awaiting_next_token = current > 0
+            continue
+        if unit.kind == "ascii_word" and _is_capitalized_ascii_org_unit(unit.text):
+            current = current + 1 if current > 0 and awaiting_next_token else 1
+            best = max(best, current)
+            awaiting_next_token = False
+            continue
+        current = 0
+        awaiting_next_token = False
+    return best
 
 
 def _is_organization_candidate_usable(text: str, *, label_driven: bool) -> bool:

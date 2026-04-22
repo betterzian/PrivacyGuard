@@ -43,6 +43,7 @@ def _clue(
     start: int,
     end: int,
     text: str,
+    source_kind: str = "test",
     component_type: AddressComponentType | None = None,
     family: ClueFamily | None = None,
     unit_start: int = 0,
@@ -59,7 +60,7 @@ def _clue(
         start=start,
         end=end,
         text=text,
-        source_kind="test",
+        source_kind=source_kind,
         component_type=component_type,
         unit_start=unit_start,
         unit_last=unit_last,
@@ -336,6 +337,32 @@ def test_rightmost_negative_trims_subdistrict_tail_leaves_prefix():
     addr = next((c for c in candidates if c.attr_type.value == "address"), None)
     assert addr is not None
     assert addr.text == "长安街道"
+
+
+def test_name_scoped_negative_no_longer_triggers_address_tail_repair():
+    text = "收货地址：上海路88号"
+    clues = (
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("city", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=7, text="上海", component_type=AddressComponentType.CITY),
+        _clue("road", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=7, end=8, text="路", component_type=AddressComponentType.ROAD),
+        _clue("number", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=10, end=11, text="号", component_type=AddressComponentType.NUMBER),
+        _clue(
+            "neg-name",
+            role=ClueRole.NEGATIVE,
+            attr_type=None,
+            start=7,
+            end=8,
+            text="路",
+            family=ClueFamily.CONTROL,
+            source_kind="negative_name_word",
+        ),
+    )
+
+    candidates = _detect_candidates(text, clues)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+
+    assert addr is not None
+    assert addr.text == "上海路88号"
 
 
 # ---- POI 延迟提交测试 ----

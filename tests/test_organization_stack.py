@@ -346,7 +346,7 @@ def test_suffix_seed_caps_en_left_expansion():
     assert run.candidate.text == "Beta Gamma Delta Echo Ltd"
 
 
-def test_suffix_seed_left_expansion_stops_at_negative_boundary():
+def test_suffix_seed_soft_negative_no_longer_hard_trims_prefix():
     text = "路由科技公司"
     suffix = "公司"
     start = text.index(suffix)
@@ -373,7 +373,46 @@ def test_suffix_seed_left_expansion_stops_at_negative_boundary():
     run = _run_organization_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
 
     assert run is not None
-    assert run.candidate.text == "科技公司"
+    assert run.candidate.text == "路由科技公司"
+
+
+def test_en_label_seed_without_value_suffix_or_two_capitalized_tokens_is_rejected():
+    text = "company name: alpha"
+    label = "company name"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            len(label),
+            label,
+            source_kind="context_organization_field",
+        ),
+    )
+
+    run = _run_organization_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is None
+
+
+def test_en_label_seed_with_two_capitalized_tokens_commits_without_suffix():
+    text = "company name: Blue River"
+    label = "company name"
+    clues = (
+        _clue(
+            "label-1",
+            ClueRole.LABEL,
+            0,
+            len(label),
+            label,
+            source_kind="context_organization_field",
+        ),
+    )
+
+    run = _run_organization_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is not None
+    assert run.candidate.text == "Blue River"
 
 
 def test_suffix_only_candidate_is_rejected():

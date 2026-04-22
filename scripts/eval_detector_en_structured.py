@@ -133,11 +133,13 @@ def strip_pii_tags(text_with_tags: str) -> tuple[str, list[dict[str, Any]]]:
         prefix = text_with_tags[cursor : match.start()]
         plain_parts.append(prefix)
         plain_cursor += len(prefix)
-        entity_value = match.group(3)
-        entity_start = plain_cursor
-        entity_end = entity_start + len(entity_value)
+        raw_entity_value = match.group(3)
+        leading_ws_len = len(raw_entity_value) - len(raw_entity_value.lstrip())
+        entity_value = raw_entity_value.strip()
         plain_parts.append(entity_value)
-        plain_cursor = entity_end
+        entity_start = plain_cursor + leading_ws_len
+        entity_end = entity_start + len(entity_value)
+        plain_cursor += len(entity_value)
         entities.append(
             {
                 "occurrence_index": occurrence_index,
@@ -568,6 +570,92 @@ def summarize_sample_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def build_sample_entity_breakdown(
+    sample_rows: list[dict[str, Any]],
+    entity_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """生成样例级实体分析，便于直接查看每个样例的召回与碎片情况。"""
+
+    entity_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in entity_rows:
+        entity_groups[str(row["sample_id"])].append(row)
+
+    breakdown_rows: list[dict[str, Any]] = []
+    for sample_row in sample_rows:
+        sample_id = str(sample_row["sample_id"])
+        rows = sorted(
+            entity_groups.get(sample_id, []),
+            key=lambda row: (int(row["start"]), int(row["end"]), int(row["occurrence_index"])),
+        )
+        per_type_counter = Counter(row["entity_type"] for row in rows)
+        per_type_status: dict[str, dict[str, int]] = {}
+        for entity_type in sorted(per_type_counter):
+            type_rows = [row for row in rows if row["entity_type"] == entity_type]
+            status_counter = Counter(row["status"] for row in type_rows)
+            per_type_status[entity_type] = {
+                "count": len(type_rows),
+                "exact_complete": status_counter.get("exact_complete", 0),
+                "exact_fragment": status_counter.get("exact_fragment", 0),
+                "generic_complete": status_counter.get("generic_complete", 0),
+                "generic_fragment": status_counter.get("generic_fragment", 0),
+                "miss": status_counter.get("miss", 0),
+            }
+
+        breakdown_rows.append(
+            {
+                **sample_row,
+                "per_type_status": per_type_status,
+                "entities": rows,
+            }
+        )
+    return breakdown_rows
+
+
+def build_markdown_report(
+    *,
+    summary: dict[str, Any],
+    sample_breakdown: list[dict[str, Any]],
+) -> str:
+    """生成面向人工阅读的简要报告。"""
+
+    lines: list[str] = []
+    entity_summary = summary["entity_summary"]
+    sample_summary = summary["sample_summary"]
+    lines.append("# Detector Structured EN Analysis")
+    lines.append("")
+    lines.append("## Overall")
+    lines.append(f"- Dataset: `{summary['dataset_name']}`")
+    lines.append(f"- Locale profile: `{summary['locale_profile']}`")
+    lines.append(f"- Sample count: {sample_summary['sample_count']}")
+    lines.append(f"- Entity count: {entity_summary['entity_count']}")
+    lines.append(f"- Accepted recall rate: {entity_summary['accepted_recall_rate']:.4f}")
+    lines.append(f"- Accepted complete rate: {entity_summary['accepted_complete_rate']:.4f}")
+    lines.append(f"- Accepted fragment rate: {entity_summary['accepted_fragment_rate']:.4f}")
+    lines.append(f"- Miss rate: {entity_summary['miss_rate']:.4f}")
+    lines.append("")
+    lines.append("## Per Type")
+    lines.append("| Type | Count | Complete Recall | Fragment Recall | Mean Fragment Pieces | Mean Fragment Coverage % |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+    for entity_type, stats in entity_summary["per_type"].items():
+        lines.append(
+            f"| {entity_type} | {stats['count']} | {stats['accepted_complete_rate']:.4f} | "
+            f"{stats['accepted_fragment_rate']:.4f} | {stats['mean_fragment_piece_count']:.2f} | "
+            f"{stats['mean_fragment_coverage_percent']:.2f} |"
+        )
+    lines.append("")
+    lines.append("## Worst Samples")
+    lines.append("| Sample ID | Miss | Fragment | Wrong Type | Background FP | Accepted Coverage |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+    for row in sample_breakdown[:20]:
+        fragment_count = row["exact_fragment_count"] + row["generic_fragment_count"]
+        lines.append(
+            f"| {row['sample_id']} | {row['miss_count']} | {fragment_count} | "
+            f"{row['wrong_type_prediction_count']} | {row['background_fp_count']} | "
+            f"{row['accepted_coverage_mean']:.4f} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def evaluate_dataset(detector: RuleBasedPIIDetector, dataset_path: Path, *, limit: int | None = None) -> dict[str, Any]:
     dataset = load_dataset(dataset_path)
     samples = list(dataset["samples"][:limit] if limit else dataset["samples"])
@@ -621,6 +709,17 @@ def evaluate_dataset(detector: RuleBasedPIIDetector, dataset_path: Path, *, limi
             row["accepted_coverage_mean"],
         ),
     )[:20]
+    sample_breakdown = build_sample_entity_breakdown(sample_rows, entity_rows)
+    worst_sample_breakdown = sorted(
+        sample_breakdown,
+        key=lambda row: (
+            -row["miss_count"],
+            -(row["exact_fragment_count"] + row["generic_fragment_count"]),
+            -row["wrong_type_prediction_count"],
+            -row["background_fp_count"],
+            row["accepted_coverage_mean"],
+        ),
+    )
     return {
         "dataset_name": dataset["dataset_name"],
         "dataset_path": str(dataset_path),
@@ -628,6 +727,8 @@ def evaluate_dataset(detector: RuleBasedPIIDetector, dataset_path: Path, *, limi
         "entity_summary": summarize_entity_table(entity_rows),
         "sample_summary": summarize_sample_table(sample_rows),
         "worst_samples": worst_samples,
+        "sample_breakdown": sample_breakdown,
+        "worst_sample_breakdown": worst_sample_breakdown,
         "entity_rows": entity_rows,
         "sample_rows": sample_rows,
         "prediction_rows": prediction_rows,
@@ -657,12 +758,18 @@ def main() -> None:
         "worst_samples": result["worst_samples"],
         "alignment_mismatch_count": len(result["alignment_mismatches"]),
     }
+    markdown_report = build_markdown_report(
+        summary=summary,
+        sample_breakdown=result["worst_sample_breakdown"],
+    )
 
     write_json(output_dir / "summary.json", summary)
     write_jsonl(output_dir / "entity_details.jsonl", result["entity_rows"])
     write_jsonl(output_dir / "sample_summary.jsonl", result["sample_rows"])
+    write_jsonl(output_dir / "sample_entity_breakdown.jsonl", result["sample_breakdown"])
     write_jsonl(output_dir / "prediction_summary.jsonl", result["prediction_rows"])
     write_json(output_dir / "alignment_mismatches.json", result["alignment_mismatches"])
+    (output_dir / "report.md").write_text(markdown_report, encoding="utf-8")
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
