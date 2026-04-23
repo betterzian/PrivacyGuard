@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.utils.normalized_pii import normalize_pii, same_entity
+from privacyguard.utils.normalized_pii import _numbers_match, normalize_pii, same_entity
 
 
 def _suspected_json(*entries: dict[str, object]) -> str:
@@ -473,6 +473,13 @@ def test_address_same_entity_distinguishes_heavenly_stem_mixed_number():
     assert left.numbers == ("甲1",)
     assert right.numbers == ("乙1",)
     assert same_entity(left, right) is False
+
+
+def test_address_numbers_match_uses_longer_side_40_percent_threshold():
+    assert _numbers_match(("101",), ("101",)) is True
+    assert _numbers_match(("101",), ("201", "101")) is True
+    assert _numbers_match(("101",), ("301", "201", "101")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "404", "202", "505")) is True
 
 
 def test_bank_number_canonical_keeps_digits_only():

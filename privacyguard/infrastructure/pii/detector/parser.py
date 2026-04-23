@@ -252,35 +252,58 @@ def _address_component_keys(normalized: object) -> set[str]:
 
 def _is_prefix_fragment_address(normalized: object) -> bool:
     keys = _address_component_keys(normalized)
-    return bool(keys) and keys <= {"detail", "building"}
+    return bool(keys) and keys <= {"poi", "building", "unit", "room", "suite", "detail"}
 
 
 def _is_leading_road_fragment_address(normalized: object) -> bool:
     """英文地址前段若只含门牌号/路名，可并回后续 building/admin 组件。"""
     keys = _address_component_keys(normalized)
-    return bool(keys) and keys <= {"road", "house_number"}
+    return bool(keys) and keys <= {"road", "number"}
 
 
 def _is_tail_fragment_address(normalized: object) -> bool:
     keys = _address_component_keys(normalized)
-    return bool(keys) and keys <= {"city", "province", "postal_code", "country"}
+    return bool(keys) and keys <= {"multi_admin", "city", "province", "postal_code", "country"}
 
 
 def _is_trailing_detail_admin_fragment_address(normalized: object) -> bool:
     """英文地址尾段可只剩 detail/admin。"""
     keys = _address_component_keys(normalized)
-    return bool(keys) and keys <= {"detail", "city", "province", "postal_code", "country"}
+    return bool(keys) and keys <= {
+        "building",
+        "unit",
+        "room",
+        "suite",
+        "detail",
+        "multi_admin",
+        "city",
+        "province",
+        "postal_code",
+        "country",
+    }
 
 
 def _has_main_address_shape(normalized: object) -> bool:
     keys = _address_component_keys(normalized)
-    return bool(keys & {"road", "house_number", "city", "province", "postal_code", "country", "poi"})
+    return bool(keys & {"road", "number", "multi_admin", "city", "province", "postal_code", "country", "poi"})
 
 
 def _has_trailing_address_context(normalized: object) -> bool:
     """后段需至少带有 building/detail/admin/poi，避免把两个独立门牌段硬并。"""
     keys = _address_component_keys(normalized)
-    return bool(keys & {"building", "detail", "city", "province", "postal_code", "country", "poi"})
+    return bool(keys & {
+        "building",
+        "unit",
+        "room",
+        "suite",
+        "detail",
+        "multi_admin",
+        "city",
+        "province",
+        "postal_code",
+        "country",
+        "poi",
+    })
 
 
 def _looks_like_english_address_text(text: str) -> bool:

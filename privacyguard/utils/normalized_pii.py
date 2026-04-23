@@ -39,6 +39,9 @@ _ADDRESS_COMPONENT_KEYS = (
     "number",
     "poi",
     "building",
+    "unit",
+    "room",
+    "suite",
     "detail",
     "postal_code",
 )
@@ -52,7 +55,7 @@ _ADDRESS_MATCH_KEYS = (
     "road",
     "poi",
 )
-_ADDRESS_DETAIL_KEYS = ("building", "detail")
+_ADDRESS_DETAIL_KEYS = ("building", "unit", "room", "suite", "detail")
 _ADDRESS_COMPONENT_COMPARE_KEYS = (
     "multi_admin",
     "province",
@@ -75,6 +78,9 @@ _ORDERED_COMPONENT_KEYS = (
     "subdistrict",
     "poi",
     "building",
+    "unit",
+    "room",
+    "suite",
     "detail",
     "postal_code",
 )
@@ -101,9 +107,10 @@ _ADDRESS_COMPONENT_ALIASES = {
     "street_admin": "subdistrict",
     "town": "subdistrict",
     "village": "subdistrict",
-    "unit": "detail",
+    "house_number": "number",
+    "unit": "unit",
     "floor": "detail",
-    "room": "detail",
+    "room": "room",
     "street_number": "number",
     "zip": "postal_code",
     "zipcode": "postal_code",
@@ -121,6 +128,14 @@ _PHONE_US_COUNTRY_CODE_PREFIX_RE = re.compile(r"^\s*(?:\(\+?1\)|\+1)")
 _PHONE_US_TRUNK_AREA_PREFIX_RE = re.compile(r"^\s*1[ \-]*\([2-9]\d{2}\)")
 _PHONE_CN_MOBILE_RE = re.compile(r"1[3-9]\d{9}")
 _PHONE_US_TEN_DIGIT_RE = re.compile(r"[2-9]\d{9}")
+_PRECISE_ADDRESS_COMPONENT_KEYS = frozenset({"building", "unit", "room", "suite"})
+_EN_ADDRESS_COMPONENT_PREFIX_PATTERNS: dict[str, re.Pattern[str]] = {
+    "unit": re.compile(r"^(?:apartment|apt|unit)\b[\s\-:.,#]*", re.IGNORECASE),
+    "room": re.compile(r"^(?:room|rm)\b[\s\-:.,#]*", re.IGNORECASE),
+    "suite": re.compile(r"^(?:suite|ste)\b[\s\-:.,#]*", re.IGNORECASE),
+    "building": re.compile(r"^(?:building|bldg|tower|block)\b[\s\-:.,#]*", re.IGNORECASE),
+    "detail": re.compile(r"^(?:floor|fl|level|lvl|lot|slip|space|spc)\b[\s\-:.,#]*", re.IGNORECASE),
+}
 
 
 def normalize_pii(
@@ -259,6 +274,7 @@ def _normalize_address(
 ) -> NormalizedPII:
     raw_components = _address_components(raw_text=raw_text, metadata=metadata, components=components)
     ordered_components = _address_ordered_components(metadata=metadata, components=components)
+    component_precision_mode = _address_prefers_component_precision_raw(raw_text, raw_components, ordered_components)
     normalized_components = {
         key: str(raw_components.get(key) or "").strip()
         for key in _ADDRESS_COMPONENT_KEYS
@@ -286,10 +302,9 @@ def _normalize_address(
     details_tokens = _address_detail_tokens(normalized_components)
     if address_part_values:
         identity["address_part"] = "|".join(address_part_values)
-    if numbers:
-        identity["number"] = ",".join(numbers)
+    if numbers and not component_precision_mode:
         canonical_parts.append(f"number=[{','.join(numbers)}]")
-    if details_tokens:
+    if details_tokens and not component_precision_mode:
         identity["details_part"] = "-".join(details_tokens)
     if pk := normalized_components.get("poi_key"):
         identity["poi_key"] = pk
@@ -313,7 +328,7 @@ def _normalize_address(
         match_terms=_dedupe_terms(match_terms),
         identity=identity,
         numbers=tuple(numbers),
-        keyed_numbers=keyed_numbers,
+        keyed_numbers={} if component_precision_mode else keyed_numbers,
         ordered_components=ordered_components,
         has_admin_static=has_admin_static,
     )
@@ -349,6 +364,43 @@ def _looks_like_en_text(text: str) -> bool:
     return any(("A" <= ch <= "Z") or ("a" <= ch <= "z") for ch in text)
 
 
+def _address_prefers_component_precision_raw(
+    raw_text: str,
+    components: Mapping[str, str],
+    ordered_components: tuple[NormalizedAddressComponent, ...],
+) -> bool:
+    if any(key in components for key in ("unit", "room", "suite")):
+        return True
+    if any(component.component_type in {"unit", "room", "suite"} for component in ordered_components):
+        return True
+    if _looks_like_en_text(raw_text):
+        return True
+    return any(_looks_like_en_text(str(value or "")) for value in components.values())
+
+
+def _address_prefers_component_precision(normalized: NormalizedPII) -> bool:
+    return _address_prefers_component_precision_raw(
+        normalized.raw_text,
+        normalized.components,
+        normalized.ordered_components,
+    )
+
+
+def _canonicalize_en_address_component_value(component_key: str, value: str) -> str:
+    """英文细粒度组件统一去掉类别前缀，避免结构化输入与 detector trace 语义不一致。"""
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    if not text:
+        return ""
+    if component_key == "unit":
+        text = re.sub(r"^\s*#\s*", "", text)
+    pattern = _EN_ADDRESS_COMPONENT_PREFIX_PATTERNS.get(component_key)
+    if pattern is not None:
+        stripped = pattern.sub("", text, count=1).strip()
+        if stripped:
+            text = stripped
+    return _compact_component_text(text)
+
+
 def _canonicalize_address_component_value(component_key: str, value: str) -> str:
     """按组件类型生成稳定 canonical。"""
     text = str(value or "").strip()
@@ -362,6 +414,8 @@ def _canonicalize_address_component_value(component_key: str, value: str) -> str
         return re.sub(r"[^0-9-]", "", unicodedata.normalize("NFKC", text))
     if component_key in {"house_number", "number"}:
         return _alnum_only(text).upper()
+    if component_key in _PRECISE_ADDRESS_COMPONENT_KEYS or component_key == "detail":
+        return _canonicalize_en_address_component_value(component_key, text)
     return _compact_component_text(text)
 
 
@@ -416,8 +470,8 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
 
     流程：
     1. address_part 闸门：任一侧缺则失败。
-    2. 顶层 identity（country / province / house_number / postal_code）：双侧俱存时必须相等。
-    3. 非 admin 层（road / poi / building / detail）：按 component_type peer 比较，
+    2. 顶层 identity（country / province / number / postal_code）：双侧俱存时必须相等。
+    3. 非 admin 层（road / poi / building / unit / room / suite / detail）：按 component_type peer 比较，
        并顺带累计 has_admin Case 2（suspect step1 失败 + entry.level ⊂ admin 集合）。
     4. admin 层（province / city / district / district_city / subdistrict）：
        走多解释枚举，返回 match / inconclusive / mismatch。
@@ -431,21 +485,28 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
         return False
 
     substantive_hits = 0
+    component_precision_mode = _address_prefers_component_precision(left) or _address_prefers_component_precision(right)
 
-    for key in ("country", "province", "house_number", "postal_code"):
+    for key in ("country", "province", "number", "postal_code"):
         if not _identity_field_match_if_both_present(left, right, key):
             return False
         if left.identity.get(key) and right.identity.get(key):
             substantive_hits += 1
+
+    if component_precision_mode and _has_precise_component_cross_key_conflict(left, right):
+        return False
 
     # has_admin 动态累计器：static（Case 1）作为起点，非 admin 层再累计 Case 2。
     left_has_admin = left.has_admin_static
     right_has_admin = right.has_admin_static
 
     # 非 admin 层比较 + has_admin Case 2 累计
-    for key in ("road", "poi", "building", "detail"):
+    for key in ("road", "poi", "building", "unit", "room", "suite", "detail"):
         ok, left_admin_hit, right_admin_hit = _compare_peer_with_suspect_case2(
-            left, right, key,
+            left,
+            right,
+            key,
+            exact_compare=component_precision_mode and key in _PRECISE_ADDRESS_COMPONENT_KEYS,
         )
         if not ok:
             return False
@@ -464,14 +525,14 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
         if left_has_admin and right_has_admin:
             return False
 
-    # numbers —— 逆序子序列 / keyed
-    if not _numbers_match(
-        left.numbers, right.numbers,
-        left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers,
-    ):
-        return False
-    if _numbers_substantive_pair(left, right):
-        substantive_hits += 1
+    if not component_precision_mode:
+        if not _numbers_match(
+            left.numbers, right.numbers,
+            left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers,
+        ):
+            return False
+        if _numbers_substantive_pair(left, right):
+            substantive_hits += 1
 
     # subdistrict：走非 admin peer 路径；不累计 has_admin（SUBDISTRICT ∉ _HAS_ADMIN_LEVEL_KEYS）
     ok_sd, _lhit_sd, _rhit_sd = _compare_peer_with_suspect_case2(
@@ -508,10 +569,26 @@ def _identity_field_match_if_both_present(
 
 
 def _numbers_substantive_pair(left: NormalizedPII, right: NormalizedPII) -> bool:
-    """双方是否都带有可比的号码信息（纯数字序列或 keyed 之一非空）。"""
-    left_has = bool(left.numbers) or bool(left.keyed_numbers)
-    right_has = bool(right.numbers) or bool(right.keyed_numbers)
+    """双方是否都带有可比的号码序列。"""
+    left_has = bool(left.numbers)
+    right_has = bool(right.numbers)
     return bool(left_has and right_has)
+
+
+def _has_precise_component_cross_key_conflict(left: NormalizedPII, right: NormalizedPII) -> bool:
+    """细粒度英文组件若跨槽位对撞，应直接判为不同实体。"""
+    for left_key in _PRECISE_ADDRESS_COMPONENT_KEYS:
+        if not str(left.identity.get(left_key) or "").strip():
+            continue
+        for right_key in _PRECISE_ADDRESS_COMPONENT_KEYS:
+            if left_key == right_key:
+                continue
+            if not str(right.identity.get(right_key) or "").strip():
+                continue
+            if left.identity.get(right_key) or right.identity.get(left_key):
+                continue
+            return True
+    return False
 
 
 _MIN_POI_LEN = 2
@@ -661,6 +738,8 @@ def _compare_peer_with_suspect_case2(
     left: NormalizedPII,
     right: NormalizedPII,
     component_type: str,
+    *,
+    exact_compare: bool = False,
 ) -> tuple[bool, bool, bool]:
     """非 admin 层级（road / poi / building / detail / subdistrict）的同 component_type 比较。
 
@@ -676,10 +755,15 @@ def _compare_peer_with_suspect_case2(
 
     # 值层比较：任一为 None 时跳过，双边都有则双向子串
     if left_component is not None and right_component is not None:
-        if not _admin_text_subset_either(
-            _component_value_text(left_component),
-            _component_value_text(right_component),
-        ):
+        left_value = _component_value_text(left_component)
+        right_value = _component_value_text(right_component)
+        if exact_compare:
+            if (
+                _canonicalize_address_component_value(component_type, left_value)
+                != _canonicalize_address_component_value(component_type, right_value)
+            ):
+                return False, False, False
+        elif not _admin_text_subset_either(left_value, right_value):
             return False, False, False
 
     left_ok, left_admin_hit = _suspect_chain_and_case2(
@@ -1007,18 +1091,13 @@ def _numbers_match(
     left_keyed: dict[str, str] | None = None,
     right_keyed: dict[str, str] | None = None,
 ) -> bool:
-    """号码判定：优先 keyed 路径（共有 key 值相等），fallback 到逆序子序列匹配。"""
-    # 路径 1: keyed 比对——仅比较双方共有的 key，值相等即通过。
-    if left_keyed and right_keyed:
-        common = left_keyed.keys() & right_keyed.keys()
-        if common:
-            return all(left_keyed[k] == right_keyed[k] for k in common)
-    # 路径 2: fallback 到 numbers 逆序子序列匹配。
+    """号码判定：按最长一方 40% 门槛做逆序单调子序列匹配。"""
+    del left_keyed, right_keyed
     return _numbers_sequence_match(left, right)
 
 
 def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
-    """号码序列判定：从末尾往前做逆序一致的子序列匹配，且至少命中 2 个 token。"""
+    """号码序列判定：从末尾往前做逆序一致的子序列匹配，命中数需覆盖最长一方的 40%。"""
     if not left and not right:
         return True
     if not left or not right:
@@ -1034,9 +1113,10 @@ def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bo
             pointer += 1
             if pointer == len(s):
                 break
-    if pointer != len(s):
-        return False
-    return matched >= 2
+    longer_len = max(len(left), len(right))
+    if longer_len <= 0:
+        return True
+    return (matched / longer_len) >= 0.4
 
 
 _KEYED_NUMBER_TYPES = {"building", "detail", "number"}
@@ -1107,10 +1187,17 @@ def _ordered_components_from_direct_components(
 ) -> tuple[NormalizedAddressComponent, ...]:
     """结构化 components 直传时，按固定层级顺序生成组件。"""
     ordered: list[NormalizedAddressComponent] = []
-    poi_key_raw = str(components.get("poi_key") or "").strip()
+    normalized_components: dict[str, str] = {}
+    for raw_key, value in components.items():
+        key = _ADDRESS_COMPONENT_ALIASES.get(str(raw_key or "").strip(), str(raw_key or "").strip())
+        text = str(value or "").strip()
+        if key in _ADDRESS_COMPONENT_KEYS or key in _ADDRESS_OPTIONAL_KEYS:
+            if text:
+                normalized_components[key] = text
+    poi_key_raw = str(normalized_components.get("poi_key") or "").strip()
     poi_keys = tuple(part.strip() for part in poi_key_raw.split("|") if part.strip())
     for component_type in _ORDERED_COMPONENT_KEYS:
-        raw_value = str(components.get(component_type) or "").strip()
+        raw_value = str(normalized_components.get(component_type) or "").strip()
         if not raw_value:
             continue
         if component_type == "poi":
@@ -1288,7 +1375,7 @@ def _address_numbers(
                 comp_type, value = item.split(":", 1)
                 comp_type = comp_type.strip()
                 value = value.strip()
-                if comp_type in {"building", "detail", "number"}:
+                if comp_type in {"building", "unit", "room", "suite", "detail", "number"}:
                     tokens.extend(_extract_number_tokens(value))
             return [t for t in tokens if t]
     # fallback：无 trace 时按 detail keys 顺序提取（仅用于 components 直传场景）。
@@ -1425,11 +1512,16 @@ def _address_components(
 ) -> dict[str, str]:
     if components:
         allowed = frozenset(_ADDRESS_COMPONENT_KEYS) | _ADDRESS_OPTIONAL_KEYS
-        return {
-            key: str(value).strip()
-            for key, value in components.items()
-            if key in allowed and str(value or "").strip()
-        }
+        resolved: dict[str, str] = {}
+        for raw_key, value in components.items():
+            key = _ADDRESS_COMPONENT_ALIASES.get(str(raw_key or "").strip(), str(raw_key or "").strip())
+            if key not in allowed:
+                continue
+            text = str(value or "").strip()
+            if not text:
+                continue
+            resolved[key] = text
+        return resolved
     traced = _components_from_address_metadata(metadata)
     if traced:
         return traced

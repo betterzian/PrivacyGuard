@@ -41,6 +41,9 @@ _ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUM, PIIAttributeType
 _NUMBERISH_COMPONENTS = frozenset({
     AddressComponentType.NUMBER,
     AddressComponentType.BUILDING,
+    AddressComponentType.UNIT,
+    AddressComponentType.ROOM,
+    AddressComponentType.SUITE,
     AddressComponentType.DETAIL,
 })
 
@@ -252,7 +255,7 @@ def _normalize_numberish_address_value(raw_value: str) -> str:
 
 def _normalize_address_value(component_type: AddressComponentType, raw_value: str) -> str:
     cleaned = clean_value(raw_value)
-    if component_type == AddressComponentType.HOUSE_NUMBER:
+    if component_type in {AddressComponentType.HOUSE_NUMBER, AddressComponentType.NUMBER}:
         return "".join(char for char in cleaned if char.isalnum())
     if component_type == AddressComponentType.POSTAL_CODE:
         return re.sub(r"[^0-9-]", "", cleaned)

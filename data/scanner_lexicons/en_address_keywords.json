@@ -51,21 +51,36 @@
     ]
   },
   {
-    "component_type": "detail",
+    "component_type": "unit",
     "keywords": [
       {"text": "apartment", "strength": "hard"},
-      {"text": "suite", "strength": "hard"},
-      {"text": "ste", "strength": "hard"},
       {"text": "apt", "strength": "hard"},
       {"text": "unit", "strength": "soft"},
-      {"text": "#", "strength": "soft"},
+      {"text": "#", "strength": "soft"}
+    ]
+  },
+  {
+    "component_type": "suite",
+    "keywords": [
+      {"text": "suite", "strength": "hard"},
+      {"text": "ste", "strength": "hard"}
+    ]
+  },
+  {
+    "component_type": "room",
+    "keywords": [
+      {"text": "room", "strength": "soft"},
+      {"text": "rm", "strength": "hard"}
+    ]
+  },
+  {
+    "component_type": "detail",
+    "keywords": [
       {"text": "lot", "strength": "soft"},
       {"text": "floor", "strength": "soft"},
       {"text": "fl", "strength": "hard"},
       {"text": "level", "strength": "soft"},
       {"text": "lvl", "strength": "soft"},
-      {"text": "room", "strength": "soft"},
-      {"text": "rm", "strength": "hard"},
       {"text": "slip", "strength": "weak"},
       {"text": "space", "strength": "weak"},
       {"text": "spc", "strength": "weak"}

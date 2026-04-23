@@ -308,7 +308,12 @@ class BaseAddressStack(BaseStack):
 
             search_anchor = _state_next_component_start(state, stream, address_start=address_start)
             if not relaxed and search_anchor is not None and clue.start > search_anchor:
-                if _span_has_search_stop_unit(stream, search_anchor, clue.start):
+                allow_bridge = self._allow_search_stop_bridge(
+                    state,
+                    clue,
+                    search_anchor=search_anchor,
+                )
+                if not allow_bridge and _span_has_search_stop_unit(stream, search_anchor, clue.start):
                     if state.deferred_chain:
                         self._flush_chain(state, clue_index=index)
                         if state.split_at is not None:
@@ -374,6 +379,16 @@ class BaseAddressStack(BaseStack):
         del kwargs
         if isinstance(subject, Clue):
             return subject.role == ClueRole.BREAK
+        return False
+
+    def _allow_search_stop_bridge(
+        self,
+        state: _ParseState,
+        clue: Clue,
+        *,
+        search_anchor: int,
+    ) -> bool:
+        del state, clue, search_anchor
         return False
 
     def _handle_address_clue(

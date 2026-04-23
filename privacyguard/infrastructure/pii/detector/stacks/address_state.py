@@ -58,6 +58,9 @@ SINGLE_OCCUPY = frozenset({
     AddressComponentType.ROAD,
     AddressComponentType.HOUSE_NUMBER,
     AddressComponentType.NUMBER,
+    AddressComponentType.UNIT,
+    AddressComponentType.ROOM,
+    AddressComponentType.SUITE,
     AddressComponentType.POSTAL_CODE,
 })
 
@@ -131,24 +134,48 @@ _VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] =
         AddressComponentType.NUMBER,
         AddressComponentType.POI,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.NUMBER: frozenset({
         AddressComponentType.POI,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.POI: frozenset({
         AddressComponentType.NUMBER,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
         AddressComponentType.DETAIL,
     }),
-    AddressComponentType.BUILDING: frozenset({AddressComponentType.DETAIL}),
+    AddressComponentType.BUILDING: frozenset({
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
+    }),
+    AddressComponentType.UNIT: frozenset({
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
+    }),
+    AddressComponentType.ROOM: frozenset({AddressComponentType.DETAIL}),
+    AddressComponentType.SUITE: frozenset({AddressComponentType.DETAIL}),
     AddressComponentType.DETAIL: frozenset({AddressComponentType.DETAIL}),
 }
 
 _DETAIL_COMPONENTS = frozenset({
     AddressComponentType.BUILDING,
+    AddressComponentType.UNIT,
+    AddressComponentType.ROOM,
+    AddressComponentType.SUITE,
     AddressComponentType.DETAIL,
 })
 
@@ -159,6 +186,9 @@ _DIGIT_TAIL_TRIGGER_TYPES = frozenset({
     AddressComponentType.POI,
     AddressComponentType.NUMBER,
     AddressComponentType.BUILDING,
+    AddressComponentType.UNIT,
+    AddressComponentType.ROOM,
+    AddressComponentType.SUITE,
     AddressComponentType.DETAIL,
 })
 
@@ -1428,6 +1458,8 @@ def _is_room_level_detail_component(component: _DraftComponent) -> bool:
     """房/室/户这类 room 粒度 detail 不参与“号”提强上下文。"""
     if component.component_type == AddressComponentType.BUILDING:
         return False
+    if component.component_type == AddressComponentType.ROOM:
+        return True
     key_clue = _component_key_clue(component)
     return key_clue is not None and key_clue.text in _ROOM_LEVEL_DETAIL_KEYS
 
@@ -1438,6 +1470,11 @@ def _has_hao_hard_context(previous_components: Sequence[_DraftComponent]) -> boo
         if component.component_type == AddressComponentType.ROAD:
             return True
         if component.component_type == AddressComponentType.BUILDING:
+            return True
+        if component.component_type in {
+            AddressComponentType.UNIT,
+            AddressComponentType.SUITE,
+        }:
             return True
         if component.component_type == AddressComponentType.DETAIL and not _is_room_level_detail_component(component):
             return True
