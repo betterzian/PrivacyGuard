@@ -19,6 +19,7 @@ from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import (
+    AddressComponentType,
     CandidateDraft,
     Claim,
     ClaimStrength,
@@ -254,14 +255,32 @@ def _is_prefix_fragment_address(normalized: object) -> bool:
     return bool(keys) and keys <= {"detail", "building"}
 
 
+def _is_leading_road_fragment_address(normalized: object) -> bool:
+    """英文地址前段若只含门牌号/路名，可并回后续 building/admin 组件。"""
+    keys = _address_component_keys(normalized)
+    return bool(keys) and keys <= {"road", "house_number"}
+
+
 def _is_tail_fragment_address(normalized: object) -> bool:
     keys = _address_component_keys(normalized)
     return bool(keys) and keys <= {"city", "province", "postal_code", "country"}
 
 
+def _is_trailing_detail_admin_fragment_address(normalized: object) -> bool:
+    """英文地址尾段可只剩 detail/admin。"""
+    keys = _address_component_keys(normalized)
+    return bool(keys) and keys <= {"detail", "city", "province", "postal_code", "country"}
+
+
 def _has_main_address_shape(normalized: object) -> bool:
     keys = _address_component_keys(normalized)
     return bool(keys & {"road", "house_number", "city", "province", "postal_code", "country", "poi"})
+
+
+def _has_trailing_address_context(normalized: object) -> bool:
+    """后段需至少带有 building/detail/admin/poi，避免把两个独立门牌段硬并。"""
+    keys = _address_component_keys(normalized)
+    return bool(keys & {"building", "detail", "city", "province", "postal_code", "country", "poi"})
 
 
 def _looks_like_english_address_text(text: str) -> bool:
@@ -997,6 +1016,85 @@ class StreamParser:
                 )
                 if run is not None and _candidates_overlap(current_run.candidate, run.candidate):
                     return run, stack
+        bridge_run, bridge_stack = self._find_address_bridge_challenger(
+            context,
+            current_run,
+            suppress_ids=suppress_ids,
+        )
+        if bridge_run is not None:
+            return bridge_run, bridge_stack
+        return None, None
+
+    def _candidate_is_short_address_bridge_source(self, run: StackRun) -> bool:
+        """英文地址桥接只处理短 NUM / ALNUM。"""
+        if run.candidate.attr_type not in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
+            return False
+        compact = "".join(char for char in str(run.candidate.text or "") if char.isalnum())
+        return 0 < len(compact) <= 5
+
+    def _unit_blocks_address_bridge(self, context: StackContext, unit_index: int) -> bool:
+        """桥接只允许穿过同一局部片段，不跨标点、break 或 direct seed。"""
+        if unit_index < 0 or unit_index >= len(context.unit_index):
+            return True
+        bucket = context.unit_index[unit_index]
+        if bucket.break_start or bucket.flag == "OCR_BREAK":
+            return True
+        if self._has_non_structured_direct_seed_at_unit(context, unit_index):
+            return True
+        return bucket.flag not in {None, "SPACE", "INLINE_GAP"}
+
+    def _is_non_admin_address_bridge_seed(self, clue: Clue) -> bool:
+        """只允许非 admin 地址 clue 触发左侧数值桥接。"""
+        return (
+            clue.attr_type == PIIAttributeType.ADDRESS
+            and clue.role != ClueRole.LABEL
+            and clue.component_type in {
+                AddressComponentType.ROAD,
+                AddressComponentType.BUILDING,
+                AddressComponentType.POI,
+                AddressComponentType.DETAIL,
+            }
+        )
+
+    def _find_address_bridge_challenger(
+        self,
+        context: StackContext,
+        current_run: StackRun,
+        *,
+        suppress_ids: frozenset[str],
+    ) -> tuple[StackRun | None, BaseStack | None]:
+        """短 NUM / ALNUM 向右寻找英文地址 seed。"""
+        if not self._candidate_is_short_address_bridge_source(current_run):
+            return None, None
+        start_unit = current_run.candidate.unit_last + 1
+        end_unit = min(len(context.unit_index) - 1, current_run.candidate.unit_last + 6)
+        for unit_index in range(start_unit, end_unit + 1):
+            if self._unit_blocks_address_bridge(context, unit_index):
+                break
+            self._advance_semantic_value_locks_at_unit(context, unit_index)
+            start_groups = self._start_groups_at_unit(
+                context,
+                unit_index,
+                suppress_start_clue_ids=suppress_ids,
+            )
+            for _group_start, clue_indices in start_groups:
+                address_seed_indices = tuple(
+                    clue_index
+                    for clue_index in clue_indices
+                    if self._is_non_admin_address_bridge_seed(context.clues[clue_index])
+                )
+                if not address_seed_indices:
+                    continue
+                selected = self._select_start_group_run(context, address_seed_indices)
+                if selected is None:
+                    continue
+                run, stack = selected
+                if run.attr_type != PIIAttributeType.ADDRESS:
+                    continue
+                if run.pending_challenge is not None:
+                    run = self._resolve_pending_challenge(context, run)
+                if _candidates_overlap(current_run.candidate, run.candidate):
+                    return run, stack
         return None, None
 
     def _resolve_pending_challenge(self, context: StackContext, run: StackRun) -> StackRun:
@@ -1338,6 +1436,26 @@ class StreamParser:
             longer_normalized = candidate_normalized
             shorter_normalized = previous_normalized
             absorb_mode = "prepend_fragment"
+        elif (
+            english_fragment_merge
+            and _is_leading_road_fragment_address(previous_normalized)
+            and _has_trailing_address_context(candidate_normalized)
+        ):
+            longer = candidate
+            shorter = previous
+            longer_normalized = candidate_normalized
+            shorter_normalized = previous_normalized
+            absorb_mode = "prepend_fragment"
+        elif (
+            english_fragment_merge
+            and _is_trailing_detail_admin_fragment_address(candidate_normalized)
+            and _has_main_address_shape(previous_normalized)
+        ):
+            longer = previous
+            shorter = candidate
+            longer_normalized = previous_normalized
+            shorter_normalized = candidate_normalized
+            absorb_mode = "append_fragment"
         elif (
             english_fragment_merge
             and _is_tail_fragment_address(candidate_normalized)

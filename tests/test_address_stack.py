@@ -255,6 +255,65 @@ def test_digit_tail_extends_after_last_component():
     assert "79" in addr.text
 
 
+@pytest.mark.parametrize(
+    ("text", "expected_text"),
+    [
+        ("815 Madison Ave", "815 Madison Ave"),
+        ("798 SW 8th St", "798 SW 8th St"),
+        ("483 1st Ave", "483 1st Ave"),
+        ("922 Memorial Dr SE", "922 Memorial Dr SE"),
+    ],
+)
+def test_en_address_detector_bridges_left_short_num_or_alnum_into_full_address(text: str, expected_text: str):
+    candidates = _detect_candidates_from_scanner(text, locale_profile="en_us")
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [expected_text]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Riverside Homes",
+        "Bayfront Flats",
+        "Bryant Residences",
+        "Biscayne Commerce Hall",
+    ],
+)
+def test_en_address_detector_accepts_building_only_suffix_phrases(text: str):
+    candidates = _detect_candidates_from_scanner(text, locale_profile="en_us")
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [text]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_text"),
+    [
+        ("Miami, FL", "Miami, FL"),
+        ("Suite 320, Miami, FL 33131", "Suite 320, Miami, FL 33131"),
+        (
+            "245 Couch St, Burnside Offices, Suite 1708, Portland, OR 97205",
+            "245 Couch St, Burnside Offices, Suite 1708, Portland, OR 97205",
+        ),
+    ],
+)
+def test_en_address_detector_merges_comma_tail_components_into_single_address(text: str, expected_text: str):
+    candidates = _detect_candidates_from_scanner(text, locale_profile="en_us")
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [expected_text]
+
+
+def test_en_address_bridge_does_not_promote_plain_short_num_followed_by_non_address_words():
+    candidates = _detect_candidates_from_scanner("note 123 alpha beta", locale_profile="en_us")
+
+    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
+
+
 def test_same_tier_value_replaces_pending_and_flushes_previous():
     # 连续出现同层级 VALUE 时，旧 VALUE 应立即落成 component（自动补 key），新 VALUE 进入 pending。
     # DISTRICT→DISTRICT 在新后继图中允许自环（通过 SUBDISTRICT 路径），但 DISTRICT 不含自身后继，

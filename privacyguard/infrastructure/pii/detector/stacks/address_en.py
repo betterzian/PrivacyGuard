@@ -23,6 +23,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     _chain_can_accept,
     _clue_unit_gap,
     _normalize_address_value,
+    _scan_forward_value_end,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_en import (
     EN_VALID_SUCCESSORS,
@@ -33,6 +34,8 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_en import (
     key_left_expand_start_if_deferrable_en,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
+    _comma_tail_prehandle,
+    _comma_value_scan_upper_bound,
     _resolve_admin_key_chain_levels,
     _resolve_standalone_admin_value_group,
     collect_admin_value_span,
@@ -124,6 +127,27 @@ class EnAddressStack(BaseAddressStack):
             ),
         )
 
+    def _prehandle_clue(
+        self,
+        state: _ParseState,
+        raw_text: str,
+        stream: StreamInput,
+        clues: tuple[Clue, ...],
+        clue_index: int,
+        clue: Clue,
+    ) -> object | None:
+        return _comma_tail_prehandle(
+            state,
+            raw_text,
+            stream,
+            clues,
+            clue_index,
+            clue,
+            flush_chain=lambda idx: self._flush_chain(state, clue_index=idx),
+            materialize_digit_tail_before_comma=lambda idx: self._materialize_digit_tail_before_comma(state, clues, idx),
+            should_break=self.should_break_clue,
+        )
+
     def run(self) -> StackRun | None:
         if (
             self.clue.role == ClueRole.VALUE
@@ -146,6 +170,21 @@ class EnAddressStack(BaseAddressStack):
         stream = self.context.stream
         raw_text = self.context.stream.text
         admin_levels = _clue_admin_levels(clue)
+        if state.pending_comma_value_right_scan:
+            state.pending_comma_value_right_scan = False
+            upper_bound = _comma_value_scan_upper_bound(
+                clues,
+                clue_index,
+                clue,
+                stream,
+                len(raw_text),
+                should_break=self.should_break_clue,
+            )
+            value_end = _scan_forward_value_end(raw_text, clue.end, upper_bound, stream=stream)
+            if value_end > clue.end:
+                merged = raw_text[clue.start:value_end]
+                if _normalize_address_value(comp_type, merged):
+                    state.value_char_end_override[clue.clue_id] = value_end
         # §6.2：EN 同 span 多层 admin VALUE 组 —— dual-emit 后按相同 start/end 聚成一个 admin span，
         # 用于 resolver / collision 决策；非 admin 类型继续走单层路径。
         admin_span = collect_admin_value_span(clues, clue_index) if admin_levels else None

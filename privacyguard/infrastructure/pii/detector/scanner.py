@@ -10,6 +10,7 @@ from functools import lru_cache
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.address.geo_db import GeoEntry, load_en_geo_lexicon, load_zh_geo_lexicon
+from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_en_company_suffixes,
@@ -48,8 +49,9 @@ from privacyguard.infrastructure.pii.detector.models import (
     UnitBucket,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-from privacyguard.infrastructure.pii.detector.stacks.common import valid_left_numeral_for_zh_address_key
-from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
+from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import _normalize_address_value
+from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after, valid_left_numeral_for_zh_address_key
+from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN, is_any_break
 from privacyguard.infrastructure.pii.detector.zh_name_rules import compact_zh_name_text
 
 _HARD_SOURCE_PRIORITY = {
@@ -313,6 +315,13 @@ _NEGATIVE_SCOPE_BY_SOURCE_KIND: dict[str, str] = {
 _ASCII_KEYWORD_CHARS_RE = re.compile(r"[A-Za-z0-9 #.'-]+")
 _ASCII_LITERAL_CHARS_RE = re.compile(r"[A-Za-z0-9 .,'@_+\-#/&()]+")
 _POSTAL_CODE_PATTERN = re.compile(r"(?<!\d)\d{5}(?:-\d{4})?(?!\d)")
+_EN_DIRECTIONAL_TOKENS = frozenset({"n", "s", "e", "w", "ne", "nw", "se", "sw"})
+_EN_ORDINAL_TOKEN_RE = re.compile(r"\d+(?:st|nd|rd|th)$", re.IGNORECASE)
+_EN_SUFFIX_PHRASE_COMPONENTS = frozenset({
+    AddressComponentType.POI,
+    AddressComponentType.BUILDING,
+})
+_EN_FL_FLOOR_KEYWORDS = frozenset({"fl", "floor"})
 
 
 def _luhn_valid(digits: str) -> bool:
@@ -441,7 +450,7 @@ def build_clue_bundle(
         soft_clues.extend(_scan_license_plate_value_clues(ctx, segment, locale_profile=locale_profile))
         soft_clues.extend(_scan_control_value_clues(ctx, segment, locale_profile=locale_profile))
         negative_clues.extend(_scan_negative_clues(ctx, segment))
-    if locale_profile in {"en", "mixed"}:
+    if locale_profile == "mixed" or locale_profile.startswith("en"):
         soft_clues.extend(_scan_en_address_postal_clues_full_stream(ctx, stream))
 
     deduped_negative_clues = _dedupe_clues(negative_clues) if negative_clues else []
@@ -1450,7 +1459,15 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
         if normalized is None:
             continue
-        raw_start, raw_end, _matched_text = normalized
+        raw_start, raw_end, matched_text = normalized
+        if not _should_emit_en_address_value_match(
+            segment.stream,
+            raw_start,
+            raw_end,
+            matched_text=matched_text,
+            component_type=payload.component_type,
+        ):
+            continue
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -1474,6 +1491,16 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         if normalized is None:
             continue
         raw_start, raw_end, matched_text = normalized
+        if not _should_emit_en_address_key_match(
+            segment.stream,
+            raw_start,
+            raw_end,
+            matched_text=matched_text,
+            component_type=payload.component_type,
+        ):
+            continue
+        if payload.component_type == AddressComponentType.ROAD:
+            raw_end = _extend_en_road_key_end_with_direction(segment.stream, raw_end)
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -1491,6 +1518,17 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 component_type=payload.component_type,
             )
         )
+        phrase_value_clue = _build_en_suffix_phrase_value_clue(
+            ctx,
+            segment.stream,
+            raw_start=raw_start,
+            raw_end=raw_end,
+            matched_text=matched_text,
+            component_type=payload.component_type,
+            strength=payload.strength,
+        )
+        if phrase_value_clue is not None:
+            clues.append(phrase_value_clue)
     for token_match in _POSTAL_CODE_PATTERN.finditer(segment.text):
         raw_start, raw_end = _segment_span_to_raw(segment, token_match.start(), token_match.end())
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
@@ -1585,6 +1623,206 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                 )
             )
     return clues
+
+
+def _is_short_floor_number_unit(unit) -> bool:
+    if unit.kind == "digit_run":
+        digits = "".join(char for char in unit.text if char.isdigit())
+        return 0 < len(digits) <= 2
+    if unit.kind == "alnum_run":
+        token = unit.text.strip()
+        return 0 < len(token) <= 3 and any(char.isdigit() for char in token)
+    return False
+
+
+def _unit_index_left_of_char(stream: StreamInput, char_index: int) -> int:
+    if char_index <= 0 or not stream.char_to_unit:
+        return -1
+    return stream.char_to_unit[char_index - 1]
+
+
+def _next_non_space_unit(stream: StreamInput, char_index: int):
+    if char_index < 0 or char_index >= len(stream.text) or not stream.units:
+        return None
+    ui = _unit_index_at_or_after(stream, char_index)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.kind not in {"space", "inline_gap"}:
+            return unit
+        ui += 1
+    return None
+
+
+def _previous_non_space_unit(stream: StreamInput, char_index: int):
+    ui = _unit_index_left_of_char(stream, char_index)
+    while 0 <= ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.kind not in {"space", "inline_gap"}:
+            return unit
+        ui -= 1
+    return None
+
+
+def _en_fl_context_kind(stream: StreamInput, start: int, end: int, *, matched_text: str) -> str | None:
+    token = str(matched_text or "").strip()
+    lowered = token.lower()
+    if lowered not in _EN_FL_FLOOR_KEYWORDS:
+        return None
+    previous = _previous_non_space_unit(stream, start)
+    next_unit = _next_non_space_unit(stream, end)
+    if (
+        (previous is not None and _is_short_floor_number_unit(previous))
+        or (next_unit is not None and _is_short_floor_number_unit(next_unit))
+    ):
+        return "floor"
+    if lowered == "floor":
+        return None
+    if token.isupper() and len(token) == 2:
+        return "state"
+    if previous is not None and previous.kind == "punct" and previous.text in ",，":
+        return "state"
+    if next_unit is not None and bool(_POSTAL_CODE_PATTERN.fullmatch(next_unit.text)):
+        return "state"
+    return None
+
+
+def _should_emit_en_address_value_match(
+    stream: StreamInput,
+    start: int,
+    end: int,
+    *,
+    matched_text: str,
+    component_type: AddressComponentType,
+) -> bool:
+    if component_type == AddressComponentType.PROVINCE and str(matched_text or "").strip().lower() == "fl":
+        return _en_fl_context_kind(stream, start, end, matched_text=matched_text) != "floor"
+    return True
+
+
+def _should_emit_en_address_key_match(
+    stream: StreamInput,
+    start: int,
+    end: int,
+    *,
+    matched_text: str,
+    component_type: AddressComponentType,
+) -> bool:
+    if component_type == AddressComponentType.DETAIL and str(matched_text or "").strip().lower() in _EN_FL_FLOOR_KEYWORDS:
+        return _en_fl_context_kind(stream, start, end, matched_text=matched_text) == "floor"
+    return True
+
+
+def _en_titlecase_like_token(token: str) -> bool:
+    stripped = str(token or "").strip()
+    if not stripped:
+        return False
+    if stripped.isupper() and stripped.isalpha():
+        return len(stripped) <= 4
+    return stripped[0].isalpha() and stripped[0].isupper()
+
+
+def _en_suffix_phrase_token_allowed(token: str, *, component_type: AddressComponentType) -> bool:
+    lowered = str(token or "").strip().lower()
+    if not lowered:
+        return False
+    if component_type == AddressComponentType.ROAD:
+        return (
+            lowered in _EN_DIRECTIONAL_TOKENS
+            or bool(_EN_ORDINAL_TOKEN_RE.fullmatch(lowered))
+            or _en_titlecase_like_token(token)
+        )
+    return _en_titlecase_like_token(token)
+
+
+def _en_suffix_phrase_start(stream: StreamInput, key_start: int, *, component_type: AddressComponentType) -> int | None:
+    if not stream.units or key_start <= 0:
+        return None
+    ui = _unit_index_left_of_char(stream, key_start)
+    earliest_start: int | None = None
+    token_count = 0
+    while 0 <= ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.kind in {"space", "inline_gap"}:
+            ui -= 1
+            continue
+        if unit.kind == "punct" or unit.kind == "ocr_break" or any(is_any_break(char) for char in unit.text):
+            break
+        token = unit.text.strip()
+        if not _en_suffix_phrase_token_allowed(token, component_type=component_type):
+            break
+        earliest_start = unit.char_start
+        token_count += 1
+        if token_count >= 3:
+            break
+        ui -= 1
+    return earliest_start if token_count > 0 else None
+
+
+def _next_non_space_unit_after_direction(stream: StreamInput, direction_end: int):
+    if direction_end >= len(stream.text):
+        return None
+    ui = _unit_index_at_or_after(stream, direction_end)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.kind in {"space", "inline_gap"}:
+            ui += 1
+            continue
+        return unit
+    return None
+
+
+def _extend_en_road_key_end_with_direction(stream: StreamInput, raw_end: int) -> int:
+    if raw_end >= len(stream.text) or not stream.units:
+        return raw_end
+    direction_unit = _next_non_space_unit(stream, raw_end)
+    if direction_unit is None:
+        return raw_end
+    token = direction_unit.text.strip().lower()
+    if token not in _EN_DIRECTIONAL_TOKENS:
+        return raw_end
+    next_unit = _next_non_space_unit_after_direction(stream, direction_unit.char_end)
+    if next_unit is not None and next_unit.kind not in {"punct", "ocr_break"}:
+        return raw_end
+    return direction_unit.char_end
+
+
+def _build_en_suffix_phrase_value_clue(
+    ctx: DetectContext,
+    stream: StreamInput,
+    *,
+    raw_start: int,
+    raw_end: int,
+    matched_text: str,
+    component_type: AddressComponentType,
+    strength: ClaimStrength,
+) -> Clue | None:
+    if component_type not in _EN_SUFFIX_PHRASE_COMPONENTS:
+        return None
+    phrase_start = _en_suffix_phrase_start(stream, raw_start, component_type=component_type)
+    if phrase_start is None or phrase_start >= raw_start:
+        return None
+    phrase_text = clean_value(stream.text[phrase_start:raw_end])
+    if not phrase_text:
+        return None
+    normalized = _normalize_address_value(component_type, stream.text[phrase_start:raw_end])
+    if not normalized:
+        return None
+    unit_start, unit_last = _char_span_to_unit_span(stream, phrase_start, raw_end)
+    return Clue(
+        clue_id=ctx.next_clue_id(),
+        family=ClueFamily.ADDRESS,
+        role=ClueRole.VALUE,
+        attr_type=PIIAttributeType.ADDRESS,
+        strength=strength,
+        start=phrase_start,
+        end=raw_end,
+        text=phrase_text,
+        unit_start=unit_start,
+        unit_last=unit_last,
+        source_kind=f"address_phrase_{component_type.value}",
+        component_type=component_type,
+        source_metadata={"derived_from_keyword": [matched_text]},
+    )
 
 
 @lru_cache(maxsize=1)

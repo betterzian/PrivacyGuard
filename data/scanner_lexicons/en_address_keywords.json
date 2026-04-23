@@ -80,6 +80,9 @@
       {"text": "twr", "strength": "hard"},
       {"text": "block", "strength": "soft"},
       {"text": "blk", "strength": "hard"},
+      {"text": "hall", "strength": "soft"},
+      {"text": "office", "strength": "soft"},
+      {"text": "offices", "strength": "soft"},
       {"text": "house", "strength": "weak"},
       {"text": "complex", "strength": "weak"}
     ]
@@ -88,9 +91,13 @@
     "component_type": "poi",
     "keywords": [
       {"text": "residence", "strength": "hard"},
+      {"text": "residences", "strength": "hard"},
       {"text": "manor", "strength": "hard"},
       {"text": "mansion", "strength": "hard"},
       {"text": "villa", "strength": "hard"},
+      {"text": "homes", "strength": "hard"},
+      {"text": "flats", "strength": "hard"},
+      {"text": "lofts", "strength": "hard"},
       {"text": "plaza", "strength": "soft"},
       {"text": "plz", "strength": "soft"},
       {"text": "gardens", "strength": "soft"},

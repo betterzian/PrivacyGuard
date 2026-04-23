@@ -188,6 +188,67 @@ def test_hard_pattern_scan_keeps_plain_email_boundary_behavior():
 
 
 @pytest.mark.parametrize(
+    ("text", "expected_component", "expected_text"),
+    [
+        ("Miami, FL", "province", "FL"),
+        ("3 fl", "detail", "fl"),
+        ("floor 3", "detail", "floor"),
+    ],
+)
+def test_en_address_scanner_disambiguates_fl_and_floor_by_context(text: str, expected_component: str, expected_text: str):
+    stream = build_prompt_stream(text)
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="en_us",
+    )
+
+    address_clues = [
+        clue
+        for clue in bundle.all_clues
+        if clue.attr_type == PIIAttributeType.ADDRESS and clue.text == expected_text
+    ]
+
+    assert address_clues
+    assert address_clues[0].component_type.value == expected_component
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_component"),
+    [
+        ("Riverside Homes", "poi"),
+        ("Bayfront Flats", "poi"),
+        ("Bryant Residences", "poi"),
+        ("Biscayne Commerce Hall", "building"),
+    ],
+)
+def test_en_address_scanner_builds_suffix_phrase_value_clues(text: str, expected_component: str):
+    stream = build_prompt_stream(text)
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="en_us",
+    )
+
+    address_values = [
+        clue
+        for clue in bundle.all_clues
+        if clue.attr_type == PIIAttributeType.ADDRESS
+        and clue.role == ClueRole.VALUE
+        and clue.text == text
+    ]
+
+    assert address_values
+    assert address_values[0].component_type.value == expected_component
+
+
+@pytest.mark.parametrize(
     "raw_text",
     [
         "邮箱 foo_xyz-xyz.xyz@gmail.com",
