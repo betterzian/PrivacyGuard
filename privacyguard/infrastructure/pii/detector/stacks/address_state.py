@@ -253,6 +253,8 @@ class _DraftComponent:
     clue_indices: set[int] = field(default_factory=set)
     suspect_demoted: bool = False
     level: tuple[AddressComponentType, ...] = ()
+    strength_floor: ClaimStrength | None = None
+    strength_cap: ClaimStrength | None = None
 
     def __post_init__(self) -> None:
         if not self.level:
@@ -450,6 +452,9 @@ class _ParseState:
     comma_tail_checkpoint: _CommaTailCheckpoint | None = None
     ignored_address_key_indices: set[int] = field(default_factory=set)
     last_piece_end: int | None = None
+    pending_label_first_component_hard: bool = False
+    label_expected_component_levels: tuple[AddressComponentType, ...] = ()
+    pending_prefix_value: _IndexedClue | None = None
 
 
 # §3.4 resolver 返回视图；此处不显式 import 以避免与 policy 的循环依赖，
@@ -505,6 +510,8 @@ def _clone_draft_component(component: _DraftComponent) -> _DraftComponent:
         # 显式传递 level，避免 __post_init__ 走 component_type 反填；MULTI_ADMIN 组件
         # 必须依赖 level 元组恢复形态。
         level=tuple(component.level),
+        strength_floor=component.strength_floor,
+        strength_cap=component.strength_cap,
     )
 
 
@@ -1081,6 +1088,8 @@ def _commit(
     # 只有 key 没有 value 的组件不允许提交。
     if component.key and not component.value:
         return False
+    if state.pending_label_first_component_hard:
+        component.strength_floor = ClaimStrength.HARD
     if not _segment_admit(state, component.component_type, valid_successors=valid_successors):
         state.split_at = component.start
         return False
@@ -1121,6 +1130,9 @@ def _commit(
     _prune_prior_component_suspects(state, committed)
     if is_fresh_component:
         _mark_pending_community_poi(state, committed)
+    if state.pending_label_first_component_hard:
+        state.pending_label_first_component_hard = False
+        state.label_expected_component_levels = ()
     return True
 
 
@@ -1246,6 +1258,7 @@ def _flush_chain(
     state.chain_left_anchor = None
     state.value_char_end_override.clear()
     _recompute_last_piece_end(state)
+    state.pending_prefix_value = None
     # 若本轮冲洗没有产出新组件，回退 last_end 到已提交组件末端，避免失败链污染后续 search_start。
     if len(state.components) == before_component_count and state.components:
         state.last_end = max(component.end for component in state.components)
@@ -1446,6 +1459,24 @@ def _sum_strength(parts: Iterable[ClaimStrength]) -> ClaimStrength:
     return ClaimStrength.WEAK
 
 
+def _raise_strength_floor(
+    strength: ClaimStrength,
+    floor: ClaimStrength | None,
+) -> ClaimStrength:
+    if floor is None:
+        return strength
+    return floor if strength_ge(floor, strength) else strength
+
+
+def _apply_strength_cap(
+    strength: ClaimStrength,
+    cap: ClaimStrength | None,
+) -> ClaimStrength:
+    if cap is None:
+        return strength
+    return strength if strength_ge(cap, strength) else cap
+
+
 def _component_key_clue(component: _DraftComponent) -> Clue | None:
     """返回 component 最右侧的 key clue。"""
     for clue in reversed(component.raw_chain):
@@ -1524,7 +1555,10 @@ def _component_strength(
         ):
             key_strength = ClaimStrength.HARD
         parts.append(key_strength)
-    return _sum_strength(parts)
+    strength = _sum_strength(parts)
+    strength = _raise_strength_floor(strength, component.strength_floor)
+    strength = _apply_strength_cap(strength, component.strength_cap)
+    return strength
 
 
 def _address_strength(
@@ -1655,6 +1689,7 @@ def _rebuild_component_derived_state(
     state.pending_community_poi_index = None
     state.comma_tail_checkpoint = None
     state.last_piece_end = None
+    state.pending_prefix_value = None
 
     for index, component in enumerate(state.components):
         component_type = component.component_type

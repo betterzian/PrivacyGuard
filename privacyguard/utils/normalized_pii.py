@@ -1091,13 +1091,19 @@ def _numbers_match(
     left_keyed: dict[str, str] | None = None,
     right_keyed: dict[str, str] | None = None,
 ) -> bool:
-    """号码判定：按最长一方 40% 门槛做逆序单调子序列匹配。"""
+    """号码判定。
+
+    规则：
+    1. 先按逆序单调子序列计算命中数。
+    2. 命中数相对最长一方的覆盖率必须严格大于 40%。
+    3. 当最短一方长度小于等于 2 时，要求最短一方全部命中。
+    """
     del left_keyed, right_keyed
     return _numbers_sequence_match(left, right)
 
 
 def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
-    """号码序列判定：从末尾往前做逆序一致的子序列匹配，命中数需覆盖最长一方的 40%。"""
+    """号码序列判定：从末尾往前做逆序一致的子序列匹配。"""
     if not left and not right:
         return True
     if not left or not right:
@@ -1116,7 +1122,11 @@ def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bo
     longer_len = max(len(left), len(right))
     if longer_len <= 0:
         return True
-    return (matched / longer_len) >= 0.4
+    if (matched / longer_len) <= 0.4:
+        return False
+    if len(shorter) <= 2 and matched != len(shorter):
+        return False
+    return True
 
 
 _KEYED_NUMBER_TYPES = {"building", "detail", "number"}

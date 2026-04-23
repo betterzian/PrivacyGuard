@@ -78,6 +78,14 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
 _ADDRESS_STRONG_NEGATIVE_SCOPES = ("address", "ui")
 
 
+def _clue_component_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    if clue.component_levels:
+        return tuple(clue.component_levels)
+    if clue.component_type is None:
+        return ()
+    return (clue.component_type,)
+
+
 @dataclass(slots=True)
 class BaseAddressStack(BaseStack):
     """中文/英文地址 stack 的共享骨架。"""
@@ -187,9 +195,9 @@ class BaseAddressStack(BaseStack):
 
         if is_label_seed:
             address_start = _floor_clamped_label_seed_start_char(self.context, ClueFamily.ADDRESS, self.clue.end)
-            seed_index = _first_address_clue_index_after(
+            seed_index = self._label_seed_address_index(
                 self.context.clues,
-                address_start,
+                address_start=address_start,
             )
             if seed_index is None:
                 return None
@@ -280,6 +288,38 @@ class BaseAddressStack(BaseStack):
             handled_labels,
         )
 
+    def _label_seed_address_index(
+        self,
+        clues: tuple[Clue, ...],
+        *,
+        address_start: int,
+    ) -> int | None:
+        expected_levels = tuple(_clue_component_levels(self.clue))
+        fallback_index: int | None = None
+        if expected_levels:
+            for index, clue in enumerate(clues):
+                if clue.end <= address_start:
+                    continue
+                if clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM} and fallback_index is None:
+                    fallback_index = index
+                if clue.family != ClueFamily.ADDRESS or clue.role == ClueRole.LABEL:
+                    continue
+                levels = tuple(_clue_component_levels(clue))
+                if levels and any(level in expected_levels for level in levels):
+                    return index
+                break
+        if fallback_index is not None:
+            return fallback_index
+        first_address = _first_address_clue_index_after(clues, address_start)
+        if first_address is not None:
+            return first_address
+        for index, clue in enumerate(clues):
+            if clue.end <= address_start:
+                continue
+            if clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
+                return index
+        return None
+
     def _scan_components(
         self,
         *,
@@ -299,6 +339,9 @@ class BaseAddressStack(BaseStack):
         state.last_end = address_start
         state.evidence_count = evidence_count
         state.seed_floor = seed_floor
+        if self.clue.role == ClueRole.LABEL:
+            state.pending_label_first_component_hard = True
+            state.label_expected_component_levels = tuple(_clue_component_levels(self.clue))
         index = scan_index
 
         while index < len(clues):
@@ -678,4 +721,3 @@ class BaseAddressStack(BaseStack):
             frontier_last_unit=candidate.unit_last,
             suppress_challenger_clue_ids=frozenset(state.suppress_challenger_clue_ids),
         )
-

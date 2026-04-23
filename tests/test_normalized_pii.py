@@ -479,7 +479,16 @@ def test_address_numbers_match_uses_longer_side_40_percent_threshold():
     assert _numbers_match(("101",), ("101",)) is True
     assert _numbers_match(("101",), ("201", "101")) is True
     assert _numbers_match(("101",), ("301", "201", "101")) is False
-    assert _numbers_match(("101", "202"), ("303", "101", "404", "202", "505")) is True
+    assert _numbers_match(("101", "202"), ("303", "101", "404", "202", "505")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "202", "505")) is True
+    assert _numbers_match(("101", "202"), ("303", "101", "404", "505", "606")) is False
+
+
+def test_address_numbers_match_requires_full_match_for_shorter_side_with_two_or_fewer_items():
+    assert _numbers_match(("101",), ("201", "101", "301")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "404", "505")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "404", "202", "505")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "202", "505")) is True
 
 
 def test_bank_number_canonical_keeps_digits_only():

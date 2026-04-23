@@ -8,6 +8,7 @@ import re
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
     CandidateDraft,
+    ClaimStrength,
     ClueFamily,
     Clue,
     ClueRole,
@@ -22,8 +23,10 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     _SENTINEL_STOP,
     _chain_can_accept,
     _clue_unit_gap,
+    _is_comma_boundary_span,
     _normalize_address_value,
     _scan_forward_value_end,
+    _unit_frontier_after_last,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_en import (
     EN_VALID_SUCCESSORS,
@@ -98,6 +101,50 @@ def _iter_family_clues_from_unit(
             yield clue_index, clues[clue_index]
 
 
+_PREFIX_KEY_HARD_FLOOR = frozenset({"apartment", "apt", "suite", "ste", "room", "rm", "#"})
+_PREFIX_KEY_SOFT_CAP = frozenset({"unit"})
+
+
+def _pending_prefix_key_entry(state: _ParseState) -> tuple[int, Clue] | None:
+    if len(state.deferred_chain) != 1:
+        return None
+    clue_index, clue = state.deferred_chain[0]
+    if clue.role != ClueRole.KEY or not is_prefix_en_key(clue.text):
+        return None
+    return clue_index, clue
+
+
+def _prefix_gap_allows_value(prefix_key: Clue, value_clue: Clue, stream: StreamInput) -> bool:
+    if value_clue.start < prefix_key.end:
+        return False
+    for unit in stream.units[_unit_frontier_after_last(prefix_key.unit_last): value_clue.unit_start]:
+        if unit.kind not in {"space", "inline_gap"}:
+            return False
+    return True
+
+
+def _prefix_value_token(prefix_key: Clue, value_clue: Clue, stream: StreamInput) -> str | None:
+    if value_clue.attr_type not in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
+        return None
+    if not _prefix_gap_allows_value(prefix_key, value_clue, stream):
+        return None
+    units = [
+        unit
+        for unit in stream.units[value_clue.unit_start: _unit_frontier_after_last(value_clue.unit_last)]
+        if unit.kind not in {"space", "inline_gap"}
+    ]
+    if len(units) != 1:
+        return None
+    token = units[0].text.strip()
+    if not token or not token.isalnum():
+        return None
+    if value_clue.attr_type == PIIAttributeType.NUM:
+        return token if token.isdigit() else None
+    if not any(char.isdigit() for char in token):
+        return None
+    return token
+
+
 @dataclass(slots=True)
 class EnAddressStack(BaseAddressStack):
     """英文地址专用 stack。"""
@@ -110,6 +157,52 @@ class EnAddressStack(BaseAddressStack):
         return EN_VALID_SUCCESSORS
 
     def _flush_chain(self, state: _ParseState, *, clue_index: int) -> None:
+        prefix_entry = _pending_prefix_key_entry(state)
+        if prefix_entry is not None:
+            before_component_count = len(state.components)
+            key_index, key_clue = prefix_entry
+            value_entry = state.pending_prefix_value
+            if value_entry is not None:
+                value_index, value_clue = value_entry
+                token = _prefix_value_token(key_clue, value_clue, self.context.stream)
+                if token is not None:
+                    component = _DraftComponent(
+                        component_type=key_clue.component_type or AddressComponentType.DETAIL,
+                        start=key_clue.start,
+                        end=value_clue.end,
+                        value=_normalize_address_value(
+                            key_clue.component_type or AddressComponentType.DETAIL,
+                            token,
+                        ),
+                        key=key_clue.text,
+                        is_detail=(key_clue.component_type or AddressComponentType.DETAIL) in {
+                            AddressComponentType.BUILDING,
+                            AddressComponentType.UNIT,
+                            AddressComponentType.ROOM,
+                            AddressComponentType.SUITE,
+                            AddressComponentType.DETAIL,
+                        },
+                        raw_chain=[key_clue, value_clue],
+                        clue_ids={key_clue.clue_id, value_clue.clue_id},
+                        clue_indices={key_index, value_index},
+                    )
+                    folded_key = key_clue.text.strip().lower()
+                    if folded_key in _PREFIX_KEY_HARD_FLOOR:
+                        component.strength_floor = ClaimStrength.HARD
+                    if folded_key in _PREFIX_KEY_SOFT_CAP:
+                        component.strength_cap = ClaimStrength.SOFT
+                    self._commit_component(state, component)
+            else:
+                state.ignored_address_key_indices.add(key_index)
+            state.deferred_chain.clear()
+            state.suspect_chain.clear()
+            state.pending_suspects.clear()
+            state.chain_left_anchor = None
+            state.value_char_end_override.clear()
+            state.pending_prefix_value = None
+            if len(state.components) == before_component_count and state.components:
+                state.last_end = max(component.end for component in state.components)
+            return
         # §6.2：EN 冲洗链接入与 ZH 对等的 admin 解析器，但闭包到 EN_VALID_SUCCESSORS。
         en_valid = self.valid_successors
         _flush_chain(
@@ -134,9 +227,36 @@ class EnAddressStack(BaseAddressStack):
         clue_index: int,
         clue: Clue,
     ) -> object | None:
-        del state, raw_text, stream, clues, clue_index, clue
-        # 英文逗号是组件分隔，不沿用中文“逗号尾行政逆序”状态机。
+        gap_start = state.last_piece_end
+        if gap_start is None and state.deferred_chain:
+            gap_start = state.deferred_chain[-1][1].end
+        if (
+            gap_start is not None
+            and clue.start > gap_start
+            and _is_comma_boundary_span(stream, gap_start, clue.start)
+        ):
+            self._flush_chain(state, clue_index=clue_index)
+            if state.split_at is not None:
+                return _SENTINEL_STOP
+            state.segment_state.reset()
         return None
+
+    def _consume_non_address_clue(
+        self,
+        state: _ParseState,
+        clue: Clue,
+        clues: tuple[Clue, ...],
+        index: int,
+        stream: StreamInput,
+    ) -> bool:
+        prefix_entry = _pending_prefix_key_entry(state)
+        if prefix_entry is not None and state.pending_prefix_value is None:
+            _, key_clue = prefix_entry
+            if _prefix_value_token(key_clue, clue, stream) is not None:
+                state.pending_prefix_value = (index, clue)
+                state.last_end = max(state.last_end, clue.end)
+                return True
+        return BaseAddressStack._consume_non_address_clue(self, state, clue, clues, index, stream)
 
     def _allow_search_stop_bridge(
         self,
@@ -145,6 +265,11 @@ class EnAddressStack(BaseAddressStack):
         *,
         search_anchor: int,
     ) -> bool:
+        prefix_entry = _pending_prefix_key_entry(state)
+        if prefix_entry is not None and state.pending_prefix_value is None:
+            _, key_clue = prefix_entry
+            if _prefix_value_token(key_clue, clue, self.context.stream) is not None:
+                return True
         if not state.components:
             return False
         if (
@@ -190,6 +315,10 @@ class EnAddressStack(BaseAddressStack):
         clue_index: int,
         comp_type: AddressComponentType,
     ) -> object | None:
+        if _pending_prefix_key_entry(state) is not None:
+            self._flush_chain(state, clue_index=clue_index)
+            if state.split_at is not None:
+                return _SENTINEL_STOP
         stream = self.context.stream
         raw_text = self.context.stream.text
         admin_levels = _clue_admin_levels(clue)
@@ -290,6 +419,10 @@ class EnAddressStack(BaseAddressStack):
     ) -> object | None:
         raw_text = self.context.stream.text
         stream = self.context.stream
+        if _pending_prefix_key_entry(state) is not None:
+            self._flush_chain(state, clue_index=clue_index)
+            if state.split_at is not None:
+                return _SENTINEL_STOP
         chain = [item for _, item in state.deferred_chain]
         if chain:
             last_chain_clue = chain[-1]
@@ -319,13 +452,8 @@ class EnAddressStack(BaseAddressStack):
                 return _SENTINEL_STOP
 
         if is_prefix_en_key(clue.text):
-            component = self._build_prefix_key_component(raw_text, clue, comp_type, clue_index)
-            if component is None:
-                state.ignored_address_key_indices.add(clue_index)
-                return _SENTINEL_IGNORE
-            if not self._commit_component(state, component):
-                return _SENTINEL_STOP
-            state.last_end = max(state.last_end, component.end)
+            _append_deferred(state, clue_index, clue, record_suspect=False)
+            state.last_end = max(state.last_end, clue.end)
             return None
 
         context = _state_routing_context(state, clues, raw_text, stream, value_floor=self._value_floor_char())
@@ -659,4 +787,3 @@ class EnAddressStack(BaseAddressStack):
         if cut >= 0:
             floor += cut + 1
         return _skip_separators(raw_text, floor)
-

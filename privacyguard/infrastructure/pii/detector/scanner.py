@@ -1433,22 +1433,21 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         strength = _promote_weak_zh_keyword(
             segment.stream, raw_start, payload.strength, payload.canonical_text,
         )
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ADDRESS,
-                role=ClueRole.KEY,
-                attr_type=PIIAttributeType.ADDRESS,
-                strength=strength,
-                start=raw_start,
-                end=raw_end,
-                text=payload.canonical_text,
-                unit_start=_us,
-                unit_last=_ue,
-                source_kind="address_keyword",
-                component_type=payload.component_type,
-            )
+        key_clue = Clue(
+            clue_id=ctx.next_clue_id(),
+            family=ClueFamily.ADDRESS,
+            role=ClueRole.KEY,
+            attr_type=PIIAttributeType.ADDRESS,
+            strength=strength,
+            start=raw_start,
+            end=raw_end,
+            text=payload.canonical_text,
+            unit_start=_us,
+            unit_last=_ue,
+            source_kind="address_keyword",
+            component_type=payload.component_type,
         )
+        clues.append(_try_promote_address_key_to_derived_label(key_clue, segment.stream))
     return clues
 
 
@@ -1502,33 +1501,34 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         if payload.component_type == AddressComponentType.ROAD:
             raw_end = _extend_en_road_key_end_with_direction(segment.stream, raw_end)
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ADDRESS,
-                role=ClueRole.KEY,
-                attr_type=PIIAttributeType.ADDRESS,
-                strength=payload.strength,
-                start=raw_start,
-                end=raw_end,
-                text=matched_text,
-                unit_start=_us,
-                unit_last=_ue,
-                source_kind="address_keyword",
-                component_type=payload.component_type,
-            )
-        )
-        phrase_value_clue = _build_en_suffix_phrase_value_clue(
-            ctx,
-            segment.stream,
-            raw_start=raw_start,
-            raw_end=raw_end,
-            matched_text=matched_text,
-            component_type=payload.component_type,
+        key_clue = Clue(
+            clue_id=ctx.next_clue_id(),
+            family=ClueFamily.ADDRESS,
+            role=ClueRole.KEY,
+            attr_type=PIIAttributeType.ADDRESS,
             strength=payload.strength,
+            start=raw_start,
+            end=raw_end,
+            text=matched_text,
+            unit_start=_us,
+            unit_last=_ue,
+            source_kind="address_keyword",
+            component_type=payload.component_type,
         )
-        if phrase_value_clue is not None:
-            clues.append(phrase_value_clue)
+        key_clue = _try_promote_address_key_to_derived_label(key_clue, segment.stream)
+        clues.append(key_clue)
+        if key_clue.role == ClueRole.KEY:
+            phrase_value_clue = _build_en_suffix_phrase_value_clue(
+                ctx,
+                segment.stream,
+                raw_start=raw_start,
+                raw_end=raw_end,
+                matched_text=matched_text,
+                component_type=payload.component_type,
+                strength=payload.strength,
+            )
+            if phrase_value_clue is not None:
+                clues.append(phrase_value_clue)
     for token_match in _POSTAL_CODE_PATTERN.finditer(segment.text):
         raw_start, raw_end = _segment_span_to_raw(segment, token_match.start(), token_match.end())
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
@@ -2335,6 +2335,49 @@ def _en_label_has_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bo
     return False
 
 
+_ADDRESS_DERIVED_LABEL_GAP_KINDS = frozenset({"ocr_break", "inline_gap"})
+
+
+def _is_address_derived_label(clue: Clue) -> bool:
+    return (
+        clue.family == ClueFamily.ADDRESS
+        and clue.role == ClueRole.LABEL
+        and "derived_from_address_key" in clue.source_metadata
+    )
+
+
+def _has_address_derived_label_left_boundary(stream: StreamInput, clue: Clue) -> bool:
+    if not stream.units or clue.unit_start <= 0:
+        return False
+    prev_unit = stream.units[clue.unit_start - 1]
+    if prev_unit.kind in _ADDRESS_DERIVED_LABEL_GAP_KINDS:
+        return clue.unit_last + 1 < len(stream.units) and stream.units[clue.unit_last + 1].kind in _ADDRESS_DERIVED_LABEL_GAP_KINDS
+    if clue.unit_start < 2 or clue.unit_last + 2 > len(stream.units):
+        return False
+    return all(unit.kind == "space" for unit in stream.units[clue.unit_start - 2: clue.unit_start]) and all(
+        unit.kind == "space" for unit in stream.units[clue.unit_last + 1: clue.unit_last + 3]
+    )
+
+
+def _try_promote_address_key_to_derived_label(clue: Clue, stream: StreamInput) -> Clue:
+    if clue.family != ClueFamily.ADDRESS or clue.role != ClueRole.KEY:
+        return clue
+    if not _has_address_derived_label_left_boundary(stream, clue):
+        return clue
+    levels = clue.component_levels or ((clue.component_type,) if clue.component_type is not None else ())
+    metadata = {key: list(values) for key, values in clue.source_metadata.items()}
+    metadata["derived_from_address_key"] = [clue.text]
+    metadata["seed_kind"] = ["label"]
+    return replace(
+        clue,
+        role=ClueRole.LABEL,
+        strength=ClaimStrength.SOFT,
+        source_kind="address_keyword_derived_label",
+        source_metadata=metadata,
+        component_levels=tuple(levels),
+    )
+
+
 def _has_label_direct_seed_break_after(
     stream: StreamInput,
     clue: Clue,
@@ -2342,6 +2385,8 @@ def _has_label_direct_seed_break_after(
     locale_profile: str,
 ) -> bool:
     """判断非结构化 label 右侧是否满足 direct seed 条件。"""
+    if _is_address_derived_label(clue):
+        return True
     if clue.family not in {ClueFamily.NAME, ClueFamily.ORGANIZATION}:
         return _zh_label_has_direct_seed_break_after(stream, clue)
     seed_locale = (clue.source_metadata.get("seed_locale") or [None])[0]
