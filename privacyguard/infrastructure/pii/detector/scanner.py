@@ -699,6 +699,43 @@ def _is_negative_numeric(text: str, start: int, end: int) -> bool:
     return False
 
 
+_CLAIM_STRENGTH_METADATA_KEYS: tuple[str, ...] = (
+    "claim_strength",
+    "address_component_strength",
+)
+
+
+def _dictionary_claim_strength(metadata: dict[str, list[str]], matched_text: str) -> ClaimStrength:
+    """决定词典命中 clue 的 ClaimStrength。
+
+    - 若 metadata 显式携带预置强度（`claim_strength` 或 `address_component_strength`）→ 直接采用。
+    - 否则按"去除空白/非词字符后的有效字符数"兜底：1→WEAK，≤3→SOFT，其他→HARD。
+      CJK 与字母数字均计入有效字符，避免把"南京"这种两字组件识别成 HARD。
+    """
+    for key in _CLAIM_STRENGTH_METADATA_KEYS:
+        raw_values = metadata.get(key) if metadata else None
+        if not raw_values:
+            continue
+        raw = str(raw_values[0]).strip().lower()
+        if not raw:
+            continue
+        try:
+            return ClaimStrength(raw)
+        except ValueError:
+            # 兼容大小写/enum.name 入参：尝试按枚举名反查一次。
+            for member in ClaimStrength:
+                if member.name.lower() == raw:
+                    return member
+            continue
+    effective = re.sub(r"[\s\W_]+", "", str(matched_text or ""), flags=re.UNICODE)
+    length = len(effective)
+    if length <= 1:
+        return ClaimStrength.WEAK
+    if length <= 3:
+        return ClaimStrength.SOFT
+    return ClaimStrength.HARD
+
+
 def _scan_dictionary_hard_clues(
     ctx: DetectContext,
     stream: StreamInput | str,
@@ -775,6 +812,7 @@ def _scan_org_address_dictionary_clues(
         dict_metadata = {key: list(values) for key, values in payload.metadata_items}
         dict_metadata["hard_source"] = [source_kind]
         dict_metadata["placeholder"] = [_PLACEHOLDER_BY_ATTR.get(payload.attr_type, f"<{payload.attr_type.value}>")]
+        strength = _dictionary_claim_strength(dict_metadata, matched_text)
         _us, _ue = _char_span_to_unit_span(segment.stream, start, end)
         clues.append(
             Clue(
@@ -782,7 +820,7 @@ def _scan_org_address_dictionary_clues(
                 family=_attr_to_family(payload.attr_type),
                 role=ClueRole.VALUE,
                 attr_type=payload.attr_type,
-                strength=ClaimStrength.HARD,
+                strength=strength,
                 start=start,
                 end=end,
                 text=matched_text,
@@ -864,12 +902,13 @@ def _scan_name_dictionary_clues(
         role, hint_value = _dictionary_name_role(component)
         metadata["name_component_hint"] = [hint_value]
         is_zh_family = component == "family" and _is_cjk_text(matched_text)
-        strength = ClaimStrength.HARD
         if is_zh_family:
+            # 中文单字姓走专用的姓氏流行度降级表，不走字数兜底。
             metadata.update(_zh_surname_metadata(matched_text, from_dictionary=True))
             strength = _zh_surname_claim_strength(matched_text) or ClaimStrength.SOFT
         else:
             metadata["hard_source"] = [source_kind]
+            strength = _dictionary_claim_strength(metadata, matched_text)
         _us, _ue = _char_span_to_unit_span(normalized_stream, start, end)
         clues.append(
             Clue(
@@ -1584,6 +1623,14 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
         if normalized is None:
             continue
         raw_start, raw_end, matched_text = normalized
+        if _should_skip_en_address_negative_match(
+            segment.stream,
+            raw_start,
+            raw_end,
+            matched_text=matched_text,
+            source_kind=str(match.payload),
+        ):
+            continue
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -1623,6 +1670,26 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                 )
             )
     return clues
+
+
+def _should_skip_en_address_negative_match(
+    stream: StreamInput,
+    start: int,
+    end: int,
+    *,
+    matched_text: str,
+    source_kind: str,
+) -> bool:
+    """避免把明显带门牌号的 `Main Street` 误判成英文地址负向短语。"""
+    if source_kind != "negative_address_word":
+        return False
+    if str(matched_text or "").strip().lower() != "main street":
+        return False
+    previous = _previous_non_space_unit(stream, start)
+    if previous is None:
+        return False
+    token = previous.text.strip()
+    return any(char.isdigit() for char in token)
 
 
 def _is_short_floor_number_unit(unit) -> bool:

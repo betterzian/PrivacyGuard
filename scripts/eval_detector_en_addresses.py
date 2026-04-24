@@ -265,7 +265,7 @@ def expected_component_tokens(component_key: str, value: str) -> list[str]:
 
 
 def trace_component_key(component_type: str, levels: tuple[str, ...]) -> tuple[str, ...]:
-    if component_type == "house_number":
+    if component_type in {"house_number", "number"}:
         return ("number",)
     if component_type == "postal_code":
         return ("postal_code",)

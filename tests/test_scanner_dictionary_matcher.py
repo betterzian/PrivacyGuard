@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from scripts.eval_detector_en_addresses import trace_component_key
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
@@ -246,6 +247,31 @@ def test_en_address_scanner_builds_suffix_phrase_value_clues(text: str, expected
 
     assert address_values
     assert address_values[0].component_type.value == expected_component
+
+
+@pytest.mark.parametrize(
+    ("text", "expect_negative"),
+    [
+        ("7429 Main Street, Building 7, Austin, TX 19356", False),
+        ("main street festival", True),
+    ],
+)
+def test_en_address_scanner_main_street_negative_respects_numeric_address_context(text: str, expect_negative: bool):
+    _stream, segment = _first_segment(text)
+
+    negatives = scanner_module._scan_negative_clues(DetectContext(), segment)
+    main_street_negatives = [
+        clue
+        for clue in negatives
+        if clue.source_kind == "negative_address_word" and clue.text.strip().lower() == "main street"
+    ]
+
+    assert bool(main_street_negatives) is expect_negative
+
+
+def test_eval_trace_component_key_maps_number_component():
+    assert trace_component_key("number", ("number",)) == ("number",)
+    assert trace_component_key("house_number", ("house_number",)) == ("number",)
 
 
 @pytest.mark.parametrize(
@@ -980,6 +1006,90 @@ def test_hard_pattern_scan_matches_amount_before_generic_fragments():
         and clue.text in {"88", "532.00", "12", "181.00"}
         for clue in clues
     )
+
+
+def test_dictionary_claim_strength_respects_metadata_preset():
+    strength = scanner_module._dictionary_claim_strength(
+        {"claim_strength": ["soft"]},
+        matched_text="anywhere",
+    )
+    assert strength == ClaimStrength.SOFT
+
+
+def test_dictionary_claim_strength_falls_back_by_char_count_cjk():
+    # 单字 → WEAK；两字 → SOFT；≥4 有效字符 → HARD。
+    assert scanner_module._dictionary_claim_strength({}, "王") == ClaimStrength.WEAK
+    assert scanner_module._dictionary_claim_strength({}, "南京") == ClaimStrength.SOFT
+    assert scanner_module._dictionary_claim_strength({}, "南京东路") == ClaimStrength.HARD
+
+
+def test_dictionary_claim_strength_falls_back_by_char_count_ascii():
+    # 去掉空白/标点后计数。
+    assert scanner_module._dictionary_claim_strength({}, " a ") == ClaimStrength.WEAK
+    assert scanner_module._dictionary_claim_strength({}, "Abc") == ClaimStrength.SOFT
+    assert scanner_module._dictionary_claim_strength({}, "Tencent") == ClaimStrength.HARD
+
+
+def test_scan_org_address_dictionary_clues_downgrades_short_org_by_char_count():
+    entry = _entry(
+        attr_type=PIIAttributeType.ORGANIZATION,
+        text="腾讯",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"]},
+    )
+    _stream, segment = _first_segment("我在腾讯工作")
+
+    clues = scanner_module._scan_org_address_dictionary_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        segment,
+        (entry,),
+        source_kind="local",
+    )
+    # "腾讯" 两字 → SOFT（按字数兜底）。
+    assert clues
+    assert all(clue.strength == ClaimStrength.SOFT for clue in clues)
+    assert all(clue.attr_type == PIIAttributeType.ORGANIZATION for clue in clues)
+
+
+def test_scan_org_address_dictionary_clues_uses_preset_strength_from_metadata():
+    entry = _entry(
+        attr_type=PIIAttributeType.ADDRESS,
+        text="南京",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"], "claim_strength": ["hard"]},
+    )
+    _stream, segment = _first_segment("下周去南京出差")
+
+    clues = scanner_module._scan_org_address_dictionary_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        segment,
+        (entry,),
+        source_kind="local",
+    )
+    # 预置 hard 应覆盖字数兜底（"南京"=SOFT）。
+    assert clues
+    assert all(clue.strength == ClaimStrength.HARD for clue in clues)
+    assert all(clue.attr_type == PIIAttributeType.ADDRESS for clue in clues)
+
+
+def test_scan_org_address_dictionary_clues_long_org_stays_hard():
+    entry = _entry(
+        attr_type=PIIAttributeType.ORGANIZATION,
+        text="腾讯科技有限公司",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"]},
+    )
+    _stream, segment = _first_segment("我在腾讯科技有限公司工作")
+
+    clues = scanner_module._scan_org_address_dictionary_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        segment,
+        (entry,),
+        source_kind="local",
+    )
+    assert clues
+    # 8 字 → HARD。
+    assert all(clue.strength == ClaimStrength.HARD for clue in clues)
 
 
 @pytest.mark.parametrize(

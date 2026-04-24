@@ -37,6 +37,7 @@ _ADDRESS_LEVEL_KEYS = (
     "building",
     "detail",
 )
+_ADDRESS_EXTRA_KEYS = ("components",)
 _NAME_SLOT_KEYS = ("full", "family", "given", "alias", "middle")
 
 
@@ -57,7 +58,20 @@ def _is_storage_slot_dict(value: Any) -> bool:
 
 
 def _is_address_slot_dict(value: Any) -> bool:
-    return isinstance(value, dict) and bool(value) and set(value).issubset(set(_ADDRESS_LEVEL_KEYS))
+    return (
+        isinstance(value, dict)
+        and bool(value)
+        and set(value).issubset(set(_ADDRESS_LEVEL_KEYS) | set(_ADDRESS_EXTRA_KEYS))
+    )
+
+
+def _is_address_component_dict(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and "level" in value
+        and "value" in value
+        and set(value).issubset({"level", "value", "strength"})
+    )
 
 
 def _is_name_slot_dict(value: Any) -> bool:
@@ -113,7 +127,43 @@ def _address_slot_identity(item: dict[str, Any]) -> tuple[str, ...]:
         if not _is_storage_slot_dict(level):
             continue
         values.append(f"{key}:{str(level.get('value') or '').strip()}")
+    components = item.get("components")
+    if isinstance(components, list):
+        for component in components:
+            if not _is_address_component_dict(component):
+                continue
+            values.append(
+                f"component:{str(component.get('level') or '').strip()}={str(component.get('value') or '').strip()}"
+            )
     return tuple(values)
+
+
+def _merge_address_component_list(
+    old: list[dict[str, Any]], new: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """按 (level, value) 去重合并扁平组件袋；strength 冲突时 later-wins，非 None 优先。"""
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    ordered_keys: list[tuple[str, str]] = []
+    for item in [*old, *new]:
+        if not _is_address_component_dict(item):
+            continue
+        level = str(item.get("level") or "").strip()
+        value = str(item.get("value") or "").strip()
+        if not level or not value:
+            continue
+        key = (level, value)
+        payload = {"level": level, "value": value}
+        strength = item.get("strength")
+        if strength is not None:
+            payload["strength"] = strength
+        if key in merged:
+            existing = merged[key]
+            if "strength" in payload:
+                existing["strength"] = payload["strength"]
+            continue
+        merged[key] = payload
+        ordered_keys.append(key)
+    return [merged[key] for key in ordered_keys]
 
 
 def _name_slot_identity(item: dict[str, Any]) -> tuple[str, ...]:
@@ -129,6 +179,11 @@ def _name_slot_identity(item: dict[str, Any]) -> tuple[str, ...]:
 def _merge_address_slot_dicts(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     merged = dict(old)
     for key, value in new.items():
+        if key == "components":
+            old_components = merged.get("components") if isinstance(merged.get("components"), list) else []
+            new_components = value if isinstance(value, list) else []
+            merged["components"] = _merge_address_component_list(old_components, new_components)
+            continue
         if key in merged and _is_storage_slot_dict(merged[key]) and _is_storage_slot_dict(value):
             merged[key] = _merge_storage_slot_dicts(merged[key], value)
         else:

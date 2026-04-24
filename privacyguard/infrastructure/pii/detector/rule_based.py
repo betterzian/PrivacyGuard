@@ -17,7 +17,11 @@ from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 from privacyguard.infrastructure.pii.json_privacy_repository import DEFAULT_PRIVACY_REPOSITORY_PATH, JsonPrivacyRepository, parse_privacy_repository_document
+from privacyguard.infrastructure.repository.schemas import AddressLevel
 from privacyguard.utils.normalized_pii import normalize_pii, normalized_primary_text
+from privacyguard.utils.text import is_cjk_text
+
+_ADDRESS_LEVEL_VALUES: frozenset[str] = frozenset(level.value for level in AddressLevel)
 
 
 class RuleBasedPIIDetector:
@@ -108,16 +112,17 @@ class RuleBasedPIIDetector:
         entries: list[DictionaryEntry] = []
         for persona in document.true_personas:
             slots = persona.slots
-            persona_metadata = {"local_entity_ids": [persona.persona_id]}
             for slot in slots.name or []:
                 entries.append(self._name_entry(component="full", value=slot.full.value, persona_id=persona.persona_id))
-                if slot.family:
+                # family / middle 只对非 CJK 文本发射 entry：中文 scanner 不消费这两类 component，
+                # 避免单字姓或单字中间名造成过度召回。保留原字段是为了英文匹配需要。
+                if slot.family and not is_cjk_text(slot.family.value):
                     entries.append(self._name_entry(component="family", value=slot.family.value, persona_id=persona.persona_id))
                 if slot.given:
                     entries.append(self._name_entry(component="given", value=slot.given.value, persona_id=persona.persona_id))
                 if slot.alias:
                     entries.append(self._name_entry(component="alias", value=slot.alias.value, persona_id=persona.persona_id))
-                if slot.middle:
+                if slot.middle and not is_cjk_text(slot.middle.value):
                     entries.append(self._name_entry(component="middle", value=slot.middle.value, persona_id=persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.PHONE, slots.phone, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.BANK_NUMBER, slots.bank_number, persona.persona_id))
@@ -127,18 +132,37 @@ class RuleBasedPIIDetector:
             entries.extend(self._scalar_slot_entries(PIIAttributeType.ID_NUMBER, slots.id_number, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.ORGANIZATION, slots.organization, persona.persona_id))
             for slot in slots.address or []:
-                entries.append(
-                    self._dictionary_entry(
-                        attr_type=PIIAttributeType.ADDRESS,
-                        match_terms=normalize_pii(
-                            PIIAttributeType.ADDRESS,
-                            "",
-                            components=self._address_components_from_slot(slot),
-                        ).match_terms,
-                        matched_by="dictionary_local",
-                        metadata={"local_entity_ids": [persona.persona_id]},
+                main_components = self._address_components_from_slot(slot)
+                if main_components:
+                    entries.append(
+                        self._dictionary_entry(
+                            attr_type=PIIAttributeType.ADDRESS,
+                            match_terms=normalize_pii(
+                                PIIAttributeType.ADDRESS,
+                                "",
+                                components=main_components,
+                            ).match_terms,
+                            matched_by="dictionary_local",
+                            metadata={"local_entity_ids": [persona.persona_id]},
+                        )
                     )
-                )
+                # 扁平组件袋：每条 (level, value) 独立发射一个 DictionaryEntry，
+                # 由 scanner 侧按字数/预置强度决定 ClaimStrength。
+                for component in slot.components:
+                    metadata: dict[str, list[str]] = {
+                        "local_entity_ids": [persona.persona_id],
+                        "address_level": [component.level.value],
+                    }
+                    if component.strength is not None:
+                        metadata["claim_strength"] = [component.strength.value]
+                    entries.append(
+                        self._dictionary_entry(
+                            attr_type=PIIAttributeType.ADDRESS,
+                            match_terms=(component.value,),
+                            matched_by="dictionary_local",
+                            metadata=metadata,
+                        )
+                    )
         return tuple(entries)
 
     def _load_session_dictionary(self, *, session_id: str | None, turn_id: int | None) -> tuple[DictionaryEntry, ...]:
@@ -159,14 +183,18 @@ class RuleBasedPIIDetector:
                     components=normalized.components,
                     metadata=record.metadata,
                 )
+            base_metadata: dict[str, list[str]] = {"session_turn_ids": [str(record.turn_id)]}
+            if record.persona_id:
+                base_metadata["local_entity_ids"] = [record.persona_id]
+
+            if record.attr_type == PIIAttributeType.NAME:
+                entries.extend(self._session_name_entries(record=record, normalized=normalized, base_metadata=base_metadata))
+                continue
+
             source_text = normalized_primary_text(normalized)
             if not source_text:
                 continue
-            metadata: dict[str, list[str]] = {"session_turn_ids": [str(record.turn_id)]}
-            if record.persona_id:
-                metadata["local_entity_ids"] = [record.persona_id]
-            if record.metadata.get("name_component"):
-                metadata["name_component"] = [record.metadata["name_component"]]
+            metadata = dict(base_metadata)
             entries.append(
                 self._dictionary_entry(
                     attr_type=record.attr_type,
@@ -175,7 +203,107 @@ class RuleBasedPIIDetector:
                     metadata=metadata,
                 )
             )
+            # 地址主结构 entry 已发射；再追加扁平组件袋（含 suspect）供 scanner 独立匹配。
+            if record.attr_type == PIIAttributeType.ADDRESS:
+                entries.extend(self._session_address_component_entries(normalized=normalized, base_metadata=base_metadata))
         return tuple(entries)
+
+    def _session_name_entries(
+        self,
+        *,
+        record,
+        normalized,
+        base_metadata: dict[str, list[str]],
+    ) -> list[DictionaryEntry]:
+        """按 locale 展开 session 姓名 record 为多条词典条目。
+
+        - ZH：若 normalized.components 同时有 family 与 given，发 full + given（family 丢弃）；
+          否则只发 full。
+        - EN：按空白切分 full；≥2 词 → full + family=last + given=others；否则只发 full。
+        不产 middle。
+        """
+        entries: list[DictionaryEntry] = []
+        components = dict(normalized.components or {})
+        full_text = str(components.get("full") or record.source_text or "").strip()
+        if not full_text:
+            return entries
+
+        def _emit(component: str, value: str) -> None:
+            text = str(value or "").strip()
+            if not text:
+                return
+            metadata = dict(base_metadata)
+            metadata["name_component"] = [component]
+            entries.append(
+                self._dictionary_entry(
+                    attr_type=PIIAttributeType.NAME,
+                    match_terms=(text,),
+                    matched_by="dictionary_session",
+                    metadata=metadata,
+                )
+            )
+
+        if is_cjk_text(full_text):
+            _emit("full", full_text)
+            family = str(components.get("family") or "").strip()
+            given = str(components.get("given") or "").strip()
+            if family and given:
+                _emit("given", given)
+            return entries
+
+        # EN / 非 CJK
+        tokens = full_text.split()
+        _emit("full", full_text)
+        if len(tokens) >= 2:
+            _emit("family", tokens[-1])
+            _emit("given", " ".join(tokens[:-1]))
+        return entries
+
+    def _session_address_component_entries(
+        self,
+        *,
+        normalized,
+        base_metadata: dict[str, list[str]],
+    ) -> list[DictionaryEntry]:
+        """把 normalized.ordered_components 展开为扁平 per-level 条目，与 local 侧对齐。"""
+        entries: list[DictionaryEntry] = []
+        valid_levels = {level_value for level_value in _ADDRESS_LEVEL_VALUES}
+        seen: set[tuple[str, str]] = set()
+
+        def _emit(level_text: str, value_text: str) -> None:
+            level_text = str(level_text or "").strip()
+            value_text = str(value_text or "").strip()
+            if not level_text or not value_text or level_text not in valid_levels:
+                return
+            key = (level_text, value_text)
+            if key in seen:
+                return
+            seen.add(key)
+            metadata = dict(base_metadata)
+            metadata["address_level"] = [level_text]
+            entries.append(
+                self._dictionary_entry(
+                    attr_type=PIIAttributeType.ADDRESS,
+                    match_terms=(value_text,),
+                    matched_by="dictionary_session",
+                    metadata=metadata,
+                )
+            )
+
+        for component in normalized.ordered_components or ():
+            level_tuple = getattr(component, "level", ()) or ()
+            primary_level = level_tuple[-1] if level_tuple else getattr(component, "component_type", "")
+            value = getattr(component, "value", "")
+            if isinstance(value, tuple):
+                for item in value:
+                    _emit(primary_level, item)
+            else:
+                _emit(primary_level, value)
+            for suspect in getattr(component, "suspected", ()) or ():
+                suspect_levels = getattr(suspect, "levels", ()) or ()
+                suspect_level = suspect_levels[-1] if suspect_levels else ""
+                _emit(suspect_level, getattr(suspect, "value", ""))
+        return entries
 
     def _dictionary_entry(
         self,

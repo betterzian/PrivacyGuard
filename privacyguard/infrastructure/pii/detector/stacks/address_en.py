@@ -138,11 +138,50 @@ def _prefix_value_token(prefix_key: Clue, value_clue: Clue, stream: StreamInput)
     token = units[0].text.strip()
     if not token or not token.isalnum():
         return None
-    if value_clue.attr_type == PIIAttributeType.NUM:
-        return token if token.isdigit() else None
-    if not any(char.isdigit() for char in token):
-        return None
-    return token
+    return token if _prefix_token_allowed(prefix_key, token, source_attr_type=value_clue.attr_type) else None
+
+
+def _prefix_token_allowed(
+    prefix_key: Clue,
+    token: str,
+    *,
+    source_attr_type: PIIAttributeType | None = None,
+) -> bool:
+    """判断 prefix-key 右侧单 token 是否可作为英文 detail/building 值。"""
+    cleaned = str(token or "").strip()
+    if not cleaned or not cleaned.isalnum():
+        return False
+    if source_attr_type == PIIAttributeType.NUM:
+        return cleaned.isdigit()
+    if any(char.isdigit() for char in cleaned):
+        return True
+    component_type = prefix_key.component_type or AddressComponentType.DETAIL
+    if component_type == AddressComponentType.BUILDING:
+        return cleaned.isalpha() and len(cleaned) <= 2
+    if component_type in {
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
+    }:
+        return cleaned.isalpha() and len(cleaned) == 1
+    return False
+
+
+def _prefix_value_fragment_from_text(prefix_key: Clue, stream: StreamInput) -> tuple[str, int] | None:
+    """当 scanner 没有产出 NUM/ALNUM clue 时，直接从 key 右侧取一个紧邻 token。"""
+    cursor = prefix_key.end
+    for unit in stream.units[_unit_frontier_after_last(prefix_key.unit_last):]:
+        if unit.char_end <= cursor:
+            continue
+        if unit.kind in {"space", "inline_gap"}:
+            cursor = max(cursor, unit.char_end)
+            continue
+        token = unit.text.strip()
+        if not _prefix_token_allowed(prefix_key, token):
+            return None
+        return token, unit.char_end
+    return None
 
 
 @dataclass(slots=True)
@@ -162,36 +201,50 @@ class EnAddressStack(BaseAddressStack):
             before_component_count = len(state.components)
             key_index, key_clue = prefix_entry
             value_entry = state.pending_prefix_value
+            token: str | None = None
+            component_end = key_clue.end
+            raw_chain = [key_clue]
+            clue_ids = {key_clue.clue_id}
+            clue_indices = {key_index}
             if value_entry is not None:
                 value_index, value_clue = value_entry
                 token = _prefix_value_token(key_clue, value_clue, self.context.stream)
                 if token is not None:
-                    component = _DraftComponent(
-                        component_type=key_clue.component_type or AddressComponentType.DETAIL,
-                        start=key_clue.start,
-                        end=value_clue.end,
-                        value=_normalize_address_value(
-                            key_clue.component_type or AddressComponentType.DETAIL,
-                            token,
-                        ),
-                        key=key_clue.text,
-                        is_detail=(key_clue.component_type or AddressComponentType.DETAIL) in {
-                            AddressComponentType.BUILDING,
-                            AddressComponentType.UNIT,
-                            AddressComponentType.ROOM,
-                            AddressComponentType.SUITE,
-                            AddressComponentType.DETAIL,
-                        },
-                        raw_chain=[key_clue, value_clue],
-                        clue_ids={key_clue.clue_id, value_clue.clue_id},
-                        clue_indices={key_index, value_index},
-                    )
-                    folded_key = key_clue.text.strip().lower()
-                    if folded_key in _PREFIX_KEY_HARD_FLOOR:
-                        component.strength_floor = ClaimStrength.HARD
-                    if folded_key in _PREFIX_KEY_SOFT_CAP:
-                        component.strength_cap = ClaimStrength.SOFT
-                    self._commit_component(state, component)
+                    component_end = value_clue.end
+                    raw_chain.append(value_clue)
+                    clue_ids.add(value_clue.clue_id)
+                    clue_indices.add(value_index)
+            if token is None:
+                raw_fragment = _prefix_value_fragment_from_text(key_clue, self.context.stream)
+                if raw_fragment is not None:
+                    token, component_end = raw_fragment
+            if token is not None:
+                component = _DraftComponent(
+                    component_type=key_clue.component_type or AddressComponentType.DETAIL,
+                    start=key_clue.start,
+                    end=component_end,
+                    value=_normalize_address_value(
+                        key_clue.component_type or AddressComponentType.DETAIL,
+                        token,
+                    ),
+                    key=key_clue.text,
+                    is_detail=(key_clue.component_type or AddressComponentType.DETAIL) in {
+                        AddressComponentType.BUILDING,
+                        AddressComponentType.UNIT,
+                        AddressComponentType.ROOM,
+                        AddressComponentType.SUITE,
+                        AddressComponentType.DETAIL,
+                    },
+                    raw_chain=raw_chain,
+                    clue_ids=clue_ids,
+                    clue_indices=clue_indices,
+                )
+                folded_key = key_clue.text.strip().lower()
+                if folded_key in _PREFIX_KEY_HARD_FLOOR:
+                    component.strength_floor = ClaimStrength.HARD
+                if folded_key in _PREFIX_KEY_SOFT_CAP:
+                    component.strength_cap = ClaimStrength.SOFT
+                self._commit_component(state, component)
             else:
                 state.ignored_address_key_indices.add(key_index)
             state.deferred_chain.clear()

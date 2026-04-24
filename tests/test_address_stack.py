@@ -308,6 +308,24 @@ def test_en_address_detector_merges_comma_tail_components_into_single_address(te
     assert [candidate.text for candidate in addresses] == [expected_text]
 
 
+@pytest.mark.parametrize(
+    ("text", "expected_text"),
+    [
+        ("7429 Main Street, Building 7, Austin, TX 19356", "7429 Main Street, Building 7, Austin, TX 19356"),
+        ("5291 Main Street, Block C, Austin, TX 31178", "5291 Main Street, Block C, Austin, TX 31178"),
+        ("1320 Main Street, House 9, Boston, MA 85456", "1320 Main Street, House 9, Boston, MA 85456"),
+        ("7482 Oak Avenue, Tower B, Seattle, WA 94259", "7482 Oak Avenue, Tower B, Seattle, WA 94259"),
+        ("Tower B 7482 Oak Avenue, Seattle, WA 94259", "Tower B 7482 Oak Avenue, Seattle, WA 94259"),
+    ],
+)
+def test_en_address_detector_keeps_single_token_building_prefix_values(text: str, expected_text: str):
+    candidates = _detect_candidates_from_scanner(text, locale_profile="en_us")
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [expected_text]
+
+
 def test_en_address_bridge_does_not_promote_plain_short_num_followed_by_non_address_words():
     candidates = _detect_candidates_from_scanner("note 123 alpha beta", locale_profile="en_us")
 
