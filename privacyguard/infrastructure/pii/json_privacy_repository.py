@@ -620,11 +620,21 @@ class JsonPrivacyRepository:
         return _build_repo_entity_index(document)
 
     def merge_and_write(self, patch: dict[str, Any]) -> None:
-        """将 patch 校验后按 persona 合并并原子写入。"""
+        """将 patch 校验后按 persona 合并并原子写入。
+
+        若进程内 `RuntimeContext` 已初始化且其 `privacy_repository` 是当前实例，
+        则同步令 repo_index 缓存失效，避免下游 sanitize 读到过期索引。
+        """
         base_document = parse_privacy_repository_document(self.load_raw())
         patch_document = parse_privacy_repository_document(patch)
         merged = merge_privacy_repository_documents(base_document, patch_document)
         self._atomic_write(merged.model_dump(mode="json", exclude_none=True))
+        # 局部 import 防止 runtime 包加载时反向依赖本模块产生循环。
+        from privacyguard.runtime.context import get_runtime_context
+
+        ctx = get_runtime_context()
+        if ctx is not None and ctx.privacy_repository is self:
+            ctx.invalidate_repo_index()
 
     def _atomic_write(self, payload: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
