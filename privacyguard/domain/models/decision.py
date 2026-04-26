@@ -34,6 +34,8 @@ class DecisionAction(BaseModel):
     block_id: str | None = None
     span_start: int | None = None
     span_end: int | None = None
+    # session 级 entity 下标（仅 GENERICIZE 会填充；由 SessionPlaceholderAllocator 分配）。
+    entity_id: int | None = None
     reason: str = ""
     metadata: dict[str, list[str]] = Field(default_factory=dict)
 

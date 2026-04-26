@@ -142,10 +142,11 @@ def test_placeholder_allocator_reuses_address_placeholder_by_same_entity():
                     },
                 ),
                 canonical_source_text=None,
-                replacement_text="<地址1>",
+                replacement_text="⟨ADDR#1.CITY-DIST-DTL⟩",
                 attr_type=PIIAttributeType.ADDRESS,
                 action_type=ActionType.GENERICIZE,
                 source=PIISourceType.PROMPT,
+                entity_id=1,
             )
         ],
     )
@@ -176,4 +177,6 @@ def test_placeholder_allocator_reuses_address_placeholder_by_same_entity():
 
     assigned = SessionPlaceholderAllocator(store).assign(plan)
 
-    assert assigned.actions[0].replacement_text == "<地址1>"
+    # 同实体复用 #1，本次 PII 自身组件投射出 CITY-DIST-DTL（无 ROAD）。
+    assert assigned.actions[0].replacement_text == "⟨ADDR#1.CITY-DIST-DTL⟩"
+    assert assigned.actions[0].entity_id == 1

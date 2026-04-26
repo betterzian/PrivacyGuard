@@ -1181,6 +1181,69 @@ def _component_suspected_tuple_from_metadata(
     return tuple(_parse_one_component_suspected(str(item or "")) for item in raw)
 
 
+_DISPLAY_LEVEL_BY_COMPONENT_KEY: dict[str, str] = {
+    "province": "prov",
+    "country": "prov",
+    "city": "city",
+    "district": "dist",
+    "district_city": "dist",
+    "subdistrict": "dist",
+    "road": "road",
+    "number": "road",
+    "house_number": "road",
+    "poi": "dtl",
+    "building": "dtl",
+    "unit": "dtl",
+    "room": "dtl",
+    "suite": "dtl",
+    "detail": "dtl",
+    "postal_code": "",
+}
+# SPEC 拼接顺序：固定 PROV→CITY→DIST→ROAD→DTL。
+_DISPLAY_LEVEL_ORDER: tuple[str, ...] = ("prov", "city", "dist", "road", "dtl")
+
+
+def _derive_display_level(component_type: str, level_tuple: tuple[str, ...]) -> str:
+    """为 NormalizedAddressComponent 推导 display 短码。
+
+    - MULTI_ADMIN：取 level 元组中 rank 最低的行政层级映射（例：("province","city") → "city"）；
+      元组为空或无行政层级时回退为 "city"。
+    - 其它 component_type：直接按映射表取；命中 postal_code 或未知类型返回空串。
+    """
+    ct = str(component_type or "").strip()
+    if ct == "multi_admin":
+        if level_tuple:
+            ranked = sorted(
+                level_tuple,
+                key=lambda lvl: _ADMIN_LEVEL_RANK.get(lvl, 10**9),
+            )
+            for lvl in ranked:
+                mapped = _DISPLAY_LEVEL_BY_COMPONENT_KEY.get(lvl, "")
+                if mapped:
+                    return mapped
+        return "city"
+    return _DISPLAY_LEVEL_BY_COMPONENT_KEY.get(ct, "")
+
+
+def address_display_spec(normalized: NormalizedPII) -> str:
+    """按 PROV/CITY/DIST/ROAD/DTL 顺序生成地址占位符 SPEC 后缀。
+
+    - 只扫描 `normalized.ordered_components` 里 display_level 非空的条目；
+    - 去重后按固定顺序用 "-" 拼（同一 display level 多次仅保留一次）；
+    - 全空或非地址归一返回空字符串（调用方据此决定是否追加 `.SPEC`）。
+    """
+    if normalized is None or normalized.attr_type != PIIAttributeType.ADDRESS:
+        return ""
+    seen: set[str] = set()
+    for component in normalized.ordered_components:
+        level = (component.display_level or "").strip()
+        if level:
+            seen.add(level)
+    if not seen:
+        return ""
+    return "-".join(level.upper() for level in _DISPLAY_LEVEL_ORDER if level in seen)
+
+
 def _address_ordered_components(
     *,
     metadata: Mapping[str, object] | None,
@@ -1226,12 +1289,14 @@ def _ordered_components_from_direct_components(
             value = raw_value
             key = ""
         # 结构化直传无 trace，level 默认等于 component_type。
+        level_tuple = (component_type,)
         ordered.append(NormalizedAddressComponent(
             component_type=component_type,
-            level=(component_type,),
+            level=level_tuple,
             value=value,
             key=key,
             suspected=(),
+            display_level=_derive_display_level(component_type, level_tuple),
         ))
     return tuple(ordered)
 
@@ -1269,12 +1334,14 @@ def _ordered_components_from_metadata(
             while key_index < len(key_entries) and key_entries[key_index][0] == "poi" and len(keys) < len(values):
                 keys.append(key_entries[key_index][1])
                 key_index += 1
+            poi_level_tuple = first_level or ("poi",)
             ordered.append(NormalizedAddressComponent(
                 component_type="poi",
-                level=first_level or ("poi",),
+                level=poi_level_tuple,
                 value=tuple(values) if len(values) > 1 else values[0],
                 key=tuple(keys) if len(keys) > 1 else (keys[0] if keys else ""),
                 suspected=tuple(suspected),
+                display_level=_derive_display_level("poi", poi_level_tuple),
             ))
             continue
 
@@ -1282,12 +1349,14 @@ def _ordered_components_from_metadata(
         if key_index < len(key_entries) and key_entries[key_index][0] == component_type:
             key_value = key_entries[key_index][1]
             key_index += 1
+        effective_level_tuple = level_tuple or (component_type,)
         ordered.append(NormalizedAddressComponent(
             component_type=component_type,
-            level=level_tuple or (component_type,),
+            level=effective_level_tuple,
             value=value,
             key=key_value,
             suspected=tuple(suspected),
+            display_level=_derive_display_level(component_type, effective_level_tuple),
         ))
         trace_index += 1
 

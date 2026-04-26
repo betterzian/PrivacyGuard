@@ -16,7 +16,6 @@ from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
-from privacyguard.domain.policies.generic_placeholder import render_generic_replacement_text
 
 from privacyguard.application.services.placeholder_allocator import SessionPlaceholderAllocator
 

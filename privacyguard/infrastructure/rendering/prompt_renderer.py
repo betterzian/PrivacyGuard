@@ -74,6 +74,7 @@ class PromptRenderer:
                     span_end=action.span_end,
                     persona_id=action.persona_id,
                     source=action.source,
+                    entity_id=action.entity_id,
                     metadata=_record_metadata_from_action(action),
                 )
             )

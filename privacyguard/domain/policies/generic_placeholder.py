@@ -3,11 +3,18 @@
 与 `label_only` / `label_persona_mixed` / `de_model` 等决策模式解耦：各模式只对每个 PII
 候选产出 ``KEEP`` / ``GENERICIZE`` / ``PERSONA_SLOT``；凡 ``GENERICIZE`` 的展示用占位字符串
 均由本模块生成，避免在多处重复维护属性→标签映射。
+
+新格式统一为 ``⟨TYPE#N[.SPEC]⟩``（见 :mod:`placeholder_labels`）；
+中英标签表仅供 policy_context 等训练特征侧继续复用。
 """
 
 from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType
+from privacyguard.domain.policies.placeholder_labels import (
+    attr_type_code,
+    format_placeholder,
+)
 
 # 对外只读：属性类型 → 占位符中的中文标签名（不含尖括号）
 GENERIC_PLACEHOLDER_LABELS_ZH: dict[PIIAttributeType, str] = {
@@ -49,52 +56,57 @@ GENERIC_PLACEHOLDER_LABELS_EN: dict[PIIAttributeType, str] = {
 # 兼容旧导入路径；默认暴露中文标签表。
 GENERIC_PLACEHOLDER_LABELS = GENERIC_PLACEHOLDER_LABELS_ZH
 
+
 def _contains_cjk(text: str | None) -> bool:
     return bool(text) and any("\u4e00" <= char <= "\u9fff" for char in text)
 
 
 def generic_placeholder_label(attr_type: PIIAttributeType, *, source_text: str | None = None) -> str:
-    """返回占位符内的标签片段（如 ``姓名``、``name``），不含括号。"""
+    """返回用于 policy_context 训练特征的中/英文标签（不含括号）。
+
+    与占位符渲染无关；渲染路径统一走 :func:`render_placeholder`。
+    """
     if _contains_cjk(source_text):
         return GENERIC_PLACEHOLDER_LABELS_ZH.get(attr_type, "敏感信息")
     return GENERIC_PLACEHOLDER_LABELS_EN.get(attr_type, "sensitive")
 
 
-def render_generic_replacement_text(
+def render_placeholder(
     attr_type: PIIAttributeType,
     *,
-    source_text: str | None = None,
-    index: int | None = None,
+    index: int,
+    address_spec: str | None = None,
     fragment_type: str | None = None,
     fragment_length: int | None = None,
 ) -> str:
-    """渲染 GENERICIZE 使用的标准占位字符串。
+    """按统一格式渲染 GENERICIZE 占位符字符串。
 
-    - 有 fragment_type 时使用语义格式：``<1@NUM.LEN=17>``、``<2@ALNUM.LEN=9>``。
-    - 否则使用常规格式：``<姓名1>``、``<name2>``。
+    - ``attr_type = ADDRESS`` + ``address_spec`` → ``⟨ADDR#N.CITY-DIST-ROAD⟩``；spec 空时退化为 ``⟨ADDR#N⟩``。
+    - ``fragment_type`` + ``fragment_length``（NUM / ALNUM）→ ``⟨NUM#N.LEN=L⟩``。
+    - 其它：``⟨TYPE#N⟩``。
     """
     if fragment_type is not None and fragment_length is not None:
-        return render_numeric_semantic_placeholder(
-            index=index or 1,
-            fragment_type=fragment_type,
-            length=fragment_length,
-        )
-    label = generic_placeholder_label(attr_type, source_text=source_text)
-    if index is not None:
-        label = f"{label}{index}"
-    return f"<{label}>"
+        frag_type = str(fragment_type or "").strip().upper()
+        if frag_type not in {"NUM", "ALNUM"}:
+            raise ValueError(f"fragment_type 仅支持 NUM/ALNUM，收到: {fragment_type!r}")
+        if fragment_length <= 0:
+            raise ValueError("fragment_length 必须 > 0")
+        return format_placeholder(frag_type, index, f"LEN={fragment_length}")
+
+    label = attr_type_code(attr_type)
+    if not label:
+        raise ValueError(f"未登记占位符短码的 attr_type: {attr_type!r}")
+
+    if attr_type == PIIAttributeType.ADDRESS:
+        spec = str(address_spec or "").strip()
+        return format_placeholder(label, index, spec)
+    return format_placeholder(label, index, "")
 
 
-def render_numeric_semantic_placeholder(
-    *,
-    index: int,
-    fragment_type: str,
-    length: int,
-) -> str:
-    """渲染数字/混合片段的语义占位符，格式为 ``<N@TYPE.LEN=X>``。
-
-    - index: 同类型+同长度组合在文本中的出现序号。
-    - fragment_type: ``NUM``（纯数字）或 ``ALNUM``（数字字母混合）。
-    - length: 原始文本长度。
-    """
-    return f"<{index}@{fragment_type}.LEN={length}>"
+__all__ = [
+    "GENERIC_PLACEHOLDER_LABELS",
+    "GENERIC_PLACEHOLDER_LABELS_EN",
+    "GENERIC_PLACEHOLDER_LABELS_ZH",
+    "generic_placeholder_label",
+    "render_placeholder",
+]

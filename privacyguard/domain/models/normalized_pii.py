@@ -32,6 +32,11 @@ class NormalizedAddressComponent(BaseModel):
     value: str | tuple[str, ...]
     key: str | tuple[str, ...] = ""
     suspected: tuple[NormalizedAddressSuspectEntry, ...] = Field(default_factory=tuple)
+    # 占位符 display 用短码，取值之一："prov" / "city" / "dist" / "road" / "dtl" / ""。
+    # - 由 canonical 侧 component_type + level 推导，仅影响 SPEC 生成，不参与 same_address 判定。
+    # - POSTAL_CODE 等不展示的层级保持空串。
+    # - MULTI_ADMIN 取 level 元组中 rank 最低的层级映射（典型"北京" → "city"）。
+    display_level: str = ""
 
 
 class NormalizedPII(BaseModel):
