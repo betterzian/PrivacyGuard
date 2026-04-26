@@ -3,7 +3,7 @@
 restore 与 sanitize 对称：
 
 - 含 ``entity_id`` 的 GENERICIZE 记录走"占位符正则 + entity 累积态投射"路径，
-  支持云端 LLM 改写 SPEC 精度（如 ``⟨ADDR#1.CITY⟩`` ↔ ``⟨ADDR#1.PROV-CITY-DIST-ROAD-DTL⟩``）；
+  支持云端 LLM 改写 SPEC 精度（如 ``[[ADDR#1.CITY]]`` ↔ ``[[ADDR#1.PROV-CITY-DIST-ROAD-DTL]]``）；
 - 无 ``entity_id`` 的记录（如 PERSONA_SLOT）按原字面匹配路径兜底；
 - 同实体多 POI 时按 ``select_priority_poi`` 择一（小区/社区 > 楼号 > 广场/停车场）。
 """
@@ -17,7 +17,11 @@ from privacyguard.application.services.session_entity_state import SessionEntity
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.domain.models.action import RestoredSlot
 from privacyguard.domain.models.mapping import ReplacementRecord
-from privacyguard.domain.policies.placeholder_labels import PLACEHOLDER_TYPE_CODE
+from privacyguard.domain.policies.placeholder_labels import (
+    PLACEHOLDER_LEFT_BRACKET,
+    PLACEHOLDER_RIGHT_BRACKET,
+    PLACEHOLDER_TYPE_CODE,
+)
 from privacyguard.domain.policies.poi_priority import select_priority_poi
 from privacyguard.utils.normalized_pii import (
     _ADDRESS_COMPONENT_KEYS,  # type: ignore[attr-defined]
@@ -27,7 +31,7 @@ from privacyguard.utils.normalized_pii import (
 
 # 在云端文本中搜索的非锚定占位符正则；与 PLACEHOLDER_PATTERN 同结构去掉 ^$。
 _PLACEHOLDER_FIND_PATTERN: re.Pattern[str] = re.compile(
-    r"\u27e8(?P<label>[A-Z_]+)#(?P<index>\d+)(?:\.(?P<spec>[A-Z0-9=+\-]+))?\u27e9"
+    rf"{re.escape(PLACEHOLDER_LEFT_BRACKET)}(?P<label>[A-Z_]+)#(?P<index>\d+)(?:\.(?P<spec>[A-Z0-9=+\-]+))?{re.escape(PLACEHOLDER_RIGHT_BRACKET)}"
 )
 
 # label → attr_type 反向表，用于占位符与 entity attr_type 一致性校验。

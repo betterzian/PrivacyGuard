@@ -4,7 +4,7 @@
 候选产出 ``KEEP`` / ``GENERICIZE`` / ``PERSONA_SLOT``；凡 ``GENERICIZE`` 的展示用占位字符串
 均由本模块生成，避免在多处重复维护属性→标签映射。
 
-新格式统一为 ``⟨TYPE#N[.SPEC]⟩``（见 :mod:`placeholder_labels`）；
+新格式统一为 ``[[TYPE#N]]`` / ``[[TYPE#N.SPEC]]``（见 :mod:`placeholder_labels`）；
 中英标签表仅供 policy_context 等训练特征侧继续复用。
 """
 
@@ -81,9 +81,9 @@ def render_placeholder(
 ) -> str:
     """按统一格式渲染 GENERICIZE 占位符字符串。
 
-    - ``attr_type = ADDRESS`` + ``address_spec`` → ``⟨ADDR#N.CITY-DIST-ROAD⟩``；spec 空时退化为 ``⟨ADDR#N⟩``。
-    - ``fragment_type`` + ``fragment_length``（NUM / ALNUM）→ ``⟨NUM#N.LEN=L⟩``。
-    - 其它：``⟨TYPE#N⟩``。
+    - ``attr_type = ADDRESS`` + ``address_spec`` → ``[[ADDR#N.CITY-DIST-ROAD]]``；spec 空时退化为 ``[[ADDR#N]]``。
+    - ``fragment_type`` + ``fragment_length``（NUM / ALNUM）→ ``[[NUM#N.LEN=L]]``。
+    - 其它：``[[TYPE#N]]``。
     """
     if fragment_type is not None and fragment_length is not None:
         frag_type = str(fragment_type or "").strip().upper()

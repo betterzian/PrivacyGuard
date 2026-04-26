@@ -2,11 +2,11 @@
 
 占位符统一格式：
 
-- 通用：``⟨TYPE#N⟩``
-- 地址：``⟨ADDR#N.SPEC⟩``（SPEC 为去重后按 PROV/CITY/DIST/ROAD/DTL 顺序拼接）
-- 数字/混合：``⟨NUM#N.LEN=L⟩`` / ``⟨ALNUM#N.LEN=L⟩``
+- 通用：``[[TYPE#N]]``
+- 地址：``[[ADDR#N.SPEC]]``（SPEC 为去重后按 PROV/CITY/DIST/ROAD/DTL 顺序拼接）
+- 数字/混合：``[[NUM#N.LEN=L]]`` / ``[[ALNUM#N.LEN=L]]``
 
-- ``⟨`` / ``⟩`` 使用 U+27E8 / U+27E9 数学括号，避免 HTML/XML 冲突。
+- 使用 ASCII ``[[`` / ``]]``，避免字体缺字与模板语法冲突。
 - ``N`` 为 session 全局下标（跨 attr_type 共享序号）。
 """
 
@@ -35,13 +35,13 @@ PLACEHOLDER_TYPE_CODE: dict[PIIAttributeType, str] = {
     PIIAttributeType.ALNUM: "ALNUM",
 }
 
-# 括号字符常量（显式拆出便于排查 tokenizer 问题）。
-PLACEHOLDER_LEFT_BRACKET = "\u27e8"
-PLACEHOLDER_RIGHT_BRACKET = "\u27e9"
+# 括号字符常量（显式拆出便于统一渲染与解析）。
+PLACEHOLDER_LEFT_BRACKET = "[["
+PLACEHOLDER_RIGHT_BRACKET = "]]"
 
 # 占位符正则：TYPE 大写英文或下划线；N 数字；SPEC 可选，内部允许大写英文/数字/`=+-`。
 PLACEHOLDER_PATTERN: re.Pattern[str] = re.compile(
-    r"^\u27e8(?P<label>[A-Z_]+)#(?P<index>\d+)(?:\.(?P<spec>[A-Z0-9=+\-]+))?\u27e9$"
+    rf"^{re.escape(PLACEHOLDER_LEFT_BRACKET)}(?P<label>[A-Z_]+)#(?P<index>\d+)(?:\.(?P<spec>[A-Z0-9=+\-]+))?{re.escape(PLACEHOLDER_RIGHT_BRACKET)}$"
 )
 
 

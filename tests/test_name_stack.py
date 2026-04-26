@@ -1278,6 +1278,14 @@ def test_en_given_path_does_not_absorb_lowercase_plain_unit():
     ) == ["Wyatt Bell"]
 
 
+def test_detector_merges_adjacent_english_name_clues_even_with_weird_ocr_casing():
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect("keVIN dANiEl", [])
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["keVIN dANiEl"]
+
+
 def test_en_label_seed_keeps_joiner_name_parts():
     """英文 label seed 右扩时应保留连字符姓名片段。"""
     text = "Name: Mary-Jane Watson"

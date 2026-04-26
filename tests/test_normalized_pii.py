@@ -6,6 +6,7 @@ import json
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.utils.normalized_pii import _numbers_match, normalize_pii, same_entity
+from privacyguard.utils.pii_value import classify_content_shape_attr
 
 
 def _suspected_json(*entries: dict[str, object]) -> str:
@@ -505,6 +506,20 @@ def test_alnum_canonical_keeps_uppercase_letters_and_digits_only():
     assert normalized.raw_text == "ab-12 cd"
     assert normalized.canonical == "AB12CD"
     assert normalized.match_terms == ("AB12CD",)
+
+
+def test_alnum_canonical_for_symbolic_ascii_keeps_letters_only():
+    normalized = normalize_pii(PIIAttributeType.ALNUM, "ab_cd.ef")
+
+    assert normalized.raw_text == "ab_cd.ef"
+    assert normalized.canonical == "ABCDEF"
+    assert normalized.match_terms == ("ABCDEF",)
+
+
+def test_content_shape_classifies_symbolic_ascii_as_alnum():
+    assert classify_content_shape_attr("john.doe") == PIIAttributeType.ALNUM
+    assert classify_content_shape_attr("abc_def") == PIIAttributeType.ALNUM
+    assert classify_content_shape_attr("123_456") == PIIAttributeType.NUM
 
 
 def test_license_plate_canonical_keeps_prefix_and_uppercases_suffix():

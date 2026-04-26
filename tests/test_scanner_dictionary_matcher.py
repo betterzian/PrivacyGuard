@@ -149,7 +149,7 @@ def test_prompt_stream_normalizes_fullwidth_parentheses_only():
 
 
 def test_hard_pattern_scan_prefers_alnum_fragment_over_nested_digit_fragment():
-    stream = build_prompt_stream("h123 12345678a")
+    stream = build_prompt_stream("h123 12345678a abc_def john.doe abc-def")
 
     clues = scanner_module._scan_hard_patterns(
         DetectContext(protection_level=ProtectionLevel.STRONG),
@@ -159,6 +159,16 @@ def test_hard_pattern_scan_prefers_alnum_fragment_over_nested_digit_fragment():
     assert [(clue.source_kind, clue.text, clue.attr_type) for clue in clues] == [
         ("extract_alnum_fragment", "h123", PIIAttributeType.ALNUM),
         ("extract_alnum_fragment", "12345678a", PIIAttributeType.ALNUM),
+        ("extract_alnum_fragment", "abc_def", PIIAttributeType.ALNUM),
+        ("extract_alnum_fragment", "john.doe", PIIAttributeType.ALNUM),
+        ("extract_alnum_fragment", "abc-def", PIIAttributeType.ALNUM),
+    ]
+    assert [clue.source_metadata["fragment_shape"] for clue in clues] == [
+        ["mixed_alnum"],
+        ["mixed_alnum"],
+        ["alpha_symbolic"],
+        ["alpha_symbolic"],
+        ["alpha_symbolic"],
     ]
 
 
@@ -1180,7 +1190,9 @@ def test_hard_pattern_scan_matches_alnum_with_underscore_and_hyphen():
     )
 
     alnum_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.ALNUM]
-    assert alnum_values == ["abc_123", "A1-B2"]
+    num_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.NUM]
+    assert alnum_values == ["abc_123", "A1-B2", "abc-def"]
+    assert num_values == ["123_456"]
 
 
 def test_build_clue_bundle_emits_license_plate_prefix_family_value_clue():

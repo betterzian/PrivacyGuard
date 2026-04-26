@@ -211,6 +211,8 @@ def classify_content_shape_attr(value: str | None) -> PIIAttributeType | None:
     has_digit = any(char.isdigit() for char in text)
     if has_letter and has_digit:
         return PIIAttributeType.ALNUM
+    if has_letter and any(char in "._+-/" for char in text):
+        return PIIAttributeType.ALNUM
     if has_digit and not has_letter:
         return PIIAttributeType.NUM
     return None

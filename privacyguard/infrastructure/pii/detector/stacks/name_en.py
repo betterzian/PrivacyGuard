@@ -168,6 +168,13 @@ class EnNameStack(BaseNameStack):
             if unit.char_end - start > 80:
                 break
             if unit.kind == "ascii_word":
+                overlapping_clue = self._find_name_piece_clue_covering(unit.char_start, unit.char_end)
+                if overlapping_clue is not None:
+                    if not self._is_en_name_component_clue(overlapping_clue):
+                        break
+                    cursor_end = unit.char_end
+                    ui += 1
+                    continue
                 if not self._is_capitalized_ascii_name_unit(unit):
                     break
                 cursor_end = unit.char_end
@@ -181,8 +188,19 @@ class EnNameStack(BaseNameStack):
                     next_ui < len(units)
                     and units[next_ui].kind == "ascii_word"
                     and units[next_ui].char_start <= upper
-                    and self._is_capitalized_ascii_name_unit(units[next_ui])
                 ):
+                    overlapping_clue = self._find_name_piece_clue_covering(
+                        units[next_ui].char_start,
+                        units[next_ui].char_end,
+                    )
+                    if overlapping_clue is not None:
+                        if not self._is_en_name_component_clue(overlapping_clue):
+                            break
+                        cursor_end = unit.char_end
+                        ui += 1
+                        continue
+                    if not self._is_capitalized_ascii_name_unit(units[next_ui]):
+                        break
                     cursor_end = unit.char_end
                     ui += 1
                     continue
@@ -277,14 +295,22 @@ class EnNameStack(BaseNameStack):
         clues = self.context.clues
         best_match: Clue | None = None
         best_len = -1
+        best_name_match: Clue | None = None
+        best_name_len = -1
         for clue in clues:
             if clue.end <= start or clue.start >= end:
                 continue
             if clue.start <= start and clue.end >= end:
-                if best_match is None or (clue.end - clue.start) < best_len or best_len < 0:
+                clue_len = clue.end - clue.start
+                if self._is_en_name_component_clue(clue):
+                    if best_name_match is None or clue_len < best_name_len or best_name_len < 0:
+                        best_name_match = clue
+                        best_name_len = clue_len
+                    continue
+                if best_match is None or clue_len < best_len or best_len < 0:
                     best_match = clue
-                    best_len = clue.end - clue.start
-        return best_match
+                    best_len = clue_len
+        return best_name_match or best_match
 
     def _is_en_name_component_clue(self, clue: Clue) -> bool:
         return clue.attr_type == PIIAttributeType.NAME and clue.role in {

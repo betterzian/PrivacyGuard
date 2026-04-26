@@ -213,9 +213,29 @@ def _email_match_right_boundary_ok(text: str, end: int) -> bool:
         return False
     return True
 
-# 通用数字片段：允许常见“电话号码写法”的连接符。
-# 目的：把 "+86 139-1234-1234" 这类写法抽成一个片段，后续再在 structured stack 中统一去连接符/去国家码做校验。
-_DIGIT_FRAGMENT_PATTERN = re.compile(r"\+?\d(?:[ \-()]*\d)*")
+
+_ALNUM_SYMBOL_JOINERS = "._+-/"
+_ALNUM_SYMBOL_JOINER_CLASS = re.escape(_ALNUM_SYMBOL_JOINERS)
+
+
+def _alnum_fragment_shape(value: str) -> str:
+    """返回 ALNUM 粗形态；空串表示不应作为 ALNUM 片段提交。"""
+    if not any(ch.isascii() and ch.isalpha() for ch in value):
+        return ""
+    if any(ch.isdigit() for ch in value):
+        return "mixed_alnum"
+    if any(ch in _ALNUM_SYMBOL_JOINERS for ch in value):
+        return "alpha_symbolic"
+    return ""
+
+
+def _numeric_fragment_shape(value: str) -> str:
+    """返回 NUM 粗形态。"""
+    return "numeric_symbolic" if any(not ch.isdigit() for ch in value) else "numeric"
+
+# 通用数字片段：允许常见“电话号码/编号写法”的连接符。
+# 目的：把 "+86 139-1234-1234"、"123_456" 这类写法抽成一个片段，后续再在 structured stack 中统一校验。
+_DIGIT_FRAGMENT_PATTERN = re.compile(r"\+?\d(?:[ \-()_]*\d)*")
 _PHONE_JOINER_PATTERN = r"[ \-()]*"
 _CN_PHONE_BODY_PATTERN = rf"1[3-9](?:{_PHONE_JOINER_PATTERN}\d){{9}}"
 _US_PHONE_BODY_PATTERN = rf"[2-9](?:{_PHONE_JOINER_PATTERN}\d){{2}}(?:{_PHONE_JOINER_PATTERN}[2-9])(?:{_PHONE_JOINER_PATTERN}\d){{6}}"
@@ -253,9 +273,13 @@ _PHONE_PATTERNS: tuple[tuple[str, str, str, re.Pattern[str]], ...] = (
     ),
 )
 
-# 混合片段：字母数字混合（至少包含一个数字和一个字母），允许中间带 `_` / `-`。
+# 含 ASCII 字母的结构化片段：字母数字混合，或纯英文带 `_` / `-` / `.` / `+` / `/`。
 _ALNUM_FRAGMENT_PATTERN = re.compile(
-    r"(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)*"
+    rf"(?=[A-Za-z0-9{_ALNUM_SYMBOL_JOINER_CLASS}]*[A-Za-z])(?:"
+    rf"(?=[A-Za-z0-9{_ALNUM_SYMBOL_JOINER_CLASS}]*\d)[A-Za-z0-9]+(?:[{_ALNUM_SYMBOL_JOINER_CLASS}][A-Za-z0-9]+)*"
+    rf"|"
+    rf"(?=[A-Za-z0-9{_ALNUM_SYMBOL_JOINER_CLASS}]*[{_ALNUM_SYMBOL_JOINER_CLASS}])[A-Za-z0-9]+(?:[{_ALNUM_SYMBOL_JOINER_CLASS}][A-Za-z0-9]+)+"
+    rf")"
 )
 
 _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
@@ -577,15 +601,24 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
             )
             excluded_spans.append((raw_start, raw_end))
 
-    # ── 2c: 先提取字母数字混合片段，避免其内部数字被提前拆走。 ──
+    # ── 2c: 先提取含 ASCII 字母的结构化片段，避免其内部数字被提前拆走。 ──
     for match in _ALNUM_FRAGMENT_PATTERN.finditer(text):
         value = match.group(0)
         if _overlaps_any(match.start(), match.end(), excluded_spans):
             continue
-        digits = re.sub(r"[^0-9]", "", value)
-        if not digits:
+        fragment_shape = _alnum_fragment_shape(value)
+        if not fragment_shape:
             continue
+        digits = re.sub(r"[^0-9]", "", value)
         _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+        source_metadata = {
+            "hard_source": ["regex"],
+            "placeholder": ["<alnum>"],
+            "fragment_type": ["ALNUM"],
+            "fragment_shape": [fragment_shape],
+        }
+        if digits:
+            source_metadata["pure_digits"] = [digits]
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -599,12 +632,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 unit_start=_us,
                 unit_last=_ue,
                 source_kind="extract_alnum_fragment",
-                source_metadata={
-                    "hard_source": ["regex"],
-                    "placeholder": ["<alnum>"],
-                    "fragment_type": ["ALNUM"],
-                    "pure_digits": [digits],
-                },
+                source_metadata=source_metadata,
             )
         )
         excluded_spans.append((match.start(), match.end()))
@@ -636,6 +664,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                         "hard_source": ["regex"],
                         "placeholder": ["<num>"],
                         "fragment_type": ["NUM"],
+                        "fragment_shape": [_numeric_fragment_shape(value)],
                         "pure_digits": [digits],
                         "phone_region": [phone_region],
                         "phone_pattern": [phone_pattern],
@@ -674,6 +703,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     "hard_source": ["regex"],
                     "placeholder": ["<num>"],
                     "fragment_type": ["NUM"],
+                    "fragment_shape": [_numeric_fragment_shape(value)],
                     "pure_digits": [digits],
                 },
             )

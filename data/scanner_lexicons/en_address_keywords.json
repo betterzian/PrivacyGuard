@@ -82,7 +82,6 @@
       {"text": "level", "strength": "soft"},
       {"text": "lvl", "strength": "soft"},
       {"text": "slip", "strength": "weak"},
-      {"text": "space", "strength": "weak"},
       {"text": "spc", "strength": "weak"}
     ]
   },
