@@ -19,9 +19,9 @@ from privacyguard.infrastructure.pii.detector.models import (
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
     _RoutingContext,
-    _build_admin_value_span,
     _normalize_address_value,
 )
+from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import _build_admin_value_span
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _ParseState,
     _VALID_SUCCESSORS,

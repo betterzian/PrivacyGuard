@@ -20,6 +20,7 @@ from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import (
     CandidateDraft,
     Clue,
+    ClueRole,
     OCRScene,
     OCRSceneBlock,
     ParseResult,
@@ -35,6 +36,72 @@ class OCROwnershipProposal:
     candidate_blocks: tuple[OCRSceneBlock, ...]
 
 
+_GATED_LABEL_ATTRS = frozenset({
+    PIIAttributeType.NAME,
+    PIIAttributeType.ORGANIZATION,
+    PIIAttributeType.ADDRESS,
+})
+_NUMBERISH_LABEL_ATTRS = frozenset({
+    PIIAttributeType.PHONE,
+    PIIAttributeType.ID_NUMBER,
+    PIIAttributeType.BANK_NUMBER,
+    PIIAttributeType.PASSPORT_NUMBER,
+    PIIAttributeType.DRIVER_LICENSE,
+})
+_NUMBERISH_BLOCK_ATTRS = frozenset({
+    PIIAttributeType.NUM,
+    PIIAttributeType.ALNUM,
+})
+_CLUE_GATED_LABEL_ATTRS = _GATED_LABEL_ATTRS | _NUMBERISH_LABEL_ATTRS
+_BLOCK_CLUE_ROLES_BY_ATTR = {
+    PIIAttributeType.NAME: frozenset({
+        ClueRole.FAMILY_NAME,
+        ClueRole.GIVEN_NAME,
+        ClueRole.FULL_NAME,
+        ClueRole.ALIAS,
+        ClueRole.VALUE,
+    }),
+    PIIAttributeType.ORGANIZATION: frozenset({
+        ClueRole.VALUE,
+        ClueRole.SUFFIX,
+    }),
+    PIIAttributeType.ADDRESS: frozenset({
+        ClueRole.VALUE,
+        ClueRole.KEY,
+    }),
+}
+
+
+class LabelBlockClueGate:
+    """限制 label 只能抓取已有可信 clue 的 OCR block。"""
+
+    def __init__(self, *, scene: OCRScene, clues: tuple[Clue, ...]) -> None:
+        self._clues_by_block_id: dict[str, tuple[Clue, ...]] = {}
+        for block in scene.blocks:
+            self._clues_by_block_id[block.block_id] = tuple(
+                clue
+                for clue in clues
+                if _spans_overlap(clue.start, clue.end, block.clean_start, block.clean_end)
+            )
+
+    def allows_block(self, event: Clue, block: OCRSceneBlock) -> bool:
+        """判断 label 是否允许把该 block 作为待生成 PII 的 value。"""
+        if event.attr_type not in _CLUE_GATED_LABEL_ATTRS:
+            return True
+        block_clues = self._clues_by_block_id.get(block.block_id, ())
+        if event.attr_type in _NUMBERISH_LABEL_ATTRS:
+            # 号类 label 只能绑定通用结构化片段，不能把普通文字 block 提升为号码类 PII。
+            return any(
+                clue.attr_type in _NUMBERISH_BLOCK_ATTRS and clue.role == ClueRole.VALUE
+                for clue in block_clues
+            )
+        allowed_roles = _BLOCK_CLUE_ROLES_BY_ATTR.get(event.attr_type, frozenset())
+        return any(
+            clue.attr_type == event.attr_type and clue.role in allowed_roles
+            for clue in block_clues
+        )
+
+
 def apply_ocr_geometry(
     *,
     prepared: PreparedOCRContext,
@@ -45,6 +112,7 @@ def apply_ocr_geometry(
     scene = prepared.scene
     median_h = _scene_median_height(scene)
     remapped = [_remap_candidate(candidate, prepared) for candidate in parsed.candidates]
+    clue_gate = LabelBlockClueGate(scene=scene, clues=tuple(bundle.all_clues))
     label_block_ids = {
         block_id
         for event in bundle.label_clues
@@ -62,7 +130,14 @@ def apply_ocr_geometry(
         if bound is not None:
             _bind_label_to_candidate(bound, event)
             continue
-        candidate_blocks = _find_candidate_blocks(label_block, scene, label_block_ids, median_h=median_h)
+        candidate_blocks = _find_candidate_blocks(
+            event,
+            label_block,
+            scene,
+            label_block_ids,
+            median_h=median_h,
+            clue_gate=clue_gate,
+        )
         if not candidate_blocks:
             continue
         proposals.append(
@@ -263,11 +338,13 @@ def _existing_binding_score(label_block: OCRSceneBlock, candidate_block: OCRScen
 
 
 def _find_candidate_blocks(
+    event: Clue,
     label_block: OCRSceneBlock,
     scene: OCRScene,
     label_block_ids: set[str],
     *,
     median_h: float,
+    clue_gate: LabelBlockClueGate,
 ) -> tuple[OCRSceneBlock, ...]:
     """宽松空间搜索：不依赖预计算 chain，直接在 scene 中按几何邻近度查找值 block。"""
     lb = label_block.block.bbox
@@ -288,6 +365,8 @@ def _find_candidate_blocks(
             continue
         bb = block.block.bbox
         if bb is None or not block.clean_text.strip():
+            continue
+        if not clue_gate.allows_block(event, block):
             continue
         block_cy = float(bb.y) + float(bb.height) / 2
 
@@ -389,6 +468,10 @@ def _event_scene_block(stream: StreamInput, scene: OCRScene, event: Clue) -> OCR
     if block_id is None:
         return None
     return scene.id_to_block.get(block_id)
+
+
+def _spans_overlap(left_start: int, left_end: int, right_start: int, right_end: int) -> bool:
+    return left_start < right_end and right_start < left_end
 
 
 def _horizontal_gap(left: OCRSceneBlock, right: OCRSceneBlock) -> int:

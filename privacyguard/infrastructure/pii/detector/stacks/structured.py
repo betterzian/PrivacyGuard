@@ -29,6 +29,14 @@ PERSONA_ONLY_ATTRS = frozenset({
     PIIAttributeType.PASSPORT_NUMBER,
     PIIAttributeType.DRIVER_LICENSE,
 })
+_NUMBERISH_LABEL_ATTRS = frozenset({
+    PIIAttributeType.PHONE,
+    PIIAttributeType.ID_NUMBER,
+    PIIAttributeType.BANK_NUMBER,
+    PIIAttributeType.PASSPORT_NUMBER,
+    PIIAttributeType.DRIVER_LICENSE,
+})
+_LABEL_BIND_FRAGMENT_TYPES = frozenset({"NUM", "ALNUM"})
 
 # 美国 NANP 非法 NPA（N11 服务号）与 NXX 禁用前缀。
 US_NANP_INVALID_NPA = frozenset({
@@ -287,6 +295,13 @@ class StructuredStack(BaseStack):
         anchor_clue = self.context.clues[anchor.clue_index]
         if anchor_clue.attr_type is None:
             return candidate
+        normalized_fragment_type = str(fragment_type or "").upper()
+        if (
+            anchor_clue.attr_type in _NUMBERISH_LABEL_ATTRS
+            and normalized_fragment_type not in _LABEL_BIND_FRAGMENT_TYPES
+        ):
+            # 号类 label 只承认 scanner 产出的 NUM / ALNUM 片段。
+            return candidate
         if anchor_clue.attr_type == candidate.attr_type:
             candidate.label_clue_ids.add(anchor_clue.clue_id)
             candidate.metadata = merge_metadata(
@@ -294,7 +309,7 @@ class StructuredStack(BaseStack):
                 {"bound_label_clue_ids": [anchor_clue.clue_id]},
             )
             return candidate
-        candidate.attr_type = PIIAttributeType.ALNUM if fragment_type == "ALNUM" else PIIAttributeType.NUM
+        candidate.attr_type = PIIAttributeType.ALNUM if normalized_fragment_type == "ALNUM" else PIIAttributeType.NUM
         candidate.source_kind = self.clue.source_kind
         candidate.attr_locked = False
         candidate.metadata = merge_metadata(
