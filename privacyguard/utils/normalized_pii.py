@@ -39,12 +39,32 @@ _ADDRESS_COMPONENT_KEYS = (
     "number",
     "poi",
     "building",
+    "unit",
+    "room",
+    "suite",
     "detail",
     "postal_code",
 )
-_ADDRESS_MATCH_KEYS = ("multi_admin", "province", "city", "district", "district_city", "subdistrict", "road", "poi")
-_ADDRESS_DETAIL_KEYS = ("building", "detail")
-_ADDRESS_COMPONENT_COMPARE_KEYS = ("multi_admin", "province", "city", "district", "district_city", "road", "subdistrict")
+_ADDRESS_MATCH_KEYS = (
+    "multi_admin",
+    "province",
+    "city",
+    "district",
+    "district_city",
+    "subdistrict",
+    "road",
+    "poi",
+)
+_ADDRESS_DETAIL_KEYS = ("building", "unit", "room", "suite", "detail")
+_ADDRESS_COMPONENT_COMPARE_KEYS = (
+    "multi_admin",
+    "province",
+    "city",
+    "district",
+    "district_city",
+    "road",
+    "subdistrict",
+)
 _ORDERED_COMPONENT_KEYS = (
     "country",
     "multi_admin",
@@ -58,9 +78,25 @@ _ORDERED_COMPONENT_KEYS = (
     "subdistrict",
     "poi",
     "building",
+    "unit",
+    "room",
+    "suite",
     "detail",
     "postal_code",
 )
+# 单一行政层级字符串。与 detector 侧 _ADMIN_RANK 对齐：DISTRICT_CITY 与 DISTRICT 同级。
+_ADMIN_LEVEL_KEYS = ("province", "city", "district", "district_city", "subdistrict")
+# 表明"存在行政层级信息"的 key 集合（用于 has_admin_static 预判），subdistrict 语义上偏 detail 不计入。
+_HAS_ADMIN_LEVEL_KEYS = frozenset({"province", "city", "district", "district_city"})
+_ADMIN_LEVEL_RANK: dict[str, int] = {
+    "subdistrict": 1,
+    "district": 2,
+    "district_city": 2,
+    "city": 3,
+    "province": 4,
+}
+# MULTI_ADMIN 解释枚举上限，避免病态 trace 爆炸。
+_MULTI_ADMIN_INTERP_CAP = 4
 # 与 trace 对齐的 POI 终端 key（仅用于 same_entity 比较时剥末尾 key），可选。
 _ADDRESS_OPTIONAL_KEYS = frozenset({"poi_key"})
 # 旧类型到新类型的别名映射，兼容历史 trace 数据。
@@ -71,23 +107,16 @@ _ADDRESS_COMPONENT_ALIASES = {
     "street_admin": "subdistrict",
     "town": "subdistrict",
     "village": "subdistrict",
-    "unit": "detail",
+    "house_number": "number",
+    "unit": "unit",
     "floor": "detail",
-    "room": "detail",
+    "room": "room",
     "street_number": "number",
     "zip": "postal_code",
     "zipcode": "postal_code",
     "postal": "postal_code",
     "country_region": "country",
 }
-_ADDRESS_ADMIN_COMPONENT_KEYS = frozenset({
-    "multi_admin",
-    "province",
-    "city",
-    "district",
-    "district_city",
-    "subdistrict",
-})
 _PUNCT_TRIM_RE = re.compile(r"[\s\-_.,，。:：;；/\\|()（）【】\[\]#]+")
 _DIGIT_RE = re.compile(r"\d+")
 _NAME_COMPONENT_RE = re.compile(r"^[A-Za-z][A-Za-z .,'\-]{0,80}$")
@@ -95,6 +124,18 @@ _ZH_NUMERAL_CHARS = set("零〇一二三四五六七八九十百千两")
 _AMOUNT_UNIT_RE = re.compile(
     r"(?i)(?:us\$|usd|rmb|cny|eur|gbp|dollars?|yuan|元|美元|欧元|英镑)"
 )
+_PHONE_US_COUNTRY_CODE_PREFIX_RE = re.compile(r"^\s*(?:\(\+?1\)|\+1)")
+_PHONE_US_TRUNK_AREA_PREFIX_RE = re.compile(r"^\s*1[ \-]*\([2-9]\d{2}\)")
+_PHONE_CN_MOBILE_RE = re.compile(r"1[3-9]\d{9}")
+_PHONE_US_TEN_DIGIT_RE = re.compile(r"[2-9]\d{9}")
+_PRECISE_ADDRESS_COMPONENT_KEYS = frozenset({"building", "unit", "room", "suite"})
+_EN_ADDRESS_COMPONENT_PREFIX_PATTERNS: dict[str, re.Pattern[str]] = {
+    "unit": re.compile(r"^(?:apartment|apt|unit)\b[\s\-:.,#]*", re.IGNORECASE),
+    "room": re.compile(r"^(?:room|rm)\b[\s\-:.,#]*", re.IGNORECASE),
+    "suite": re.compile(r"^(?:suite|ste)\b[\s\-:.,#]*", re.IGNORECASE),
+    "building": re.compile(r"^(?:building|bldg|tower|block)\b[\s\-:.,#]*", re.IGNORECASE),
+    "detail": re.compile(r"^(?:floor|fl|level|lvl|lot|slip|space|spc)\b[\s\-:.,#]*", re.IGNORECASE),
+}
 
 
 def normalize_pii(
@@ -123,7 +164,7 @@ def normalize_pii(
     }:
         canonical = _digits_only(normalized_raw)
         if attr_type == PIIAttributeType.PHONE:
-            canonical = _normalize_phone_digits(canonical)
+            canonical = _normalize_phone_digits(canonical, raw_text=normalized_raw, metadata=metadata)
         return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
     if attr_type in {PIIAttributeType.PASSPORT_NUMBER, PIIAttributeType.DRIVER_LICENSE, PIIAttributeType.ALNUM}:
         canonical = _alnum_only(normalized_raw).upper()
@@ -233,6 +274,7 @@ def _normalize_address(
 ) -> NormalizedPII:
     raw_components = _address_components(raw_text=raw_text, metadata=metadata, components=components)
     ordered_components = _address_ordered_components(metadata=metadata, components=components)
+    component_precision_mode = _address_prefers_component_precision_raw(raw_text, raw_components, ordered_components)
     normalized_components = {
         key: str(raw_components.get(key) or "").strip()
         for key in _ADDRESS_COMPONENT_KEYS
@@ -260,10 +302,9 @@ def _normalize_address(
     details_tokens = _address_detail_tokens(normalized_components)
     if address_part_values:
         identity["address_part"] = "|".join(address_part_values)
-    if numbers:
-        identity["number"] = ",".join(numbers)
+    if numbers and not component_precision_mode:
         canonical_parts.append(f"number=[{','.join(numbers)}]")
-    if details_tokens:
+    if details_tokens and not component_precision_mode:
         identity["details_part"] = "-".join(details_tokens)
     if pk := normalized_components.get("poi_key"):
         identity["poi_key"] = pk
@@ -273,6 +314,12 @@ def _normalize_address(
         if (value := normalized_components.get(key))
         if (term := _address_match_term(key, value))
     )
+    # has_admin_static：ordered_components 的任一 level 命中 _HAS_ADMIN_LEVEL_KEYS 即为真。
+    # SUBDISTRICT 语义偏 detail，不计入行政层级判定。
+    has_admin_static = any(
+        any(level in _HAS_ADMIN_LEVEL_KEYS for level in component.level)
+        for component in ordered_components
+    )
     return NormalizedPII(
         attr_type=PIIAttributeType.ADDRESS,
         raw_text=raw_text or render_address_text(normalized_components),
@@ -281,8 +328,9 @@ def _normalize_address(
         match_terms=_dedupe_terms(match_terms),
         identity=identity,
         numbers=tuple(numbers),
-        keyed_numbers=keyed_numbers,
+        keyed_numbers={} if component_precision_mode else keyed_numbers,
         ordered_components=ordered_components,
+        has_admin_static=has_admin_static,
     )
 
 
@@ -316,6 +364,43 @@ def _looks_like_en_text(text: str) -> bool:
     return any(("A" <= ch <= "Z") or ("a" <= ch <= "z") for ch in text)
 
 
+def _address_prefers_component_precision_raw(
+    raw_text: str,
+    components: Mapping[str, str],
+    ordered_components: tuple[NormalizedAddressComponent, ...],
+) -> bool:
+    if any(key in components for key in ("unit", "room", "suite")):
+        return True
+    if any(component.component_type in {"unit", "room", "suite"} for component in ordered_components):
+        return True
+    if _looks_like_en_text(raw_text):
+        return True
+    return any(_looks_like_en_text(str(value or "")) for value in components.values())
+
+
+def _address_prefers_component_precision(normalized: NormalizedPII) -> bool:
+    return _address_prefers_component_precision_raw(
+        normalized.raw_text,
+        normalized.components,
+        normalized.ordered_components,
+    )
+
+
+def _canonicalize_en_address_component_value(component_key: str, value: str) -> str:
+    """英文细粒度组件统一去掉类别前缀，避免结构化输入与 detector trace 语义不一致。"""
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    if not text:
+        return ""
+    if component_key == "unit":
+        text = re.sub(r"^\s*#\s*", "", text)
+    pattern = _EN_ADDRESS_COMPONENT_PREFIX_PATTERNS.get(component_key)
+    if pattern is not None:
+        stripped = pattern.sub("", text, count=1).strip()
+        if stripped:
+            text = stripped
+    return _compact_component_text(text)
+
+
 def _canonicalize_address_component_value(component_key: str, value: str) -> str:
     """按组件类型生成稳定 canonical。"""
     text = str(value or "").strip()
@@ -329,6 +414,8 @@ def _canonicalize_address_component_value(component_key: str, value: str) -> str
         return re.sub(r"[^0-9-]", "", unicodedata.normalize("NFKC", text))
     if component_key in {"house_number", "number"}:
         return _alnum_only(text).upper()
+    if component_key in _PRECISE_ADDRESS_COMPONENT_KEYS or component_key == "detail":
+        return _canonicalize_en_address_component_value(component_key, text)
     return _compact_component_text(text)
 
 
@@ -379,53 +466,87 @@ def _same_organization(left: NormalizedPII, right: NormalizedPII) -> bool:
 
 
 def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
-    """§6 canonical 比较顺序：province → city → district → road → numbers → subdistrict → poi。
+    """§7.5 canonical 比较：has_admin 闸门 + admin 多解释枚举。
 
-    除任一步失败立即返回 False 外，要求「实质性成功匹配」占比：成功次数除以
-    ``min(len(left.ordered_components), len(right.ordered_components))`` 必须 **严格大于** 0.3；
-    单侧缺失而放行的层级不计入成功次数。分母为 0 时返回 False。
+    流程：
+    1. address_part 闸门：任一侧缺则失败。
+    2. 顶层 identity（country / province / number / postal_code）：双侧俱存时必须相等。
+    3. 非 admin 层（road / poi / building / unit / room / suite / detail）：按 component_type peer 比较，
+       并顺带累计 has_admin Case 2（suspect step1 失败 + entry.level ⊂ admin 集合）。
+    4. admin 层（province / city / district / district_city / subdistrict）：
+       走多解释枚举，返回 match / inconclusive / mismatch。
+       - match → 计入命中；
+       - mismatch → 失败；
+       - inconclusive → 若双方 has_admin=True 则失败，否则放行不计命中。
+    5. numbers、subdistrict（component_type 视角）、poi list。
+    6. substantive_hits / denom > 0.3。
     """
-    # 必须有实质地址信息。
     if not left.identity.get("address_part") or not right.identity.get("address_part"):
         return False
 
     substantive_hits = 0
+    component_precision_mode = _address_prefers_component_precision(left) or _address_prefers_component_precision(right)
 
-    for key in ("country", "province", "house_number", "postal_code"):
+    for key in ("country", "province", "number", "postal_code"):
         if not _identity_field_match_if_both_present(left, right, key):
             return False
         if left.identity.get(key) and right.identity.get(key):
             substantive_hits += 1
 
-    for key in ("city", "district", "district_city", "road", "poi", "building", "detail"):
-        left_component = _ordered_component_by_type(left, key)
-        right_component = _ordered_component_by_type(right, key)
-        if left_component is None or right_component is None:
-            if not _compare_component_with_suspected(left, right, key):
-                return False
-            continue
-        if not _compare_component_with_suspected(left, right, key):
-            return False
-        substantive_hits += 1
-
-    # numbers —— 逆序子序列 / keyed。
-    if not _numbers_match(left.numbers, right.numbers,
-                          left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers):
+    if component_precision_mode and _has_precise_component_cross_key_conflict(left, right):
         return False
-    if _numbers_substantive_pair(left, right):
+
+    # has_admin 动态累计器：static（Case 1）作为起点，非 admin 层再累计 Case 2。
+    left_has_admin = left.has_admin_static
+    right_has_admin = right.has_admin_static
+
+    # 非 admin 层比较 + has_admin Case 2 累计
+    for key in ("road", "poi", "building", "unit", "room", "suite", "detail"):
+        ok, left_admin_hit, right_admin_hit = _compare_peer_with_suspect_case2(
+            left,
+            right,
+            key,
+            exact_compare=component_precision_mode and key in _PRECISE_ADDRESS_COMPONENT_KEYS,
+        )
+        if not ok:
+            return False
+        left_has_admin = left_has_admin or left_admin_hit
+        right_has_admin = right_has_admin or right_admin_hit
+        if _ordered_component_by_type(left, key) and _ordered_component_by_type(right, key):
+            substantive_hits += 1
+
+    # admin 层多解释枚举
+    admin_result = _compare_admin_levels_with_interpretations(left, right)
+    if admin_result == "mismatch":
+        return False
+    if admin_result == "match":
+        substantive_hits += 1
+    else:  # inconclusive：双方都 has_admin 才否决
+        if left_has_admin and right_has_admin:
+            return False
+
+    if not component_precision_mode:
+        if not _numbers_match(
+            left.numbers, right.numbers,
+            left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers,
+        ):
+            return False
+        if _numbers_substantive_pair(left, right):
+            substantive_hits += 1
+
+    # subdistrict：走非 admin peer 路径；不累计 has_admin（SUBDISTRICT ∉ _HAS_ADMIN_LEVEL_KEYS）
+    ok_sd, _lhit_sd, _rhit_sd = _compare_peer_with_suspect_case2(
+        left, right, "subdistrict",
+    )
+    if not ok_sd:
+        return False
+    if (
+        _ordered_component_by_type(left, "subdistrict")
+        and _ordered_component_by_type(right, "subdistrict")
+    ):
         substantive_hits += 1
 
-    left_sd = _ordered_component_by_type(left, "subdistrict")
-    right_sd = _ordered_component_by_type(right, "subdistrict")
-    if left_sd is None or right_sd is None:
-        if not _compare_component_with_suspected(left, right, "subdistrict"):
-            return False
-    else:
-        if not _compare_component_with_suspected(left, right, "subdistrict"):
-            return False
-        substantive_hits += 1
-
-    # poi —— 列表双向子集（仅可去掉各 POI 的最后一个 key，不做任意后缀剥离）。
+    # poi 列表：双向子集
     if not _compare_poi_list(left, right):
         return False
 
@@ -448,44 +569,29 @@ def _identity_field_match_if_both_present(
 
 
 def _numbers_substantive_pair(left: NormalizedPII, right: NormalizedPII) -> bool:
-    """双方是否都带有可比的号码信息（纯数字序列或 keyed 之一非空）。"""
-    left_has = bool(left.numbers) or bool(left.keyed_numbers)
-    right_has = bool(right.numbers) or bool(right.keyed_numbers)
+    """双方是否都带有可比的号码序列。"""
+    left_has = bool(left.numbers)
+    right_has = bool(right.numbers)
     return bool(left_has and right_has)
 
 
-_MIN_POI_LEN = 2
-
-
-def _compare_component_with_suspected(
-    left: NormalizedPII, right: NormalizedPII, key: str,
-) -> bool:
-    """按组件自身 suspected 比较当前层级。"""
-    left_component = _ordered_component_by_type(left, key)
-    right_component = _ordered_component_by_type(right, key)
-    if left_component is None or right_component is None:
-        return True
-    left_value = _component_value_text(left_component)
-    right_value = _component_value_text(right_component)
-    if not _admin_text_subset_either(left_value, right_value):
-        return False
-    if not _component_suspected_matches(left_component, right_component, right):
-        return False
-    if not _component_suspected_matches(right_component, left_component, left):
-        return False
-    return True
-
-
-def _component_type_levels(component: NormalizedAddressComponent | None) -> tuple[str, ...]:
-    if component is None:
-        return ()
-    ordered: list[str] = []
-    for level in (component.component_type, *component.levels):
-        text = str(level or "").strip()
-        if not text or text in ordered:
+def _has_precise_component_cross_key_conflict(left: NormalizedPII, right: NormalizedPII) -> bool:
+    """细粒度英文组件若跨槽位对撞，应直接判为不同实体。"""
+    for left_key in _PRECISE_ADDRESS_COMPONENT_KEYS:
+        if not str(left.identity.get(left_key) or "").strip():
             continue
-        ordered.append(text)
-    return tuple(ordered)
+        for right_key in _PRECISE_ADDRESS_COMPONENT_KEYS:
+            if left_key == right_key:
+                continue
+            if not str(right.identity.get(right_key) or "").strip():
+                continue
+            if left.identity.get(right_key) or right.identity.get(left_key):
+                continue
+            return True
+    return False
+
+
+_MIN_POI_LEN = 2
 
 
 def _ordered_component_by_type(
@@ -495,7 +601,24 @@ def _ordered_component_by_type(
     for component in normalized.ordered_components:
         if component.component_type == component_type:
             return component
-        if component_type in _component_type_levels(component):
+    return None
+
+
+def _component_covering_level(
+    normalized: NormalizedPII,
+    level: str,
+    skip: Iterable[NormalizedAddressComponent] | None = None,
+) -> NormalizedAddressComponent | None:
+    """返回 level 元组中包含 level 且未被 skip 的第一个 component。
+
+    admin 场景的查找入口：优先按 level 查找；兼容旧 component（level 为空）时
+    退回按 component_type == level 匹配。non-admin 场景仍用 _ordered_component_by_type。
+    """
+    skip_ids: set[int] = {id(c) for c in skip} if skip else set()
+    for component in normalized.ordered_components:
+        if id(component) in skip_ids:
+            continue
+        if level in component.level or (not component.level and component.component_type == level):
             return component
     return None
 
@@ -520,51 +643,6 @@ def _suspect_entry_by_level(
     return None
 
 
-def _suspect_group_matches(
-    entry: NormalizedAddressSuspectEntry,
-    other_component: NormalizedAddressComponent,
-    other_normalized: NormalizedPII,
-) -> bool | None:
-    """按三步顺序比较一个 suspect group。"""
-    surface = f"{entry.value}{entry.key}".strip()
-    other_value = _component_value_text(other_component)
-
-    if surface and other_value and surface in other_value:
-        return True
-
-    for level in entry.levels:
-        peer_suspected = _suspect_entry_by_level(other_component, level)
-        if peer_suspected is not None:
-            return peer_suspected.value.strip() == entry.value.strip()
-
-    for level in entry.levels:
-        other_level_component = _ordered_component_by_type(other_normalized, level)
-        if other_level_component is None:
-            continue
-        other_level_value = _component_value_text(other_level_component)
-        if not other_level_value:
-            continue
-        return other_level_value == entry.value.strip()
-
-    return True
-
-
-def _component_suspected_matches(
-    component: NormalizedAddressComponent,
-    other_component: NormalizedAddressComponent,
-    other_normalized: NormalizedPII,
-) -> bool:
-    """逐组比较当前组件自己的 suspected。"""
-    if not component.suspected:
-        return True
-
-    for entry in component.suspected:
-        result = _suspect_group_matches(entry, other_component, other_normalized)
-        if result is False:
-            return False
-    return True
-
-
 def _admin_text_subset_either(a: str, b: str) -> bool:
     """行政片段子串互容（短串在长串内即可）。"""
     a, b = (a or "").strip(), (b or "").strip()
@@ -572,6 +650,395 @@ def _admin_text_subset_either(a: str, b: str) -> bool:
         return False
     shorter, longer = sorted((a, b), key=len)
     return shorter in longer
+
+
+# ---------------------------------------------------------------------------
+# PR #6：suspect 3 步 OR 链（带第 1 步失败旗标）+ has_admin Case 2 累计
+# ---------------------------------------------------------------------------
+
+def _entry_level_all_admin(entry: NormalizedAddressSuspectEntry) -> bool:
+    """entry.level 是否完全落在 admin 层（参与 has_admin 判定）。"""
+    return bool(entry.levels) and all(lvl in _HAS_ADMIN_LEVEL_KEYS for lvl in entry.levels)
+
+
+def _suspect_group_matches_with_flag(
+    entry: NormalizedAddressSuspectEntry,
+    other_component: NormalizedAddressComponent | None,
+    other_normalized: NormalizedPII,
+) -> tuple[bool | None, bool]:
+    """三步 OR 链（返回 step1_failed 供 has_admin Case 2 使用）。
+
+    返回 (match_result, step1_failed)。
+    - step1：surface = entry.value+entry.key，与对侧同 component_type peer.value 双向子串；
+      任一为空时也记 step1 失败（保守计 Case 2）。
+    - step2：对侧 peer 组件的 suspected 中同 level 的 entry，value 精确相等（策略 A）。
+    - step3：对侧按 level 查找覆盖组件，surface 与其 value 双向子串（策略 C）。
+    - 三步皆无从判定 → 不否决，返回 True。
+    """
+    surface = f"{entry.value}{entry.key}".strip()
+    other_value = _component_value_text(other_component)
+
+    # 第 1 步：同 component_type peer 双向子串
+    if surface and other_value and _admin_text_subset_either(surface, other_value):
+        return True, False
+
+    step1_failed = True
+
+    # 第 2 步：对侧 peer suspected 同 level 精确等值
+    for level in entry.levels:
+        peer_suspected = _suspect_entry_by_level(other_component, level)
+        if peer_suspected is not None:
+            return (peer_suspected.value.strip() == entry.value.strip()), step1_failed
+
+    bare_value = entry.value.strip()
+
+    # 第 3 步：对侧按 level 查找任一覆盖组件，bare value 与其 value 双向子串
+    for level in entry.levels:
+        other_level_component = _component_covering_level(other_normalized, level)
+        if other_level_component is None:
+            continue
+        other_level_value = _component_value_text(other_level_component)
+        if not bare_value or not other_level_value:
+            continue
+        return (
+            _admin_text_subset_either(bare_value, other_level_value),
+            step1_failed,
+        )
+
+    # 无从判定 → 不否决
+    return True, step1_failed
+
+
+def _suspect_chain_and_case2(
+    component: NormalizedAddressComponent | None,
+    other_component: NormalizedAddressComponent | None,
+    other_normalized: NormalizedPII,
+) -> tuple[bool, bool]:
+    """遍历 component.suspected；返回 (chain_ok, admin_hit)。
+
+    - chain_ok：任一 entry 的 OR 链结果 False 即整组失败。
+    - admin_hit：any-entry 聚合——entry step1 失败且 entry.level ⊂ admin 集合时累计 Case 2。
+    """
+    if component is None or not component.suspected:
+        return True, False
+    chain_ok = True
+    admin_hit = False
+    for entry in component.suspected:
+        result, step1_failed = _suspect_group_matches_with_flag(
+            entry, other_component, other_normalized,
+        )
+        if step1_failed and _entry_level_all_admin(entry):
+            admin_hit = True
+        if result is False:
+            chain_ok = False
+    return chain_ok, admin_hit
+
+
+def _compare_peer_with_suspect_case2(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    component_type: str,
+    *,
+    exact_compare: bool = False,
+) -> tuple[bool, bool, bool]:
+    """非 admin 层级（road / poi / building / detail / subdistrict）的同 component_type 比较。
+
+    返回 (match_ok, left_admin_from_suspect, right_admin_from_suspect)。
+    - match_ok：值层双向子串通过且双侧 suspect OR 链整体未否决。
+    - left_admin_from_suspect / right_admin_from_suspect：各侧在本层遍历中聚合的 Case 2 信号。
+    """
+    left_component = _ordered_component_by_type(left, component_type)
+    right_component = _ordered_component_by_type(right, component_type)
+
+    if left_component is None and right_component is None:
+        return True, False, False
+
+    # 值层比较：任一为 None 时跳过，双边都有则双向子串
+    if left_component is not None and right_component is not None:
+        left_value = _component_value_text(left_component)
+        right_value = _component_value_text(right_component)
+        if exact_compare:
+            if (
+                _canonicalize_address_component_value(component_type, left_value)
+                != _canonicalize_address_component_value(component_type, right_value)
+            ):
+                return False, False, False
+        elif not _admin_text_subset_either(left_value, right_value):
+            return False, False, False
+
+    left_ok, left_admin_hit = _suspect_chain_and_case2(
+        left_component, right_component, right,
+    )
+    right_ok, right_admin_hit = _suspect_chain_and_case2(
+        right_component, left_component, left,
+    )
+    if not left_ok or not right_ok:
+        return False, left_admin_hit, right_admin_hit
+
+    return True, left_admin_hit, right_admin_hit
+
+
+# ---------------------------------------------------------------------------
+# PR #6：admin 层三态比较器（多解释枚举 + suspect 补救）
+# ---------------------------------------------------------------------------
+
+def _admin_value_match(a: str, b: str) -> bool:
+    """admin 同层 component↔component 值比较。
+
+    值已剥 KEY，采用双向子串（短串为长串前/子串），允许 "浦东"="浦东新区" 同地判定。
+    多解释枚举下每 component 仅固定一层，不会出现"北京"⊂"北京市朝阳"式跨层假阳。
+    """
+    return _admin_text_subset_either(a, b)
+
+
+def _canonicalize_for_admin_compare(level: str, value: str) -> str:
+    """admin 层级值比较前的 canonical 化：
+    - EN province（state 别名）/ country 统一到短码；
+    - 其他层走 _canonicalize_address_component_value 的通用归一（例如 _compact_component_text）。
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    canon = _canonicalize_address_component_value(level, raw)
+    return canon or raw
+
+
+def _admin_value_at_level(
+    normalized: NormalizedPII,
+    level: str,
+    interpretation: dict,
+) -> str | None:
+    """取本侧在 level 层的 component value（硬值，已 canonicalize）。
+
+    - interpretation 中 multi component 仅在被固定到 level 时才贡献；
+    - 单层 component 只要 level 在其 level 元组里即贡献；兼容旧 component（level 空）按 component_type 匹配。
+    """
+    for c in normalized.ordered_components:
+        if id(c) in interpretation:
+            if interpretation[id(c)] == level:
+                v = _component_value_text(c)
+                return _canonicalize_for_admin_compare(level, v) if v else None
+            continue
+        if level in c.level or (not c.level and c.component_type == level):
+            v = _component_value_text(c)
+            return _canonicalize_for_admin_compare(level, v) if v else None
+    return None
+
+
+def _level_candidates(
+    normalized: NormalizedPII,
+    level: str,
+    interpretation: dict,
+) -> set[str]:
+    """某侧在 level 层的候选值集合 = 硬值（受 interpretation 约束） ∪ suspect 裸 value。
+
+    候选值在入集合前统一 canonicalize，保证 "California" 与 "CA"、"苏州" 与 "苏州市" 等别名可比。
+    """
+    out: set[str] = set()
+
+    def _add(raw: str) -> None:
+        canon = _canonicalize_for_admin_compare(level, raw)
+        if canon:
+            out.add(canon)
+
+    for c in normalized.ordered_components:
+        if id(c) in interpretation:
+            if interpretation[id(c)] == level:
+                _add(_component_value_text(c))
+        else:
+            if level in c.level or (not c.level and c.component_type == level):
+                _add(_component_value_text(c))
+        for s in c.suspected:
+            if level in s.levels and s.value:
+                _add(s.value.strip())
+    return out
+
+
+def _suspect_chain_consistent_at_level(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    level: str,
+    left_interp: dict,
+    right_interp: dict,
+) -> bool:
+    """单侧硬值缺失时的层级一致性判定。
+
+    两侧候选集（硬值 + suspect 裸 value）任一为空视为 True（单缺不证伪）；
+    两侧都有候选则需存在一对满足 _admin_text_subset_either，否则显式冲突。
+    """
+    left_set = _level_candidates(left, level, left_interp)
+    right_set = _level_candidates(right, level, right_interp)
+    if not left_set or not right_set:
+        return True
+    for a in left_set:
+        for b in right_set:
+            if _admin_text_subset_either(a, b):
+                return True
+    return False
+
+
+def _suspect_chain_can_reconcile(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    level: str,
+    left_interp: dict,
+    right_interp: dict,
+) -> bool:
+    """双侧硬值都存在但精确不等时的 suspect 补救。
+
+    仅用裸 value 候选集补救；不再依赖 suspect surface。
+    """
+    left_set = _level_candidates(left, level, left_interp)
+    right_set = _level_candidates(right, level, right_interp)
+    if not left_set or not right_set:
+        return False
+    return _sets_subset_either(left_set, right_set)
+
+
+def _admin_match_under_interpretation(
+    left: NormalizedPII,
+    right: NormalizedPII,
+    left_interp: dict,
+    right_interp: dict,
+) -> str:
+    """某种解释下逐 admin level 比较，返回 match / inconclusive / mismatch。
+
+    单侧硬值缺失时用候选集（硬值 + suspect 裸 value）判定：
+    - 两侧候选集俱空 / 双方都真空 → 本层不贡献也不冲突；
+    - 单侧候选空 → 本层真单缺，不证伪也不命中；
+    - 双方候选都非空 → 必须存在一对子串互容，否则显式冲突。候选互容时计 matched。
+    """
+    matched_any = False
+    for level in _ADMIN_LEVEL_KEYS:
+        left_value = _admin_value_at_level(left, level, left_interp)
+        right_value = _admin_value_at_level(right, level, right_interp)
+
+        if left_value is None and right_value is None:
+            # 双侧硬值均缺：仍要看候选集是否存在显式冲突
+            left_set = _level_candidates(left, level, left_interp)
+            right_set = _level_candidates(right, level, right_interp)
+            if not left_set or not right_set:
+                continue  # 真双缺
+            # 双侧都有候选：需要一对互容
+            if _sets_subset_either(left_set, right_set):
+                matched_any = True
+                continue
+            return "mismatch"
+
+        if left_value is None or right_value is None:
+            left_set = _level_candidates(left, level, left_interp)
+            right_set = _level_candidates(right, level, right_interp)
+            if not left_set or not right_set:
+                continue  # 单侧真缺
+            if _sets_subset_either(left_set, right_set):
+                matched_any = True
+                continue
+            return "mismatch"
+
+        if _admin_value_match(left_value, right_value):
+            matched_any = True
+            continue
+
+        if _suspect_chain_can_reconcile(
+            left, right, level, left_interp, right_interp,
+        ):
+            matched_any = True
+            continue
+        return "mismatch"
+
+    return "match" if matched_any else "inconclusive"
+
+
+def _sets_subset_either(left_set: set[str], right_set: set[str]) -> bool:
+    """双候选集存在一对满足 _admin_text_subset_either 即 True。"""
+    for a in left_set:
+        for b in right_set:
+            if _admin_text_subset_either(a, b):
+                return True
+    return False
+
+
+def _iter_admin_interpretations(
+    multis: list[NormalizedAddressComponent],
+):
+    """逐 MULTI_ADMIN component 在其 level 元组内取一层的笛卡尔积；
+    每次 yield 一个 {id(component): level_str} dict。"""
+    if not multis:
+        yield {}
+        return
+    from itertools import product
+    level_sets = [tuple(m.level) for m in multis]
+    keys = [id(m) for m in multis]
+    for combo in product(*level_sets):
+        yield dict(zip(keys, combo))
+
+
+def _admin_match_simplified(left: NormalizedPII, right: NormalizedPII) -> str:
+    """k 过大时的降级路径：逐 admin level 聚合所有候选值；
+    - 双方都有候选且存在一对子串互容 → 本层命中；
+    - 双方都有候选但无任何对匹配 → 本层 mismatch；
+    - 单侧有候选 → 视为本层无冲突也不命中。
+    聚合后：任一层 mismatch → 整体 mismatch；有命中 → match；否则 inconclusive。
+    """
+    empty_interp: dict = {}
+    any_match = False
+    for level in _ADMIN_LEVEL_KEYS:
+        left_set = _level_candidates(left, level, empty_interp)
+        right_set = _level_candidates(right, level, empty_interp)
+        if not left_set and not right_set:
+            continue
+        if not left_set or not right_set:
+            continue
+        ok = False
+        for a in left_set:
+            for b in right_set:
+                if _admin_text_subset_either(a, b):
+                    ok = True
+                    break
+            if ok:
+                break
+        if ok:
+            any_match = True
+        else:
+            return "mismatch"
+    return "match" if any_match else "inconclusive"
+
+
+def _compare_admin_levels_with_interpretations(
+    left: NormalizedPII,
+    right: NormalizedPII,
+) -> str:
+    """admin 层三态比较（match / mismatch / inconclusive）。
+
+    聚合规则（与 0.2 对齐）：
+    - 任一解释 match → 整体 match；
+    - 否则任一解释 inconclusive → 整体 inconclusive；
+    - 否则（均 mismatch） → 整体 mismatch。
+    """
+    left_multis = [
+        c for c in left.ordered_components
+        if c.component_type == "multi_admin" or len(c.level) >= 2
+    ]
+    right_multis = [
+        c for c in right.ordered_components
+        if c.component_type == "multi_admin" or len(c.level) >= 2
+    ]
+
+    # 枚举量兜底
+    if len(left_multis) + len(right_multis) > _MULTI_ADMIN_INTERP_CAP:
+        return _admin_match_simplified(left, right)
+
+    any_inconclusive = False
+    for left_interp in _iter_admin_interpretations(left_multis):
+        for right_interp in _iter_admin_interpretations(right_multis):
+            result = _admin_match_under_interpretation(
+                left, right, left_interp, right_interp,
+            )
+            if result == "match":
+                return "match"
+            if result == "inconclusive":
+                any_inconclusive = True
+    return "inconclusive" if any_inconclusive else "mismatch"
 
 
 def _compare_poi_list(left: NormalizedPII, right: NormalizedPII) -> bool:
@@ -624,18 +1091,19 @@ def _numbers_match(
     left_keyed: dict[str, str] | None = None,
     right_keyed: dict[str, str] | None = None,
 ) -> bool:
-    """号码判定：优先 keyed 路径（共有 key 值相等），fallback 到逆序子序列匹配。"""
-    # 路径 1: keyed 比对——仅比较双方共有的 key，值相等即通过。
-    if left_keyed and right_keyed:
-        common = left_keyed.keys() & right_keyed.keys()
-        if common:
-            return all(left_keyed[k] == right_keyed[k] for k in common)
-    # 路径 2: fallback 到 numbers 逆序子序列匹配。
+    """号码判定。
+
+    规则：
+    1. 先按逆序单调子序列计算命中数。
+    2. 命中数相对最长一方的覆盖率必须严格大于 40%。
+    3. 当最短一方长度小于等于 2 时，要求最短一方全部命中。
+    """
+    del left_keyed, right_keyed
     return _numbers_sequence_match(left, right)
 
 
 def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
-    """号码序列判定：从末尾往前做逆序一致的子序列匹配，且至少命中 2 个 token。"""
+    """号码序列判定：从末尾往前做逆序一致的子序列匹配。"""
     if not left and not right:
         return True
     if not left or not right:
@@ -651,9 +1119,14 @@ def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bo
             pointer += 1
             if pointer == len(s):
                 break
-    if pointer != len(s):
+    longer_len = max(len(left), len(right))
+    if longer_len <= 0:
+        return True
+    if (matched / longer_len) <= 0.4:
         return False
-    return matched >= 2
+    if len(shorter) <= 2 and matched != len(shorter):
+        return False
+    return True
 
 
 _KEYED_NUMBER_TYPES = {"building", "detail", "number"}
@@ -708,23 +1181,67 @@ def _component_suspected_tuple_from_metadata(
     return tuple(_parse_one_component_suspected(str(item or "")) for item in raw)
 
 
-def _component_levels_tuple_from_metadata(
-    metadata: Mapping[str, object] | None,
-) -> tuple[tuple[str, ...], ...]:
-    if not metadata:
-        return ()
-    raw = metadata.get("address_component_levels")
-    if not isinstance(raw, list):
-        return ()
-    parsed: list[tuple[str, ...]] = []
-    for item in raw:
-        levels = tuple(
-            level.strip()
-            for level in str(item or "").split("|")
-            if level.strip()
-        )
-        parsed.append(levels)
-    return tuple(parsed)
+_DISPLAY_LEVEL_BY_COMPONENT_KEY: dict[str, str] = {
+    "province": "prov",
+    "country": "prov",
+    "city": "city",
+    "district": "dist",
+    "district_city": "dist",
+    "subdistrict": "dist",
+    "road": "road",
+    "number": "road",
+    "house_number": "road",
+    "poi": "dtl",
+    "building": "dtl",
+    "unit": "dtl",
+    "room": "dtl",
+    "suite": "dtl",
+    "detail": "dtl",
+    "postal_code": "",
+}
+# SPEC 拼接顺序：固定 PROV→CITY→DIST→ROAD→DTL。
+_DISPLAY_LEVEL_ORDER: tuple[str, ...] = ("prov", "city", "dist", "road", "dtl")
+
+
+def _derive_display_level(component_type: str, level_tuple: tuple[str, ...]) -> str:
+    """为 NormalizedAddressComponent 推导 display 短码。
+
+    - MULTI_ADMIN：取 level 元组中 rank 最低的行政层级映射（例：("province","city") → "city"）；
+      元组为空或无行政层级时回退为 "city"。
+    - 其它 component_type：直接按映射表取；命中 postal_code 或未知类型返回空串。
+    """
+    ct = str(component_type or "").strip()
+    if ct == "multi_admin":
+        if level_tuple:
+            ranked = sorted(
+                level_tuple,
+                key=lambda lvl: _ADMIN_LEVEL_RANK.get(lvl, 10**9),
+            )
+            for lvl in ranked:
+                mapped = _DISPLAY_LEVEL_BY_COMPONENT_KEY.get(lvl, "")
+                if mapped:
+                    return mapped
+        return "city"
+    return _DISPLAY_LEVEL_BY_COMPONENT_KEY.get(ct, "")
+
+
+def address_display_spec(normalized: NormalizedPII) -> str:
+    """按 PROV/CITY/DIST/ROAD/DTL 顺序生成地址占位符 SPEC 后缀。
+
+    - 只扫描 `normalized.ordered_components` 里 display_level 非空的条目；
+    - 去重后按固定顺序用 "-" 拼（同一 display level 多次仅保留一次）；
+    - 全空或非地址归一返回空字符串（调用方据此决定是否追加 `.SPEC`）。
+    """
+    if normalized is None or normalized.attr_type != PIIAttributeType.ADDRESS:
+        return ""
+    seen: set[str] = set()
+    for component in normalized.ordered_components:
+        level = (component.display_level or "").strip()
+        if level:
+            seen.add(level)
+    if not seen:
+        return ""
+    return "-".join(level.upper() for level in _DISPLAY_LEVEL_ORDER if level in seen)
 
 
 def _address_ordered_components(
@@ -743,10 +1260,17 @@ def _ordered_components_from_direct_components(
 ) -> tuple[NormalizedAddressComponent, ...]:
     """结构化 components 直传时，按固定层级顺序生成组件。"""
     ordered: list[NormalizedAddressComponent] = []
-    poi_key_raw = str(components.get("poi_key") or "").strip()
+    normalized_components: dict[str, str] = {}
+    for raw_key, value in components.items():
+        key = _ADDRESS_COMPONENT_ALIASES.get(str(raw_key or "").strip(), str(raw_key or "").strip())
+        text = str(value or "").strip()
+        if key in _ADDRESS_COMPONENT_KEYS or key in _ADDRESS_OPTIONAL_KEYS:
+            if text:
+                normalized_components[key] = text
+    poi_key_raw = str(normalized_components.get("poi_key") or "").strip()
     poi_keys = tuple(part.strip() for part in poi_key_raw.split("|") if part.strip())
     for component_type in _ORDERED_COMPONENT_KEYS:
-        raw_value = str(components.get(component_type) or "").strip()
+        raw_value = str(normalized_components.get(component_type) or "").strip()
         if not raw_value:
             continue
         if component_type == "poi":
@@ -764,12 +1288,15 @@ def _ordered_components_from_direct_components(
         else:
             value = raw_value
             key = ""
+        # 结构化直传无 trace，level 默认等于 component_type。
+        level_tuple = (component_type,)
         ordered.append(NormalizedAddressComponent(
             component_type=component_type,
+            level=level_tuple,
             value=value,
             key=key,
-            levels=(),
             suspected=(),
+            display_level=_derive_display_level(component_type, level_tuple),
         ))
     return tuple(ordered)
 
@@ -778,11 +1305,12 @@ def _ordered_components_from_metadata(
     metadata: Mapping[str, object] | None,
 ) -> tuple[NormalizedAddressComponent, ...]:
     """从 detector metadata 重建组件顺序与组件级 suspected。"""
-    trace_entries = _parse_address_trace_entries(_metadata_values(metadata, "address_component_trace"))
+    trace_raw = _metadata_values(metadata, "address_component_trace")
+    level_raw = _metadata_values(metadata, "address_component_level")
+    trace_entries = _parse_address_trace_entries_with_levels(trace_raw, level_raw)
     if not trace_entries:
         return ()
     key_entries = _parse_address_trace_entries(_metadata_values(metadata, "address_component_key_trace"))
-    level_entries = _component_levels_tuple_from_metadata(metadata)
     suspected_entries = _component_suspected_tuple_from_metadata(metadata)
 
     ordered: list[NormalizedAddressComponent] = []
@@ -791,13 +1319,13 @@ def _ordered_components_from_metadata(
     component_index = 0
 
     while trace_index < len(trace_entries):
-        component_type, value = trace_entries[trace_index]
-        levels = level_entries[component_index] if component_index < len(level_entries) else ()
+        component_type, value, level_tuple = trace_entries[trace_index]
         suspected = suspected_entries[component_index] if component_index < len(suspected_entries) else ()
         component_index += 1
 
         if component_type == "poi":
             values = [value]
+            first_level = level_tuple
             trace_index += 1
             while trace_index < len(trace_entries) and trace_entries[trace_index][0] == "poi":
                 values.append(trace_entries[trace_index][1])
@@ -806,12 +1334,14 @@ def _ordered_components_from_metadata(
             while key_index < len(key_entries) and key_entries[key_index][0] == "poi" and len(keys) < len(values):
                 keys.append(key_entries[key_index][1])
                 key_index += 1
+            poi_level_tuple = first_level or ("poi",)
             ordered.append(NormalizedAddressComponent(
                 component_type="poi",
+                level=poi_level_tuple,
                 value=tuple(values) if len(values) > 1 else values[0],
                 key=tuple(keys) if len(keys) > 1 else (keys[0] if keys else ""),
-                levels=(),
                 suspected=tuple(suspected),
+                display_level=_derive_display_level("poi", poi_level_tuple),
             ))
             continue
 
@@ -819,12 +1349,14 @@ def _ordered_components_from_metadata(
         if key_index < len(key_entries) and key_entries[key_index][0] == component_type:
             key_value = key_entries[key_index][1]
             key_index += 1
+        effective_level_tuple = level_tuple or (component_type,)
         ordered.append(NormalizedAddressComponent(
             component_type=component_type,
+            level=effective_level_tuple,
             value=value,
             key=key_value,
-            levels=levels,
             suspected=tuple(suspected),
+            display_level=_derive_display_level(component_type, effective_level_tuple),
         ))
         trace_index += 1
 
@@ -842,6 +1374,39 @@ def _parse_address_trace_entries(items: tuple[str, ...]) -> list[tuple[str, str]
         value = raw_value.strip()
         if component_type in _ADDRESS_COMPONENT_KEYS and value:
             entries.append((component_type, value))
+    return entries
+
+
+def _parse_address_trace_entries_with_levels(
+    trace_items: tuple[str, ...],
+    level_items: tuple[str, ...],
+) -> list[tuple[str, str, tuple[str, ...]]]:
+    """把 trace 与并行 level 列表解析成带层级的组件项。
+
+    - trace_items 与 level_items 按原始 detector 顺序一一对应；
+      level_items 缺失或短于 trace_items 时，缺位条目回退为空元组（调用方再兜底为 component_type）。
+    - level 字符串格式：单层 "road" / "province"；MULTI_ADMIN 以 `|` 分隔。
+    """
+    entries: list[tuple[str, str, tuple[str, ...]]] = []
+    for idx, item in enumerate(trace_items):
+        if ":" not in item:
+            continue
+        raw_type, raw_value = item.split(":", 1)
+        component_type = _ADDRESS_COMPONENT_ALIASES.get(raw_type.strip(), raw_type.strip())
+        value = raw_value.strip()
+        if component_type not in _ADDRESS_COMPONENT_KEYS or not value:
+            continue
+        level_tuple: tuple[str, ...] = ()
+        if idx < len(level_items):
+            raw_level = str(level_items[idx] or "").strip()
+            if raw_level:
+                parts = tuple(
+                    _ADDRESS_COMPONENT_ALIASES.get(p.strip(), p.strip())
+                    for p in raw_level.split("|")
+                    if p.strip()
+                )
+                level_tuple = tuple(p for p in parts if p in _ADMIN_LEVEL_KEYS or p in _ADDRESS_COMPONENT_KEYS)
+        entries.append((component_type, value, level_tuple))
     return entries
 
 
@@ -889,7 +1454,7 @@ def _address_numbers(
                 comp_type, value = item.split(":", 1)
                 comp_type = comp_type.strip()
                 value = value.strip()
-                if comp_type in {"building", "detail", "number"}:
+                if comp_type in {"building", "unit", "room", "suite", "detail", "number"}:
                     tokens.extend(_extract_number_tokens(value))
             return [t for t in tokens if t]
     # fallback：无 trace 时按 detail keys 顺序提取（仅用于 components 直传场景）。
@@ -1026,11 +1591,16 @@ def _address_components(
 ) -> dict[str, str]:
     if components:
         allowed = frozenset(_ADDRESS_COMPONENT_KEYS) | _ADDRESS_OPTIONAL_KEYS
-        return {
-            key: str(value).strip()
-            for key, value in components.items()
-            if key in allowed and str(value or "").strip()
-        }
+        resolved: dict[str, str] = {}
+        for raw_key, value in components.items():
+            key = _ADDRESS_COMPONENT_ALIASES.get(str(raw_key or "").strip(), str(raw_key or "").strip())
+            if key not in allowed:
+                continue
+            text = str(value or "").strip()
+            if not text:
+                continue
+            resolved[key] = text
+        return resolved
     traced = _components_from_address_metadata(metadata)
     if traced:
         return traced
@@ -1121,12 +1691,39 @@ def _metadata_values(metadata: Mapping[str, object] | None, key: str) -> tuple[s
     return (text,) if text else ()
 
 
-def _normalize_phone_digits(digits: str) -> str:
-    if len(digits) == 13 and digits.startswith("86") and re.fullmatch(r"1[3-9]\d{9}", digits[2:]):
+def _normalize_phone_digits(
+    digits: str,
+    *,
+    raw_text: str = "",
+    metadata: Mapping[str, object] | None = None,
+) -> str:
+    phone_region = (_metadata_values(metadata, "phone_region")[:1] or ("",))[0].lower()
+    if phone_region == "cn":
+        if len(digits) == 13 and digits.startswith("86") and _PHONE_CN_MOBILE_RE.fullmatch(digits[2:]):
+            return digits[2:]
+        return digits
+    if phone_region == "us":
+        if len(digits) == 11 and digits.startswith("1") and _is_valid_us_phone_digits(digits[1:]):
+            return digits[1:]
+        return digits
+    if len(digits) == 13 and digits.startswith("86") and _PHONE_CN_MOBILE_RE.fullmatch(digits[2:]):
         return digits[2:]
-    if len(digits) == 11 and digits.startswith("1") and re.fullmatch(r"[2-9]\d{9}", digits[1:]):
+    normalized_text = unicodedata.normalize("NFKC", raw_text or "")
+    if (
+        len(digits) == 11
+        and digits.startswith("1")
+        and _is_valid_us_phone_digits(digits[1:])
+        and (
+            _PHONE_US_COUNTRY_CODE_PREFIX_RE.match(normalized_text)
+            or _PHONE_US_TRUNK_AREA_PREFIX_RE.match(normalized_text)
+        )
+    ):
         return digits[1:]
     return digits
+
+
+def _is_valid_us_phone_digits(digits: str) -> bool:
+    return len(digits) == 10 and digits.isdigit() and bool(_PHONE_US_TEN_DIGIT_RE.fullmatch(digits))
 
 
 def _organization_canonical(value: str) -> str:

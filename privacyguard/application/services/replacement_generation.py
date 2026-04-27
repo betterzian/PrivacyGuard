@@ -16,7 +16,7 @@ from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
-from privacyguard.domain.policies.generic_placeholder import render_generic_replacement_text
+from privacyguard.infrastructure.pii.json_privacy_repository import RepoEntityIndex
 
 from privacyguard.application.services.placeholder_allocator import SessionPlaceholderAllocator
 
@@ -24,9 +24,15 @@ from privacyguard.application.services.placeholder_allocator import SessionPlace
 class ReplacementGenerationService:
     """决策计划 → 带完整 ``replacement_text`` 的执行计划。"""
 
-    def __init__(self, mapping_store: MappingStore, persona_repository: PersonaRepository) -> None:
+    def __init__(
+        self,
+        mapping_store: MappingStore,
+        persona_repository: PersonaRepository,
+        repo_index: RepoEntityIndex | None = None,
+    ) -> None:
         self._mapping_store = mapping_store
         self._persona_repository = persona_repository
+        self._repo_index = repo_index
 
     def apply(self, plan: DecisionPlan, context: DecisionContext) -> DecisionPlan:
         """补全 persona 文案与会话级 generic 占位符。"""
@@ -40,7 +46,10 @@ class ReplacementGenerationService:
             after_persona.append(updated)
 
         plan = plan.model_copy(update={"actions": after_persona}, deep=True)
-        plan = SessionPlaceholderAllocator(self._mapping_store).assign(plan)
+        plan = SessionPlaceholderAllocator(
+            self._mapping_store,
+            repo_index=self._repo_index,
+        ).assign(plan)
 
         final_actions: list[DecisionAction] = []
         for action in plan.actions:
@@ -93,9 +102,18 @@ def apply_post_decision_steps(
     context: DecisionContext,
     mapping_store: MappingStore,
     persona_repository: PersonaRepository,
+    repo_index: RepoEntityIndex | None = None,
 ) -> DecisionPlan:
-    """决策引擎产出抽象计划后：结构约束 → 替换文案与会话占位生成。"""
+    """决策引擎产出抽象计划后：结构约束 → 替换文案与会话占位生成。
+
+    ``repo_index`` 由 sanitize 主链从 ``RuntimeContext`` 注入；为 ``None`` 时
+    分配器走纯 session 路径，向下兼容测试 / 评测脚本等未初始化 ctx 的调用方。
+    """
     resolver = ConstraintResolver(persona_repository)
     actions = resolver.resolve(plan.actions, context.candidates, context.session_binding)
     bound = plan.model_copy(update={"actions": actions}, deep=True)
-    return ReplacementGenerationService(mapping_store, persona_repository).apply(bound, context)
+    return ReplacementGenerationService(
+        mapping_store,
+        persona_repository,
+        repo_index=repo_index,
+    ).apply(bound, context)

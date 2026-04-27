@@ -16,8 +16,10 @@ from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueF
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
+    _family_value_floor_char,
+    _floor_clamped_label_seed_start_char,
     _count_non_space_units,
-    _label_seed_start_char,
+    _starter_is_before_family_value_floor,
     _unit_char_end,
     _unit_char_start,
     _unit_index_at_or_after,
@@ -26,6 +28,8 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_any_break, is_hard_break
 
+_ORG_SOFT_NEGATIVE_SCOPES = ("organization", "ui")
+
 
 @dataclass(slots=True)
 class BaseOrganizationStack(BaseStack):
@@ -33,29 +37,56 @@ class BaseOrganizationStack(BaseStack):
 
     STACK_LOCALE = "zh"
 
-    def need_break(self, subject, **kwargs) -> bool:
+    def _has_organization_negative_cover(self, unit_start: int, unit_last: int) -> bool:
+        """组织栈的负向由显式 negative、LABEL 与 START 构成，不吸收 inspire。"""
+        return self._has_semantic_negative_cover(
+            unit_start,
+            unit_last,
+            scopes=_ORG_SOFT_NEGATIVE_SCOPES,
+            include_seed_roles=True,
+            include_inspire=False,
+        )
+
+    def _value_floor_char(self) -> int:
+        """返回 ORGANIZATION 当前生效的 value 起点下界。"""
+        return _family_value_floor_char(self.context, ClueFamily.ORGANIZATION)
+
+    def _starter_is_before_value_floor(self) -> bool:
+        """非 LABEL/START 起栈不得从已锁住的 value 区间左侧开始。"""
+        return _starter_is_before_family_value_floor(self.context, self.clue, ClueFamily.ORGANIZATION)
+
+    def should_break_clue(self, subject, **kwargs) -> bool:
         del kwargs
         if isinstance(subject, Clue):
-            return subject.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}
+            if subject.role == ClueRole.BREAK:
+                return True
+            if subject.role in {ClueRole.LABEL, ClueRole.START}:
+                return subject.attr_type != PIIAttributeType.ORGANIZATION
+            return subject.strength == ClaimStrength.HARD and subject.attr_type not in {
+                None,
+                PIIAttributeType.ORGANIZATION,
+            }
         return False
 
-    def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
+    def shrink(self, run: StackRun, blocker_start: int, blocker_last: int) -> StackRun | None:
         """组织名回缩：后缀被截即放弃，前缀被截后需重新校验。"""
         candidate = run.candidate
         stream = self.context.stream
         if blocker_start <= candidate.unit_start:
-            new_unit_start, new_unit_end = blocker_end, candidate.unit_end
-        elif blocker_end >= candidate.unit_end:
-            new_unit_start, new_unit_end = candidate.unit_start, blocker_start
+            new_unit_start, new_unit_last = blocker_last + 1, candidate.unit_last
+        elif blocker_last >= candidate.unit_last:
+            new_unit_start, new_unit_last = candidate.unit_start, blocker_start - 1
         else:
-            new_unit_start, new_unit_end = candidate.unit_start, blocker_start
+            new_unit_start, new_unit_last = candidate.unit_start, blocker_start - 1
+        if new_unit_last < new_unit_start:
+            return None
         trimmed = trim_candidate(
             candidate,
             stream.text,
             start=_unit_char_start(stream, new_unit_start),
-            end=_unit_char_end(stream, new_unit_end),
+            end=_unit_char_end(stream, new_unit_last),
             unit_start=new_unit_start,
-            unit_end=new_unit_end,
+            unit_last=new_unit_last,
         )
         if trimmed is None:
             return None
@@ -64,16 +95,17 @@ class BaseOrganizationStack(BaseStack):
         return StackRun(
             attr_type=run.attr_type,
             candidate=trimmed,
-            consumed_ids=run.consumed_ids,
             handled_label_clue_ids=run.handled_label_clue_ids,
-            next_index=run.next_index,
+            frontier_last_unit=trimmed.unit_last,
         )
 
     def run(self) -> StackRun | None:
+        if self._starter_is_before_value_floor():
+            return None
         is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
         locale = self.STACK_LOCALE
         if is_label_seed:
-            start = _label_seed_start_char(self.context.stream, self.clue.end)
+            start = _floor_clamped_label_seed_start_char(self.context, ClueFamily.ORGANIZATION, self.clue.end)
             if start >= len(self.context.stream.text):
                 return None
             end = self._resolve_label_end(start=start, locale=locale)
@@ -86,8 +118,11 @@ class BaseOrganizationStack(BaseStack):
             return self._build_value_seed_run(locale=locale)
         else:
             return None
+        start, end = self._soft_trim_negative_edges(start=start, end=end, locale=locale)
+        if end <= start:
+            return None
         matches = self._organization_clues_in_span(start, end)
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
+        unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
         candidate = build_organization_candidate_from_value(
             source=self.context.stream.source,
             value_text=self.context.stream.text[start:end],
@@ -95,7 +130,7 @@ class BaseOrganizationStack(BaseStack):
             value_end=end,
             source_kind=self.clue.source_kind,
             unit_start=unit_start,
-            unit_end=unit_end,
+            unit_last=unit_last,
             label_clue_id=self.clue.clue_id if is_label_seed else None,
             label_driven=(self.clue.role == ClueRole.LABEL),
         )
@@ -117,15 +152,11 @@ class BaseOrganizationStack(BaseStack):
         ):
             return None
         candidate.claim_strength = evidence.max_clue_strength
-        consumed_ids = {clue.clue_id for _index, clue in matches}
-        consumed_ids.add(self.clue.clue_id)
-        last_index = max((index for index, _clue in matches), default=self.clue_index)
         return StackRun(
             attr_type=PIIAttributeType.ORGANIZATION,
             candidate=candidate,
-            consumed_ids=consumed_ids,
             handled_label_clue_ids=handled,
-            next_index=last_index + 1,
+            frontier_last_unit=candidate.unit_last,
         )
 
     def _resolve_label_end(self, *, start: int, locale: str) -> int:
@@ -143,7 +174,8 @@ class BaseOrganizationStack(BaseStack):
         )
 
     def _resolve_suffix_start(self, *, locale: str) -> int:
-        floor = _left_expand_text_boundary(self.context, self.clue.start, should_break=self.need_break)
+        floor = _left_expand_text_boundary(self.context, self.clue.start, should_break=self.should_break_clue)
+        floor = max(floor, self._value_floor_char())
         return _extend_organization_left_with_limit(
             self.context.stream,
             floor=floor,
@@ -167,77 +199,61 @@ class BaseOrganizationStack(BaseStack):
         return upper
 
     def _next_label_blocker_start(self, start: int) -> int | None:
-        blocker_start = start if self.context.has_negative_cover_left_of_char(start) else self.context.next_negative_start_char(start)
-        ci = self.context.clue_index
-        stream = self.context.stream
-        # 检查 cursor 是否在某个 blocker clue 内部（cover_prefix_sum 快速排除）。
-        if stream.char_to_unit and 0 < start < len(stream.char_to_unit):
-            cursor_unit = stream.char_to_unit[start]
-            if cursor_unit < ci.unit_count and ci.cover_prefix_sum[cursor_unit + 1] - ci.cover_prefix_sum[cursor_unit] > 0:
-                for clue in self.context.clues:
-                    if clue.clue_id == self.clue.clue_id:
-                        continue
-                    if clue.start < start < clue.end and self._is_label_right_blocker(clue):
-                        return start if blocker_start is None else min(blocker_start, start)
-        # 向右查找第一个 blocker。
-        if stream.char_to_unit and start < len(stream.char_to_unit):
-            start_unit = stream.char_to_unit[min(start, len(stream.char_to_unit) - 1)]
-            clues = self.context.clues
-            for u in range(start_unit, ci.unit_count):
-                for idx in ci.clues_starting_at[u]:
-                    if idx <= self.clue_index:
-                        continue
-                    clue = clues[idx]
-                    if clue.end <= start:
-                        continue
-                    if self._is_label_right_blocker(clue):
-                        candidate = max(start, clue.start)
-                        blocker_start = candidate if blocker_start is None else min(blocker_start, candidate)
-                        return blocker_start
+        blocker_start = None
+        for clue in self.context.clues:
+            if clue.clue_id == self.clue.clue_id:
+                continue
+            if clue.start < start < clue.end and self._is_label_right_blocker(clue):
+                return start if blocker_start is None else min(blocker_start, start)
+            if clue.end > start and self._is_label_right_blocker(clue):
+                candidate = max(start, clue.start)
+                blocker_start = candidate if blocker_start is None else min(blocker_start, candidate)
+                return blocker_start
         return blocker_start
 
     def _is_label_right_blocker(self, clue: Clue) -> bool:
-        if clue.role in {ClueRole.BREAK, ClueRole.NEGATIVE, ClueRole.LABEL}:
+        if clue.role == ClueRole.BREAK:
             return True
-        if clue.strength == ClaimStrength.HARD:
+        if clue.role in {ClueRole.LABEL, ClueRole.START}:
+            return clue.attr_type != PIIAttributeType.ORGANIZATION
+        if clue.strength == ClaimStrength.HARD and clue.attr_type != PIIAttributeType.ORGANIZATION:
             return True
-        if clue.attr_type is None:
-            return False
-        return clue.attr_type != PIIAttributeType.ORGANIZATION
+        return False
 
     def _find_suffix_end_within_window(self, *, start: int, upper: int) -> int | None:
         if start >= upper or not self.context.stream.char_to_unit:
             return None
         start_ui = _unit_index_at_or_after(self.context.stream, start)
-        for index in range(self.clue_index + 1, len(self.context.clues)):
-            clue = self.context.clues[index]
+        for clue in self.context.clues[self.clue_index + 1 :]:
             if clue.start >= upper:
                 break
             if clue.end <= start:
                 continue
-            if clue.attr_type != PIIAttributeType.ORGANIZATION or clue.role != ClueRole.SUFFIX:
-                continue
-            suffix_ui = self.context.stream.char_to_unit[clue.start]
-            if _count_non_space_units(self.context.stream.units, start_ui, suffix_ui + 1) <= 10:
-                return clue.end
+            if clue.attr_type == PIIAttributeType.ORGANIZATION and clue.role == ClueRole.SUFFIX:
+                suffix_ui = self.context.stream.char_to_unit[clue.start]
+                if _count_non_space_units(self.context.stream.units, start_ui, suffix_ui + 1) <= 10:
+                    return clue.end
         return None
 
     def _build_value_seed_run(self, *, locale: str) -> StackRun | None:
         """VALUE seed：已知公司名起栈，向右搜索 suffix 以扩展。"""
+        if self._starter_is_before_value_floor():
+            return None
         value_start = self.clue.start
         value_end = self.clue.end
         # 向右搜索 suffix。
         suffix_clue = self._find_suffix_after_value(value_end, locale=locale)
-        consumed_ids = {self.clue.clue_id}
         if suffix_clue is not None:
             # 有 suffix → 吸收 value ~ suffix 区间。
             end = suffix_clue.end
-            consumed_ids.add(suffix_clue.clue_id)
         else:
             end = value_end
         start = value_start
+        start, end = self._soft_trim_negative_edges(start=start, end=end, locale=locale)
+        if end <= start:
+            return None
         matches = self._organization_clues_in_span(start, end)
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
+        unit_start, unit_last = _char_span_to_unit_span(self.context.stream, start, end)
         candidate = build_organization_candidate_from_value(
             source=self.context.stream.source,
             value_text=self.context.stream.text[start:end],
@@ -245,7 +261,7 @@ class BaseOrganizationStack(BaseStack):
             value_end=end,
             source_kind=self.clue.source_kind,
             unit_start=unit_start,
-            unit_end=unit_end,
+            unit_last=unit_last,
             value_driven=True,
         )
         if candidate is None:
@@ -264,17 +280,11 @@ class BaseOrganizationStack(BaseStack):
         ):
             return None
         candidate.claim_strength = evidence.max_clue_strength
-        consumed_ids.update(clue_id for _index, clue in matches for clue_id in [clue.clue_id])
-        last_index = max(
-            (index for index, _clue in matches),
-            default=self.clue_index,
-        )
         return StackRun(
             attr_type=PIIAttributeType.ORGANIZATION,
             candidate=candidate,
-            consumed_ids=consumed_ids,
             handled_label_clue_ids=set(),
-            next_index=last_index + 1,
+            frontier_last_unit=candidate.unit_last,
         )
 
     def _find_suffix_after_value(self, value_end: int, *, locale: str) -> Clue | None:
@@ -300,34 +310,24 @@ class BaseOrganizationStack(BaseStack):
                 continue
             break
         # 在窗口范围内搜索 suffix clue。
-        for index in range(self.clue_index + 1, len(self.context.clues)):
-            clue = self.context.clues[index]
+        for clue in self.context.clues[self.clue_index + 1 :]:
             if clue.start > upper_char:
                 break
             if clue.start < value_end:
                 continue
-            if clue.attr_type != PIIAttributeType.ORGANIZATION or clue.role != ClueRole.SUFFIX:
-                continue
-            return clue
+            if clue.attr_type == PIIAttributeType.ORGANIZATION and clue.role == ClueRole.SUFFIX:
+                return clue
         return None
 
     def _organization_clues_in_span(self, start: int, end: int, *, include_hard: bool = False) -> list[tuple[int, Clue]]:
-        ci = self.context.clue_index
-        us, ue = _char_span_to_unit_span(self.context.stream, start, end)
-        org_starts = ci.family_starts.get(ClueFamily.ORGANIZATION)
-        if org_starts is None or ue <= us:
-            return []
-        clues = self.context.clues
         matches: list[tuple[int, Clue]] = []
-        for u in range(max(0, us), min(ue, ci.unit_count)):
-            for idx in org_starts[u]:
-                clue = clues[idx]
-                if clue.attr_type != PIIAttributeType.ORGANIZATION:
-                    continue
-                if clue.strength == ClaimStrength.HARD and not include_hard:
-                    continue
-                if clue.start < end and clue.end > start:
-                    matches.append((idx, clue))
+        for index, clue in enumerate(self.context.clues):
+            if clue.start >= end:
+                break
+            if clue.attr_type == PIIAttributeType.ORGANIZATION:
+                if clue.strength != ClaimStrength.HARD or include_hard:
+                    if clue.end > start:
+                        matches.append((index, clue))
         return matches
 
     def _build_org_evidence(
@@ -357,21 +357,47 @@ class BaseOrganizationStack(BaseStack):
         if self.clue.role == ClueRole.VALUE:
             has_value = True
             value_strength = _max_strength(value_strength, self.clue.strength)
-        unit_start, unit_end = _char_span_to_unit_span(self.context.stream, start, end)
-        has_inspire = self.context.inspire_index.has_inspire_nearby(
-            PIIAttributeType.ORGANIZATION,
-            unit_start,
-            unit_end,
-        )
         return _OrgEvidence(
             has_suffix=has_suffix,
             suffix_strength=suffix_strength,
             has_value=has_value,
             value_strength=value_strength,
             has_label=is_label_seed,
-            has_inspire=has_inspire,
             max_clue_strength=_max_strength(suffix_strength, value_strength),
+            capitalized_body_tokens=_max_adjacent_capitalized_body_tokens(
+                self.context.stream,
+                start=start,
+                end=end,
+            ),
         )
+
+    def _soft_trim_negative_edges(self, *, start: int, end: int, locale: str) -> tuple[int, int]:
+        """普通 negative 只在组织候选两端做软裁边，不参与硬拒绝。"""
+        if end <= start or not self.context.stream.units:
+            return start, end
+        stream = self.context.stream
+        unit_start, unit_last = _char_span_to_unit_span(stream, start, end)
+        while unit_start <= unit_last and self._has_organization_negative_cover(unit_start, unit_start):
+            if _organization_edge_unit_is_protected(
+                stream,
+                self.context.clues,
+                unit_start,
+                locale=locale,
+            ):
+                break
+            unit_start += 1
+        while unit_last >= unit_start and self._has_organization_negative_cover(unit_last, unit_last):
+            if _organization_edge_unit_is_protected(
+                stream,
+                self.context.clues,
+                unit_last,
+                locale=locale,
+            ):
+                break
+            unit_last -= 1
+        if unit_last < unit_start:
+            return start, start
+        return (_unit_char_start(stream, unit_start), _unit_char_end(stream, unit_last))
 
 
 @dataclass(frozen=True, slots=True)
@@ -382,8 +408,8 @@ class _OrgEvidence:
     has_value: bool = False
     value_strength: ClaimStrength = ClaimStrength.WEAK
     has_label: bool = False
-    has_inspire: bool = False
     max_clue_strength: ClaimStrength = ClaimStrength.WEAK
+    capitalized_body_tokens: int = 0
 
 
 def _max_strength(left: ClaimStrength, right: ClaimStrength) -> ClaimStrength:
@@ -409,7 +435,13 @@ def _meets_org_commit_threshold(
     3) value-only：HARD 在 STRONG/BALANCED 通过，SOFT 仅 STRONG 通过。
     """
     if evidence.has_label:
-        return True
+        if locale != "en":
+            return True
+        return (
+            evidence.has_value
+            or evidence.has_suffix
+            or evidence.capitalized_body_tokens >= 2
+        )
     if evidence.has_suffix and evidence.suffix_strength == ClaimStrength.HARD:
         return True
     if evidence.has_suffix and evidence.has_value:
@@ -419,12 +451,12 @@ def _meets_org_commit_threshold(
     if evidence.has_suffix and not evidence.has_value:
         if evidence.suffix_strength == ClaimStrength.SOFT:
             if locale == "zh":
-                return is_strong or (is_balanced and evidence.has_inspire)
+                # inspire 机制移除后，zh + SOFT suffix-only 仅在 STRONG 通过。
+                return is_strong
             return is_strong or is_balanced
         if evidence.suffix_strength == ClaimStrength.WEAK:
-            if locale == "zh":
-                return False
-            return is_strong and evidence.has_inspire
+            # inspire 机制移除后，WEAK suffix-only 一律拒绝。
+            return False
         return False
     if evidence.has_value and not evidence.has_suffix:
         if evidence.value_strength == ClaimStrength.HARD:
@@ -439,9 +471,6 @@ def _left_expand_text_boundary(context, start: int, *, should_break) -> int:
     raw_text = context.stream.text
     clues = context.clues
     floor = 0
-    negative_floor = context.previous_negative_end_char(start)
-    if negative_floor is not None:
-        floor = max(floor, negative_floor)
     for clue in reversed(clues):
         if clue.end <= start:
             if should_break(clue):
@@ -551,9 +580,74 @@ def _organization_has_body_before_suffix(text: str) -> bool:
     return bool(clean_value(text[:suffix_start]))
 
 
+def _organization_edge_unit_is_protected(
+    stream: StreamInput,
+    clues: tuple[Clue, ...],
+    unit_index: int,
+    *,
+    locale: str,
+) -> bool:
+    """负向仅作软裁边时，主体 token / capitalized token / suffix 不应被裁掉。"""
+    if unit_index < 0 or unit_index >= len(stream.units):
+        return False
+    unit = stream.units[unit_index]
+    if unit.kind == "space":
+        return False
+    if unit.kind == "ascii_word" and _is_capitalized_ascii_org_unit(unit.text):
+        return True
+    if _is_organization_count_unit(unit.kind, locale):
+        return True
+    unit_start = unit.char_start
+    unit_end = unit.char_end
+    return any(
+        clue.attr_type == PIIAttributeType.ORGANIZATION
+        and clue.role == ClueRole.SUFFIX
+        and clue.start < unit_end
+        and clue.end > unit_start
+        for clue in clues
+    )
+
+
+def _is_capitalized_ascii_org_unit(text: str) -> bool:
+    token = str(text or "").strip()
+    if not token:
+        return False
+    first_char = token[0]
+    return first_char.isascii() and first_char.isalpha() and first_char.isupper()
+
+
+def _max_adjacent_capitalized_body_tokens(
+    stream: StreamInput,
+    *,
+    start: int,
+    end: int,
+) -> int:
+    """统计候选内部最长的连续首字母大写 ASCII token 片段。"""
+    if end <= start or not stream.units or not stream.char_to_unit:
+        return 0
+    unit_start, unit_last = _char_span_to_unit_span(stream, start, end)
+    current = 0
+    best = 0
+    awaiting_next_token = False
+    for ui in range(unit_start, unit_last + 1):
+        unit = stream.units[ui]
+        if unit.kind == "space":
+            awaiting_next_token = current > 0
+            continue
+        if unit.kind == "ascii_word" and _is_capitalized_ascii_org_unit(unit.text):
+            current = current + 1 if current > 0 and awaiting_next_token else 1
+            best = max(best, current)
+            awaiting_next_token = False
+            continue
+        current = 0
+        awaiting_next_token = False
+    return best
+
+
 def _is_organization_candidate_usable(text: str, *, label_driven: bool) -> bool:
     if not text:
         return False
     if not has_organization_suffix(text) and not label_driven:
         return False
     return _organization_has_body_before_suffix(text)
+

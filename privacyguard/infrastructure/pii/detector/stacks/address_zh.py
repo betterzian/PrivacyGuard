@@ -16,6 +16,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     _SENTINEL_IGNORE,
     _SENTINEL_STOP,
     _chain_can_accept,
+    _clue_unit_gap,
     _normalize_address_value,
     _scan_forward_value_end,
     _start_after_component_end,
@@ -23,23 +24,31 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _comma_tail_prehandle,
     _comma_value_scan_upper_bound,
+    _has_valid_left_numeral_for_numberish_key,
+    _is_left_numeral_bound_numberish_key,
+    _resolve_admin_key_chain_levels,
     _resolve_standalone_admin_value_group,
     collect_admin_value_span,
+    _freeze_key_suspect_from_previous_key,
+    _freeze_value_suspect,
+    _freeze_value_suspect_for_mismatched_admin_key,
     _has_reasonable_successor_key,
+    _key_has_admin_levels,
     _key_left_expand_start_if_deferrable,
+    _remove_last_value_suspect,
     _routed_key_clue,
     _suspect_eligible_after_last_piece,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _ADMIN_TYPES,
     _ParseState,
-    _SUSPECT_KEY_TYPES,
     _VALID_SUCCESSORS,
     _append_deferred,
     _clear_pending_community_poi,
     _flush_chain,
     _pending_community_blocks_road,
     _reroute_pending_community_poi_to_subdistrict,
+    _resolve_multi_admin_collision,
     _segment_admit,
 )
 
@@ -60,10 +69,14 @@ def _state_routing_context(
         clues=clues,
         raw_text=raw_text,
         stream=stream,
+        seed_floor=state.seed_floor,
+        value_floor=stack._value_floor_char(),
         # 仅在已有已提交组件时才提供 search_start，避免未提交失败链污染 numberish 左扩起点。
         search_start=state.last_end if state.components else None,
-        should_break_clue=lambda clue: stack.need_break(clue),
+        should_break_clue=lambda clue: stack.should_break_clue(clue),
     )
+
+
 @dataclass(slots=True)
 class ZhAddressStack(BaseAddressStack):
     """中文地址专用 stack。"""
@@ -79,6 +92,24 @@ class ZhAddressStack(BaseAddressStack):
             normalize_value=_normalize_address_value,
             commit_component=lambda component: self._commit_component(state, component),
             resolve_standalone_admin_group=_resolve_standalone_admin_value_group,
+            resolve_admin_key_chain_levels=_resolve_admin_key_chain_levels,
+            validate_key_component=self._validate_key_component_before_commit,
+        )
+
+    def _validate_key_component_before_commit(
+        self,
+        state: _ParseState,
+        used_entries: tuple[tuple[int, Clue], ...],
+        key_clue: Clue,
+        component_start: int,
+        comp_type: AddressComponentType,
+    ) -> bool:
+        del state, used_entries
+        return _has_valid_left_numeral_for_numberish_key(
+            self.context.stream,
+            key_clue,
+            component_start=component_start,
+            comp_type=comp_type,
         )
 
     def _prepare_effective_clue(
@@ -98,6 +129,11 @@ class ZhAddressStack(BaseAddressStack):
             clue,
         )
         if routed_key is None:
+            _freeze_value_suspect_for_mismatched_admin_key(
+                state,
+                clue,
+                stream=stream,
+            )
             state.ignored_address_key_indices.add(clue_index)
             return _SENTINEL_IGNORE
         return routed_key
@@ -120,7 +156,7 @@ class ZhAddressStack(BaseAddressStack):
             clue,
             flush_chain=lambda idx: self._flush_chain(state, clue_index=idx),
             materialize_digit_tail_before_comma=lambda idx: self._materialize_digit_tail_before_comma(state, clues, idx),
-            should_break=self.need_break,
+            should_break=self.should_break_clue,
         )
 
     def _handle_value_clue(
@@ -133,17 +169,8 @@ class ZhAddressStack(BaseAddressStack):
     ) -> object | None:
         raw_text = self.context.stream.text
         stream = self.context.stream
-        admin_span = collect_admin_value_span(clues, clue_index) if comp_type in _ADMIN_TYPES else None
-        trailing_deferred = state.deferred_chain[-1][1] if state.deferred_chain else None
-        same_trailing_admin_span = (
-            admin_span is not None
-            and trailing_deferred is not None
-            and trailing_deferred.role == ClueRole.VALUE
-            and trailing_deferred.attr_type == clue.attr_type
-            and trailing_deferred.component_type in _ADMIN_TYPES
-            and trailing_deferred.start == admin_span.start
-            and trailing_deferred.end == admin_span.end
-        )
+        admin_span = collect_admin_value_span(clues, clue_index)
+        has_admin_levels = admin_span is not None
 
         if state.pending_comma_value_right_scan:
             state.pending_comma_value_right_scan = False
@@ -153,7 +180,7 @@ class ZhAddressStack(BaseAddressStack):
                 clue,
                 stream,
                 len(raw_text),
-                should_break=self.need_break,
+                should_break=self.should_break_clue,
             )
             value_end = _scan_forward_value_end(raw_text, clue.end, upper_bound, stream=stream)
             if value_end > clue.end:
@@ -161,39 +188,6 @@ class ZhAddressStack(BaseAddressStack):
                 if _normalize_address_value(comp_type, merged):
                     state.value_char_end_override[clue.clue_id] = value_end
 
-        if (
-            state.segment_state.comma_tail_active
-            and not state.pending_comma_first_component
-            and state.deferred_chain
-            and state.deferred_chain[-1][1].role == ClueRole.VALUE
-            and not same_trailing_admin_span
-        ):
-            self._flush_chain(state, clue_index=clue_index)
-            if state.split_at is not None:
-                return _SENTINEL_STOP
-
-        pure_admin_value_chain = (
-            admin_span is not None
-            and bool(state.deferred_chain)
-            and all(
-                deferred.role == ClueRole.VALUE
-                and deferred.attr_type == clue.attr_type
-                and deferred.component_type in _ADMIN_TYPES
-                for _, deferred in state.deferred_chain
-            )
-        )
-        same_admin_text_chain = (
-            pure_admin_value_chain
-            and any(
-                deferred.text == clue.text
-                for _, deferred in state.deferred_chain
-            )
-        )
-        if pure_admin_value_chain:
-            _append_deferred(state, clue_index, clue, record_suspect=False)
-            state.last_value = clue
-            state.last_end = max(state.last_end, clue.end)
-            return None
         if state.deferred_chain and not _chain_can_accept([c for _, c in state.deferred_chain], clue, stream):
             self._flush_chain(state, clue_index=clue_index)
             if state.split_at is not None:
@@ -201,43 +195,60 @@ class ZhAddressStack(BaseAddressStack):
 
         if state.components or state.deferred_chain:
             admin_levels = admin_span.levels if admin_span is not None else (comp_type,)
-            admitted_level = comp_type
-            admitted_levels: tuple[AddressComponentType, ...] = ()
+            # MULTI_ADMIN 探针：resolve 返回的每一层都要做 _segment_admit 探测，
+            # 任一层可接纳即视为可挂；全部失败才走 split/寻后继的降级路径。
+            probe_levels: tuple[AddressComponentType, ...] = (comp_type,)
+            resolved_group = None
             if admin_span is not None:
                 resolved_group = _resolve_standalone_admin_value_group(
                     state,
                     tuple((index, clues[index]) for index in range(admin_span.first_index, admin_span.last_index + 1)),
                 )
-                if resolved_group is not None:
-                    admitted_level = resolved_group[0]
-                    admitted_levels = resolved_group[1] if len(resolved_group[1]) >= 2 else ()
-            if (
+                if resolved_group is not None and resolved_group.available_levels:
+                    probe_levels = resolved_group.available_levels
+            probe_failed = (
                 not state.pending_comma_first_component
                 and not state.segment_state.comma_tail_active
-                and not _segment_admit(
-                    state,
-                    admitted_level if not admitted_levels else AddressComponentType.MULTI_ADMIN,
-                    levels=admitted_levels,
-                    valid_successors=self.valid_successors,
+                and not any(
+                    _segment_admit(state, lvl, valid_successors=self.valid_successors)
+                    for lvl in probe_levels
                 )
+            )
+            # §5.2.1 collision 触发点：admin_span 存在、无 deferred_chain、probe 全失败时，
+            # 尝试同值 MULTI_ADMIN 原地降解以让 incoming 取互补层继续 admit。降解后占位被释放，
+            # 再重跑一次探针；若任一层能 admit 则跳过 split。
+            if (
+                probe_failed
+                and admin_span is not None
+                and resolved_group is not None
+                and not state.deferred_chain
             ):
-                if comp_type in _ADMIN_TYPES and _has_reasonable_successor_key(
+                forced = _resolve_multi_admin_collision(
+                    state,
+                    raw_text,
+                    clue.start,
+                    resolved_group.text,
+                    resolved_group.all_levels,
+                )
+                if forced is not None:
+                    probe_levels = forced
+                    probe_failed = not any(
+                        _segment_admit(state, lvl, valid_successors=self.valid_successors)
+                        for lvl in probe_levels
+                    )
+            if probe_failed:
+                if has_admin_levels and _has_reasonable_successor_key(
                     state,
                     clues,
                     clue_index,
                     admin_levels,
                     stream,
                     raw_text,
-                    should_break=self.need_break,
+                    should_break=self.should_break_clue,
                 ):
                     self._flush_chain(state, clue_index=clue_index)
                     if state.split_at is not None:
                         return _SENTINEL_STOP
-                    _append_deferred(state, clue_index, clue, record_suspect=False)
-                    state.last_value = clue
-                    state.last_end = max(state.last_end, clue.end)
-                    return None
-                if same_admin_text_chain:
                     _append_deferred(state, clue_index, clue, record_suspect=False)
                     state.last_value = clue
                     state.last_end = max(state.last_end, clue.end)
@@ -249,13 +260,15 @@ class ZhAddressStack(BaseAddressStack):
         anchor_start: int | None = None
         if (
             not state.deferred_chain
-            and comp_type in _ADMIN_TYPES
+            and has_admin_levels
             and (state.components or state.last_piece_end is not None)
             and not _suspect_eligible_after_last_piece(state, clue, stream)
         ):
             anchor_base = state.last_piece_end if state.last_piece_end is not None else state.last_end
             anchor_start = _start_after_component_end(stream, anchor_base)
         _append_deferred(state, clue_index, clue, record_suspect=False, anchor_start=anchor_start)
+        if has_admin_levels:
+            _freeze_value_suspect(state, clues, clue_index, stream)
         state.last_value = clue
         state.last_end = max(state.last_end, clue.end)
         return None
@@ -272,7 +285,25 @@ class ZhAddressStack(BaseAddressStack):
         stream = self.context.stream
         state.pending_comma_value_right_scan = False
         chain = [item for _, item in state.deferred_chain]
-        if chain and _chain_can_accept(chain, clue, stream):
+        allow_chain_append = (
+            bool(chain)
+            and _chain_can_accept(chain, clue, stream)
+            and not _is_left_numeral_bound_numberish_key(clue, comp_type=comp_type)
+        )
+        # 需要左侧编号前缀的中文 numberish key 不能继续吸收前链，必须先冲洗再单独验左值。
+        if allow_chain_append:
+            last_chain_clue = chain[-1]
+            should_freeze_previous_key = (
+                last_chain_clue.role == ClueRole.KEY
+                and _key_has_admin_levels(last_chain_clue)
+                and (
+                    _key_has_admin_levels(clue)
+                    or _clue_unit_gap(last_chain_clue, clue, stream) > 0
+                )
+            )
+            if should_freeze_previous_key:
+                _freeze_key_suspect_from_previous_key(state, raw_text, stream, last_chain_clue)
+            _remove_last_value_suspect(state, clue, stream)
             _append_deferred(state, clue_index, clue, record_suspect=False)
             state.last_end = max(state.last_end, clue.end)
             return None

@@ -14,7 +14,7 @@ from privacyguard.domain.policies.constraint_resolver import ConstraintResolver
 from privacyguard.domain.policies.generic_placeholder import (
     GENERIC_PLACEHOLDER_LABELS,
     generic_placeholder_label,
-    render_generic_replacement_text,
+    render_placeholder,
 )
 
 __all__ = [
@@ -29,6 +29,6 @@ __all__ = [
     "REWRITE_MODE_ORDER",
     "REWRITE_MODE_PERSONA_SLOT",
     "generic_placeholder_label",
-    "render_generic_replacement_text",
+    "render_placeholder",
 ]
 

@@ -179,7 +179,22 @@ class PrivacyGuard:
 
         request = PrivacyRepositoryWritePayloadModel.model_validate(payload)
         patch = request.model_dump(exclude_none=True)
-        JsonPrivacyRepository(path=str(target_path)).merge_and_write(patch)
+        repo = JsonPrivacyRepository(path=str(target_path))
+        # 让 RuntimeContext 与本次 repo 对齐，保证 merge_and_write 后能命中失效回调；
+        # init 是幂等的，已存在则保留旧实例。
+        from privacyguard.runtime.context import (
+            get_runtime_context,
+            init_runtime_context,
+        )
+
+        ctx = get_runtime_context()
+        if ctx is None:
+            init_runtime_context(repo)
+        elif ctx.privacy_repository.path == repo.path:
+            # 同一路径但实例不同：把 ctx 切到当前实例，让失效回调能匹配上。
+            ctx.privacy_repository = repo
+            ctx.invalidate_repo_index()
+        repo.merge_and_write(patch)
         self.detector.reload_privacy_dictionary()
         return PrivacyRepositoryWriteResponseModel(
             status="ok",

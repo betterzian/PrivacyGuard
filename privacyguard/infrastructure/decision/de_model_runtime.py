@@ -325,7 +325,6 @@ class TinyPolicyRuntime:
             PIIAttributeType.DRIVER_LICENSE,
             PIIAttributeType.ORGANIZATION,
             PIIAttributeType.ALNUM,
-            PIIAttributeType.OTHER,
         }:
             generic_score += 0.12
         if attr_type == PIIAttributeType.PHONE and prompt_digit_bias > 0:
@@ -529,10 +528,13 @@ def _attr_type_from_view(view: dict[str, object]) -> PIIAttributeType:
     attr = view.get("attr_type")
     if isinstance(attr, PIIAttributeType):
         return attr
+    normalized_attr = str(view.get("attr_id") or "").strip().lower()
+    if normalized_attr in {"textual", "other"}:
+        return PIIAttributeType.ALNUM
     try:
-        return PIIAttributeType(str(view.get("attr_id") or "").strip().lower())
+        return PIIAttributeType(normalized_attr)
     except Exception:
-        return PIIAttributeType.OTHER
+        return PIIAttributeType.ALNUM
 
 
 def _confidence_from_view(view: dict[str, object]) -> float:

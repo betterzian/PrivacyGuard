@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+import pytest
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.context import DetectContext
@@ -23,11 +23,18 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueBundle,
     ClueFamily,
     ClueRole,
-    build_negative_unit_index,
+    InspireEntry,
 )
-from privacyguard.infrastructure.pii.detector.parser import StreamParser
+from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-from privacyguard.infrastructure.pii.detector.stacks.common import _char_span_to_unit_span
+from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
+from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import (
+    _key_key_chain_gap_allowed,
+    _label_seed_address_index,
+)
+from privacyguard.infrastructure.pii.detector.stacks.address import AddressStack
+from privacyguard.infrastructure.pii.detector.stacks.address_zh import ZhAddressStack
+from tests._detector_negative_index import build_test_bundle_with_inspire, split_negative_clues
 
 
 def _clue(
@@ -38,8 +45,11 @@ def _clue(
     start: int,
     end: int,
     text: str,
+    source_kind: str = "test",
     component_type: AddressComponentType | None = None,
     family: ClueFamily | None = None,
+    unit_start: int = 0,
+    unit_last: int = 0,
 ) -> Clue:
     if family is None:
         family = ClueFamily.ADDRESS if attr_type == PIIAttributeType.ADDRESS else ClueFamily.CONTROL
@@ -52,50 +62,60 @@ def _clue(
         start=start,
         end=end,
         text=text,
-        source_kind="test",
+        source_kind=source_kind,
         component_type=component_type,
-        unit_start=0,
-        unit_end=0,
+        unit_start=unit_start,
+        unit_last=unit_last,
     )
-
-
-def _with_units(stream, clue: Clue) -> Clue:
-    unit_start, unit_end = _char_span_to_unit_span(stream, clue.start, clue.end)
-    return replace(clue, unit_start=unit_start, unit_end=unit_end)
 
 
 def _split_negative_clues(
     stream,
     clues: tuple[Clue, ...],
-) -> tuple[tuple[Clue, ...], list[int], list[int], int]:
-    fixed_clues: list[Clue] = []
-    negative_spans: list[tuple[int, int]] = []
-    for clue in clues:
-        fixed = _with_units(stream, clue)
-        if fixed.role == ClueRole.NEGATIVE:
-            negative_spans.append((fixed.unit_start, fixed.unit_end))
-            continue
-        fixed_clues.append(fixed)
-    negative_unit_marks, negative_prefix_sum, negative_start_weight = build_negative_unit_index(
-        len(stream.units),
-        negative_spans,
-    )
-    return tuple(fixed_clues), negative_unit_marks, negative_prefix_sum, negative_start_weight
+) -> tuple[tuple[Clue, ...], tuple[Clue, ...], tuple]:
+    fixed, negative_clues, _index_by_id, unit_index = split_negative_clues(stream, clues)
+    return fixed, negative_clues, unit_index
 
 
 def _detect_candidates(text: str, clues: tuple[Clue, ...], *, locale_profile: str = "zh"):
     ctx = DetectContext()
     stream = build_prompt_stream(text)
-    fixed, negative_unit_marks, negative_prefix_sum, negative_start_weight = _split_negative_clues(stream, clues)
+    fixed, negative_clues, unit_index = _split_negative_clues(stream, clues)
     bundle = ClueBundle(
         all_clues=fixed,
-        negative_unit_marks=negative_unit_marks,
-        negative_prefix_sum=negative_prefix_sum,
-        negative_start_weight=negative_start_weight,
+        unit_index=unit_index,
+        negative_clues=negative_clues,
     )
     parser = StreamParser(locale_profile=locale_profile, ctx=ctx)
     result = parser.parse(stream, bundle)
     return result.candidates
+
+
+def _build_address_context(text: str, clues: tuple[Clue, ...], *, locale_profile: str = "zh"):
+    stream = build_prompt_stream(text)
+    fixed, negative_clues, unit_index = _split_negative_clues(stream, clues)
+    stack_context = StackContext(
+        stream=stream,
+        locale_profile=locale_profile,
+        clues=fixed,
+        negative_clues=negative_clues,
+        unit_index=unit_index,
+    )
+    return stream, fixed, stack_context
+
+
+def _detect_candidates_from_scanner(text: str, *, locale_profile: str = "zh_cn"):
+    ctx = DetectContext()
+    stream = build_prompt_stream(text)
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile=locale_profile,
+    )
+    parser = StreamParser(locale_profile=locale_profile, ctx=ctx)
+    return parser.parse(stream, bundle).candidates
 
 
 def test_label_seed_returns_none_when_no_value_and_no_key_within_6_units():
@@ -105,6 +125,108 @@ def test_label_seed_returns_none_when_no_value_and_no_key_within_6_units():
     )
     candidates = _detect_candidates(text, clues)
     assert not any(c.attr_type.value == "address" for c in candidates)
+
+
+def test_value_seed_before_address_value_floor_is_rejected():
+    text = "上海路"
+    stream, fixed, context = _build_address_context(
+        text,
+        (
+            _clue(
+                "value",
+                role=ClueRole.VALUE,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=0,
+                end=2,
+                text="上海",
+                component_type=AddressComponentType.CITY,
+            ),
+            _clue(
+                "key",
+                role=ClueRole.KEY,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=2,
+                end=3,
+                text="路",
+                component_type=AddressComponentType.ROAD,
+            ),
+        ),
+    )
+    context.raise_stack_value_floor(ClueFamily.ADDRESS, fixed[0].unit_start)
+
+    run = AddressStack(clue=fixed[0], clue_index=0, context=context).run()
+
+    assert stream.text == text
+    assert run is None
+
+
+def test_key_seed_left_expansion_respects_address_value_floor():
+    text = "住址楼"
+    stream, fixed, context = _build_address_context(
+        text,
+        (
+            _clue(
+                "key",
+                role=ClueRole.KEY,
+                attr_type=PIIAttributeType.ADDRESS,
+                start=2,
+                end=3,
+                text="楼",
+                component_type=AddressComponentType.DETAIL,
+            ),
+        ),
+    )
+    context.raise_stack_value_floor(ClueFamily.ADDRESS, stream.char_to_unit[text.index("址")])
+
+    run = AddressStack(clue=fixed[0], clue_index=0, context=context).run()
+
+    assert stream.text == text
+    assert run is None
+
+
+def test_label_seed_value_hit_includes_value_last_unit():
+    stream = build_prompt_stream("上海")
+    clues = (
+        _clue(
+            "value",
+            role=ClueRole.VALUE,
+            attr_type=PIIAttributeType.ADDRESS,
+            start=0,
+            end=2,
+            text="上海",
+            component_type=AddressComponentType.CITY,
+            unit_start=0,
+            unit_last=1,
+        ),
+    )
+    assert _label_seed_address_index(clues, stream, 0, 1, max_units=6) == 0
+
+
+def test_key_key_chain_gap_allows_single_cjk_unit_under_closed_interval():
+    stream = build_prompt_stream("市名路")
+    left = _clue(
+        "city-key",
+        role=ClueRole.KEY,
+        attr_type=PIIAttributeType.ADDRESS,
+        start=0,
+        end=1,
+        text="市",
+        component_type=AddressComponentType.CITY,
+        unit_start=0,
+        unit_last=0,
+    )
+    right = _clue(
+        "road-key",
+        role=ClueRole.KEY,
+        attr_type=PIIAttributeType.ADDRESS,
+        start=2,
+        end=3,
+        text="路",
+        component_type=AddressComponentType.ROAD,
+        unit_start=2,
+        unit_last=2,
+    )
+    assert _key_key_chain_gap_allowed(left, right, stream) is True
 
 
 def test_cross_tier_merge_city_plus_road_key():
@@ -131,6 +253,83 @@ def test_digit_tail_extends_after_last_component():
     addr = next((c for c in candidates if c.attr_type.value == "address"), None)
     assert addr is not None
     assert "79" in addr.text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_text"),
+    [
+        ("815 Madison Ave", "815 Madison Ave"),
+        ("798 SW 8th St", "798 SW 8th St"),
+        ("483 1st Ave", "483 1st Ave"),
+        ("922 Memorial Dr SE", "922 Memorial Dr SE"),
+    ],
+)
+def test_en_address_detector_bridges_left_short_num_or_alnum_into_full_address(text: str, expected_text: str):
+    candidates = _detect_candidates_from_scanner(text, locale_profile="en_us")
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [expected_text]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Riverside Homes",
+        "Bayfront Flats",
+        "Bryant Residences",
+        "Biscayne Commerce Hall",
+    ],
+)
+def test_en_address_detector_accepts_building_only_suffix_phrases(text: str):
+    candidates = _detect_candidates_from_scanner(text, locale_profile="en_us")
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [text]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_text"),
+    [
+        ("Miami, FL", "Miami, FL"),
+        ("Suite 320, Miami, FL 33131", "Suite 320, Miami, FL 33131"),
+        (
+            "245 Couch St, Burnside Offices, Suite 1708, Portland, OR 97205",
+            "245 Couch St, Burnside Offices, Suite 1708, Portland, OR 97205",
+        ),
+    ],
+)
+def test_en_address_detector_merges_comma_tail_components_into_single_address(text: str, expected_text: str):
+    candidates = _detect_candidates_from_scanner(text, locale_profile="en_us")
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [expected_text]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_text"),
+    [
+        ("7429 Main Street, Building 7, Austin, TX 19356", "7429 Main Street, Building 7, Austin, TX 19356"),
+        ("5291 Main Street, Block C, Austin, TX 31178", "5291 Main Street, Block C, Austin, TX 31178"),
+        ("1320 Main Street, House 9, Boston, MA 85456", "1320 Main Street, House 9, Boston, MA 85456"),
+        ("7482 Oak Avenue, Tower B, Seattle, WA 94259", "7482 Oak Avenue, Tower B, Seattle, WA 94259"),
+        ("Tower B 7482 Oak Avenue, Seattle, WA 94259", "Tower B 7482 Oak Avenue, Seattle, WA 94259"),
+    ],
+)
+def test_en_address_detector_keeps_single_token_building_prefix_values(text: str, expected_text: str):
+    candidates = _detect_candidates_from_scanner(text, locale_profile="en_us")
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [expected_text]
+
+
+def test_en_address_bridge_does_not_promote_plain_short_num_followed_by_non_address_words():
+    candidates = _detect_candidates_from_scanner("note 123 alpha beta", locale_profile="en_us")
+
+    assert not any(candidate.attr_type == PIIAttributeType.ADDRESS for candidate in candidates)
 
 
 def test_same_tier_value_replaces_pending_and_flushes_previous():
@@ -219,6 +418,32 @@ def test_rightmost_negative_trims_subdistrict_tail_leaves_prefix():
     assert addr.text == "长安街道"
 
 
+def test_name_scoped_negative_no_longer_triggers_address_tail_repair():
+    text = "收货地址：上海路88号"
+    clues = (
+        _clue("label", role=ClueRole.LABEL, attr_type=PIIAttributeType.ADDRESS, start=0, end=4, text="收货地址"),
+        _clue("city", role=ClueRole.VALUE, attr_type=PIIAttributeType.ADDRESS, start=5, end=7, text="上海", component_type=AddressComponentType.CITY),
+        _clue("road", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=7, end=8, text="路", component_type=AddressComponentType.ROAD),
+        _clue("number", role=ClueRole.KEY, attr_type=PIIAttributeType.ADDRESS, start=10, end=11, text="号", component_type=AddressComponentType.NUMBER),
+        _clue(
+            "neg-name",
+            role=ClueRole.NEGATIVE,
+            attr_type=None,
+            start=7,
+            end=8,
+            text="路",
+            family=ClueFamily.CONTROL,
+            source_kind="negative_name_word",
+        ),
+    )
+
+    candidates = _detect_candidates(text, clues)
+    addr = next((c for c in candidates if c.attr_type.value == "address"), None)
+
+    assert addr is not None
+    assert addr.text == "上海路88号"
+
+
 # ---- POI 延迟提交测试 ----
 
 
@@ -282,3 +507,150 @@ def test_trailing_admin_blocked_without_comma():
     addr = next((c for c in candidates if c.attr_type.value == "address"), None)
     if addr is not None:
         assert "上海市" not in addr.text
+
+
+def test_name_label_and_start_no_longer_emit_label_text_as_name_candidate():
+    candidates = _detect_candidates_from_scanner("家属姓名：罗嘉羽。")
+
+    names = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME]
+
+    assert [candidate.text for candidate in names] == ["罗嘉羽"]
+
+
+def test_regular_name_label_path_remains_unchanged():
+    candidates = _detect_candidates_from_scanner("姓名：罗嘉羽。")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["罗嘉羽"]
+    assert candidates[0].claim_strength == ClaimStrength.HARD
+
+
+def test_same_start_name_address_conflict_prefers_full_name_when_name_contains_city():
+    candidates = _detect_candidates_from_scanner("登记的姓名是陈南宁。")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["陈南宁"]
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_address"),
+    [
+        ("景明路187号", "景明路187号"),
+        ("住址道路：景明路187号。", "景明路187号"),
+        ("南京市鼓楼区景明路46号", "南京市鼓楼区景明路46号"),
+        ("苏州市工业园区青年路323号国际广场1号楼5层1581室", "苏州市工业园区青年路323号国际广场1号楼5层1581室"),
+    ],
+)
+def test_road_and_hao_chain_commit_full_address(text: str, expected_address: str):
+    candidates = _detect_candidates_from_scanner(text)
+
+    addresses = [candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS]
+
+    assert [candidate.text for candidate in addresses] == [expected_address]
+    assert addresses[0].claim_strength == ClaimStrength.HARD
+
+
+def test_partial_overlap_keeps_trimmed_multi_unit_name_and_full_address():
+    candidates = _detect_candidates_from_scanner("欧阳南京路88号")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["欧阳"]
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == ["南京路88号"]
+
+
+def test_partial_overlap_with_single_unit_residual_falls_back_to_strength_compare():
+    candidates = _detect_candidates_from_scanner("陈南宁路88号")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == []
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == ["南宁路88号"]
+
+
+def test_plain_hao_fragment_is_not_promoted_without_context():
+    candidates = _detect_candidates_from_scanner("187号")
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == []
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NUM] == ["187"]
+
+
+@pytest.mark.parametrize("text", ["国际广场1号楼", "10号楼"])
+def test_existing_building_shapes_still_parse_as_address(text: str):
+    candidates = _detect_candidates_from_scanner(text)
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS] == [text]
+
+
+def test_address_key_negative_cover_includes_label_and_inspire_but_not_value():
+    text = "提示 景明 路 备注"
+    stream = build_prompt_stream(text)
+    label_start = text.index("提示")
+    value_start = text.index("景明")
+    key_start = text.index("路")
+    note_start = text.index("备注")
+    clues = (
+        _clue(
+            "label",
+            role=ClueRole.LABEL,
+            attr_type=PIIAttributeType.NAME,
+            start=label_start,
+            end=label_start + len("提示"),
+            text="提示",
+            family=ClueFamily.NAME,
+        ),
+        _clue(
+            "value",
+            role=ClueRole.VALUE,
+            attr_type=PIIAttributeType.ADDRESS,
+            start=value_start,
+            end=value_start + len("景明"),
+            text="景明",
+            component_type=AddressComponentType.ROAD,
+        ),
+        _clue(
+            "key",
+            role=ClueRole.KEY,
+            attr_type=PIIAttributeType.ADDRESS,
+            start=key_start,
+            end=key_start + len("路"),
+            text="路",
+            component_type=AddressComponentType.ROAD,
+        ),
+    )
+    fixed, negative_clues, unit_index = _split_negative_clues(stream, clues)
+    index_by_id = {clue.clue_id: idx for idx, clue in enumerate(fixed)}
+    context = StackContext(
+        stream=stream,
+        locale_profile="zh_cn",
+        clues=fixed,
+        negative_clues=negative_clues,
+        unit_index=unit_index,
+    )
+    stack = ZhAddressStack(clue=fixed[index_by_id["key"]], clue_index=index_by_id["key"], context=context)
+
+    assert stack._has_address_key_negative_cover(fixed[index_by_id["label"]].unit_start, fixed[index_by_id["label"]].unit_last) is True
+    assert stack._has_address_key_negative_cover(fixed[index_by_id["value"]].unit_start, fixed[index_by_id["value"]].unit_last) is False
+
+    inspire = InspireEntry(
+        attr_type=PIIAttributeType.NAME,
+        family=ClueFamily.NAME,
+        start=note_start,
+        end=note_start + len("备注"),
+        unit_start=stream.char_to_unit[note_start],
+        unit_last=stream.char_to_unit[note_start + len("备注") - 1],
+        clue_id="note-inspire",
+    )
+    inspire_bundle = build_test_bundle_with_inspire(stream, clues, (inspire,))
+    inspire_index_by_id = {clue.clue_id: idx for idx, clue in enumerate(inspire_bundle.all_clues)}
+    inspire_context = StackContext(
+        stream=stream,
+        locale_profile="zh_cn",
+        clues=inspire_bundle.all_clues,
+        negative_clues=inspire_bundle.negative_clues,
+        unit_index=inspire_bundle.unit_index,
+        inspire_entries=inspire_bundle.inspire_entries,
+    )
+    inspire_stack = ZhAddressStack(
+        clue=inspire_bundle.all_clues[inspire_index_by_id["key"]],
+        clue_index=inspire_index_by_id["key"],
+        context=inspire_context,
+    )
+
+    assert inspire_stack._has_address_key_negative_cover(inspire.unit_start, inspire.unit_last) is True
+

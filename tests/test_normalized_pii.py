@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.utils.normalized_pii import normalize_pii, same_entity
+from privacyguard.utils.normalized_pii import _numbers_match, normalize_pii, same_entity
+from privacyguard.utils.pii_value import classify_content_shape_attr
 
 
 def _suspected_json(*entries: dict[str, object]) -> str:
@@ -21,6 +22,24 @@ def test_phone_canonical_strips_supported_country_codes_only():
     assert zh.canonical == "13800000001"
     assert us.canonical == "2025550111"
     assert keep.canonical == "442079460958"
+
+
+def test_phone_canonical_respects_phone_region_and_keeps_bare_cn_mobile():
+    bare_cn = normalize_pii(PIIAttributeType.PHONE, "13132111111")
+    cn_country = normalize_pii(
+        PIIAttributeType.PHONE,
+        "86 13132111111",
+        metadata={"phone_region": ["cn"]},
+    )
+    us_country = normalize_pii(
+        PIIAttributeType.PHONE,
+        "1(231)2244423",
+        metadata={"phone_region": ["us"]},
+    )
+
+    assert bare_cn.canonical == "13132111111"
+    assert cn_country.canonical == "13132111111"
+    assert us_country.canonical == "2312244423"
 
 
 def test_email_keeps_raw_text_and_only_changes_canonical():
@@ -457,6 +476,22 @@ def test_address_same_entity_distinguishes_heavenly_stem_mixed_number():
     assert same_entity(left, right) is False
 
 
+def test_address_numbers_match_uses_longer_side_40_percent_threshold():
+    assert _numbers_match(("101",), ("101",)) is True
+    assert _numbers_match(("101",), ("201", "101")) is True
+    assert _numbers_match(("101",), ("301", "201", "101")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "404", "202", "505")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "202", "505")) is True
+    assert _numbers_match(("101", "202"), ("303", "101", "404", "505", "606")) is False
+
+
+def test_address_numbers_match_requires_full_match_for_shorter_side_with_two_or_fewer_items():
+    assert _numbers_match(("101",), ("201", "101", "301")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "404", "505")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "404", "202", "505")) is False
+    assert _numbers_match(("101", "202"), ("303", "101", "202", "505")) is True
+
+
 def test_bank_number_canonical_keeps_digits_only():
     normalized = normalize_pii(PIIAttributeType.BANK_NUMBER, "6222 0000 1234 5678")
 
@@ -471,6 +506,20 @@ def test_alnum_canonical_keeps_uppercase_letters_and_digits_only():
     assert normalized.raw_text == "ab-12 cd"
     assert normalized.canonical == "AB12CD"
     assert normalized.match_terms == ("AB12CD",)
+
+
+def test_alnum_canonical_for_symbolic_ascii_keeps_letters_only():
+    normalized = normalize_pii(PIIAttributeType.ALNUM, "ab_cd.ef")
+
+    assert normalized.raw_text == "ab_cd.ef"
+    assert normalized.canonical == "ABCDEF"
+    assert normalized.match_terms == ("ABCDEF",)
+
+
+def test_content_shape_classifies_symbolic_ascii_as_alnum():
+    assert classify_content_shape_attr("john.doe") == PIIAttributeType.ALNUM
+    assert classify_content_shape_attr("abc_def") == PIIAttributeType.ALNUM
+    assert classify_content_shape_attr("123_456") == PIIAttributeType.NUM
 
 
 def test_license_plate_canonical_keeps_prefix_and_uppercases_suffix():

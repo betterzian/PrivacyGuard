@@ -8,6 +8,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from privacyguard.infrastructure.pii.detector.models import ClaimStrength
+
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 _ADDRESS_LEVEL_FIELDS = (
     "province",
@@ -138,6 +140,19 @@ def _validate_address_levels(
         raise ValueError("地址不能为空")
 
 
+class AddressComponentSlot(RepositoryBaseModel):
+    """扁平化的地址组件条目，供 scanner 作独立匹配源。
+
+    - `level` 记录 component 自身承担的层级末端（MULTI_ADMIN 取最末 rank）。
+    - `value` 为该层级的原文值，已由 ingestor 清洗/归一。
+    - `strength` 为入库时预置的 ClaimStrength；`None` 表示由消费侧按字数兜底。
+    """
+
+    level: AddressLevel
+    value: NonEmptyStr
+    strength: ClaimStrength | None = None
+
+
 class AddressSlotStorage(RepositoryBaseModel):
     province: SharedSlotStorage | None = None
     city: SharedSlotStorage | None = None
@@ -148,20 +163,25 @@ class AddressSlotStorage(RepositoryBaseModel):
     poi: SharedSlotStorage | None = None
     building: SharedSlotStorage | None = None
     detail: SharedSlotStorage | None = None
+    # 扁平组件袋：除 9 级主结构外，额外承载 MULTI_ADMIN 展开与 suspect 子组件，
+    # 作为 scanner 独立匹配源（与主结构 match_terms 并列，不替代）。
+    components: list[AddressComponentSlot] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_address(self) -> "AddressSlotStorage":
-        _validate_address_levels(
-            self.province,
-            self.city,
-            self.district,
-            self.subdistrict,
-            self.road,
-            self.number,
-            self.poi,
-            self.building,
-            self.detail,
-        )
+        # 允许 9 级主结构全为空但 components 非空的情形：扁平组件袋可独立承担地址语义。
+        if not self.components:
+            _validate_address_levels(
+                self.province,
+                self.city,
+                self.district,
+                self.subdistrict,
+                self.road,
+                self.number,
+                self.poi,
+                self.building,
+                self.detail,
+            )
         return self
 
 
@@ -213,20 +233,22 @@ class AddressSlotRuntime(RepositoryBaseModel):
     poi: SharedSlotRuntime | None = None
     building: SharedSlotRuntime | None = None
     detail: SharedSlotRuntime | None = None
+    components: list[AddressComponentSlot] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_address(self) -> "AddressSlotRuntime":
-        _validate_address_levels(
-            self.province,
-            self.city,
-            self.district,
-            self.subdistrict,
-            self.road,
-            self.number,
-            self.poi,
-            self.building,
-            self.detail,
-        )
+        if not self.components:
+            _validate_address_levels(
+                self.province,
+                self.city,
+                self.district,
+                self.subdistrict,
+                self.road,
+                self.number,
+                self.poi,
+                self.building,
+                self.detail,
+            )
         return self
 
 
@@ -358,11 +380,12 @@ def project_storage_slot_to_runtime(
     if isinstance(first, AddressSlotStorage):
         return [
             AddressSlotRuntime(
+                components=[component.model_copy(deep=True) for component in item.components],
                 **{
                     field_name: _project_scalar_slot_to_runtime(level_slot, alias_role)
                     for field_name in _ADDRESS_LEVEL_FIELDS
                     if (level_slot := getattr(item, field_name, None)) is not None
-                }
+                },
             )
             for item in slot
         ]
@@ -402,12 +425,14 @@ def project_fake_persona_to_runtime(persona: PersonaDocument) -> PersonaRuntime:
 
 
 __all__ = [
+    "AddressComponentSlot",
     "AddressLevel",
     "AddressLevelExposureStats",
     "AddressSlotRuntime",
     "AddressSlotStorage",
     "AddressStats",
     "AliasRole",
+    "ClaimStrength",
     "AtomicSlotRuntime",
     "AtomicSlotStorage",
     "ExposureInfo",

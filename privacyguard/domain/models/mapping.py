@@ -29,6 +29,9 @@ class ReplacementRecord(BaseModel):
     span_end: int | None = None
     persona_id: str | None = None
     source: PIISourceType = PIISourceType.PROMPT
+    # session 级 entity 下标；GENERICIZE 路径由 SessionPlaceholderAllocator 填入，
+    # 其它路径保持 None。占位符 `#N` 直接使用该值，跨 attr_type 共享序号。
+    entity_id: int | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
 
 

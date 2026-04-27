@@ -34,34 +34,50 @@ EN_VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]]
     AddressComponentType.PROVINCE: frozenset({
         AddressComponentType.POSTAL_CODE,
         AddressComponentType.COUNTRY,
-        AddressComponentType.DETAIL,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
     }),
     AddressComponentType.CITY: frozenset({
         AddressComponentType.PROVINCE,
         AddressComponentType.POSTAL_CODE,
         AddressComponentType.COUNTRY,
-        AddressComponentType.DETAIL,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
     }),
     AddressComponentType.DISTRICT: frozenset({
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
         AddressComponentType.POSTAL_CODE,
         AddressComponentType.COUNTRY,
-        AddressComponentType.DETAIL,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
     }),
     AddressComponentType.SUBDISTRICT: frozenset({
+        AddressComponentType.NUMBER,
         AddressComponentType.ROAD,
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
         AddressComponentType.POSTAL_CODE,
         AddressComponentType.COUNTRY,
-        AddressComponentType.DETAIL,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
     }),
     AddressComponentType.HOUSE_NUMBER: frozenset({
+        AddressComponentType.ROAD,
+    }),
+    AddressComponentType.NUMBER: frozenset({
         AddressComponentType.ROAD,
     }),
     AddressComponentType.ROAD: frozenset({
@@ -71,42 +87,84 @@ EN_VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]]
         AddressComponentType.COUNTRY,
         AddressComponentType.POI,
         AddressComponentType.BUILDING,
-        AddressComponentType.DETAIL,
-    }),
-    AddressComponentType.NUMBER: frozenset({
-        AddressComponentType.ROAD,
-        AddressComponentType.CITY,
-        AddressComponentType.PROVINCE,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.POI: frozenset({
+        AddressComponentType.NUMBER,
+        AddressComponentType.ROAD,
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
         AddressComponentType.POSTAL_CODE,
         AddressComponentType.COUNTRY,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.BUILDING: frozenset({
-        AddressComponentType.HOUSE_NUMBER,
+        AddressComponentType.NUMBER,
         AddressComponentType.ROAD,
+        AddressComponentType.POI,
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
         AddressComponentType.POSTAL_CODE,
         AddressComponentType.COUNTRY,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
+    }),
+    AddressComponentType.UNIT: frozenset({
+        AddressComponentType.NUMBER,
         AddressComponentType.ROAD,
+        AddressComponentType.POI,
+        AddressComponentType.BUILDING,
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
+    }),
+    AddressComponentType.ROOM: frozenset({
+        AddressComponentType.NUMBER,
+        AddressComponentType.ROAD,
+        AddressComponentType.POI,
+        AddressComponentType.BUILDING,
+        AddressComponentType.CITY,
+        AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
+        AddressComponentType.DETAIL,
+    }),
+    AddressComponentType.SUITE: frozenset({
+        AddressComponentType.NUMBER,
+        AddressComponentType.ROAD,
+        AddressComponentType.POI,
+        AddressComponentType.BUILDING,
+        AddressComponentType.CITY,
+        AddressComponentType.PROVINCE,
+        AddressComponentType.POSTAL_CODE,
+        AddressComponentType.COUNTRY,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.DETAIL: frozenset({
-        AddressComponentType.HOUSE_NUMBER,
+        AddressComponentType.NUMBER,
         AddressComponentType.ROAD,
+        AddressComponentType.POI,
+        AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
         AddressComponentType.CITY,
         AddressComponentType.PROVINCE,
         AddressComponentType.POSTAL_CODE,
         AddressComponentType.COUNTRY,
-        AddressComponentType.BUILDING,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.POSTAL_CODE: frozenset({
@@ -137,7 +195,13 @@ def resolve_standalone_admin_value_group_en(
 def _en_prefix_keywords() -> set[str]:
     keywords: set[str] = set()
     for group in load_en_address_keyword_groups():
-        if group.component_type not in {AddressComponentType.DETAIL, AddressComponentType.BUILDING}:
+        if group.component_type not in {
+            AddressComponentType.BUILDING,
+            AddressComponentType.UNIT,
+            AddressComponentType.ROOM,
+            AddressComponentType.SUITE,
+            AddressComponentType.DETAIL,
+        }:
             continue
         for entry in group.entries:
             text = entry.text.strip().lower()
@@ -148,7 +212,13 @@ def _en_prefix_keywords() -> set[str]:
 
 
 _PREFIX_EN_KEYWORDS = _en_prefix_keywords()
-_EN_PREFIX_COMPONENTS = frozenset({AddressComponentType.DETAIL, AddressComponentType.BUILDING})
+_EN_PREFIX_COMPONENTS = frozenset({
+    AddressComponentType.BUILDING,
+    AddressComponentType.UNIT,
+    AddressComponentType.ROOM,
+    AddressComponentType.SUITE,
+    AddressComponentType.DETAIL,
+})
 _EN_SUFFIX_COMPONENTS = frozenset({AddressComponentType.ROAD, AddressComponentType.POI})
 _DIRECTIONAL_TOKENS = frozenset({"n", "s", "e", "w", "ne", "nw", "se", "sw"})
 _ORDINAL_TOKEN_RE = re.compile(r"\d+(?:st|nd|rd|th)$", re.IGNORECASE)
@@ -216,10 +286,11 @@ def _left_expand_en_phrase(pos: int, floor: int, stream: StreamInput) -> int:
 
 def _routing_left_value_start_en(context: _RoutingContext, clue: Clue) -> int:
     if context.chain:
-        return context.chain[-1].end
+        return max(context.chain[-1].end, context.value_floor)
     if context.previous_component_end is not None:
-        return context.previous_component_end
-    return _left_expand_en_phrase(clue.start, 0, context.stream)
+        return max(context.previous_component_end, context.value_floor)
+    floor = max(context.seed_floor or 0, context.value_floor)
+    return _left_expand_en_phrase(clue.start, floor, context.stream)
 
 
 def key_left_expand_start_if_deferrable_en(

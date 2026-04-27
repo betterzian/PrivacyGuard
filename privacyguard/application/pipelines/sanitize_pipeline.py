@@ -35,6 +35,7 @@ from privacyguard.domain.interfaces.ocr_engine import OCREngine
 from privacyguard.domain.interfaces.persona_repository import PersonaRepository
 from privacyguard.domain.interfaces.pii_detector import PIIDetector
 from privacyguard.domain.interfaces.rendering_engine import RenderingEngine
+from privacyguard.runtime.context import get_runtime_context
 
 LOGGER = logging.getLogger(__name__)
 
@@ -156,13 +157,20 @@ def _plan_replacements(
     mapping_store: MappingStore,
     persona_repository: PersonaRepository,
 ):
-    """阶段 6-9：抽象决策计划 → 结构约束 → 替换文案与会话占位。"""
+    """阶段 6-9：抽象决策计划 → 结构约束 → 替换文案与会话占位。
+
+    若进程内 RuntimeContext 已初始化，则注入 repo_index 让 allocator 走 repo
+    命中路径；未初始化时保持 ``None`` 兼容单次脚本/测试调用。
+    """
     decision_plan = decision_engine.plan(decision_context)
+    runtime_ctx = get_runtime_context()
+    repo_index = runtime_ctx.get_repo_index() if runtime_ctx is not None else None
     return apply_post_decision_steps(
         decision_plan,
         decision_context,
         mapping_store,
         persona_repository,
+        repo_index=repo_index,
     )
 
 

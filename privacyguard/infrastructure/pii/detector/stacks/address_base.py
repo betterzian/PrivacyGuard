@@ -2,7 +2,7 @@
 
 中文与英文 stack 共用以下流程：
 1. 地址 clue 起栈与 label/value seed 入口。
-2. clue 主扫描、非地址 clue 吸收与 next_index 维护。
+2. clue 主扫描、非地址 clue 吸收与 frontier 维护。
 3. 负向尾修复、digit tail 挑战、最终 `StackRun` 组装。
 
 语言差异通过钩子方法下放到子类，不在共享骨架里做 locale 分支。
@@ -19,6 +19,7 @@ from privacyguard.infrastructure.pii.detector.models import (
     CandidateDraft,
     ClaimStrength,
     Clue,
+    ClueFamily,
     ClueRole,
     PIIAttributeType,
     StreamInput,
@@ -27,8 +28,6 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     DigitTailResult,
     _SENTINEL_IGNORE,
     _SENTINEL_STOP,
-    _admin_key_chain_can_cross_gap,
-    _admin_value_chain_can_cross_gap,
     _analyze_digit_tail,
     _bridge_last_address_to_next_within_units,
     _clue_gap_has_search_stop,
@@ -42,12 +41,14 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
     _span_has_non_comma_search_stop_unit,
     _span_has_search_stop_unit,
     _state_next_component_start,
+    _unit_frontier_after_last,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _ADMIN_TYPES,
     _DETAIL_COMPONENTS,
     _DraftComponent,
     _ParseState,
+    _address_strength,
     _address_metadata,
     _append_deferred,
     _clear_pending_community_poi,
@@ -60,23 +61,48 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _ordered_component_clue_entries,
     _pending_community_blocks_road,
     _rebuild_component_derived_state,
-    _recompute_last_consumed_index,
     _reroute_pending_community_poi_to_subdistrict,
     _rightmost_component_key_overlaps_negative,
 )
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, PendingChallenge, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
     _char_span_to_unit_span,
-    _label_seed_start_char,
+    _clamp_left_boundary_to_value_floor,
+    _family_value_floor_char,
+    _floor_clamped_label_seed_start_char,
     _skip_separators,
     _unit_char_end,
     _unit_char_start,
 )
 
+_ADDRESS_STRONG_NEGATIVE_SCOPES = ("address", "ui")
+
+
+def _clue_component_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    if clue.component_levels:
+        return tuple(clue.component_levels)
+    if clue.component_type is None:
+        return ()
+    return (clue.component_type,)
+
 
 @dataclass(slots=True)
 class BaseAddressStack(BaseStack):
     """中文/英文地址 stack 的共享骨架。"""
+
+    def _value_floor_char(self) -> int:
+        """返回 ADDRESS 当前生效的 value 起点下界。"""
+        return _family_value_floor_char(self.context, ClueFamily.ADDRESS)
+
+    def _has_address_key_negative_cover(self, unit_start: int, unit_last: int) -> bool:
+        """地址 key 的尾修复把显式 negative、LABEL/START 与 inspire 都视作负向。"""
+        return self._has_semantic_negative_cover(
+            unit_start,
+            unit_last,
+            scopes=_ADDRESS_STRONG_NEGATIVE_SCOPES,
+            include_seed_roles=True,
+            include_inspire=True,
+        )
 
     @property
     def valid_successors(self) -> Mapping[AddressComponentType, frozenset[AddressComponentType]]:
@@ -130,22 +156,24 @@ class BaseAddressStack(BaseStack):
             max(component.end for component in state.components),
         )
 
-    def shrink(self, run: StackRun, blocker_start: int, blocker_end: int) -> StackRun | None:
+    def shrink(self, run: StackRun, blocker_start: int, blocker_last: int) -> StackRun | None:
         candidate = run.candidate
         stream = self.context.stream
         if blocker_start <= candidate.unit_start:
-            new_unit_start, new_unit_end = blocker_end, candidate.unit_end
-        elif blocker_end >= candidate.unit_end:
-            new_unit_start, new_unit_end = candidate.unit_start, blocker_start
+            new_unit_start, new_unit_last = blocker_last + 1, candidate.unit_last
+        elif blocker_last >= candidate.unit_last:
+            new_unit_start, new_unit_last = candidate.unit_start, blocker_start - 1
         else:
-            new_unit_start, new_unit_end = candidate.unit_start, blocker_start
+            new_unit_start, new_unit_last = candidate.unit_start, blocker_start - 1
+        if new_unit_last < new_unit_start:
+            return None
         trimmed = trim_candidate(
             candidate,
             stream.text,
             start=_unit_char_start(stream, new_unit_start),
-            end=_unit_char_end(stream, new_unit_end),
+            end=_unit_char_end(stream, new_unit_last),
             unit_start=new_unit_start,
-            unit_end=new_unit_end,
+            unit_last=new_unit_last,
         )
         if trimmed is None:
             return None
@@ -154,9 +182,8 @@ class BaseAddressStack(BaseStack):
         return StackRun(
             attr_type=run.attr_type,
             candidate=trimmed,
-            consumed_ids=run.consumed_ids,
             handled_label_clue_ids=run.handled_label_clue_ids,
-            next_index=run.next_index,
+            frontier_last_unit=trimmed.unit_last,
             suppress_challenger_clue_ids=run.suppress_challenger_clue_ids,
         )
 
@@ -164,25 +191,29 @@ class BaseAddressStack(BaseStack):
         """地址 stack 主入口。"""
         stream = self.context.stream
         is_label_seed = self.clue.role in {ClueRole.LABEL, ClueRole.START}
+        floor_char = self._value_floor_char()
 
         if is_label_seed:
-            address_start = _label_seed_start_char(stream, self.clue.end)
-            seed_index = _first_address_clue_index_after(
+            address_start = _floor_clamped_label_seed_start_char(self.context, ClueFamily.ADDRESS, self.clue.end)
+            seed_index = self._label_seed_address_index(
                 self.context.clues,
-                address_start,
+                address_start=address_start,
             )
             if seed_index is None:
                 return None
             scan_index = seed_index
-            consumed_ids: set[str] = {self.clue.clue_id}
             handled_labels: set[str] = {self.clue.clue_id}
             evidence_count = 1
+            seed_floor = address_start
         else:
-            address_start = self.clue.start if self.clue.role in {ClueRole.VALUE, ClueRole.KEY} else None
+            if self.clue.role in {ClueRole.VALUE, ClueRole.KEY} and self.clue.start >= floor_char:
+                address_start = self.clue.start
+            else:
+                address_start = None
             scan_index = self.clue_index
-            consumed_ids = set()
             handled_labels = set()
             evidence_count = 0
+            seed_floor = floor_char
         if address_start is None:
             return None
 
@@ -190,9 +221,9 @@ class BaseAddressStack(BaseStack):
             clues=self.context.clues,
             scan_index=scan_index,
             address_start=address_start,
-            consumed_ids=consumed_ids,
             handled_labels=handled_labels,
             evidence_count=evidence_count,
+            seed_floor=seed_floor,
         )
 
     def _run_with_clues(
@@ -201,9 +232,9 @@ class BaseAddressStack(BaseStack):
         clues: tuple[Clue, ...],
         scan_index: int,
         address_start: int,
-        consumed_ids: set[str],
         handled_labels: set[str],
         evidence_count: int,
+        seed_floor: int | None,
     ) -> StackRun | None:
         """统一扫描路径：扫描 clue → 尾修复 → 数字尾挑战 → 组装 `StackRun`。"""
         state, index = self._scan_components(
@@ -211,23 +242,20 @@ class BaseAddressStack(BaseStack):
             scan_index=scan_index,
             address_start=address_start,
             evidence_count=evidence_count,
+            seed_floor=seed_floor,
         )
         if not state.components:
             return None
         self._repair_negative_tail_components(state, clues)
         if not state.components:
             return None
-        consumed_ids |= state.extra_consumed_clue_ids
-        consumed_ids |= state.committed_clue_ids
         _fixup_suspected_info(state)
 
         tail = _analyze_digit_tail(state.components, self.context.stream, clues, index)
         if tail is not None and not tail.followed_by_address_key:
             conservative_run = self._build_address_run_from_state(
                 state,
-                consumed_ids,
                 handled_labels,
-                index,
             )
             if conservative_run is None:
                 return None
@@ -237,13 +265,9 @@ class BaseAddressStack(BaseStack):
             state_ext.suppress_challenger_clue_ids = set(state.suppress_challenger_clue_ids)
             state_ext.consumed_clue_indices = set(state.consumed_clue_indices) | set(tail.consumed_clue_indices)
             state_ext.absorbed_digit_unit_end = state.absorbed_digit_unit_end
-            _recompute_last_consumed_index(state_ext)
-            extended_consumed_ids = set(consumed_ids) | set(tail.consumed_clue_ids)
             extended_run = self._build_address_run_from_state(
                 state_ext,
-                extended_consumed_ids,
                 handled_labels,
-                index,
             )
             if extended_run is None:
                 return conservative_run
@@ -255,17 +279,46 @@ class BaseAddressStack(BaseStack):
                 cached_fragment_text=tail.unit_text,
                 cached_normalized_fragment=tail.pure_digits,
                 extended_candidate=extended_run.candidate,
-                extended_consumed_ids=extended_run.consumed_ids,
-                extended_next_index=extended_run.next_index,
+                extended_last_unit=extended_run.candidate.unit_last,
             )
             return conservative_run
 
         return self._build_address_run_from_state(
             state,
-            consumed_ids,
             handled_labels,
-            index,
         )
+
+    def _label_seed_address_index(
+        self,
+        clues: tuple[Clue, ...],
+        *,
+        address_start: int,
+    ) -> int | None:
+        expected_levels = tuple(_clue_component_levels(self.clue))
+        fallback_index: int | None = None
+        if expected_levels:
+            for index, clue in enumerate(clues):
+                if clue.end <= address_start:
+                    continue
+                if clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM} and fallback_index is None:
+                    fallback_index = index
+                if clue.family != ClueFamily.ADDRESS or clue.role == ClueRole.LABEL:
+                    continue
+                levels = tuple(_clue_component_levels(clue))
+                if levels and any(level in expected_levels for level in levels):
+                    return index
+                break
+        if fallback_index is not None:
+            return fallback_index
+        first_address = _first_address_clue_index_after(clues, address_start)
+        if first_address is not None:
+            return first_address
+        for index, clue in enumerate(clues):
+            if clue.end <= address_start:
+                continue
+            if clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
+                return index
+        return None
 
     def _scan_components(
         self,
@@ -274,6 +327,7 @@ class BaseAddressStack(BaseStack):
         scan_index: int,
         address_start: int,
         evidence_count: int,
+        seed_floor: int | None,
         stop_char_end: int | None = None,
         absorb_non_address: bool = True,
         relaxed: bool = False,
@@ -284,6 +338,10 @@ class BaseAddressStack(BaseStack):
         state = _ParseState()
         state.last_end = address_start
         state.evidence_count = evidence_count
+        state.seed_floor = seed_floor
+        if self.clue.role == ClueRole.LABEL:
+            state.pending_label_first_component_hard = True
+            state.label_expected_component_levels = tuple(_clue_component_levels(self.clue))
         index = scan_index
 
         while index < len(clues):
@@ -293,32 +351,21 @@ class BaseAddressStack(BaseStack):
 
             search_anchor = _state_next_component_start(state, stream, address_start=address_start)
             if not relaxed and search_anchor is not None and clue.start > search_anchor:
-                if _span_has_search_stop_unit(stream, search_anchor, clue.start):
-                    if (
-                        clue.attr_type == PIIAttributeType.ADDRESS
-                        and (
-                            _admin_value_chain_can_cross_gap(
-                                [deferred for _, deferred in state.deferred_chain],
-                                clue,
-                                stream,
-                            )
-                            or _admin_key_chain_can_cross_gap(
-                                [deferred for _, deferred in state.deferred_chain],
-                                clue,
-                                stream,
-                            )
-                        )
-                    ):
-                        pass
-                    elif state.deferred_chain:
+                allow_bridge = self._allow_search_stop_bridge(
+                    state,
+                    clue,
+                    search_anchor=search_anchor,
+                )
+                if not allow_bridge and _span_has_search_stop_unit(stream, search_anchor, clue.start):
+                    if state.deferred_chain:
                         self._flush_chain(state, clue_index=index)
                         if state.split_at is not None:
                             break
                         continue
-                    elif _span_has_non_comma_search_stop_unit(stream, search_anchor, clue.start):
+                    if _span_has_non_comma_search_stop_unit(stream, search_anchor, clue.start):
                         break
 
-            if self.need_break(clue):
+            if self.should_break_clue(clue):
                 break
             if clue.attr_type is None:
                 index += 1
@@ -333,7 +380,10 @@ class BaseAddressStack(BaseStack):
                 index += 1
                 continue
             if not relaxed and state.last_consumed is not None:
-                gap_anchor = max(state.last_consumed.unit_end, state.absorbed_digit_unit_end)
+                gap_anchor = max(
+                    _unit_frontier_after_last(state.last_consumed.unit_last),
+                    _unit_frontier_after_last(state.absorbed_digit_unit_end),
+                )
                 if clue.unit_start - gap_anchor > 6:
                     break
 
@@ -358,21 +408,30 @@ class BaseAddressStack(BaseStack):
         stream: StreamInput,
     ) -> bool:
         if _is_absorbable_digit_clue(clue):
-            state.absorbed_digit_unit_end = max(state.absorbed_digit_unit_end, clue.unit_end)
-            state.extra_consumed_clue_ids.add(clue.clue_id)
+            state.absorbed_digit_unit_end = max(state.absorbed_digit_unit_end, clue.unit_last)
             _mark_consumed_indices(state, {index})
             return True
         if clue.attr_type in {PIIAttributeType.NAME, PIIAttributeType.ORGANIZATION}:
-            nxt_addr = _next_address_clue_index_after(clues, index, should_break=self.need_break)
+            nxt_addr = _next_address_clue_index_after(clues, index, should_break=self.should_break_clue)
             if nxt_addr is not None and _bridge_last_address_to_next_within_units(state, clues[nxt_addr], stream):
                 state.suppress_challenger_clue_ids.add(clue.clue_id)
-                state.absorbed_digit_unit_end = max(state.absorbed_digit_unit_end, clue.unit_end)
+                state.absorbed_digit_unit_end = max(state.absorbed_digit_unit_end, clue.unit_last)
         return False
 
-    def need_break(self, subject, **kwargs) -> bool:
+    def should_break_clue(self, subject, **kwargs) -> bool:
         del kwargs
         if isinstance(subject, Clue):
             return subject.role == ClueRole.BREAK
+        return False
+
+    def _allow_search_stop_bridge(
+        self,
+        state: _ParseState,
+        clue: Clue,
+        *,
+        search_anchor: int,
+    ) -> bool:
+        del state, clue, search_anchor
         return False
 
     def _handle_address_clue(
@@ -426,7 +485,7 @@ class BaseAddressStack(BaseStack):
         if not _rightmost_component_key_overlaps_negative(
             ordered_components[-1],
             clues,
-            self.context.has_negative_cover,
+            self._has_address_key_negative_cover,
         ):
             return
         base_evidence_count = max(0, state.evidence_count - len(state.components))
@@ -449,7 +508,11 @@ class BaseAddressStack(BaseStack):
         )
         while ordered:
             last = ordered[-1]
-            if not _rightmost_component_key_overlaps_negative(last, clues, self.context.has_negative_cover):
+            if not _rightmost_component_key_overlaps_negative(
+                last,
+                clues,
+                self._has_address_key_negative_cover,
+            ):
                 return ordered
             repaired = self._repair_rightmost_component_prefix(
                 prefix_components=ordered[:-1],
@@ -476,7 +539,7 @@ class BaseAddressStack(BaseStack):
             return None
         last_affected_index = -1
         for index, (_, clue) in enumerate(clue_entries):
-            if self.context.has_negative_cover(clue.unit_start, clue.unit_end):
+            if self._has_address_key_negative_cover(clue.unit_start, clue.unit_last):
                 last_affected_index = index
         if last_affected_index <= 0:
             return None
@@ -492,7 +555,7 @@ class BaseAddressStack(BaseStack):
             if _rightmost_component_key_overlaps_negative(
                 replay_state.components[-1],
                 clues,
-                self.context.has_negative_cover,
+                self._has_address_key_negative_cover,
             ):
                 continue
             return replay_state.components
@@ -562,6 +625,7 @@ class BaseAddressStack(BaseStack):
         *,
         component_start: int,
     ) -> _DraftComponent | None:
+        component_start = _clamp_left_boundary_to_value_floor(component_start, self._value_floor_char())
         value = _normalize_address_value(comp_type, raw_text[component_start:clue.start])
         if not value:
             return None
@@ -611,20 +675,17 @@ class BaseAddressStack(BaseStack):
     def _build_address_run_from_state(
         self,
         state: _ParseState,
-        consumed_ids: set[str],
         handled_labels: set[str],
-        next_index: int,
-        *,
-        use_precise_next_index: bool = True,
     ) -> StackRun | None:
         """证据阈值通过后，用 component 并集 span 构造 `CandidateDraft` 与 `StackRun`。"""
         components = state.components
+        claim_strength = _address_strength(components, stream=self.context.stream)
         if not _meets_commit_threshold(
             state.evidence_count,
             components,
             self._value_locale(),
             protection_level=self.context.protection_level,
-            max_clue_strength=state.max_clue_strength,
+            claim_strength=claim_strength,
         ):
             return None
         raw_text = self.context.stream.text
@@ -634,7 +695,7 @@ class BaseAddressStack(BaseStack):
             return None
         relative = raw_text[final_start:final_end].find(text)
         absolute_start = final_start + max(0, relative)
-        unit_start, unit_end = _char_span_to_unit_span(
+        unit_start, unit_last = _char_span_to_unit_span(
             self.context.stream,
             absolute_start,
             absolute_start + len(text),
@@ -644,25 +705,19 @@ class BaseAddressStack(BaseStack):
             start=absolute_start,
             end=absolute_start + len(text),
             unit_start=unit_start,
-            unit_end=unit_end,
+            unit_last=unit_last,
             text=text,
             source=self.context.stream.source,
             source_kind=self.clue.source_kind,
-            claim_strength=state.max_clue_strength,
+            claim_strength=claim_strength,
             metadata=_address_metadata(self.clue, components),
             label_clue_ids=set(handled_labels),
             label_driven=(self.clue.role == ClueRole.LABEL),
         )
-        final_next_index = (
-            state.last_consumed_clue_index + 1
-            if use_precise_next_index and state.last_consumed_clue_index >= 0
-            else next_index
-        )
         return StackRun(
             attr_type=PIIAttributeType.ADDRESS,
             candidate=candidate,
-            consumed_ids=set(consumed_ids),
             handled_label_clue_ids=set(handled_labels),
-            next_index=final_next_index,
+            frontier_last_unit=candidate.unit_last,
             suppress_challenger_clue_ids=frozenset(state.suppress_challenger_clue_ids),
         )

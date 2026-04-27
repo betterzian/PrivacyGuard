@@ -114,13 +114,14 @@
     ]
   },
   "cities": {
+    "hard": [
+      "New York"
+    ],
     "soft": [
       "Atlanta",
       "Austin",
       "Baltimore",
       "Boston",
-      "Bronx",
-      "Brooklyn",
       "Charlotte",
       "Chicago",
       "Columbus",
@@ -136,14 +137,12 @@
       "Long Beach",
       "Los Angeles",
       "Louisville",
-      "Manhattan",
       "Memphis",
       "Miami",
       "Milwaukee",
       "Minneapolis",
       "Nashville",
       "New Orleans",
-      "New York",
       "Oakland",
       "Oklahoma",
       "Omaha",
@@ -157,7 +156,6 @@
       "San Francisco",
       "San Jose",
       "Seattle",
-      "Staten Island",
       "Tampa",
       "Virginia Beach",
       "Washington",
@@ -165,6 +163,7 @@
       "Anchorage",
       "Arlington",
       "Berkeley",
+      "Bellevue",
       "Birmingham",
       "Boise",
       "Burbank",
@@ -203,7 +202,6 @@
       "Cook",
       "King",
       "Orange",
-      "Queens",
       "Aurora",
       "Boulder",
       "Buffalo",
@@ -215,6 +213,17 @@
       "Mobile",
       "Savannah",
       "Springfield"
+    ]
+  },
+  "districts": {
+    "soft": [
+      "Brooklyn",
+      "Manhattan",
+      "Bronx",
+      "Staten Island"
+    ],
+    "weak": [
+      "Queens"
     ]
   }
 }

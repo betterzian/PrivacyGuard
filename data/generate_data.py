@@ -135,14 +135,21 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
 
 
 def main() -> None:
-    random.seed(SEED)
-    zh = [_cn_record(i) for i in range(1, COUNT + 1)]
-    en = [_en_record(i) for i in range(1, COUNT + 1)]
+    import argparse
+
+    parser = argparse.ArgumentParser(description="生成中英文地址评测 txt/jsonl")
+    parser.add_argument("--count", type=int, default=COUNT, help=f"每种语言生成条数（默认 {COUNT}）")
+    parser.add_argument("--seed", type=int, default=SEED, help="随机种子")
+    args = parser.parse_args()
+    random.seed(int(args.seed))
+    n = max(1, int(args.count))
+    zh = [_cn_record(i) for i in range(1, n + 1)]
+    en = [_en_record(i) for i in range(1, n + 1)]
     _write_lines(ROOT / "chinese_addresses.txt", zh)
     _write_lines(ROOT / "english_addresses.txt", en)
     _write_jsonl(ROOT / "chinese_addresses.jsonl", zh)
     _write_jsonl(ROOT / "english_addresses.jsonl", en)
-    print("✅ generated:", COUNT, COUNT)
+    print("✅ generated:", n, n)
 
 
 if __name__ == "__main__":

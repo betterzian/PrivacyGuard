@@ -10,8 +10,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Callable
 
@@ -27,8 +26,6 @@ from privacyguard.infrastructure.pii.detector.models import (
     StreamUnit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
-    _ADMIN_RANK,
-    _ADMIN_TYPES,
     _DETAIL_COMPONENTS,
     _DIGIT_TAIL_TRIGGER_TYPES,
     _DraftComponent,
@@ -40,6 +37,18 @@ from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK
 _SENTINEL_STOP = object()
 _SENTINEL_IGNORE = object()
 
+_ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUM, PIIAttributeType.ALNUM})
+_NUMBERISH_COMPONENTS = frozenset({
+    AddressComponentType.NUMBER,
+    AddressComponentType.BUILDING,
+    AddressComponentType.UNIT,
+    AddressComponentType.ROOM,
+    AddressComponentType.SUITE,
+    AddressComponentType.DETAIL,
+})
+
+# §4.1 KEY 多层级映射：某些 KEY 字面（如 "市"）在语义上可承担多层 admin（P / C / DC）；
+# 具体落到哪一层由 adjacent VALUE span 的 levels 与本表的交集决定，无 adjacent 时按 §4.2 规则降级。
 _MULTI_LEVEL_KEY_LEVELS: dict[str, tuple[AddressComponentType, ...]] = {
     "市": (
         AddressComponentType.PROVINCE,
@@ -48,179 +57,17 @@ _MULTI_LEVEL_KEY_LEVELS: dict[str, tuple[AddressComponentType, ...]] = {
     ),
 }
 
-_ABSORBABLE_DIGIT_ATTR_TYPES = frozenset({PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM})
-_NUMBERISH_COMPONENTS = frozenset({
-    AddressComponentType.NUMBER,
-    AddressComponentType.BUILDING,
-    AddressComponentType.DETAIL,
-})
-
-
-@dataclass(frozen=True, slots=True)
-class _AdminValueSpan:
-    """同一 value span 上的行政层级集合。"""
-
-    start: int
-    end: int
-    text: str
-    levels: tuple[AddressComponentType, ...]
-    resolved_level: AddressComponentType | None = None
-    first_index: int = -1
-    last_index: int = -1
-
-
-def _is_admin_value_clue(clue: Clue) -> bool:
-    return (
-        clue.role == ClueRole.VALUE
-        and clue.attr_type == PIIAttributeType.ADDRESS
-        and clue.component_type in _ADMIN_TYPES
-        and clue.component_type != AddressComponentType.MULTI_ADMIN
-    )
-
-
-def _is_admin_key_clue(clue: Clue) -> bool:
-    return (
-        clue.role == ClueRole.KEY
-        and clue.attr_type == PIIAttributeType.ADDRESS
-        and (
-            clue.component_type in _ADMIN_TYPES
-            or clue.component_type == AddressComponentType.MULTI_ADMIN
-        )
-    )
-
-
-def _same_admin_value_span(left: Clue, right: Clue) -> bool:
-    return (
-        _is_admin_value_clue(left)
-        and _is_admin_value_clue(right)
-        and left.start == right.start
-        and left.end == right.end
-    )
-
-
-def _ordered_admin_levels(levels: Iterable[AddressComponentType]) -> tuple[AddressComponentType, ...]:
-    seen: list[AddressComponentType] = []
-    for level in levels:
-        if level not in _ADMIN_RANK or level in seen:
-            continue
-        seen.append(level)
-    return tuple(sorted(seen, key=lambda item: _ADMIN_RANK[item], reverse=True))
-
-
-def _build_admin_value_span(
-    clues: Sequence[Clue],
-    *,
-    first_index: int = -1,
-    last_index: int = -1,
-) -> _AdminValueSpan | None:
-    if not clues:
-        return None
-    first = clues[0]
-    if not _is_admin_value_clue(first):
-        return None
-    if any(not _same_admin_value_span(first, current) for current in clues):
-        return None
-    levels = _ordered_admin_levels(
-        current.component_type
-        for current in clues
-        if current.component_type is not None
-    )
-    if not levels:
-        return None
-    return _AdminValueSpan(
-        start=first.start,
-        end=first.end,
-        text=first.text,
-        levels=levels,
-        first_index=first_index,
-        last_index=last_index,
-    )
-
-
-def collect_admin_value_span(
-    clues: Sequence[Clue],
-    clue_index: int,
-) -> _AdminValueSpan | None:
-    """按 clue 下标收集其所在的同 span 行政 VALUE 组。"""
-    if not (0 <= clue_index < len(clues)):
-        return None
-    anchor = clues[clue_index]
-    if not _is_admin_value_clue(anchor):
-        return None
-    left = clue_index
-    while left - 1 >= 0 and _same_admin_value_span(clues[left - 1], anchor):
-        left -= 1
-    right = clue_index
-    while right + 1 < len(clues) and _same_admin_value_span(anchor, clues[right + 1]):
-        right += 1
-    return _build_admin_value_span(clues[left:right + 1], first_index=left, last_index=right)
-
-
-def _collect_chain_edge_admin_value_span(
-    chain: Sequence[Clue],
-    *,
-    edge: str,
-    anchor: Clue | None = None,
-    stream: StreamInput | None = None,
-    max_gap_units: int = 0,
-    require_entire_chain_same_span: bool = False,
-) -> _AdminValueSpan | None:
-    """从 deferred/preview 链一端提取同 span 行政 VALUE 组。"""
-    if not chain:
-        return None
-    if edge == "right":
-        reference_index = len(chain) - 1
-    elif edge == "left":
-        reference_index = 0
-    else:
-        return None
-    reference = chain[reference_index]
-    if not _is_admin_value_clue(reference):
-        return None
-    if anchor is not None and stream is not None:
-        if _clue_gap_has_search_stop(reference, anchor, stream):
-            return None
-        if _clue_unit_gap(reference, anchor, stream) > max_gap_units:
-            return None
-    if edge == "right":
-        left = reference_index
-        while left - 1 >= 0 and _same_admin_value_span(chain[left - 1], reference):
-            left -= 1
-        if require_entire_chain_same_span and left != 0:
-            return None
-        return _build_admin_value_span(chain[left:], first_index=left, last_index=reference_index)
-    right = reference_index
-    while right + 1 < len(chain) and _same_admin_value_span(reference, chain[right + 1]):
-        right += 1
-    if require_entire_chain_same_span and right != len(chain) - 1:
-        return None
-    return _build_admin_value_span(chain[:right + 1], first_index=reference_index, last_index=right)
-
-
-def match_admin_levels(
-    preferred_levels: Iterable[AddressComponentType],
-    candidate_levels: Iterable[AddressComponentType],
-) -> AddressComponentType | None:
-    candidate_set = set(_ordered_admin_levels(candidate_levels))
-    if not candidate_set:
-        return None
-    for level in _ordered_admin_levels(preferred_levels):
-        if level in candidate_set:
-            return level
-    return None
-
-
-def ordered_intersect(
-    left: Iterable[AddressComponentType],
-    right: Iterable[AddressComponentType],
-) -> tuple[AddressComponentType, ...]:
-    right_set = set(right)
-    return tuple(level for level in _ordered_admin_levels(left) if level in right_set)
-
 
 def key_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    """返回 KEY clue 可承担的层级集合（按偏好顺序）。
+
+    - 多层级 KEY（目前仅 "市"）返回显式映射表；用于与 adjacent VALUE span levels 求交集。
+    - 其他 KEY 直接返回 `(clue.component_type,)`（单层），若 component_type 为空返回空元组。
+    """
+    if clue.component_levels:
+        return tuple(clue.component_levels)
     explicit = _MULTI_LEVEL_KEY_LEVELS.get(clue.text)
-    if explicit:
+    if explicit is not None:
         return explicit
     if clue.component_type is None:
         return ()
@@ -234,17 +81,22 @@ def _is_absorbable_digit_clue(clue: Clue) -> bool:
     return len(digits) <= 5
 
 
+def _unit_frontier_after_last(unit_last: int) -> int:
+    """把闭区间最后一个 unit 下标转成 exclusive frontier。"""
+    return unit_last + 1
+
+
 def _clue_unit_gap(left: Clue, right: Clue, stream: StreamInput | None = None) -> int:
     """两个 clue 之间的有效非空白 unit 数。"""
     if stream is not None and stream.units:
-        gap_start = left.unit_end
+        gap_start = _unit_frontier_after_last(left.unit_last)
         gap_end = right.unit_start
         count = 0
         for ui in range(gap_start, min(gap_end, len(stream.units))):
             if stream.units[ui].kind not in {"space", "inline_gap"}:
                 count += 1
         return count
-    return max(0, right.unit_start - left.unit_end)
+    return max(0, right.unit_start - _unit_frontier_after_last(left.unit_last))
 
 
 def _is_inline_gap_unit(unit: StreamUnit) -> bool:
@@ -269,24 +121,6 @@ def _is_search_stop_unit(unit: StreamUnit) -> bool:
     if unit.kind in {"space", "ocr_break"}:
         return True
     return any(is_any_break(char) for char in unit.text)
-
-
-def _is_admin_soft_boundary_span(stream: StreamInput, start_char: int, end_char: int) -> bool:
-    """区间仅包含空格/逗号/inline_gap 时，允许 admin value 链继续累积。"""
-    if end_char <= start_char or not stream.units:
-        return False
-    saw_boundary = False
-    ui = _unit_index_at_or_after(stream, start_char)
-    while ui < len(stream.units):
-        unit = stream.units[ui]
-        if unit.char_start >= end_char:
-            break
-        if _is_inline_gap_unit(unit) or _is_space_unit(unit) or _is_comma_unit(unit):
-            saw_boundary = True
-            ui += 1
-            continue
-        return False
-    return saw_boundary
 
 
 def _skip_from_char_by_units(
@@ -341,7 +175,7 @@ def _label_start_route_locale(
     for clue in clues:
         if clue.family != ClueFamily.ADDRESS or clue.role == ClueRole.LABEL:
             continue
-        if clue.unit_start >= probe_unit_end or clue.unit_end <= start_unit:
+        if clue.unit_start >= probe_unit_end or clue.unit_last < start_unit:
             continue
         raw_text = stream.text[max(start_char, clue.start):clue.end]
         clue_text = clue.text or ""
@@ -421,7 +255,7 @@ def _normalize_numberish_address_value(raw_value: str) -> str:
 
 def _normalize_address_value(component_type: AddressComponentType, raw_value: str) -> str:
     cleaned = clean_value(raw_value)
-    if component_type == AddressComponentType.HOUSE_NUMBER:
+    if component_type in {AddressComponentType.HOUSE_NUMBER, AddressComponentType.NUMBER}:
         return "".join(char for char in cleaned if char.isalnum())
     if component_type == AddressComponentType.POSTAL_CODE:
         return re.sub(r"[^0-9-]", "", cleaned)
@@ -509,26 +343,6 @@ def _clue_gap_has_search_stop(left: Clue, right: Clue, stream: StreamInput | Non
     return _span_has_search_stop_unit(stream, left.end, right.start)
 
 
-def _is_pure_admin_value_chain(chain: Sequence[Clue]) -> bool:
-    return bool(chain) and all(_is_admin_value_clue(clue) for clue in chain)
-
-
-def _admin_value_chain_can_cross_gap(chain: Sequence[Clue], clue: Clue, stream: StreamInput | None) -> bool:
-    if stream is None or not _is_pure_admin_value_chain(chain) or not _is_admin_value_clue(clue):
-        return False
-    return _is_admin_soft_boundary_span(stream, chain[-1].end, clue.start)
-
-
-def _is_admin_chain(chain: Sequence[Clue]) -> bool:
-    return bool(chain) and all(_is_admin_value_clue(clue) or _is_admin_key_clue(clue) for clue in chain)
-
-
-def _admin_key_chain_can_cross_gap(chain: Sequence[Clue], clue: Clue, stream: StreamInput | None) -> bool:
-    if stream is None or not _is_admin_chain(chain) or not _is_admin_value_clue(clue):
-        return False
-    return _is_admin_key_clue(chain[-1]) and _is_admin_soft_boundary_span(stream, chain[-1].end, clue.start)
-
-
 def _state_next_component_start(
     state: _ParseState,
     stream: StreamInput,
@@ -551,7 +365,8 @@ def _is_key_key_gap_text_unit_allowed(unit: StreamUnit) -> bool:
 
 
 def _last_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit | None:
-    for ui in range(min(clue.unit_end, len(stream.units)) - 1, clue.unit_start - 1, -1):
+    span_end = min(_unit_frontier_after_last(clue.unit_last), len(stream.units))
+    for ui in range(span_end - 1, clue.unit_start - 1, -1):
         unit = stream.units[ui]
         if unit.kind not in {"space", "inline_gap"}:
             return unit
@@ -559,7 +374,8 @@ def _last_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit 
 
 
 def _first_non_space_unit_in_span(clue: Clue, stream: StreamInput) -> StreamUnit | None:
-    for ui in range(clue.unit_start, min(clue.unit_end, len(stream.units))):
+    span_end = min(_unit_frontier_after_last(clue.unit_last), len(stream.units))
+    for ui in range(clue.unit_start, span_end):
         unit = stream.units[ui]
         if unit.kind not in {"space", "inline_gap"}:
             return unit
@@ -580,7 +396,7 @@ def _key_key_chain_gap_allowed(left: Clue, right: Clue, stream: StreamInput | No
         return False
     non_space = [
         stream.units[ui]
-        for ui in range(left.unit_end, min(right.unit_start, len(stream.units)))
+        for ui in range(_unit_frontier_after_last(left.unit_last), min(right.unit_start, len(stream.units)))
         if stream.units[ui].kind != "space"
     ]
     if len(non_space) != 1:
@@ -608,6 +424,8 @@ class _RoutingContext:
     clues: tuple[Clue, ...]
     raw_text: str
     stream: StreamInput
+    seed_floor: int | None = None
+    value_floor: int = 0
     search_start: int | None = None
     should_break_clue: Callable[[Clue], bool] | None = None
 
@@ -649,10 +467,6 @@ def _chain_can_accept(chain: list[Clue], clue: Clue, stream: StreamInput) -> boo
     if not chain:
         return False
     last = chain[-1]
-    if _admin_value_chain_can_cross_gap(chain, clue, stream):
-        return True
-    if _admin_key_chain_can_cross_gap(chain, clue, stream):
-        return True
     if _clue_gap_has_search_stop(last, clue, stream):
         return False
     gap = _clue_unit_gap(last, clue, stream)
@@ -681,7 +495,7 @@ def _label_seed_address_index(
             continue
         if _span_has_search_stop_unit(stream, start_char, clue.start):
             return None
-        if clue.role == ClueRole.VALUE and clue.unit_start <= start_unit < clue.unit_end:
+        if clue.role == ClueRole.VALUE and clue.unit_start <= start_unit <= clue.unit_last:
             return index
         if clue.role == ClueRole.KEY and clue.unit_start >= start_unit and clue.unit_start - start_unit <= max_units:
             if key_index is None or clue.unit_start < clues[key_index].unit_start:
@@ -717,7 +531,10 @@ def _bridge_last_address_to_next_within_units(
         return False
     if _clue_gap_has_search_stop(state.last_consumed, next_address_clue, stream):
         return False
-    gap_anchor = max(state.last_consumed.unit_end, state.absorbed_digit_unit_end)
+    gap_anchor = max(
+        _unit_frontier_after_last(state.last_consumed.unit_last),
+        _unit_frontier_after_last(state.absorbed_digit_unit_end),
+    )
     return next_address_clue.unit_start - gap_anchor <= 6
 
 
@@ -820,7 +637,7 @@ def _find_clue_for_digit_run(
         clue = clues[index]
         if clue.start > unit_char_end:
             break
-        if clue.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}:
+        if clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
             if clue.start <= unit_char_start and clue.end >= unit_char_end:
                 return index
     return None
@@ -927,3 +744,4 @@ def _analyze_digit_tail(
         consumed_clue_ids=consumed_clue_ids,
         consumed_clue_indices=consumed_clue_indices,
     )
+

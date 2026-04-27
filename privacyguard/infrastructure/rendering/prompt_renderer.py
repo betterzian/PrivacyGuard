@@ -1,7 +1,5 @@
 """Prompt 渲染器实现。"""
 
-import re
-
 from privacyguard.domain.enums import ActionType, PIISourceType
 from privacyguard.domain.models.decision import DecisionPlan
 from privacyguard.domain.models.mapping import ReplacementRecord
@@ -74,37 +72,34 @@ class PromptRenderer:
                     span_end=action.span_end,
                     persona_id=action.persona_id,
                     source=action.source,
+                    entity_id=action.entity_id,
                     metadata=_record_metadata_from_action(action),
                 )
             )
         return records
 
     def _render_prompt_text(self, prompt_text: str, records: list[ReplacementRecord]) -> str:
-        """优先使用明确 span 重建文本，缺失 span 的旧记录再走保守正则替换。"""
+        """严格按 decision span 切替；缺 span 的记录视为数据问题直接断言失败。"""
+        # 缺 span 的记录在新管线里属于配置错误（detector 主路径已稳定输出 span）；
+        # 直接抛错，避免兜底正则路径再次复活。
+        for record in records:
+            if record.source_text and record.replacement_text and (
+                record.span_start is None or record.span_end is None
+            ):
+                raise AssertionError(
+                    f"PromptRenderer requires span for record candidate_id={record.candidate_id!r}; "
+                    "fallback regex path has been removed."
+                )
+
+        valid_records = [
+            record for record in records if self._is_valid_span_record(prompt_text, record)
+        ]
+        span_records = self._select_non_overlapping_records(prompt_text, valid_records)
         sanitized = prompt_text
-        span_records = self._select_non_overlapping_records(
-            prompt_text,
-            [record for record in records if self._is_valid_span_record(prompt_text, record)],
-        )
         for record in sorted(span_records, key=lambda item: item.span_start or 0, reverse=True):
             start = record.span_start or 0
             end = record.span_end or start
             sanitized = sanitized[:start] + record.replacement_text + sanitized[end:]
-        legacy_records = sorted(
-            [
-                record
-                for record in records
-                if record.source_text
-                and record.replacement_text
-                and record.span_start is None
-                and record.span_end is None
-            ],
-            key=lambda item: len(item.source_text),
-            reverse=True,
-        )
-        for record in legacy_records:
-            pattern = self._build_boundary_pattern(record.source_text)
-            sanitized = re.sub(pattern, record.replacement_text, sanitized)
         return sanitized
 
     def _select_non_overlapping_records(
@@ -141,10 +136,3 @@ class PromptRenderer:
         if not record.source_text or not record.replacement_text:
             return False
         return prompt_text[start:end] == record.source_text
-
-    def _build_boundary_pattern(self, source_text: str) -> str:
-        """构建兼顾中英文的保守替换模式。"""
-        escaped = re.escape(source_text)
-        if source_text.isascii() and source_text.replace("_", "").isalnum():
-            return rf"(?<![A-Za-z0-9_]){escaped}(?![A-Za-z0-9_])"
-        return escaped

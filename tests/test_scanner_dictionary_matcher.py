@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from scripts.eval_detector_en_addresses import trace_component_key
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.lexicon_loader import load_zh_name_negative_phrases
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueRole, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
@@ -142,8 +142,14 @@ def test_prompt_stream_builds_single_layer_units_for_ascii_digit_cjk_and_tokens(
     assert len(set(stream.char_to_unit[ocr_break_start : ocr_break_start + len(OCR_BREAK)])) == 1
 
 
+def test_prompt_stream_normalizes_fullwidth_parentheses_only():
+    stream = build_prompt_stream("备注【测试】（+86）13812345678")
+
+    assert stream.text == "备注【测试】(+86)13812345678"
+
+
 def test_hard_pattern_scan_prefers_alnum_fragment_over_nested_digit_fragment():
-    stream = build_prompt_stream("h123 12345678a")
+    stream = build_prompt_stream("h123 12345678a abc_def john.doe abc-def")
 
     clues = scanner_module._scan_hard_patterns(
         DetectContext(protection_level=ProtectionLevel.STRONG),
@@ -153,6 +159,16 @@ def test_hard_pattern_scan_prefers_alnum_fragment_over_nested_digit_fragment():
     assert [(clue.source_kind, clue.text, clue.attr_type) for clue in clues] == [
         ("extract_alnum_fragment", "h123", PIIAttributeType.ALNUM),
         ("extract_alnum_fragment", "12345678a", PIIAttributeType.ALNUM),
+        ("extract_alnum_fragment", "abc_def", PIIAttributeType.ALNUM),
+        ("extract_alnum_fragment", "john.doe", PIIAttributeType.ALNUM),
+        ("extract_alnum_fragment", "abc-def", PIIAttributeType.ALNUM),
+    ]
+    assert [clue.source_metadata["fragment_shape"] for clue in clues] == [
+        ["mixed_alnum"],
+        ["mixed_alnum"],
+        ["alpha_symbolic"],
+        ["alpha_symbolic"],
+        ["alpha_symbolic"],
     ]
 
 
@@ -180,6 +196,134 @@ def test_hard_pattern_scan_keeps_plain_email_boundary_behavior():
     assert [(clue.source_kind, clue.text, clue.attr_type) for clue in clues] == [
         ("regex_email", "kctfqcb33@163.com", PIIAttributeType.EMAIL),
     ]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_component", "expected_text"),
+    [
+        ("Miami, FL", "province", "FL"),
+        ("3 fl", "detail", "fl"),
+        ("floor 3", "detail", "floor"),
+    ],
+)
+def test_en_address_scanner_disambiguates_fl_and_floor_by_context(text: str, expected_component: str, expected_text: str):
+    stream = build_prompt_stream(text)
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="en_us",
+    )
+
+    address_clues = [
+        clue
+        for clue in bundle.all_clues
+        if clue.attr_type == PIIAttributeType.ADDRESS and clue.text == expected_text
+    ]
+
+    assert address_clues
+    assert address_clues[0].component_type.value == expected_component
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_component"),
+    [
+        ("Riverside Homes", "poi"),
+        ("Bayfront Flats", "poi"),
+        ("Bryant Residences", "poi"),
+        ("Biscayne Commerce Hall", "building"),
+    ],
+)
+def test_en_address_scanner_builds_suffix_phrase_value_clues(text: str, expected_component: str):
+    stream = build_prompt_stream(text)
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="en_us",
+    )
+
+    address_values = [
+        clue
+        for clue in bundle.all_clues
+        if clue.attr_type == PIIAttributeType.ADDRESS
+        and clue.role == ClueRole.VALUE
+        and clue.text == text
+    ]
+
+    assert address_values
+    assert address_values[0].component_type.value == expected_component
+
+
+@pytest.mark.parametrize(
+    ("text", "expect_negative"),
+    [
+        ("7429 Main Street, Building 7, Austin, TX 19356", False),
+        ("main street festival", True),
+    ],
+)
+def test_en_address_scanner_main_street_negative_respects_numeric_address_context(text: str, expect_negative: bool):
+    _stream, segment = _first_segment(text)
+
+    negatives = scanner_module._scan_negative_clues(DetectContext(), segment)
+    main_street_negatives = [
+        clue
+        for clue in negatives
+        if clue.source_kind == "negative_address_word" and clue.text.strip().lower() == "main street"
+    ]
+
+    assert bool(main_street_negatives) is expect_negative
+
+
+def test_eval_trace_component_key_maps_number_component():
+    assert trace_component_key("number", ("number",)) == ("number",)
+    assert trace_component_key("house_number", ("house_number",)) == ("number",)
+
+
+@pytest.mark.parametrize(
+    "raw_text",
+    [
+        "邮箱 foo_xyz-xyz.xyz@gmail.com",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com.",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com. I am",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com, thanks",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com)",
+    ],
+)
+def test_hard_pattern_scan_accepts_email_with_internal_symbols_and_trailing_punctuation(raw_text: str):
+    stream = build_prompt_stream(raw_text)
+
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [(clue.source_kind, clue.text, clue.attr_type) for clue in clues] == [
+        ("regex_email", "foo_xyz-xyz.xyz@gmail.com", PIIAttributeType.EMAIL),
+    ]
+
+
+@pytest.mark.parametrize(
+    "raw_text",
+    [
+        "邮箱 foo_xyz-xyz.xyz@gmail.comabc",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com_xyz",
+        "邮箱 foo_xyz-xyz.xyz@gmail.com-foo",
+    ],
+)
+def test_hard_pattern_scan_rejects_email_when_ascii_token_continues_on_right(raw_text: str):
+    stream = build_prompt_stream(raw_text)
+
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert not any(clue.attr_type == PIIAttributeType.EMAIL for clue in clues)
 
 
 
@@ -213,6 +357,12 @@ def test_build_ocr_stream_rewrites_cjk_whitespace(raw_text: str, expected_text: 
     prepared = build_ocr_stream([_ocr_block(raw_text, block_id="b1", line_id=0)])
 
     assert prepared.stream.text == expected_text
+
+
+def test_build_ocr_stream_normalizes_fullwidth_parentheses_only():
+    prepared = build_ocr_stream([_ocr_block("备注【测试】（+86）13812345678", block_id="b1", line_id=0)])
+
+    assert prepared.stream.text == "备注【测试】(+86)13812345678"
 
 
 def test_ignored_spans_still_filter_dictionary_matches():
@@ -250,7 +400,7 @@ def test_ascii_dictionary_match_only_accepts_exact_s_and_es_word_units():
         if clue.strength == ClaimStrength.HARD and clue.source_kind == "dictionary_local"
     ]
     assert [clue.text for clue in dictionary_clues] == ["apple", "apples", "applees"]
-    assert [clue.unit_end - clue.unit_start for clue in dictionary_clues] == [1, 1, 1]
+    assert [clue.unit_last - clue.unit_start + 1 for clue in dictionary_clues] == [1, 1, 1]
     assert [stream.units[clue.unit_start].text for clue in dictionary_clues] == ["apple", "apples", "applees"]
 
 
@@ -475,6 +625,85 @@ def test_label_seed_metadata_keeps_boundary_signals():
     assert label_b.source_metadata["seed_is_left_edge"] == ["0"]
 
 
+def test_non_structured_label_with_right_space_stays_direct_seed():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    stream = build_prompt_stream("姓名 张三")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    assert any(
+        clue.role == ClueRole.LABEL
+        and clue.attr_type == PIIAttributeType.NAME
+        and clue.text == "姓名"
+        for clue in bundle.all_clues
+    )
+    assert bundle.inspire_entries == ()
+
+
+def test_non_structured_label_without_right_break_becomes_inspire():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    stream = build_prompt_stream("我的姓名你不知道")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    assert not any(clue.role == ClueRole.LABEL and clue.text == "姓名" for clue in bundle.all_clues)
+    assert len(bundle.inspire_entries) == 1
+    inspire = bundle.inspire_entries[0]
+    assert inspire.attr_type == PIIAttributeType.NAME
+    assert inspire.family == scanner_module._attr_to_family(PIIAttributeType.NAME)
+
+
+def test_non_structured_label_with_right_ocr_break_stays_direct_seed():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    stream = build_prompt_stream(f"姓名{OCR_BREAK}张三")
+
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    assert any(
+        clue.role == ClueRole.LABEL
+        and clue.attr_type == PIIAttributeType.NAME
+        and clue.text == "姓名"
+        for clue in bundle.all_clues
+    )
+    assert bundle.inspire_entries == ()
+
+
+def test_non_boundary_structured_label_is_dropped_instead_of_becoming_hint():
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    stream = build_prompt_stream("这里的手机1234")
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+    parsed = StreamParser(locale_profile="mixed", ctx=ctx).parse(stream, bundle)
+
+    assert not any(clue.role == ClueRole.LABEL and clue.text == "手机" for clue in bundle.all_clues)
+    assert len(parsed.candidates) == 1
+    assert parsed.candidates[0].attr_type == PIIAttributeType.NUM
+    assert "label_hint_attr" not in parsed.candidates[0].metadata
+
+
 def test_start_seed_metadata_marks_start_kind():
     ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
     _stream, segment = _first_segment("我叫张三")
@@ -523,12 +752,6 @@ def test_name_component_coverage_drops_contained_family_name_clue():
     assert family_name_clues == [("司马", 0, 2, ClaimStrength.HARD)]
 
 
-def test_zh_name_negative_phrases_preserve_legacy_blacklist_entries():
-    phrases = load_zh_name_negative_phrases()
-
-    assert phrases["张"] == ("张力",)
-    assert "杭州" in phrases["杭"]
-
 
 def test_scanner_no_longer_emits_generic_zh_given_name_clues():
     stream = build_prompt_stream("可欣今天到了")
@@ -565,7 +788,7 @@ def test_parser_keeps_char_span_and_unit_span_for_dictionary_name_candidate():
     assert len(dictionary_candidates) == 1
     candidate = dictionary_candidates[0]
     assert stream.text[candidate.start : candidate.end] == "Jordan Demo"
-    assert [unit.text for unit in stream.units[candidate.unit_start : candidate.unit_end]] == ["Jordan", " ", "Demo"]
+    assert [unit.text for unit in stream.units[candidate.unit_start : candidate.unit_last + 1]] == ["Jordan", " ", "Demo"]
 
 
 def test_session_dictionary_matcher_cache_reuses_same_content_signature():
@@ -685,6 +908,18 @@ def test_build_clue_bundle_emits_control_value_number_clues_for_zh_address_token
     assert ("子", ("子",)) in payloads
 
 
+def test_scan_control_value_clues_emits_en_copula_words_before_conflict_resolution():
+    _stream, segment = _first_segment("This is Liam, they are James, and I am Noah")
+
+    control_values = scanner_module._scan_control_value_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        segment,
+        locale_profile="en_us",
+    )
+
+    assert [clue.text.lower() for clue in control_values] == ["is", "are", "am"]
+    assert all(clue.source_metadata.get("control_kind") == ["copula_en"] for clue in control_values)
+
 @pytest.mark.parametrize(
     ("text", "expected_value"),
     [
@@ -705,6 +940,68 @@ def test_hard_pattern_scan_matches_expanded_time_formats(text: str, expected_val
     assert expected_value in time_values
 
 
+def test_hard_pattern_scan_matches_md_clock_without_inner_clock_duplicate():
+    stream = build_prompt_stream("arrival 03/13 16:50 update")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    time_clues = [clue for clue in clues if clue.attr_type == PIIAttributeType.TIME]
+
+    assert [clue.text for clue in time_clues] == ["03/13 16:50"]
+    assert not any(clue.source_kind == "time_clock" for clue in time_clues)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_value"),
+    [
+        ("arrival 03/13 16:50.", "03/13 16:50"),
+        ("arrival 03/13 16:50. Please confirm", "03/13 16:50"),
+        ("arrival 11:15, please join", "11:15"),
+    ],
+)
+def test_hard_pattern_scan_allows_trailing_punctuation_for_time(text: str, expected_value: str):
+    stream = build_prompt_stream(text)
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    time_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.TIME]
+    assert expected_value in time_values
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "arrival 03/13 16:50abc",
+        "arrival 03/13 16:50_foo",
+    ],
+)
+def test_hard_pattern_scan_rejects_time_when_ascii_token_continues_on_right(text: str):
+    stream = build_prompt_stream(text)
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert not any(clue.attr_type == PIIAttributeType.TIME for clue in clues)
+
+
+def test_hard_pattern_scan_does_not_match_standalone_md():
+    stream = build_prompt_stream("arrival 03/13 only")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert not any(
+        clue.attr_type == PIIAttributeType.TIME and clue.text == "03/13"
+        for clue in clues
+    )
+
+
 def test_hard_pattern_scan_matches_amount_before_generic_fragments():
     stream = build_prompt_stream("金额填¥88、532.00元、USD 12和181.00 dollars")
     clues = scanner_module._scan_hard_patterns(
@@ -715,10 +1012,174 @@ def test_hard_pattern_scan_matches_amount_before_generic_fragments():
     amount_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.AMOUNT]
     assert amount_values == ["¥88", "532.00元", "USD 12", "181.00 dollars"]
     assert not any(
-        clue.attr_type in {PIIAttributeType.NUMERIC, PIIAttributeType.ALNUM}
+        clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}
         and clue.text in {"88", "532.00", "12", "181.00"}
         for clue in clues
     )
+
+
+def test_dictionary_claim_strength_respects_metadata_preset():
+    strength = scanner_module._dictionary_claim_strength(
+        {"claim_strength": ["soft"]},
+        matched_text="anywhere",
+    )
+    assert strength == ClaimStrength.SOFT
+
+
+def test_dictionary_claim_strength_falls_back_by_char_count_cjk():
+    # 单字 → WEAK；两字 → SOFT；≥4 有效字符 → HARD。
+    assert scanner_module._dictionary_claim_strength({}, "王") == ClaimStrength.WEAK
+    assert scanner_module._dictionary_claim_strength({}, "南京") == ClaimStrength.SOFT
+    assert scanner_module._dictionary_claim_strength({}, "南京东路") == ClaimStrength.HARD
+
+
+def test_dictionary_claim_strength_falls_back_by_char_count_ascii():
+    # 去掉空白/标点后计数。
+    assert scanner_module._dictionary_claim_strength({}, " a ") == ClaimStrength.WEAK
+    assert scanner_module._dictionary_claim_strength({}, "Abc") == ClaimStrength.SOFT
+    assert scanner_module._dictionary_claim_strength({}, "Tencent") == ClaimStrength.HARD
+
+
+def test_scan_org_address_dictionary_clues_downgrades_short_org_by_char_count():
+    entry = _entry(
+        attr_type=PIIAttributeType.ORGANIZATION,
+        text="腾讯",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"]},
+    )
+    _stream, segment = _first_segment("我在腾讯工作")
+
+    clues = scanner_module._scan_org_address_dictionary_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        segment,
+        (entry,),
+        source_kind="local",
+    )
+    # "腾讯" 两字 → SOFT（按字数兜底）。
+    assert clues
+    assert all(clue.strength == ClaimStrength.SOFT for clue in clues)
+    assert all(clue.attr_type == PIIAttributeType.ORGANIZATION for clue in clues)
+
+
+def test_scan_org_address_dictionary_clues_uses_preset_strength_from_metadata():
+    entry = _entry(
+        attr_type=PIIAttributeType.ADDRESS,
+        text="南京",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"], "claim_strength": ["hard"]},
+    )
+    _stream, segment = _first_segment("下周去南京出差")
+
+    clues = scanner_module._scan_org_address_dictionary_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        segment,
+        (entry,),
+        source_kind="local",
+    )
+    # 预置 hard 应覆盖字数兜底（"南京"=SOFT）。
+    assert clues
+    assert all(clue.strength == ClaimStrength.HARD for clue in clues)
+    assert all(clue.attr_type == PIIAttributeType.ADDRESS for clue in clues)
+
+
+def test_scan_org_address_dictionary_clues_long_org_stays_hard():
+    entry = _entry(
+        attr_type=PIIAttributeType.ORGANIZATION,
+        text="腾讯科技有限公司",
+        matched_by="dictionary_local",
+        metadata={"local_entity_ids": ["persona-1"]},
+    )
+    _stream, segment = _first_segment("我在腾讯科技有限公司工作")
+
+    clues = scanner_module._scan_org_address_dictionary_clues(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        segment,
+        (entry,),
+        source_kind="local",
+    )
+    assert clues
+    # 8 字 → HARD。
+    assert all(clue.strength == ClaimStrength.HARD for clue in clues)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_amount"),
+    [
+        ("amount $581.00.", "$581.00"),
+        ("amount $2,227.00.", "$2,227.00"),
+        ("amount $2,227.00. Thanks", "$2,227.00"),
+        ("amount USD 2,227.00.", "USD 2,227.00"),
+        ("amount 2,227.00 USD.", "2,227.00 USD"),
+    ],
+)
+def test_hard_pattern_scan_matches_amount_with_thousands_and_trailing_punctuation(
+    text: str,
+    expected_amount: str,
+):
+    stream = build_prompt_stream(text)
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    amount_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.AMOUNT]
+    assert expected_amount in amount_values
+
+
+def test_hard_pattern_scan_does_not_split_amount_with_thousands_into_fragments():
+    stream = build_prompt_stream("amount $2,227.00.")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [clue.text for clue in clues if clue.attr_type == PIIAttributeType.AMOUNT] == ["$2,227.00"]
+    assert not any(
+        clue.attr_type in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}
+        and clue.text in {"2", "227.00", "2,227.00"}
+        for clue in clues
+    )
+
+
+def test_hard_pattern_scan_keeps_amount_currency_before_chinese_sentence_boundary():
+    stream = build_prompt_stream("金额 1055.23元。金额 1055.23。")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [clue.text for clue in clues if clue.attr_type == PIIAttributeType.AMOUNT] == ["1055.23元", "1055.23"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_text", "expected_region", "expected_pattern"),
+    [
+        ("（+86）13812345678", "(+86)13812345678", "cn", "cn_country_code_paren"),
+        ("+86 138-1234-5678", "+86 138-1234-5678", "cn", "cn_country_code"),
+        ("8613812345678", "8613812345678", "cn", "cn_country_code"),
+        ("（+1）4152671234", "(+1)4152671234", "us", "us_country_code_paren"),
+        ("+1 4152671234", "+1 4152671234", "us", "us_country_code"),
+        ("1（415）2671234", "1(415)2671234", "us", "us_trunk_area_paren"),
+    ],
+)
+def test_hard_pattern_scan_keeps_phone_structure_as_single_fragment(
+    text: str,
+    expected_text: str,
+    expected_region: str,
+    expected_pattern: str,
+):
+    stream = build_prompt_stream(text)
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert len(clues) == 1
+    clue = clues[0]
+    assert clue.attr_type == PIIAttributeType.NUM
+    assert clue.text == expected_text
+    assert clue.source_metadata["phone_region"] == [expected_region]
+    assert clue.source_metadata["phone_pattern"] == [expected_pattern]
 
 
 def test_hard_pattern_scan_matches_alnum_with_underscore_and_hyphen():
@@ -729,7 +1190,9 @@ def test_hard_pattern_scan_matches_alnum_with_underscore_and_hyphen():
     )
 
     alnum_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.ALNUM]
-    assert alnum_values == ["abc_123", "A1-B2"]
+    num_values = [clue.text for clue in clues if clue.attr_type == PIIAttributeType.NUM]
+    assert alnum_values == ["abc_123", "A1-B2", "abc-def"]
+    assert num_values == ["123_456"]
 
 
 def test_build_clue_bundle_emits_license_plate_prefix_family_value_clue():
@@ -783,4 +1246,5 @@ def test_license_plate_start_seed_covers_contained_name_clue():
         clue.role == ClueRole.FAMILY_NAME and clue.text == "车"
         for clue in bundle.all_clues
     )
+
 

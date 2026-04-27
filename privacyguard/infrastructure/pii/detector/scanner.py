@@ -10,6 +10,7 @@ from functools import lru_cache
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.address.geo_db import GeoEntry, load_en_geo_lexicon, load_zh_geo_lexicon
+from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_en_company_suffixes,
@@ -43,14 +44,14 @@ from privacyguard.infrastructure.pii.detector.models import (
     ClueRole,
     DictionaryEntry,
     InspireEntry,
+    NEGATIVE_SCOPES,
     StreamInput,
-    build_clue_index,
-    build_inspire_index,
-    build_negative_unit_index,
+    UnitBucket,
 )
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
-from privacyguard.infrastructure.pii.detector.stacks.common import examine_left_numeral
-from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
+from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import _normalize_address_value
+from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after, valid_left_numeral_for_zh_address_key
+from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN, is_any_break
 from privacyguard.infrastructure.pii.detector.zh_name_rules import compact_zh_name_text
 
 _HARD_SOURCE_PRIORITY = {
@@ -99,20 +100,21 @@ _PLACEHOLDER_BY_ATTR = {
     PIIAttributeType.EMAIL: "<email>",
     PIIAttributeType.ID_NUMBER: "<id>",
     PIIAttributeType.BANK_NUMBER: "<bank>",
-    PIIAttributeType.PASSPORT_NUMBER: "<passport>",
-    PIIAttributeType.DRIVER_LICENSE: "<driver_license>",
     PIIAttributeType.LICENSE_PLATE: "<license_plate>",
     PIIAttributeType.AMOUNT: "<amount>",
 }
 
 _EMAIL_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![A-Za-z0-9.-])"
+    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,4}"
 )
+_TRAILING_PUNCT_CHARS = ".,;:!?)]}。！？；：，、）】》」』"
+_DIRECT_DELIMITER_PUNCT_CHARS = ",;，、；)]}）】》」』"
 
 # 与 ``pii_value._TIME_PATTERN`` 一致的时钟片段（时 0–23，分/秒 0–59，冒号半角/全角）。
 _TIME_CLOCK_STRICT = r"(?:[01]?\d|2[0-3])[:：][0-5]\d(?:[:：][0-5]\d)?"
 _TIME_DATE_YMD = r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}"
 _TIME_DATE_MDY = r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}"
+_TIME_DATE_MD_CLOCK = rf"\d{{1,2}}/\d{{1,2}}\s+{_TIME_CLOCK_STRICT}"
 _TIME_DATE_ZH_YMD = r"\d{4}年\d{1,2}月\d{1,2}日"
 _TIME_DATE_ZH_MD = r"\d{1,2}月\d{1,2}日"
 
@@ -120,6 +122,7 @@ _TIME_DATE_ZH_MD = r"\d{1,2}月\d{1,2}日"
 _TIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("time_datetime", re.compile(rf"{_TIME_DATE_YMD}(?:[T ]{_TIME_CLOCK_STRICT})?")),
     ("time_date_mdy", re.compile(_TIME_DATE_MDY)),
+    ("time_md_clock", re.compile(_TIME_DATE_MD_CLOCK)),
     ("time_zh_datetime", re.compile(rf"{_TIME_DATE_ZH_YMD}(?:\s*{_TIME_CLOCK_STRICT})?")),
     ("time_zh_md_datetime", re.compile(rf"{_TIME_DATE_ZH_MD}(?:\s*{_TIME_CLOCK_STRICT})?")),
     ("time_clock", re.compile(_TIME_CLOCK_STRICT)),
@@ -127,24 +130,56 @@ _TIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 # 以下模式需在左右两侧满足「空白 / OCR 块界 / 链内间隙」之一（或紧贴文本首尾），避免粘在语句或数值中间。
 _TIME_KINDS_WITH_TOKEN_BOUNDARY = frozenset(
-    {"time_datetime", "time_date_mdy", "time_clock", "time_zh_datetime", "time_zh_md_datetime"}
+    {"time_datetime", "time_date_mdy", "time_md_clock", "time_clock", "time_zh_datetime", "time_zh_md_datetime"}
 )
 
 _AMOUNT_CURRENCY_PREFIX = r"(?i:US\$|USD|RMB|CNY|EUR|GBP|[$¥€£])"
 _AMOUNT_CURRENCY_SUFFIX = r"(?i:USD|RMB|CNY|EUR|GBP|元|美元|欧元|英镑|dollars?|yuan)"
+_AMOUNT_NUMBER_CORE = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?"
+_AMOUNT_DECIMAL_CORE = r"(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}"
 _AMOUNT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "amount_currency",
         re.compile(
             rf"(?<![A-Za-z0-9.])(?:"
-            rf"{_AMOUNT_CURRENCY_PREFIX}\s*\d+(?:\.\d{{2}})?(?:\s*{_AMOUNT_CURRENCY_SUFFIX})?"
+            rf"{_AMOUNT_CURRENCY_PREFIX}\s*{_AMOUNT_NUMBER_CORE}(?:\s*{_AMOUNT_CURRENCY_SUFFIX})?"
             rf"|"
-            rf"\d+(?:\.\d{{2}})?\s*{_AMOUNT_CURRENCY_SUFFIX}"
-            rf")(?![A-Za-z0-9.])"
+            rf"{_AMOUNT_NUMBER_CORE}\s*{_AMOUNT_CURRENCY_SUFFIX}"
+            rf")"
         ),
     ),
-    ("amount_decimal", re.compile(r"(?<![A-Za-z0-9.])\d+\.\d{2}(?![A-Za-z0-9.])")),
+    ("amount_decimal", re.compile(rf"(?<![A-Za-z0-9.]){_AMOUNT_DECIMAL_CORE}")),
 )
+
+
+def _match_right_boundary_allows_trailing_punct(text: str, end: int) -> bool:
+    """允许右侧是空白、OCR 断点或单个尾随句读标点。"""
+
+    if end < 0 or end > len(text):
+        return False
+    if end == len(text):
+        return True
+    right_ch = text[end]
+    if right_ch.isspace() or right_ch == _OCR_INLINE_GAP_TOKEN:
+        return True
+    if end + len(OCR_BREAK) <= len(text) and text[end : end + len(OCR_BREAK)] == OCR_BREAK:
+        return True
+    if right_ch in _TRAILING_PUNCT_CHARS:
+        if right_ch in _DIRECT_DELIMITER_PUNCT_CHARS:
+            return True
+        if end + 1 == len(text):
+            return True
+        next_ch = text[end + 1]
+        if next_ch.isspace() or next_ch == _OCR_INLINE_GAP_TOKEN:
+            return True
+        if end + 1 + len(OCR_BREAK) <= len(text) and text[end + 1 : end + 1 + len(OCR_BREAK)] == OCR_BREAK:
+            return True
+        if next_ch.isdigit() or (next_ch.isascii() and (next_ch.isalpha() or next_ch in "._-%+")):
+            return False
+        return True
+    if right_ch.isdigit() or (right_ch.isascii() and (right_ch.isalpha() or right_ch in "._-")):
+        return False
+    return True
 
 
 def _time_match_adjacent_ok(text: str, start: int, end: int) -> bool:
@@ -161,25 +196,90 @@ def _time_match_adjacent_ok(text: str, start: int, end: int) -> bool:
             return False
         else:
             pass
-    if end < len(text):
+    if not _match_right_boundary_allows_trailing_punct(text, end):
         right_ch = text[end]
-        if right_ch.isspace() or right_ch == _OCR_INLINE_GAP_TOKEN:
-            pass
-        elif end + len(OCR_BREAK) <= len(text) and text[end : end + len(OCR_BREAK)] == OCR_BREAK:
-            pass
-        elif right_ch.isdigit() or (right_ch.isascii() and (right_ch.isalpha() or right_ch in "._-")):
+        if right_ch.isdigit() or (right_ch.isascii() and (right_ch.isalpha() or right_ch in "._-")):
             return False
-        else:
-            pass
     return True
 
-# 通用数字片段：允许常见“电话号码写法”的连接符。
-# 目的：把 "+86 139-1234-1234" 这类写法抽成一个片段，后续再在 structured stack 中统一去连接符/去国家码做校验。
-_DIGIT_FRAGMENT_PATTERN = re.compile(r"\+?\d(?:[ \-()]*\d)*")
 
-# 混合片段：字母数字混合（至少包含一个数字和一个字母），允许中间带 `_` / `-`。
+def _email_match_right_boundary_ok(text: str, end: int) -> bool:
+    """校验邮箱右边界，允许句末标点落在匹配之外。"""
+
+    if _match_right_boundary_allows_trailing_punct(text, end):
+        return True
+    right_ch = text[end]
+    if right_ch.isascii() and (right_ch.isalnum() or right_ch in "._%+-"):
+        return False
+    return True
+
+
+_ALNUM_SYMBOL_JOINERS = "._+-/"
+_ALNUM_SYMBOL_JOINER_CLASS = re.escape(_ALNUM_SYMBOL_JOINERS)
+
+
+def _alnum_fragment_shape(value: str) -> str:
+    """返回 ALNUM 粗形态；空串表示不应作为 ALNUM 片段提交。"""
+    if not any(ch.isascii() and ch.isalpha() for ch in value):
+        return ""
+    if any(ch.isdigit() for ch in value):
+        return "mixed_alnum"
+    if any(ch in _ALNUM_SYMBOL_JOINERS for ch in value):
+        return "alpha_symbolic"
+    return ""
+
+
+def _numeric_fragment_shape(value: str) -> str:
+    """返回 NUM 粗形态。"""
+    return "numeric_symbolic" if any(not ch.isdigit() for ch in value) else "numeric"
+
+# 通用数字片段：允许常见“电话号码/编号写法”的连接符。
+# 目的：把 "+86 139-1234-1234"、"123_456" 这类写法抽成一个片段，后续再在 structured stack 中统一校验。
+_DIGIT_FRAGMENT_PATTERN = re.compile(r"\+?\d(?:[ \-()_]*\d)*")
+_PHONE_JOINER_PATTERN = r"[ \-()]*"
+_CN_PHONE_BODY_PATTERN = rf"1[3-9](?:{_PHONE_JOINER_PATTERN}\d){{9}}"
+_US_PHONE_BODY_PATTERN = rf"[2-9](?:{_PHONE_JOINER_PATTERN}\d){{2}}(?:{_PHONE_JOINER_PATTERN}[2-9])(?:{_PHONE_JOINER_PATTERN}\d){{6}}"
+_US_PHONE_AFTER_AREA_PATTERN = rf"[2-9](?:{_PHONE_JOINER_PATTERN}\d){{2}}(?:{_PHONE_JOINER_PATTERN}\d){{4}}"
+_PHONE_PATTERNS: tuple[tuple[str, str, str, re.Pattern[str]], ...] = (
+    (
+        "cn_country_code_paren",
+        "cn",
+        "86",
+        re.compile(rf"(?<![A-Za-z0-9])\(\+?86\){_PHONE_JOINER_PATTERN}{_CN_PHONE_BODY_PATTERN}(?![A-Za-z0-9])"),
+    ),
+    (
+        "cn_country_code",
+        "cn",
+        "86",
+        re.compile(rf"(?<![A-Za-z0-9])\+?86{_PHONE_JOINER_PATTERN}{_CN_PHONE_BODY_PATTERN}(?![A-Za-z0-9])"),
+    ),
+    (
+        "us_country_code_paren",
+        "us",
+        "1",
+        re.compile(rf"(?<![A-Za-z0-9])\(\+?1\){_PHONE_JOINER_PATTERN}{_US_PHONE_BODY_PATTERN}(?![A-Za-z0-9])"),
+    ),
+    (
+        "us_country_code",
+        "us",
+        "1",
+        re.compile(rf"(?<![A-Za-z0-9])\+1{_PHONE_JOINER_PATTERN}{_US_PHONE_BODY_PATTERN}(?![A-Za-z0-9])"),
+    ),
+    (
+        "us_trunk_area_paren",
+        "us",
+        "1",
+        re.compile(rf"(?<![A-Za-z0-9])1[ \-]*\([2-9]\d{{2}}\){_PHONE_JOINER_PATTERN}{_US_PHONE_AFTER_AREA_PATTERN}(?![A-Za-z0-9])"),
+    ),
+)
+
+# 含 ASCII 字母的结构化片段：字母数字混合，或纯英文带 `_` / `-` / `.` / `+` / `/`。
 _ALNUM_FRAGMENT_PATTERN = re.compile(
-    r"(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)*"
+    rf"(?=[A-Za-z0-9{_ALNUM_SYMBOL_JOINER_CLASS}]*[A-Za-z])(?:"
+    rf"(?=[A-Za-z0-9{_ALNUM_SYMBOL_JOINER_CLASS}]*\d)[A-Za-z0-9]+(?:[{_ALNUM_SYMBOL_JOINER_CLASS}][A-Za-z0-9]+)*"
+    rf"|"
+    rf"(?=[A-Za-z0-9{_ALNUM_SYMBOL_JOINER_CLASS}]*[{_ALNUM_SYMBOL_JOINER_CLASS}])[A-Za-z0-9]+(?:[{_ALNUM_SYMBOL_JOINER_CLASS}][A-Za-z0-9]+)+"
+    rf")"
 )
 
 _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
@@ -201,19 +301,25 @@ _DETERMINER_PATTERN = re.compile(
 )
 
 _LABEL_FIELD_SEPARATOR_CHARS = ":：-—–=|"
+_EN_LABEL_DIRECT_SEPARATOR_CHARS = frozenset(":：-—–")
 # 标签边界：匹配到的 label 前方或后方至少有一侧满足此集合中的 unit kind，
 # 或处于文本起止位置。防止自然语句中嵌入的关键词被误识别为标签。
 _LABEL_BOUNDARY_UNIT_KINDS = frozenset({"punct", "inline_gap", "ocr_break"})
 _SEED_ROLES = frozenset({ClueRole.LABEL, ClueRole.START})
-_START_MASKED_SOFT_ROLES = frozenset(
-    {
-        ClueRole.SUFFIX,
-        ClueRole.KEY,
-        ClueRole.VALUE,
-        ClueRole.FAMILY_NAME,
-        ClueRole.GIVEN_NAME,
-    }
+_PARSER_FAMILY_ORDER: tuple[ClueFamily, ...] = (
+    ClueFamily.STRUCTURED,
+    ClueFamily.LICENSE_PLATE,
+    ClueFamily.ADDRESS,
+    ClueFamily.NAME,
+    ClueFamily.ORGANIZATION,
 )
+_START_ROLES_BY_FAMILY: dict[ClueFamily, frozenset[ClueRole]] = {
+    ClueFamily.STRUCTURED: frozenset({ClueRole.VALUE}),
+    ClueFamily.LICENSE_PLATE: frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE}),
+    ClueFamily.ADDRESS: frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.VALUE, ClueRole.KEY}),
+    ClueFamily.NAME: frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.FAMILY_NAME, ClueRole.GIVEN_NAME, ClueRole.FULL_NAME, ClueRole.ALIAS, ClueRole.VALUE}),
+    ClueFamily.ORGANIZATION: frozenset({ClueRole.LABEL, ClueRole.START, ClueRole.SUFFIX, ClueRole.VALUE}),
+}
 # 数字的非隐私上下文模式。
 _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\d{4}年"),
@@ -222,10 +328,24 @@ _NEGATIVE_NUMERIC_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"No\.\d+"),
     re.compile(r"\d+(?:kg|cm|mm|m|km|g|ml|px|pt|em|rem|dp)\b"),
 )
+_NEGATIVE_SCOPE_BY_SOURCE_KIND: dict[str, str] = {
+    "negative_name_word": "name",
+    "negative_address_word": "address",
+    "negative_org_word": "organization",
+    "negative_ui_word": "ui",
+    "negative_numeric_context": "generic",
+}
 
 _ASCII_KEYWORD_CHARS_RE = re.compile(r"[A-Za-z0-9 #.'-]+")
 _ASCII_LITERAL_CHARS_RE = re.compile(r"[A-Za-z0-9 .,'@_+\-#/&()]+")
 _POSTAL_CODE_PATTERN = re.compile(r"(?<!\d)\d{5}(?:-\d{4})?(?!\d)")
+_EN_DIRECTIONAL_TOKENS = frozenset({"n", "s", "e", "w", "ne", "nw", "se", "sw"})
+_EN_ORDINAL_TOKEN_RE = re.compile(r"\d+(?:st|nd|rd|th)$", re.IGNORECASE)
+_EN_SUFFIX_PHRASE_COMPONENTS = frozenset({
+    AddressComponentType.POI,
+    AddressComponentType.BUILDING,
+})
+_EN_FL_FLOOR_KEYWORDS = frozenset({"fl", "floor"})
 
 
 def _luhn_valid(digits: str) -> bool:
@@ -354,30 +474,29 @@ def build_clue_bundle(
         soft_clues.extend(_scan_license_plate_value_clues(ctx, segment, locale_profile=locale_profile))
         soft_clues.extend(_scan_control_value_clues(ctx, segment, locale_profile=locale_profile))
         negative_clues.extend(_scan_negative_clues(ctx, segment))
-    if locale_profile in {"en", "mixed"}:
+    if locale_profile == "mixed" or locale_profile.startswith("en"):
         soft_clues.extend(_scan_en_address_postal_clues_full_stream(ctx, stream))
 
     deduped_negative_clues = _dedupe_clues(negative_clues) if negative_clues else []
-    negative_unit_marks, negative_prefix_sum, negative_start_weight = _build_negative_index(
-        stream,
-        deduped_negative_clues,
-    )
 
     # ── 事件扫描线裁决 ──
     all_clues = [*structured_clues, *_scan_ocr_break_clues(ctx, stream, ocr_break_only_spans), *soft_clues]
-    resolved_clues, inspire_entries = _sweep_resolve(stream, all_clues)
+    resolved_clues, inspire_entries = _sweep_resolve(
+        stream,
+        all_clues,
+        locale_profile=locale_profile,
+    )
     ordered_clues = tuple(sorted(resolved_clues, key=lambda item: (item.start, _family_order(item.family), item.end)))
-    unit_count = len(stream.units)
-    clue_index = build_clue_index(unit_count, ordered_clues)
-    inspire_index = build_inspire_index(unit_count, inspire_entries) if inspire_entries else None
     return ClueBundle(
         all_clues=ordered_clues,
+        unit_index=_build_unit_index(
+            stream,
+            ordered_clues,
+            tuple(deduped_negative_clues),
+            tuple(inspire_entries),
+        ),
         negative_clues=tuple(deduped_negative_clues),
-        negative_unit_marks=negative_unit_marks,
-        negative_prefix_sum=negative_prefix_sum,
-        negative_start_weight=negative_start_weight,
-        clue_index=clue_index,
-        inspire_index=inspire_index,
+        inspire_entries=tuple(inspire_entries),
     )
 
 
@@ -392,12 +511,16 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
 
     # ── 2a: 先行匹配 email ──
     for match in _EMAIL_PATTERN.finditer(text):
+        raw_start = match.start()
+        raw_end = match.end()
         value = match.group(0).strip()
         if not value:
             continue
-        if _overlaps_any(match.start(), match.end(), excluded_spans):
+        if not _email_match_right_boundary_ok(text, raw_end):
             continue
-        _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+        if _overlaps_any(raw_start, raw_end, excluded_spans):
+            continue
+        _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -405,30 +528,30 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.EMAIL,
                 strength=ClaimStrength.HARD,
-                start=match.start(),
-                end=match.end(),
+                start=raw_start,
+                end=raw_end,
                 text=value,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="regex_email",
                 source_metadata={"hard_source": ["regex"], "placeholder": ["<email>"]},
             )
         )
-        excluded_spans.append((match.start(), match.end()))
+        excluded_spans.append((raw_start, raw_end))
 
     # ── 2a: 先行匹配 time/date ──
     for source_kind, pattern in _TIME_PATTERNS:
         for match in pattern.finditer(text):
-            if source_kind in _TIME_KINDS_WITH_TOKEN_BOUNDARY and not _time_match_adjacent_ok(
-                text, match.start(), match.end()
-            ):
+            raw_start = match.start()
+            raw_end = match.end()
+            if source_kind in _TIME_KINDS_WITH_TOKEN_BOUNDARY and not _time_match_adjacent_ok(text, raw_start, raw_end):
                 continue
             value = match.group(0).strip()
             if not value:
                 continue
-            if _overlaps_any(match.start(), match.end(), excluded_spans):
+            if _overlaps_any(raw_start, raw_end, excluded_spans):
                 continue
-            _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+            _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
@@ -436,26 +559,30 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     role=ClueRole.VALUE,
                     attr_type=PIIAttributeType.TIME,
                     strength=ClaimStrength.HARD,
-                    start=match.start(),
-                    end=match.end(),
+                    start=raw_start,
+                    end=raw_end,
                     text=value,
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind=source_kind,
                     source_metadata={"hard_source": ["regex"], "placeholder": ["<time>"]},
                 )
             )
-            excluded_spans.append((match.start(), match.end()))
+            excluded_spans.append((raw_start, raw_end))
 
     # ── 2b: 先行匹配金额，避免金额小数被拆成通用片段。 ──
     for source_kind, pattern in _AMOUNT_PATTERNS:
         for match in pattern.finditer(text):
+            raw_start = match.start()
+            raw_end = match.end()
             value = match.group(0).strip()
             if not value:
                 continue
-            if _overlaps_any(match.start(), match.end(), excluded_spans):
+            if not _match_right_boundary_allows_trailing_punct(text, raw_end):
                 continue
-            _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+            if _overlaps_any(raw_start, raw_end, excluded_spans):
+                continue
+            _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
@@ -463,26 +590,35 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     role=ClueRole.VALUE,
                     attr_type=PIIAttributeType.AMOUNT,
                     strength=ClaimStrength.HARD,
-                    start=match.start(),
-                    end=match.end(),
+                    start=raw_start,
+                    end=raw_end,
                     text=value,
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind=source_kind,
                     source_metadata={"hard_source": ["regex"], "placeholder": ["<amount>"]},
                 )
             )
-            excluded_spans.append((match.start(), match.end()))
+            excluded_spans.append((raw_start, raw_end))
 
-    # ── 2c: 先提取字母数字混合片段，避免其内部数字被提前拆走。 ──
+    # ── 2c: 先提取含 ASCII 字母的结构化片段，避免其内部数字被提前拆走。 ──
     for match in _ALNUM_FRAGMENT_PATTERN.finditer(text):
         value = match.group(0)
         if _overlaps_any(match.start(), match.end(), excluded_spans):
             continue
-        digits = re.sub(r"[^0-9]", "", value)
-        if not digits:
+        fragment_shape = _alnum_fragment_shape(value)
+        if not fragment_shape:
             continue
+        digits = re.sub(r"[^0-9]", "", value)
         _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+        source_metadata = {
+            "hard_source": ["regex"],
+            "placeholder": ["<alnum>"],
+            "fragment_type": ["ALNUM"],
+            "fragment_shape": [fragment_shape],
+        }
+        if digits:
+            source_metadata["pure_digits"] = [digits]
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -494,19 +630,51 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 end=match.end(),
                 text=value,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="extract_alnum_fragment",
-                source_metadata={
-                    "hard_source": ["regex"],
-                    "placeholder": ["<alnum>"],
-                    "fragment_type": ["ALNUM"],
-                    "pure_digits": [digits],
-                },
+                source_metadata=source_metadata,
             )
         )
         excluded_spans.append((match.start(), match.end()))
 
-    # ── 2d: 提取纯数字片段 ──
+    # ── 2d: 先提取带国家码 / 括号结构的 phone-like 数字段，避免被通用数字片段拆碎。 ──
+    for phone_pattern, phone_region, phone_country_code, pattern in _PHONE_PATTERNS:
+        for match in pattern.finditer(text):
+            value = match.group(0)
+            if _overlaps_any(match.start(), match.end(), excluded_spans):
+                continue
+            digits = re.sub(r"\D", "", value)
+            if len(digits) < 10:
+                continue
+            _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.STRUCTURED,
+                    role=ClueRole.VALUE,
+                    attr_type=PIIAttributeType.NUM,
+                    strength=ClaimStrength.HARD,
+                    start=match.start(),
+                    end=match.end(),
+                    text=value,
+                    unit_start=_us,
+                    unit_last=_ue,
+                    source_kind="extract_digit_fragment",
+                    source_metadata={
+                        "hard_source": ["regex"],
+                        "placeholder": ["<num>"],
+                        "fragment_type": ["NUM"],
+                        "fragment_shape": [_numeric_fragment_shape(value)],
+                        "pure_digits": [digits],
+                        "phone_region": [phone_region],
+                        "phone_pattern": [phone_pattern],
+                        "phone_country_code": [phone_country_code],
+                    },
+                )
+            )
+            excluded_spans.append((match.start(), match.end()))
+
+    # ── 2e: 提取纯数字片段 ──
     for match in _DIGIT_FRAGMENT_PATTERN.finditer(text):
         value = match.group(0)
         if _overlaps_any(match.start(), match.end(), excluded_spans):
@@ -523,18 +691,19 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 clue_id=ctx.next_clue_id(),
                 family=ClueFamily.STRUCTURED,
                 role=ClueRole.VALUE,
-                attr_type=PIIAttributeType.NUMERIC,
+                attr_type=PIIAttributeType.NUM,
                 strength=ClaimStrength.HARD,
                 start=match.start(),
                 end=match.end(),
                 text=value,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="extract_digit_fragment",
                 source_metadata={
                     "hard_source": ["regex"],
-                    "placeholder": ["<numeric>"],
+                    "placeholder": ["<num>"],
                     "fragment_type": ["NUM"],
+                    "fragment_shape": [_numeric_fragment_shape(value)],
                     "pure_digits": [digits],
                 },
             )
@@ -558,6 +727,43 @@ def _is_negative_numeric(text: str, start: int, end: int) -> bool:
             if abs_start <= start and abs_end >= end:
                 return True
     return False
+
+
+_CLAIM_STRENGTH_METADATA_KEYS: tuple[str, ...] = (
+    "claim_strength",
+    "address_component_strength",
+)
+
+
+def _dictionary_claim_strength(metadata: dict[str, list[str]], matched_text: str) -> ClaimStrength:
+    """决定词典命中 clue 的 ClaimStrength。
+
+    - 若 metadata 显式携带预置强度（`claim_strength` 或 `address_component_strength`）→ 直接采用。
+    - 否则按"去除空白/非词字符后的有效字符数"兜底：1→WEAK，≤3→SOFT，其他→HARD。
+      CJK 与字母数字均计入有效字符，避免把"南京"这种两字组件识别成 HARD。
+    """
+    for key in _CLAIM_STRENGTH_METADATA_KEYS:
+        raw_values = metadata.get(key) if metadata else None
+        if not raw_values:
+            continue
+        raw = str(raw_values[0]).strip().lower()
+        if not raw:
+            continue
+        try:
+            return ClaimStrength(raw)
+        except ValueError:
+            # 兼容大小写/enum.name 入参：尝试按枚举名反查一次。
+            for member in ClaimStrength:
+                if member.name.lower() == raw:
+                    return member
+            continue
+    effective = re.sub(r"[\s\W_]+", "", str(matched_text or ""), flags=re.UNICODE)
+    length = len(effective)
+    if length <= 1:
+        return ClaimStrength.WEAK
+    if length <= 3:
+        return ClaimStrength.SOFT
+    return ClaimStrength.HARD
 
 
 def _scan_dictionary_hard_clues(
@@ -601,7 +807,7 @@ def _scan_dictionary_hard_clues(
                 end=end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=payload.matched_by,
                 source_metadata=dict_metadata,
             )
@@ -636,6 +842,7 @@ def _scan_org_address_dictionary_clues(
         dict_metadata = {key: list(values) for key, values in payload.metadata_items}
         dict_metadata["hard_source"] = [source_kind]
         dict_metadata["placeholder"] = [_PLACEHOLDER_BY_ATTR.get(payload.attr_type, f"<{payload.attr_type.value}>")]
+        strength = _dictionary_claim_strength(dict_metadata, matched_text)
         _us, _ue = _char_span_to_unit_span(segment.stream, start, end)
         clues.append(
             Clue(
@@ -643,12 +850,12 @@ def _scan_org_address_dictionary_clues(
                 family=_attr_to_family(payload.attr_type),
                 role=ClueRole.VALUE,
                 attr_type=payload.attr_type,
-                strength=ClaimStrength.HARD,
+                strength=strength,
                 start=start,
                 end=end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=payload.matched_by,
                 source_metadata=dict_metadata,
             )
@@ -725,12 +932,13 @@ def _scan_name_dictionary_clues(
         role, hint_value = _dictionary_name_role(component)
         metadata["name_component_hint"] = [hint_value]
         is_zh_family = component == "family" and _is_cjk_text(matched_text)
-        strength = ClaimStrength.HARD
         if is_zh_family:
+            # 中文单字姓走专用的姓氏流行度降级表，不走字数兜底。
             metadata.update(_zh_surname_metadata(matched_text, from_dictionary=True))
             strength = _zh_surname_claim_strength(matched_text) or ClaimStrength.SOFT
         else:
             metadata["hard_source"] = [source_kind]
+            strength = _dictionary_claim_strength(metadata, matched_text)
         _us, _ue = _char_span_to_unit_span(normalized_stream, start, end)
         clues.append(
             Clue(
@@ -743,7 +951,7 @@ def _scan_name_dictionary_clues(
                 end=end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=payload.matched_by,
                 source_metadata=metadata,
             )
@@ -815,7 +1023,7 @@ def _scan_label_clues(ctx: DetectContext, segment: _ScanSegment) -> tuple[Clue, 
                 end=end,
                 text=spec.keyword,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=spec.source_kind,
                 source_metadata=label_metadata,
             )
@@ -840,7 +1048,7 @@ def _scan_break_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
                     end=raw_end,
                     text=match.group(0),
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind=source_kind,
                     break_type=break_type,
                 )
@@ -875,7 +1083,7 @@ def _scan_determiner_break_clues(ctx: DetectContext, segment: _ScanSegment) -> l
                 end=raw_end,
                 text=match.group(0),
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="break_determiner",
                 break_type=BreakType.DETERMINER,
             )
@@ -902,7 +1110,7 @@ def _scan_ocr_break_clues(
                 end=end,
                 text=stream.text[start:end],
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="break_ocr",
                 break_type=BreakType.OCR,
             )
@@ -935,7 +1143,7 @@ def _scan_name_start_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=str(match.payload),
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="name_start",
                 source_metadata=metadata,
             )
@@ -982,7 +1190,7 @@ def _scan_family_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list[C
                 end=raw_end,
                 text=surname_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="family_name",
                 source_metadata=metadata,
             )
@@ -1011,7 +1219,7 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="en_surname",
             )
         )
@@ -1039,7 +1247,7 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="en_given_name",
             )
         )
@@ -1066,7 +1274,7 @@ def _scan_company_suffix_clues(ctx: DetectContext, segment: _ScanSegment) -> lis
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="company_suffix",
             )
         )
@@ -1096,7 +1304,7 @@ def _scan_company_value_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="company_value",
             )
         )
@@ -1146,7 +1354,7 @@ def _scan_license_plate_value_clues(
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="lexicon_license_plate_prefix_zh",
                 source_metadata={
                     "matched_by": ["lexicon_license_plate_prefix_zh"],
@@ -1159,73 +1367,83 @@ def _scan_license_plate_value_clues(
 
 
 def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, locale_profile: str) -> list[Clue]:
-    if locale_profile not in {"zh_cn", "mixed"}:
-        return []
     clues: list[Clue] = []
-    for match in _zh_control_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
-        normalized = _normalize_segment_ascii_match(
-            segment,
-            match.start,
-            match.end,
-            match.matched_text,
-            match.pattern_text,
-            match.ascii_boundary,
-        )
-        if normalized is None:
-            continue
-        raw_start, raw_end, matched_text = normalized
-        payload = match.payload
-        _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.CONTROL,
-                role=ClueRole.VALUE,
-                attr_type=None,
-                strength=ClaimStrength.SOFT,
-                start=raw_start,
-                end=raw_end,
-                text=matched_text,
-                unit_start=_us,
-                unit_end=_ue,
-                source_kind="control_value_zh",
-                source_metadata={
-                    "control_kind": ["number"],
-                    "control_value_kind": [payload.kind],
-                    "normalized_number": [payload.normalized_number],
-                },
+    if locale_profile in {"zh_cn", "mixed"}:
+        for match in _zh_control_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+            normalized = _normalize_segment_ascii_match(
+                segment,
+                match.start,
+                match.end,
+                match.matched_text,
+                match.pattern_text,
+                match.ascii_boundary,
             )
-        )
+            if normalized is None:
+                continue
+            raw_start, raw_end, matched_text = normalized
+            payload = match.payload
+            _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.CONTROL,
+                    role=ClueRole.VALUE,
+                    attr_type=None,
+                    strength=ClaimStrength.SOFT,
+                    start=raw_start,
+                    end=raw_end,
+                    text=matched_text,
+                    unit_start=_us,
+                    unit_last=_ue,
+                    source_kind="control_value_zh",
+                    source_metadata={
+                        "control_kind": ["number"],
+                        "control_value_kind": [payload.kind],
+                        "normalized_number": [payload.normalized_number],
+                    },
+                )
+            )
+    if locale_profile in {"en_us", "mixed"}:
+        for match in _en_control_value_matcher().find_matches(segment.text, folded_text=segment.folded_text):
+            normalized = _normalize_segment_ascii_match(
+                segment,
+                match.start,
+                match.end,
+                match.matched_text,
+                match.pattern_text,
+                match.ascii_boundary,
+            )
+            if normalized is None:
+                continue
+            raw_start, raw_end, matched_text = normalized
+            _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+            clues.append(
+                Clue(
+                    clue_id=ctx.next_clue_id(),
+                    family=ClueFamily.CONTROL,
+                    role=ClueRole.VALUE,
+                    attr_type=None,
+                    strength=ClaimStrength.SOFT,
+                    start=raw_start,
+                    end=raw_end,
+                    text=matched_text,
+                    unit_start=_us,
+                    unit_last=_ue,
+                    source_kind="control_value_en",
+                    source_metadata={"control_kind": ["copula_en"]},
+                )
+            )
     return _dedupe_clues(clues)
 
 
 # ── weak 关键字数字前缀提升规则 ────────────────────────────────
 
 
-@dataclass(frozen=True, slots=True)
-class _PromoteRule:
-    """weak 关键字前缀提升规则。
-
-    digit_count 在 ``[hard_min_digits, hard_max_digits]`` 闭区间内 → HARD；
-    有前缀但不满足 HARD 条件且 ``soft_on_prefix`` 为真 → SOFT。
-    """
-    hard_max_digits: int
-    hard_min_digits: int = 1
-    soft_on_prefix: bool = True
-
-
-# 中文 weak 关键字 → 提升规则。None 表示不提升。
-_ZH_WEAK_PROMOTE: dict[str, _PromoteRule | None] = {
-    "层": _PromoteRule(hard_max_digits=2),
-    "楼": _PromoteRule(hard_max_digits=2),
-    "室": _PromoteRule(hard_max_digits=4),
-    "房": _PromoteRule(hard_max_digits=4, hard_min_digits=2),
-    "户": _PromoteRule(hard_max_digits=4, hard_min_digits=2),
-    "弄": _PromoteRule(hard_max_digits=3),
-    "号": None,
-}
-# 不在表中的 weak keyword：有前缀 → SOFT，不做 HARD 提升。
-_DEFAULT_PROMOTE = _PromoteRule(hard_max_digits=0)
+# 中文 weak 关键字前缀强化策略：
+# 1. 先用共享规则判断左前缀是否合法；
+# 2. 只有这组 key 在合法后会被直接提升为 HARD；
+# 3. 号/其他 key 不额外提升，保持词表原强度。
+_ZH_WEAK_PROMOTE_TO_HARD = frozenset({"层", "楼", "室", "房", "户", "弄"})
 
 
 def _promote_weak_zh_keyword(
@@ -1236,20 +1454,17 @@ def _promote_weak_zh_keyword(
 ) -> ClaimStrength:
     """统一的 weak 关键字提升入口。
 
-    根据左侧数字前缀（ASCII / 中文数字 / 天干地支）和 ``_ZH_WEAK_PROMOTE``
-    配置表决定提升目标。
+    先复用共享的中文地址左前缀校验规则；校验通过后，再按 scanner 自己的
+    promotion policy 决定是否升级强度。
     """
     if strength != ClaimStrength.WEAK:
         return strength
-    rule = _ZH_WEAK_PROMOTE.get(canonical_text, _DEFAULT_PROMOTE)
-    if rule is None:
-        return strength
-    prefix = examine_left_numeral(stream, raw_start)
+    prefix = valid_left_numeral_for_zh_address_key(stream, raw_start, canonical_text)
     if prefix.kind == "none":
         return strength
-    if rule.hard_min_digits <= prefix.digit_count <= rule.hard_max_digits:
+    if canonical_text in _ZH_WEAK_PROMOTE_TO_HARD:
         return ClaimStrength.HARD
-    return ClaimStrength.SOFT if rule.soft_on_prefix else strength
+    return strength
 
 
 def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue]:
@@ -1272,7 +1487,7 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=payload.canonical_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="geo_db",
                 component_type=payload.component_type,
             )
@@ -1287,22 +1502,21 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         strength = _promote_weak_zh_keyword(
             segment.stream, raw_start, payload.strength, payload.canonical_text,
         )
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ADDRESS,
-                role=ClueRole.KEY,
-                attr_type=PIIAttributeType.ADDRESS,
-                strength=strength,
-                start=raw_start,
-                end=raw_end,
-                text=payload.canonical_text,
-                unit_start=_us,
-                unit_end=_ue,
-                source_kind="address_keyword",
-                component_type=payload.component_type,
-            )
+        key_clue = Clue(
+            clue_id=ctx.next_clue_id(),
+            family=ClueFamily.ADDRESS,
+            role=ClueRole.KEY,
+            attr_type=PIIAttributeType.ADDRESS,
+            strength=strength,
+            start=raw_start,
+            end=raw_end,
+            text=payload.canonical_text,
+            unit_start=_us,
+            unit_last=_ue,
+            source_kind="address_keyword",
+            component_type=payload.component_type,
         )
+        clues.append(_try_promote_address_key_to_derived_label(key_clue, segment.stream))
     return clues
 
 
@@ -1313,7 +1527,15 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
         if normalized is None:
             continue
-        raw_start, raw_end, _matched_text = normalized
+        raw_start, raw_end, matched_text = normalized
+        if not _should_emit_en_address_value_match(
+            segment.stream,
+            raw_start,
+            raw_end,
+            matched_text=matched_text,
+            component_type=payload.component_type,
+        ):
+            continue
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -1326,7 +1548,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=payload.canonical_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="geo_db",
                 component_type=payload.component_type,
             )
@@ -1337,23 +1559,45 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         if normalized is None:
             continue
         raw_start, raw_end, matched_text = normalized
+        if not _should_emit_en_address_key_match(
+            segment.stream,
+            raw_start,
+            raw_end,
+            matched_text=matched_text,
+            component_type=payload.component_type,
+        ):
+            continue
+        if payload.component_type == AddressComponentType.ROAD:
+            raw_end = _extend_en_road_key_end_with_direction(segment.stream, raw_end)
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.ADDRESS,
-                role=ClueRole.KEY,
-                attr_type=PIIAttributeType.ADDRESS,
-                strength=payload.strength,
-                start=raw_start,
-                end=raw_end,
-                text=matched_text,
-                unit_start=_us,
-                unit_end=_ue,
-                source_kind="address_keyword",
-                component_type=payload.component_type,
-            )
+        key_clue = Clue(
+            clue_id=ctx.next_clue_id(),
+            family=ClueFamily.ADDRESS,
+            role=ClueRole.KEY,
+            attr_type=PIIAttributeType.ADDRESS,
+            strength=payload.strength,
+            start=raw_start,
+            end=raw_end,
+            text=matched_text,
+            unit_start=_us,
+            unit_last=_ue,
+            source_kind="address_keyword",
+            component_type=payload.component_type,
         )
+        key_clue = _try_promote_address_key_to_derived_label(key_clue, segment.stream)
+        clues.append(key_clue)
+        if key_clue.role == ClueRole.KEY:
+            phrase_value_clue = _build_en_suffix_phrase_value_clue(
+                ctx,
+                segment.stream,
+                raw_start=raw_start,
+                raw_end=raw_end,
+                matched_text=matched_text,
+                component_type=payload.component_type,
+                strength=payload.strength,
+            )
+            if phrase_value_clue is not None:
+                clues.append(phrase_value_clue)
     for token_match in _POSTAL_CODE_PATTERN.finditer(segment.text):
         raw_start, raw_end = _segment_span_to_raw(segment, token_match.start(), token_match.end())
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
@@ -1368,7 +1612,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 end=raw_end,
                 text=token_match.group(0),
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="postal_value",
                 component_type=AddressComponentType.POSTAL_CODE,
             )
@@ -1392,7 +1636,7 @@ def _scan_en_address_postal_clues_full_stream(ctx: DetectContext, stream: Stream
                 end=token_match.end(),
                 text=token_match.group(0),
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind="postal_value",
                 component_type=AddressComponentType.POSTAL_CODE,
             )
@@ -1409,6 +1653,14 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
         if normalized is None:
             continue
         raw_start, raw_end, matched_text = normalized
+        if _should_skip_en_address_negative_match(
+            segment.stream,
+            raw_start,
+            raw_end,
+            matched_text=matched_text,
+            source_kind=str(match.payload),
+        ):
+            continue
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -1421,8 +1673,9 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                 end=raw_end,
                 text=matched_text,
                 unit_start=_us,
-                unit_end=_ue,
+                unit_last=_ue,
                 source_kind=str(match.payload),
+                source_metadata={"negative_scope": [_negative_scope_for_source_kind(str(match.payload))]},
             )
         )
     # 数字非隐私上下文模式（年份、百分比、序号、计量单位等）。
@@ -1441,11 +1694,232 @@ def _scan_negative_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Clue
                     end=raw_end,
                     text=token_match.group(0),
                     unit_start=_us,
-                    unit_end=_ue,
+                    unit_last=_ue,
                     source_kind="negative_numeric_context",
+                    source_metadata={"negative_scope": ["generic"]},
                 )
             )
     return clues
+
+
+def _should_skip_en_address_negative_match(
+    stream: StreamInput,
+    start: int,
+    end: int,
+    *,
+    matched_text: str,
+    source_kind: str,
+) -> bool:
+    """避免把明显带门牌号的 `Main Street` 误判成英文地址负向短语。"""
+    if source_kind != "negative_address_word":
+        return False
+    if str(matched_text or "").strip().lower() != "main street":
+        return False
+    previous = _previous_non_space_unit(stream, start)
+    if previous is None:
+        return False
+    token = previous.text.strip()
+    return any(char.isdigit() for char in token)
+
+
+def _is_short_floor_number_unit(unit) -> bool:
+    if unit.kind == "digit_run":
+        digits = "".join(char for char in unit.text if char.isdigit())
+        return 0 < len(digits) <= 2
+    if unit.kind == "alnum_run":
+        token = unit.text.strip()
+        return 0 < len(token) <= 3 and any(char.isdigit() for char in token)
+    return False
+
+
+def _unit_index_left_of_char(stream: StreamInput, char_index: int) -> int:
+    if char_index <= 0 or not stream.char_to_unit:
+        return -1
+    return stream.char_to_unit[char_index - 1]
+
+
+def _next_non_space_unit(stream: StreamInput, char_index: int):
+    if char_index < 0 or char_index >= len(stream.text) or not stream.units:
+        return None
+    ui = _unit_index_at_or_after(stream, char_index)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.kind not in {"space", "inline_gap"}:
+            return unit
+        ui += 1
+    return None
+
+
+def _previous_non_space_unit(stream: StreamInput, char_index: int):
+    ui = _unit_index_left_of_char(stream, char_index)
+    while 0 <= ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.kind not in {"space", "inline_gap"}:
+            return unit
+        ui -= 1
+    return None
+
+
+def _en_fl_context_kind(stream: StreamInput, start: int, end: int, *, matched_text: str) -> str | None:
+    token = str(matched_text or "").strip()
+    lowered = token.lower()
+    if lowered not in _EN_FL_FLOOR_KEYWORDS:
+        return None
+    previous = _previous_non_space_unit(stream, start)
+    next_unit = _next_non_space_unit(stream, end)
+    if (
+        (previous is not None and _is_short_floor_number_unit(previous))
+        or (next_unit is not None and _is_short_floor_number_unit(next_unit))
+    ):
+        return "floor"
+    if lowered == "floor":
+        return None
+    if token.isupper() and len(token) == 2:
+        return "state"
+    if previous is not None and previous.kind == "punct" and previous.text in ",，":
+        return "state"
+    if next_unit is not None and bool(_POSTAL_CODE_PATTERN.fullmatch(next_unit.text)):
+        return "state"
+    return None
+
+
+def _should_emit_en_address_value_match(
+    stream: StreamInput,
+    start: int,
+    end: int,
+    *,
+    matched_text: str,
+    component_type: AddressComponentType,
+) -> bool:
+    if component_type == AddressComponentType.PROVINCE and str(matched_text or "").strip().lower() == "fl":
+        return _en_fl_context_kind(stream, start, end, matched_text=matched_text) != "floor"
+    return True
+
+
+def _should_emit_en_address_key_match(
+    stream: StreamInput,
+    start: int,
+    end: int,
+    *,
+    matched_text: str,
+    component_type: AddressComponentType,
+) -> bool:
+    if component_type == AddressComponentType.DETAIL and str(matched_text or "").strip().lower() in _EN_FL_FLOOR_KEYWORDS:
+        return _en_fl_context_kind(stream, start, end, matched_text=matched_text) == "floor"
+    return True
+
+
+def _en_titlecase_like_token(token: str) -> bool:
+    stripped = str(token or "").strip()
+    if not stripped:
+        return False
+    if stripped.isupper() and stripped.isalpha():
+        return len(stripped) <= 4
+    return stripped[0].isalpha() and stripped[0].isupper()
+
+
+def _en_suffix_phrase_token_allowed(token: str, *, component_type: AddressComponentType) -> bool:
+    lowered = str(token or "").strip().lower()
+    if not lowered:
+        return False
+    if component_type == AddressComponentType.ROAD:
+        return (
+            lowered in _EN_DIRECTIONAL_TOKENS
+            or bool(_EN_ORDINAL_TOKEN_RE.fullmatch(lowered))
+            or _en_titlecase_like_token(token)
+        )
+    return _en_titlecase_like_token(token)
+
+
+def _en_suffix_phrase_start(stream: StreamInput, key_start: int, *, component_type: AddressComponentType) -> int | None:
+    if not stream.units or key_start <= 0:
+        return None
+    ui = _unit_index_left_of_char(stream, key_start)
+    earliest_start: int | None = None
+    token_count = 0
+    while 0 <= ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.kind in {"space", "inline_gap"}:
+            ui -= 1
+            continue
+        if unit.kind == "punct" or unit.kind == "ocr_break" or any(is_any_break(char) for char in unit.text):
+            break
+        token = unit.text.strip()
+        if not _en_suffix_phrase_token_allowed(token, component_type=component_type):
+            break
+        earliest_start = unit.char_start
+        token_count += 1
+        if token_count >= 3:
+            break
+        ui -= 1
+    return earliest_start if token_count > 0 else None
+
+
+def _next_non_space_unit_after_direction(stream: StreamInput, direction_end: int):
+    if direction_end >= len(stream.text):
+        return None
+    ui = _unit_index_at_or_after(stream, direction_end)
+    while ui < len(stream.units):
+        unit = stream.units[ui]
+        if unit.kind in {"space", "inline_gap"}:
+            ui += 1
+            continue
+        return unit
+    return None
+
+
+def _extend_en_road_key_end_with_direction(stream: StreamInput, raw_end: int) -> int:
+    if raw_end >= len(stream.text) or not stream.units:
+        return raw_end
+    direction_unit = _next_non_space_unit(stream, raw_end)
+    if direction_unit is None:
+        return raw_end
+    token = direction_unit.text.strip().lower()
+    if token not in _EN_DIRECTIONAL_TOKENS:
+        return raw_end
+    next_unit = _next_non_space_unit_after_direction(stream, direction_unit.char_end)
+    if next_unit is not None and next_unit.kind not in {"punct", "ocr_break"}:
+        return raw_end
+    return direction_unit.char_end
+
+
+def _build_en_suffix_phrase_value_clue(
+    ctx: DetectContext,
+    stream: StreamInput,
+    *,
+    raw_start: int,
+    raw_end: int,
+    matched_text: str,
+    component_type: AddressComponentType,
+    strength: ClaimStrength,
+) -> Clue | None:
+    if component_type not in _EN_SUFFIX_PHRASE_COMPONENTS:
+        return None
+    phrase_start = _en_suffix_phrase_start(stream, raw_start, component_type=component_type)
+    if phrase_start is None or phrase_start >= raw_start:
+        return None
+    phrase_text = clean_value(stream.text[phrase_start:raw_end])
+    if not phrase_text:
+        return None
+    normalized = _normalize_address_value(component_type, stream.text[phrase_start:raw_end])
+    if not normalized:
+        return None
+    unit_start, unit_last = _char_span_to_unit_span(stream, phrase_start, raw_end)
+    return Clue(
+        clue_id=ctx.next_clue_id(),
+        family=ClueFamily.ADDRESS,
+        role=ClueRole.VALUE,
+        attr_type=PIIAttributeType.ADDRESS,
+        strength=strength,
+        start=phrase_start,
+        end=raw_end,
+        text=phrase_text,
+        unit_start=unit_start,
+        unit_last=unit_last,
+        source_kind=f"address_phrase_{component_type.value}",
+        component_type=component_type,
+        source_metadata={"derived_from_keyword": [matched_text]},
+    )
 
 
 @lru_cache(maxsize=1)
@@ -1462,6 +1936,11 @@ def _negative_word_matcher() -> AhoMatcher:
     )
 
 
+def _negative_scope_for_source_kind(source_kind: str) -> str:
+    """把 negative source_kind 映射到稳定的运行时 scope。"""
+    return _NEGATIVE_SCOPE_BY_SOURCE_KIND.get(str(source_kind or ""), "generic")
+
+
 def _iter_negative_word_specs() -> tuple[tuple[str, str], ...]:
     return tuple(
         [
@@ -1474,33 +1953,11 @@ def _iter_negative_word_specs() -> tuple[tuple[str, str], ...]:
 
 
 def _resolve_structured_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
-    """hard clue 裁决：仅覆盖“被完全包含”的 clue。
-
-    规则：
-    - 若 A 的区间完全包含 B（含相等区间），则 B 被覆盖（移除）。
-    - 若两条 clue 仅“部分重叠”，但互不完全包含，则两者都保留。
-
-    实现上仍使用“更长 / 更高来源优先级”的排序来稳定地先处理更强的 clue，
-    但冲突判定从“任意重叠即互斥”改为“仅完全包含才覆盖”。
-    """
+    """STRUCTURED 线索也走统一的同属性裁决。"""
     if not clues:
         return ()
-    ranked = sorted(
-        clues,
-        key=lambda c: (
-            -(c.end - c.start),
-            -_HARD_SOURCE_PRIORITY.get((c.source_metadata.get("hard_source") or [""])[0], 0),
-            c.start,
-        ),
-    )
-    accepted: list[Clue] = []
-    for clue in ranked:
-        if any(a.start <= clue.start and clue.end <= a.end for a in accepted):
-            continue
-        accepted = [a for a in accepted if not (clue.start <= a.start and a.end <= clue.end)]
-        accepted.append(clue)
-    accepted.sort(key=lambda c: (c.start, c.end))
-    return tuple(accepted)
+    ordered = sorted(clues, key=lambda c: (c.start, c.end, _family_order(c.family)))
+    return tuple(_resolve_same_attr_clues(ordered))
 
 
 def _build_soft_scan_segments(
@@ -1674,18 +2131,18 @@ def _segment_trimmed_unit_bounds(segment: _ScanSegment) -> tuple[int, int] | Non
     """返回 segment 去掉空白与 inline gap 后的 unit 边界。"""
     stream = segment.stream
     raw_end = _segment_raw_end(segment)
-    unit_start, unit_end = _char_span_to_unit_span(stream, segment.raw_start, raw_end)
-    if unit_start >= unit_end:
+    unit_start, unit_last = _char_span_to_unit_span(stream, segment.raw_start, raw_end)
+    if unit_last < unit_start:
         return None
     left = unit_start
-    while left < unit_end and stream.units[left].kind in {"space", "inline_gap"}:
+    while left <= unit_last and stream.units[left].kind in {"space", "inline_gap"}:
         left += 1
-    right = unit_end - 1
+    right = unit_last
     while right >= left and stream.units[right].kind in {"space", "inline_gap"}:
         right -= 1
     if left > right:
         return None
-    return (left, right + 1)
+    return (left, right)
 
 
 def _seed_side_is_blank_or_boundary(stream: StreamInput, *, unit_index: int, is_left: bool) -> bool:
@@ -1700,8 +2157,8 @@ def _seed_side_is_blank_or_boundary(stream: StreamInput, *, unit_index: int, is_
     return nxt.kind in {"space", *_LABEL_BOUNDARY_UNIT_KINDS}
 
 
-def _has_label_connector_after(stream: StreamInput, unit_end: int) -> bool:
-    scan = unit_end
+def _has_label_connector_after(stream: StreamInput, unit_last: int) -> bool:
+    scan = unit_last + 1
     while scan < len(stream.units) and stream.units[scan].kind in {"space", "inline_gap"}:
         scan += 1
     if scan >= len(stream.units):
@@ -1721,25 +2178,31 @@ def _seed_metadata(
     """为 LABEL/START 生成统一的边界元数据。"""
     stream = segment.stream
     metadata = {key: list(values) for key, values in (extra_metadata or {}).items()}
-    unit_start, unit_end = _char_span_to_unit_span(stream, raw_start, raw_end)
+    unit_start, unit_last = _char_span_to_unit_span(stream, raw_start, raw_end)
     trimmed_bounds = _segment_trimmed_unit_bounds(segment)
     seed_is_left_edge = False
     seed_is_right_edge = False
     seed_segment_ratio = 0.0
     if trimmed_bounds is not None:
-        trimmed_start, trimmed_end = trimmed_bounds
+        trimmed_start, trimmed_last = trimmed_bounds
         seed_is_left_edge = unit_start == trimmed_start
-        seed_is_right_edge = unit_end == trimmed_end
+        seed_is_right_edge = unit_last == trimmed_last
         trimmed_raw_start = stream.units[trimmed_start].char_start
-        trimmed_raw_end = stream.units[trimmed_end - 1].char_end
+        trimmed_raw_end = stream.units[trimmed_last].char_end
         trimmed_length = max(1, trimmed_raw_end - trimmed_raw_start)
         seed_segment_ratio = round((raw_end - raw_start) / trimmed_length, 4)
 
-    seed_has_connector_after = _has_label_connector_after(stream, unit_end)
+    seed_has_connector_after = _has_label_connector_after(stream, unit_last)
     seed_surrounded = _seed_side_is_blank_or_boundary(stream, unit_index=unit_start, is_left=True) and _seed_side_is_blank_or_boundary(
         stream,
-        unit_index=unit_end,
+        unit_index=unit_last + 1,
         is_left=False,
+    )
+    seed_locale = _resolve_seed_locale(
+        stream,
+        raw_start=raw_start,
+        raw_end=raw_end,
+        locale_profile=str(stream.metadata.get("locale_profile", "mixed")),
     )
     metadata["seed_is_left_edge"] = ["1" if seed_is_left_edge else "0"]
     metadata["seed_is_right_edge"] = ["1" if seed_is_right_edge else "0"]
@@ -1747,26 +2210,130 @@ def _seed_metadata(
     metadata["seed_surrounded_by_boundary"] = ["1" if seed_surrounded else "0"]
     metadata["seed_segment_ratio"] = [f"{seed_segment_ratio:.4f}"]
     metadata["seed_kind"] = [seed_kind]
+    metadata["seed_locale"] = [seed_locale]
     return metadata
 
 
-def _build_negative_index(
+def _unit_flag(unit) -> str | None:
+    """将 stream unit 映射为 unit bucket flag。"""
+    if unit.kind == "ocr_break":
+        return "OCR_BREAK"
+    if unit.kind == "inline_gap":
+        return "INLINE_GAP"
+    if unit.kind == "space" or (unit.text or "").isspace():
+        return "SPACE"
+    if unit.kind == "punct":
+        return unit.text
+    return None
+
+
+def _negative_scopes_for_clue(clue: Clue) -> tuple[str, ...]:
+    """读取 negative clue 的 scope；缺失时做兼容兜底。"""
+    values = tuple(
+        scope
+        for scope in (clue.source_metadata.get("negative_scope") or ())
+        if scope in NEGATIVE_SCOPES
+    )
+    if values:
+        return values
+    inferred = _NEGATIVE_SCOPE_BY_SOURCE_KIND.get(clue.source_kind)
+    if inferred is not None:
+        return (inferred,)
+    # 手写测试 clue 可能没有 source_kind / metadata，默认保留旧“全局 negative”语义。
+    return NEGATIVE_SCOPES
+
+
+def _build_unit_index(
     stream: StreamInput,
-    negative_clues: list[Clue],
-) -> tuple[list[int], list[int], int]:
-    """把 negative clue 列表折叠为 unit 级覆盖索引。"""
-    unit_spans = [
-        (clue.unit_start, clue.unit_end)
-        for clue in negative_clues
-        if clue.role == ClueRole.NEGATIVE and clue.unit_start < clue.unit_end
-    ]
-    return build_negative_unit_index(len(stream.units), unit_spans)
+    clues: tuple[Clue, ...],
+    negative_clues: tuple[Clue, ...],
+    inspire_entries: tuple[InspireEntry, ...] = (),
+) -> tuple[UnitBucket, ...]:
+    """按 survivor clue 与 negative clue 构建 unit bucket。"""
+    unit_count = len(stream.units)
+    builders = [
+            {
+                "flag": _unit_flag(unit),
+                "structured": [],
+                "license_plate": [],
+                "address": [],
+            "name": [],
+            "organization": [],
+                "covering": [],
+                "inspire": [],
+                "break_start": False,
+                "negative_cover_scopes": set(),
+                "negative_start_scopes": set(),
+            }
+            for unit in stream.units
+        ]
+
+    family_key = {
+        ClueFamily.STRUCTURED: "structured",
+        ClueFamily.LICENSE_PLATE: "license_plate",
+        ClueFamily.ADDRESS: "address",
+        ClueFamily.NAME: "name",
+        ClueFamily.ORGANIZATION: "organization",
+    }
+    for clue_index, clue in enumerate(clues):
+        if 0 <= clue.unit_start < unit_count and clue.family in family_key:
+            builders[clue.unit_start][family_key[clue.family]].append(clue_index)
+        if 0 <= clue.unit_start < unit_count and clue.role == ClueRole.BREAK:
+            builders[clue.unit_start]["break_start"] = True
+        if clue.unit_last < clue.unit_start:
+            continue
+        for ui in range(max(0, clue.unit_start), min(unit_count - 1, clue.unit_last) + 1):
+            builders[ui]["covering"].append(clue_index)
+
+    for inspire_index, inspire in enumerate(inspire_entries):
+        if 0 <= inspire.unit_start < unit_count:
+            builders[inspire.unit_start]["inspire"].append(inspire_index)
+
+    for clue in negative_clues:
+        if clue.unit_last < clue.unit_start:
+            continue
+        start = max(0, clue.unit_start)
+        end = min(unit_count - 1, clue.unit_last)
+        if start >= unit_count:
+            continue
+        scopes = _negative_scopes_for_clue(clue)
+        builders[start]["negative_start_scopes"].update(scopes)
+        for ui in range(start, end + 1):
+            builders[ui]["negative_cover_scopes"].update(scopes)
+
+    buckets: list[UnitBucket] = []
+    for builder in builders:
+        can_start_parser = tuple(
+            family
+            for family in _PARSER_FAMILY_ORDER
+            if any(
+                clues[clue_index].role in _START_ROLES_BY_FAMILY[family]
+                for clue_index in builder[family.value]
+            )
+        )
+        buckets.append(
+            UnitBucket(
+                flag=builder["flag"],
+                structured_clues=tuple(builder["structured"]),
+                license_plate_clues=tuple(builder["license_plate"]),
+                address_clues=tuple(builder["address"]),
+                name_clues=tuple(builder["name"]),
+                organization_clues=tuple(builder["organization"]),
+                covering_clues=tuple(builder["covering"]),
+                inspire_entries=tuple(builder["inspire"]),
+                can_start_parser=can_start_parser,
+                break_start=bool(builder["break_start"]),
+                negative_cover_scopes=tuple(sorted(builder["negative_cover_scopes"])),
+                negative_start_scopes=tuple(sorted(builder["negative_start_scopes"])),
+            )
+        )
+    return tuple(buckets)
 
 
 def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[int, int]:
     if not stream.char_to_unit or start >= end:
-        return (0, 0)
-    return (stream.char_to_unit[start], stream.char_to_unit[end - 1] + 1)
+        return (0, -1)
+    return (stream.char_to_unit[start], stream.char_to_unit[end - 1])
 
 
 def _has_label_boundary(stream: StreamInput, raw_start: int, raw_end: int) -> bool:
@@ -1778,16 +2345,173 @@ def _has_label_boundary(stream: StreamInput, raw_start: int, raw_end: int) -> bo
     """
     if not stream.char_to_unit:
         return True
-    unit_start, unit_end = _char_span_to_unit_span(stream, raw_start, raw_end)
-    if unit_start >= unit_end:
+    unit_start, unit_last = _char_span_to_unit_span(stream, raw_start, raw_end)
+    if unit_last < unit_start:
         return True
     # 左侧：起始位置或相邻 unit 为边界类型。
     if unit_start == 0 or stream.units[unit_start - 1].kind in _LABEL_BOUNDARY_UNIT_KINDS:
         return True
     # 右侧：末尾位置或相邻 unit 为边界类型。
-    if unit_end >= len(stream.units) or stream.units[unit_end].kind in _LABEL_BOUNDARY_UNIT_KINDS:
+    if unit_last + 1 >= len(stream.units) or stream.units[unit_last + 1].kind in _LABEL_BOUNDARY_UNIT_KINDS:
         return True
     return False
+
+
+def _has_cjk_char(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in str(text or ""))
+
+
+def _is_non_empty_seed_probe_unit(unit) -> bool:
+    if unit.kind in {"space", "inline_gap", "ocr_break", "punct"}:
+        return False
+    return bool(str(unit.text or "").strip())
+
+
+def _resolve_seed_locale(
+    stream: StreamInput,
+    *,
+    raw_start: int,
+    raw_end: int,
+    locale_profile: str,
+) -> str:
+    """按 locale_profile 与邻近脚本，产出 LABEL/START 的 seed_locale。"""
+    profile = str(locale_profile or "mixed").strip().lower()
+    if profile == "zh_cn":
+        return "zh"
+    if profile == "en_us":
+        return "en"
+    if not stream.units or not stream.char_to_unit or raw_start >= raw_end:
+        return "zh" if _has_cjk_char(stream.text[raw_start:raw_end]) else "en"
+
+    unit_start, unit_last = _char_span_to_unit_span(stream, raw_start, raw_end)
+    saw_probe_unit = False
+    left_probe = unit_start - 1
+    while left_probe >= 0:
+        if _is_non_empty_seed_probe_unit(stream.units[left_probe]):
+            saw_probe_unit = True
+            if _has_cjk_char(stream.units[left_probe].text):
+                return "zh"
+            break
+        left_probe -= 1
+
+    right_probe = unit_last + 1
+    while right_probe < len(stream.units):
+        if _is_non_empty_seed_probe_unit(stream.units[right_probe]):
+            saw_probe_unit = True
+            if _has_cjk_char(stream.units[right_probe].text):
+                return "zh"
+            break
+        right_probe += 1
+
+    if saw_probe_unit:
+        return "en"
+    return "zh" if _has_cjk_char(stream.text[raw_start:raw_end]) else "en"
+
+
+def _zh_label_has_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bool:
+    if not stream.units or clue.unit_last + 1 >= len(stream.units):
+        return False
+    next_unit = stream.units[clue.unit_last + 1]
+    if next_unit.kind in {"space", "inline_gap", "ocr_break"}:
+        return True
+    return next_unit.kind == "punct" and next_unit.text in _LABEL_FIELD_SEPARATOR_CHARS
+
+
+def _en_label_has_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bool:
+    """英文 label direct 仅接受明确字段分隔，不把单空格当 direct。"""
+    if not stream.units or clue.unit_last + 1 >= len(stream.units):
+        return False
+    next_units = stream.units[clue.unit_last + 1 : clue.unit_last + 3]
+    if len(next_units) >= 2 and all(unit.kind == "space" for unit in next_units[:2]):
+        return True
+    for unit in next_units:
+        if unit.kind in {"inline_gap", "ocr_break"}:
+            return True
+        if unit.kind == "punct" and unit.text in _EN_LABEL_DIRECT_SEPARATOR_CHARS:
+            return True
+    return False
+
+
+_ADDRESS_DERIVED_LABEL_GAP_KINDS = frozenset({"ocr_break", "inline_gap"})
+
+
+def _is_address_derived_label(clue: Clue) -> bool:
+    return (
+        clue.family == ClueFamily.ADDRESS
+        and clue.role == ClueRole.LABEL
+        and "derived_from_address_key" in clue.source_metadata
+    )
+
+
+def _has_address_derived_label_left_boundary(stream: StreamInput, clue: Clue) -> bool:
+    if not stream.units or clue.unit_start <= 0:
+        return False
+    prev_unit = stream.units[clue.unit_start - 1]
+    if prev_unit.kind in _ADDRESS_DERIVED_LABEL_GAP_KINDS:
+        return clue.unit_last + 1 < len(stream.units) and stream.units[clue.unit_last + 1].kind in _ADDRESS_DERIVED_LABEL_GAP_KINDS
+    if clue.unit_start < 2 or clue.unit_last + 2 > len(stream.units):
+        return False
+    return all(unit.kind == "space" for unit in stream.units[clue.unit_start - 2: clue.unit_start]) and all(
+        unit.kind == "space" for unit in stream.units[clue.unit_last + 1: clue.unit_last + 3]
+    )
+
+
+def _try_promote_address_key_to_derived_label(clue: Clue, stream: StreamInput) -> Clue:
+    if clue.family != ClueFamily.ADDRESS or clue.role != ClueRole.KEY:
+        return clue
+    if not _has_address_derived_label_left_boundary(stream, clue):
+        return clue
+    levels = clue.component_levels or ((clue.component_type,) if clue.component_type is not None else ())
+    metadata = {key: list(values) for key, values in clue.source_metadata.items()}
+    metadata["derived_from_address_key"] = [clue.text]
+    metadata["seed_kind"] = ["label"]
+    return replace(
+        clue,
+        role=ClueRole.LABEL,
+        strength=ClaimStrength.SOFT,
+        source_kind="address_keyword_derived_label",
+        source_metadata=metadata,
+        component_levels=tuple(levels),
+    )
+
+
+def _has_label_direct_seed_break_after(
+    stream: StreamInput,
+    clue: Clue,
+    *,
+    locale_profile: str,
+) -> bool:
+    """判断非结构化 label 右侧是否满足 direct seed 条件。"""
+    if _is_address_derived_label(clue):
+        return True
+    if clue.family not in {ClueFamily.NAME, ClueFamily.ORGANIZATION}:
+        return _zh_label_has_direct_seed_break_after(stream, clue)
+    seed_locale = (clue.source_metadata.get("seed_locale") or [None])[0]
+    if seed_locale not in {"zh", "en"}:
+        seed_locale = _resolve_seed_locale(
+            stream,
+            raw_start=clue.start,
+            raw_end=clue.end,
+            locale_profile=locale_profile,
+        )
+    if seed_locale == "zh":
+        return _zh_label_has_direct_seed_break_after(stream, clue)
+    return _en_label_has_direct_seed_break_after(stream, clue)
+
+
+def _build_inspire_entry(clue: Clue) -> InspireEntry | None:
+    """将降级的非结构化 label 转成 inspire side channel。"""
+    if clue.attr_type is None or clue.family in {ClueFamily.STRUCTURED, ClueFamily.CONTROL}:
+        return None
+    return InspireEntry(
+        attr_type=clue.attr_type,
+        family=clue.family,
+        start=clue.start,
+        end=clue.end,
+        unit_start=clue.unit_start,
+        unit_last=clue.unit_last,
+        clue_id=clue.clue_id,
+    )
 
 
 _LABEL_START_CONNECTOR_SKIPPABLE_UNIT_KINDS = frozenset({"space", "inline_gap"})
@@ -1802,14 +2526,14 @@ def _try_convert_label_to_start(stream: StreamInput, clue: Clue) -> Clue | None:
             clue,
             role=ClueRole.START,
             end=stream.units[target_unit_index].char_end,
-            unit_end=target_unit_index + 1,
+            unit_last=target_unit_index,
             text=stream.text[clue.start : stream.units[target_unit_index].char_end],
             source_metadata=metadata,
         )
 
-    if not stream.units or clue.unit_end >= len(stream.units):
+    if not stream.units or clue.unit_last + 1 >= len(stream.units):
         return None
-    next_idx = clue.unit_end
+    next_idx = clue.unit_last + 1
     # 中文：紧邻的下一个 unit 是"是"。
     if stream.units[next_idx].text == "是":
         return _as_start(next_idx)
@@ -1834,12 +2558,12 @@ def _normalize_ascii_match(
         return (start, end, matched_text)
     if not stream.char_to_unit or start < 0 or end > len(stream.text) or start >= end:
         return None
-    unit_start, unit_end = _char_span_to_unit_span(stream, start, end)
-    if unit_start >= unit_end:
+    unit_start, unit_last = _char_span_to_unit_span(stream, start, end)
+    if unit_last < unit_start:
         return None
     first_unit = stream.units[unit_start]
-    last_unit = stream.units[unit_end - 1]
-    if unit_start == unit_end - 1 and first_unit.kind == "ascii_word":
+    last_unit = stream.units[unit_last]
+    if unit_start == unit_last and first_unit.kind == "ascii_word":
         if not _ascii_unit_text_matches(first_unit.text, pattern_text):
             return None
         return (first_unit.char_start, first_unit.char_end, first_unit.text)
@@ -2100,10 +2824,16 @@ def _company_value_matcher() -> AhoMatcher:
 @lru_cache(maxsize=1)
 def _zh_address_value_matcher() -> AhoMatcher:
     lexicon = load_zh_geo_lexicon()
+    # 直辖市 / 特别行政区不再做 scanner 端的 special-case 搬运：
+    # 词典已在 provinces 与 cities 两层同时登记（例：北京 ∈ provinces.soft ∩ cities.soft），
+    # 由下方 dual-emit 机制自然注册为 (PROVINCE, CITY) 两条 clue，
+    # 落到 _flush_chain_as_standalone 时再按 _DraftComponent.level 元组合并为 MULTI_ADMIN。
     geo_specs: tuple[tuple[AddressComponentType, tuple[GeoEntry, ...]], ...] = (
         (AddressComponentType.PROVINCE, lexicon.provinces),
         (AddressComponentType.CITY, lexicon.cities),
         (AddressComponentType.DISTRICT, lexicon.districts),
+        # 县级市（张家港等）独立注册为 DISTRICT_CITY；与 DISTRICT 同 rank、共享 SINGLE_OCCUPY 槽位。
+        (AddressComponentType.DISTRICT_CITY, lexicon.district_cities),
     )
     patterns: list[AhoPattern] = []
     # 中文行政 value 允许同文案多层级并存（如“朝阳”可同时是 city/district），
@@ -2142,6 +2872,20 @@ def _zh_control_value_matcher() -> AhoMatcher:
                 ascii_boundary=False,
             )
             for item in load_zh_control_values()
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _en_control_value_matcher() -> AhoMatcher:
+    return AhoMatcher.from_patterns(
+        tuple(
+            AhoPattern(
+                text=text,
+                payload=text,
+                ascii_boundary=True,
+            )
+            for text in ("is", "are", "am")
         )
     )
 
@@ -2189,6 +2933,9 @@ def _en_address_value_matcher() -> AhoMatcher:
     geo_entry_specs: tuple[tuple[AddressComponentType, tuple[GeoEntry, ...]], ...] = (
         (AddressComponentType.PROVINCE, tuple([*lexicon.state_names, *lexicon.state_codes])),
         (AddressComponentType.CITY, lexicon.cities),
+        # Borough/行政区登记为 DISTRICT，与 city 解耦；同一文本若兼具多层级由下游按
+        # (component_type, text) 去重后组合为 MULTI_ADMIN（参见 §6.1）。
+        (AddressComponentType.DISTRICT, lexicon.districts),
     )
     # 国家别名去重后以 SOFT 补入。
     country_names = tuple(
@@ -2199,6 +2946,8 @@ def _en_address_value_matcher() -> AhoMatcher:
         )
     )
     patterns: list[AhoPattern] = []
+    # §6.1：按 (component_type, text) 去重，使同一串 (如 "New York") 可同时登记为 state+city，
+    # 交给下游 address stack 通过 _DraftComponent.level 元组合并为 MULTI_ADMIN。
     seen: set[tuple[AddressComponentType, str]] = set()
     for component_type, entries in geo_entry_specs:
         for entry in sorted(entries, key=lambda e: len(e.text), reverse=True):
@@ -2218,10 +2967,10 @@ def _en_address_value_matcher() -> AhoMatcher:
                 )
             )
     for name in country_names:
-        lower = name.lower()
-        if (AddressComponentType.COUNTRY, lower) in seen:
+        dedupe_key = (AddressComponentType.COUNTRY, name.lower())
+        if dedupe_key in seen:
             continue
-        seen.add((AddressComponentType.COUNTRY, lower))
+        seen.add(dedupe_key)
         patterns.append(
             AhoPattern(
                 text=name,
@@ -2271,101 +3020,206 @@ def _en_address_key_matcher() -> AhoMatcher:
 
 
 def _dedupe_clues(clues: list[Clue]) -> list[Clue]:
-    """去重并执行同属性完全包含覆盖。"""
-
-    def _preserve_same_span_zh_admin_value(
-        kept: Clue,
-        current: Clue,
-    ) -> bool:
-        admin_types = {
-            AddressComponentType.PROVINCE,
-            AddressComponentType.CITY,
-            AddressComponentType.DISTRICT,
-            AddressComponentType.SUBDISTRICT,
-        }
-        if (
-            kept.attr_type != PIIAttributeType.ADDRESS
-            or current.attr_type != PIIAttributeType.ADDRESS
-            or kept.role != ClueRole.VALUE
-            or current.role != ClueRole.VALUE
-            or kept.component_type not in admin_types
-            or current.component_type not in admin_types
-            or kept.component_type == current.component_type
-        ):
-            return False
-        if kept.start != current.start or kept.end != current.end:
-            return False
-        if kept.text.lower() != current.text.lower():
-            return False
-        return any("\u4e00" <= char <= "\u9fff" for char in current.text)
+    """只去掉字段完全一致的重复 clue。"""
 
     seen: set[tuple[object, ...]] = set()
     ordered: list[Clue] = []
-    for clue in sorted(
-        clues,
-        key=lambda item: (
-            item.start,
-            -(item.end - item.start),
-            _family_order(item.family),
-            item.role.value,
-            item.attr_type.value if item.attr_type is not None else "",
-            item.component_type or "",
-            item.break_type or "",
-        ),
-    ):
+    for clue in clues:
         key = (
+            clue.family,
             clue.role,
             clue.attr_type,
             clue.component_type,
+            clue.component_levels,
             clue.strength,
             clue.break_type,
             clue.source_kind,
             clue.start,
             clue.end,
-            clue.text.lower(),
+            clue.text,
+            clue.unit_start,
+            clue.unit_last,
+            tuple(
+                (meta_key, tuple(meta_values))
+                for meta_key, meta_values in sorted(clue.source_metadata.items())
+            ),
         )
         if key in seen:
             continue
-        # 通用同属性线索覆盖：若 clue 被已保留 clue 完全包含（含相等），则子 clue 被覆盖丢弃。
-        # ADDRESS 不在这里覆盖，统一交给 _apply_address_component_coverage。
-        # 典型：district KEY “新区” 覆盖 “区”。
-        covered = False
-        for kept in reversed(ordered):
-            if _preserve_same_span_zh_admin_value(kept, clue):
-                continue
-            if _same_attr_full_containment_cover(kept, clue):
-                covered = True
-                break
-            if kept.start < clue.start and kept.end <= clue.start:
-                # 已离开可能覆盖范围。
-                break
-        if covered:
-            continue
         seen.add(key)
         ordered.append(clue)
-    return sorted(ordered, key=lambda item: (item.start, _family_order(item.family), item.end))
+    return ordered
 
 
-def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], list[InspireEntry]]:
-    """事件扫描线裁决所有 clue 重叠。
+def _resolve_same_attr_clues(clues: Sequence[Clue]) -> list[Clue]:
+    """同属性裁决只比较 strength 与 span。"""
+    buckets: dict[PIIAttributeType, list[Clue]] = {}
+    for clue in clues:
+        if clue.attr_type is None:
+            continue
+        buckets.setdefault(clue.attr_type, []).append(clue)
+    if not buckets:
+        return list(clues)
 
-    1. 扫描轮 1：STRUCTURED / BREAK 遮蔽，同时收集 seed 连通块；LABEL 当场做边界判断与 START 转换。
-       不满足边界条件的 label 收集为 InspireEntry。
-    2. Seed 裁决：完全包含→大的覆盖；否则保留 start 更靠后的。
-    3. 扫描轮 2：seed 依赖规则。
-    4. 姓名组件覆盖。
-    5. 地址组件覆盖：ADDRESS family 内仅在严格完全包含时覆盖，部分重叠保留。
-    6. Label vs soft content：完全包含→大的覆盖；其余保留。
+    kept_by_id: dict[str, Clue] = {}
+    for bucket in buckets.values():
+        accepted: list[Clue] = []
+        for incoming in bucket:
+            drop_incoming = False
+            beaten_indices: list[int] = []
+            for index, existing in enumerate(accepted):
+                if not _clues_overlap(existing, incoming):
+                    continue
+                if _clues_same_exact_span(existing, incoming):
+                    existing_rank = _claim_strength_rank(existing.strength)
+                    incoming_rank = _claim_strength_rank(incoming.strength)
+                    if existing_rank > incoming_rank:
+                        drop_incoming = True
+                        break
+                    if incoming_rank > existing_rank:
+                        beaten_indices.append(index)
+                        continue
+                    if existing.attr_type == PIIAttributeType.ADDRESS and existing.role == incoming.role:
+                        accepted[index] = _merge_exact_equal_address_clues(existing, incoming)
+                        drop_incoming = True
+                        break
+                    if existing.role == ClueRole.ALIAS and incoming.role != ClueRole.ALIAS:
+                        beaten_indices.append(index)
+                        continue
+                    drop_incoming = True
+                    break
+                outcome = _same_attr_overlap_winner(existing, incoming)
+                if outcome == "existing":
+                    drop_incoming = True
+                    break
+                if outcome == "incoming":
+                    beaten_indices.append(index)
+            if drop_incoming:
+                continue
+            for index in reversed(beaten_indices):
+                del accepted[index]
+            accepted.append(incoming)
+        for clue in accepted:
+            kept_by_id[clue.clue_id] = clue
 
-    返回 (resolved_clues, inspire_entries)。
-    """
+    return [
+        kept_by_id.get(clue.clue_id, clue)
+        for clue in clues
+        if clue.attr_type is None or clue.clue_id in kept_by_id
+    ]
+
+
+def _clues_same_exact_span(left: Clue, right: Clue) -> bool:
+    """判断两条 clue 是否命中同一段 char/unit 区间。"""
+    return (
+        left.start == right.start
+        and left.end == right.end
+        and left.unit_start == right.unit_start
+        and left.unit_last == right.unit_last
+    )
+
+
+def _clue_component_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    """统一读取地址 clue 的层级真相。"""
+    if clue.component_levels:
+        return tuple(clue.component_levels)
+    if clue.component_type is None:
+        return ()
+    return (clue.component_type,)
+
+
+def _ordered_component_levels(levels: Sequence[AddressComponentType]) -> tuple[AddressComponentType, ...]:
+    """稳定整理层级顺序：先行政层级，再保留其他首次出现顺序。"""
+    rank = {
+        AddressComponentType.PROVINCE: 0,
+        AddressComponentType.CITY: 1,
+        AddressComponentType.DISTRICT: 2,
+        AddressComponentType.DISTRICT_CITY: 3,
+        AddressComponentType.SUBDISTRICT: 4,
+    }
+    seen: list[AddressComponentType] = []
+    for level in levels:
+        if level not in seen:
+            seen.append(level)
+    admins = sorted((level for level in seen if level in rank), key=lambda item: rank[item])
+    others = [level for level in seen if level not in rank]
+    return tuple([*admins, *others])
+
+
+def _derived_component_type(levels: Sequence[AddressComponentType]) -> AddressComponentType | None:
+    ordered = _ordered_component_levels(levels)
+    if not ordered:
+        return None
+    if len(ordered) == 1:
+        return ordered[0]
+    return AddressComponentType.MULTI_ADMIN
+
+
+def _merge_exact_equal_address_clues(existing: Clue, incoming: Clue) -> Clue:
+    """把 exact-equal 地址 clue 合并成单条 survivor。"""
+    merged_levels = _ordered_component_levels([
+        *_clue_component_levels(existing),
+        *_clue_component_levels(incoming),
+    ])
+    merged_metadata = {
+        key: list(values)
+        for key, values in existing.source_metadata.items()
+    }
+    for key, values in incoming.source_metadata.items():
+        bucket = merged_metadata.setdefault(key, [])
+        for value in values:
+            if value not in bucket:
+                bucket.append(value)
+    return replace(
+        existing,
+        component_type=_derived_component_type(merged_levels),
+        component_levels=merged_levels,
+        source_metadata=merged_metadata,
+    )
+
+
+def _same_attr_overlap_winner(existing: Clue, incoming: Clue) -> str:
+    """返回同属性重叠时应保留的一侧。"""
+    existing_rank = _claim_strength_rank(existing.strength)
+    incoming_rank = _claim_strength_rank(incoming.strength)
+    if existing_rank > incoming_rank:
+        return "existing"
+    if incoming_rank > existing_rank:
+        return "incoming"
+    if existing.start == incoming.start and existing.end == incoming.end:
+        return "both"
+    if _strictly_contains(existing, incoming):
+        return "existing"
+    if _strictly_contains(incoming, existing):
+        return "incoming"
+    existing_len = existing.end - existing.start
+    incoming_len = incoming.end - incoming.start
+    if existing_len > incoming_len:
+        return "existing"
+    if incoming_len > existing_len:
+        return "incoming"
+    return "incoming"
+
+
+def _sweep_resolve(
+    stream: StreamInput,
+    clues: list[Clue],
+    *,
+    locale_profile: str = "mixed",
+) -> tuple[list[Clue], list[InspireEntry]]:
+    """按“跨属性遮蔽 + 同属性裁决”两层规则收敛 clue。"""
     if not clues:
         return [], []
     unit_len = len(stream.units)
     deduped = _dedupe_clues(clues)
 
-    # ── 轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块 + label 边界/START 转换 ──
-    survivors, seed_groups, inspire_entries = _sweep_pass1(stream, deduped, unit_len)
+    # ── 轮 1：STRUCTURED / BREAK 遮蔽 + seed 连通块 + label direct/inspire 分流 ──
+    survivors, seed_groups, inspire_entries = _sweep_pass1(
+        stream,
+        deduped,
+        unit_len,
+        locale_profile=locale_profile,
+    )
 
     # ── Seed 裁决 ──
     seed_winner_ids: set[str] = set()
@@ -2377,16 +3231,28 @@ def _sweep_resolve(stream: StreamInput, clues: list[Clue]) -> tuple[list[Clue], 
         if clue.role not in _SEED_ROLES or clue.clue_id in seed_winner_ids
     ]
 
-    # ── 轮 2：seed 依赖规则 ──
-    survivors = _sweep_pass2(survivors, unit_len)
+    # ── 普通 clue 的同属性裁决 ──
+    protected_ids = {
+        clue.clue_id
+        for clue in survivors
+        if clue.role in _SEED_ROLES
+        or clue.role == ClueRole.BREAK
+        or clue.family in {ClueFamily.STRUCTURED, ClueFamily.CONTROL}
+    }
+    ordinary = [
+        clue
+        for clue in survivors
+        if clue.clue_id not in protected_ids
+    ]
+    ordinary_resolved = _resolve_same_attr_clues(ordinary)
+    ordinary_by_id = {clue.clue_id: clue for clue in ordinary_resolved}
+    survivors = [
+        ordinary_by_id.get(clue.clue_id, clue)
+        for clue in survivors
+        if clue.clue_id in protected_ids or clue.clue_id in ordinary_by_id
+    ]
 
-    # ── 姓名组件覆盖 ──
-    survivors = _apply_name_component_coverage(survivors)
-
-    # ── 地址组件覆盖（仅完全包含时覆盖）──
-    survivors = _apply_address_component_coverage(survivors)
-
-    # ── Label vs soft content ──
+    # ── seed 严格包含普通 clue ──
     return _apply_seed_containment_coverage(survivors), inspire_entries
 
 
@@ -2399,7 +3265,7 @@ def _build_events(
     end_events: list[list[Clue]] = [[] for _ in range(unit_len + 1)]
     for clue in clues:
         start_events[clue.unit_start].append(clue)
-        end_events[clue.unit_end].append(clue)
+        end_events[clue.unit_last].append(clue)
     return start_events, end_events
 
 
@@ -2407,13 +3273,17 @@ def _sweep_pass1(
     stream: StreamInput,
     clues: list[Clue],
     unit_len: int,
+    *,
+    locale_profile: str = "mixed",
 ) -> tuple[list[Clue], list[list[Clue]], list[InspireEntry]]:
-    """扫描轮 1（unit 轴）：STRUCTURED / BREAK 遮蔽 + seed 连通块收集 + LABEL 边界/START 转换。
+    """扫描轮 1（unit 轴）：STRUCTURED / BREAK 遮蔽 + seed 连通块收集 + LABEL direct/inspire 分流。
 
     STRUCTURED 和 BREAK 无条件保留并形成活跃区间；
     其他 soft clue 落在活跃区间内则过滤。
-    LABEL 先尝试拼接"是"/"is"转 START；否则走边界过滤。
-    不满足边界条件的 label 收集为 InspireEntry，供后续消歧。
+    LABEL 先尝试拼接"是"/"is"转 START。
+    - STRUCTURED label 继续沿用旧边界过滤。
+    - 非 STRUCTURED label 若右侧满足 direct seed break，则保留为 direct LABEL。
+    - 否则降级为 inspire side channel，不进入 parser seed 流程。
     """
     start_events, end_events = _build_events(clues, unit_len)
 
@@ -2455,22 +3325,23 @@ def _sweep_pass1(
             if active_break > 0:
                 continue
 
-            # LABEL 当场判定：先尝试拼接"是"/"is"转 START，再走边界过滤。
+            # LABEL 当场判定：先尝试拼接"是"/"is"转 START，再做 direct/inspire 分流。
             if role == ClueRole.LABEL:
                 converted = _try_convert_label_to_start(stream, clue)
                 if converted is not None:
                     clue = converted
                     role = ClueRole.START
-                elif not _has_label_boundary(stream, clue.start, clue.end):
-                    # 不满足边界条件的 label 降级为 inspire 条目。
-                    if clue.attr_type is not None:
-                        inspire_entries.append(InspireEntry(
-                            attr_type=clue.attr_type,
-                            unit_start=clue.unit_start,
-                            unit_end=clue.unit_end,
-                            text=clue.text,
-                            source_kind=clue.source_kind,
-                        ))
+                elif clue.family == ClueFamily.STRUCTURED:
+                    if not _has_label_boundary(stream, clue.start, clue.end):
+                        continue
+                elif not _has_label_direct_seed_break_after(
+                    stream,
+                    clue,
+                    locale_profile=locale_profile,
+                ):
+                    inspire = _build_inspire_entry(clue)
+                    if inspire is not None:
+                        inspire_entries.append(inspire)
                     continue
 
             survivors.append(clue)
@@ -2482,7 +3353,7 @@ def _sweep_pass1(
                     if cur_seed_group:
                         seed_groups.append(cur_seed_group)
                     cur_seed_group = [clue]
-                seed_group_end = max(seed_group_end, clue.unit_end)
+                seed_group_end = max(seed_group_end, clue.unit_last)
 
     if cur_seed_group:
         seed_groups.append(cur_seed_group)
@@ -2505,123 +3376,6 @@ def _resolve_seed_group(group: list[Clue]) -> list[Clue]:
             continue
         survivors.append(clue)
     return survivors
-
-
-def _sweep_pass2(clues: list[Clue], unit_len: int) -> list[Clue]:
-    """扫描轮 2（unit 轴）：seed 遮蔽 soft_control，START 遮蔽 soft_content。"""
-    start_events, end_events = _build_events(clues, unit_len)
-
-    active_seed = 0
-    active_start = 0
-    survivors: list[Clue] = []
-
-    for pos in range(unit_len + 1):
-        for clue in end_events[pos]:
-            if clue.role in _SEED_ROLES:
-                active_seed -= 1
-                if clue.role == ClueRole.START:
-                    active_start -= 1
-
-        for clue in start_events[pos]:
-            role = clue.role
-
-            if role in _SEED_ROLES:
-                active_seed += 1
-                if role == ClueRole.START:
-                    active_start += 1
-                survivors.append(clue)
-                continue
-
-            if role in _START_MASKED_SOFT_ROLES and active_start > 0:
-                continue
-
-            survivors.append(clue)
-
-    return survivors
-
-
-def _apply_name_component_coverage(clues: list[Clue]) -> list[Clue]:
-    """姓名组件覆盖裁决。
-
-    FULL_NAME / ALIAS / FAMILY_NAME 仅在完全包含时做覆盖，部分重叠都保留。
-    """
-    full_name_winners = _resolve_name_component_overlap_winners(
-        [clue for clue in clues if clue.role == ClueRole.FULL_NAME]
-    )
-    full_name_ids = {clue.clue_id for clue in full_name_winners}
-
-    alias_candidates = [
-        clue
-        for clue in clues
-        if clue.role == ClueRole.ALIAS
-        and not any(_clues_overlap(clue, full_name) for full_name in full_name_winners)
-    ]
-    alias_winners = _resolve_name_component_overlap_winners(alias_candidates)
-    alias_ids = {clue.clue_id for clue in alias_winners}
-
-    family_name_winners = _resolve_name_component_overlap_winners(
-        [clue for clue in clues if clue.role == ClueRole.FAMILY_NAME]
-    )
-    family_name_ids = {clue.clue_id for clue in family_name_winners}
-
-    blocked_name_clues = [*full_name_winners, *alias_winners]
-    survivors: list[Clue] = []
-    for clue in clues:
-        if clue.role == ClueRole.FULL_NAME:
-            if clue.clue_id in full_name_ids:
-                survivors.append(clue)
-            continue
-        if clue.role == ClueRole.ALIAS:
-            if clue.clue_id in alias_ids:
-                survivors.append(clue)
-            continue
-        if clue.role == ClueRole.FAMILY_NAME:
-            if clue.clue_id not in family_name_ids:
-                continue
-            if any(_clues_overlap(clue, blocker) for blocker in blocked_name_clues):
-                continue
-        elif clue.role == ClueRole.GIVEN_NAME:
-            if any(_clues_overlap(clue, blocker) for blocker in blocked_name_clues):
-                continue
-        survivors.append(clue)
-    return survivors
-
-
-def _apply_address_component_coverage(clues: list[Clue]) -> list[Clue]:
-    """地址组件覆盖裁决：仅在 ADDRESS family 内按严格完全包含覆盖。"""
-    address_clues = [clue for clue in clues if clue.family == ClueFamily.ADDRESS]
-    if len(address_clues) <= 1:
-        return clues
-
-    dropped_ids: set[str] = set()
-    for clue in address_clues:
-        if clue.clue_id in dropped_ids:
-            continue
-        for other in address_clues:
-            if clue.clue_id == other.clue_id:
-                continue
-            # ADDRESS 维持专属覆盖规则：严格包含才覆盖，完全相等与部分重叠都保留。
-            if (
-                other.start <= clue.start
-                and clue.end <= other.end
-                and (other.start < clue.start or clue.end < other.end)
-            ):
-                dropped_ids.add(clue.clue_id)
-                break
-
-    return [clue for clue in clues if clue.clue_id not in dropped_ids]
-
-
-def _resolve_name_component_overlap_winners(clues: list[Clue]) -> list[Clue]:
-    """姓名组件重叠裁决：同属性完全包含时覆盖，部分重叠都保留。"""
-    if not clues:
-        return []
-    survivors: list[Clue] = []
-    for clue in clues:
-        if any(_same_attr_full_containment_cover(other, clue) for other in clues if other.clue_id != clue.clue_id):
-            continue
-        survivors.append(clue)
-    return sorted(survivors, key=lambda c: (c.start, c.end))
 
 
 def _apply_seed_containment_coverage(clues: list[Clue]) -> list[Clue]:
@@ -2654,15 +3408,20 @@ def _apply_seed_containment_coverage(clues: list[Clue]) -> list[Clue]:
     return [c for c in clues if c.clue_id not in dropped_ids]
 
 
-def _same_attr_full_containment_cover(container: Clue, contained: Clue) -> bool:
-    """通用同属性完全包含覆盖判定（不包含 ADDRESS）。"""
-    if container.attr_type is None or contained.attr_type is None:
-        return False
-    if container.attr_type != contained.attr_type:
-        return False
-    if container.attr_type == PIIAttributeType.ADDRESS:
-        return False
-    return container.start <= contained.start and contained.end <= container.end
+def _claim_strength_rank(strength: ClaimStrength) -> int:
+    return {
+        ClaimStrength.WEAK: 0,
+        ClaimStrength.SOFT: 1,
+        ClaimStrength.HARD: 2,
+    }[strength]
+
+
+def _strictly_contains(container: Clue, contained: Clue) -> bool:
+    return (
+        container.start <= contained.start
+        and contained.end <= container.end
+        and (container.start < contained.start or contained.end < container.end)
+    )
 
 
 def _skip_whitespace_right(raw_text: str, start: int) -> int:
@@ -2678,3 +3437,5 @@ def _clues_overlap(left: Clue, right: Clue) -> bool:
 
 def _overlaps_any(start: int, end: int, spans: Sequence[tuple[int, int]]) -> bool:
     return any(not (end <= left or start >= right) for left, right in spans)
+
+    stream.metadata["locale_profile"] = locale_profile

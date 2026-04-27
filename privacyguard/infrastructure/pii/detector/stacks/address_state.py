@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
@@ -42,19 +42,25 @@ from privacyguard.infrastructure.pii.detector.models import (
     StreamInput,
     strength_ge,
 )
-from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after
+from privacyguard.infrastructure.pii.detector.stacks.common import (
+    _unit_index_at_or_after,
+    valid_left_numeral_for_zh_address_key,
+)
 
 SINGLE_OCCUPY = frozenset({
     AddressComponentType.COUNTRY,
     AddressComponentType.PROVINCE,
     AddressComponentType.CITY,
     AddressComponentType.DISTRICT,
+    # DISTRICT_CITY 与 DISTRICT 共享行政层级语义（同 rank=2，SINGLE_OCCUPY 条目互斥）。
     AddressComponentType.DISTRICT_CITY,
-    AddressComponentType.MULTI_ADMIN,
     AddressComponentType.SUBDISTRICT,
     AddressComponentType.ROAD,
     AddressComponentType.HOUSE_NUMBER,
     AddressComponentType.NUMBER,
+    AddressComponentType.UNIT,
+    AddressComponentType.ROOM,
+    AddressComponentType.SUITE,
     AddressComponentType.POSTAL_CODE,
 })
 
@@ -63,7 +69,6 @@ _ADMIN_TYPES = frozenset({
     AddressComponentType.CITY,
     AddressComponentType.DISTRICT,
     AddressComponentType.DISTRICT_CITY,
-    AddressComponentType.MULTI_ADMIN,
     AddressComponentType.SUBDISTRICT,
 })
 
@@ -72,7 +77,6 @@ _COMMA_TAIL_ADMIN_TYPES = frozenset({
     AddressComponentType.CITY,
     AddressComponentType.DISTRICT,
     AddressComponentType.DISTRICT_CITY,
-    AddressComponentType.MULTI_ADMIN,
 })
 
 _SUSPECT_KEY_TYPES = frozenset({
@@ -85,6 +89,7 @@ _SUSPECT_KEY_TYPES = frozenset({
 _ADMIN_RANK: dict[AddressComponentType, int] = {
     AddressComponentType.SUBDISTRICT: 1,
     AddressComponentType.DISTRICT: 2,
+    # 县级市与 DISTRICT 同 rank；二者互斥占用同一槽位。
     AddressComponentType.DISTRICT_CITY: 2,
     AddressComponentType.CITY: 3,
     AddressComponentType.PROVINCE: 4,
@@ -94,6 +99,7 @@ _VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] =
     AddressComponentType.PROVINCE: frozenset({
         AddressComponentType.CITY,
         AddressComponentType.DISTRICT,
+        # PROVINCE 后继开放 DISTRICT_CITY，支持"江苏省→张家港市"跳层场景。
         AddressComponentType.DISTRICT_CITY,
         AddressComponentType.SUBDISTRICT,
         AddressComponentType.ROAD,
@@ -101,6 +107,7 @@ _VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] =
     }),
     AddressComponentType.CITY: frozenset({
         AddressComponentType.DISTRICT,
+        # CITY 后继开放 DISTRICT_CITY，支持"苏州市→张家港市"。
         AddressComponentType.DISTRICT_CITY,
         AddressComponentType.SUBDISTRICT,
         AddressComponentType.ROAD,
@@ -108,14 +115,12 @@ _VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] =
     }),
     AddressComponentType.DISTRICT: frozenset({
         AddressComponentType.SUBDISTRICT,
-        AddressComponentType.DISTRICT_CITY,
         AddressComponentType.ROAD,
         AddressComponentType.POI,
     }),
+    # DISTRICT_CITY 的后继集合与 DISTRICT 一致。
     AddressComponentType.DISTRICT_CITY: frozenset({
         AddressComponentType.SUBDISTRICT,
-        AddressComponentType.DISTRICT,
-        AddressComponentType.DISTRICT_CITY,
         AddressComponentType.ROAD,
         AddressComponentType.POI,
     }),
@@ -129,32 +134,61 @@ _VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] =
         AddressComponentType.NUMBER,
         AddressComponentType.POI,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.NUMBER: frozenset({
         AddressComponentType.POI,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
         AddressComponentType.DETAIL,
     }),
     AddressComponentType.POI: frozenset({
         AddressComponentType.NUMBER,
         AddressComponentType.BUILDING,
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
         AddressComponentType.DETAIL,
     }),
-    AddressComponentType.BUILDING: frozenset({AddressComponentType.DETAIL}),
+    AddressComponentType.BUILDING: frozenset({
+        AddressComponentType.UNIT,
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
+    }),
+    AddressComponentType.UNIT: frozenset({
+        AddressComponentType.ROOM,
+        AddressComponentType.SUITE,
+        AddressComponentType.DETAIL,
+    }),
+    AddressComponentType.ROOM: frozenset({AddressComponentType.DETAIL}),
+    AddressComponentType.SUITE: frozenset({AddressComponentType.DETAIL}),
     AddressComponentType.DETAIL: frozenset({AddressComponentType.DETAIL}),
 }
 
 _DETAIL_COMPONENTS = frozenset({
     AddressComponentType.BUILDING,
+    AddressComponentType.UNIT,
+    AddressComponentType.ROOM,
+    AddressComponentType.SUITE,
     AddressComponentType.DETAIL,
 })
+
+_ROOM_LEVEL_DETAIL_KEYS = frozenset({"室", "房", "户"})
 
 _DIGIT_TAIL_TRIGGER_TYPES = frozenset({
     AddressComponentType.ROAD,
     AddressComponentType.POI,
     AddressComponentType.NUMBER,
     AddressComponentType.BUILDING,
+    AddressComponentType.UNIT,
+    AddressComponentType.ROOM,
+    AddressComponentType.SUITE,
     AddressComponentType.DETAIL,
 })
 
@@ -167,222 +201,183 @@ _ALL_TYPES = frozenset(AddressComponentType)
 _SuccessorMap = Mapping[AddressComponentType, frozenset[AddressComponentType]]
 _CommitFn = Callable[["_DraftComponent"], bool]
 _IndexedClue = tuple[int, Clue]
+_ValidateKeyComponentFn = Callable[
+    ["_ParseState", tuple["_IndexedClue", ...], Clue, int, AddressComponentType],
+    bool,
+]
 
 
-def _ordered_component_levels(levels: Iterable[AddressComponentType]) -> tuple[AddressComponentType, ...]:
-    ordered: list[AddressComponentType] = []
-    for level in levels:
-        if level not in _ADMIN_RANK or level in ordered:
-            continue
-        ordered.append(level)
-    return tuple(sorted(ordered, key=lambda item: _ADMIN_RANK[item], reverse=True))
-
-
-def _component_levels(
-    comp_type: AddressComponentType,
-    levels: tuple[AddressComponentType, ...] = (),
+def _ordered_component_level(
+    level: tuple[AddressComponentType, ...] | list[AddressComponentType] | Iterable[AddressComponentType],
 ) -> tuple[AddressComponentType, ...]:
-    if comp_type == AddressComponentType.MULTI_ADMIN:
-        return _ordered_component_levels(levels)
-    if comp_type in _ADMIN_RANK:
-        return (comp_type,)
-    return ()
+    """把 level 元组按 `_ADMIN_RANK` 降序排列；非 admin 层与未入 rank 表的层排在其后，保持原相对顺序。
 
-
-def _admin_rank_of(
-    comp_type: AddressComponentType,
-    levels: tuple[AddressComponentType, ...] = (),
-) -> int:
-    component_levels = _component_levels(comp_type, levels)
-    if not component_levels:
-        return 0
-    return max(_ADMIN_RANK[level] for level in component_levels)
-
-
-def _effective_successors(
-    comp_type: AddressComponentType,
-    levels: tuple[AddressComponentType, ...] = (),
-    *,
-    valid_successors: _SuccessorMap = _VALID_SUCCESSORS,
-) -> frozenset[AddressComponentType]:
-    component_levels = _component_levels(comp_type, levels)
-    if not component_levels:
-        return valid_successors.get(comp_type, _ALL_TYPES)
-    if len(component_levels) == 1:
-        return valid_successors.get(component_levels[0], _ALL_TYPES)
-    successor_sets = [valid_successors.get(level, _ALL_TYPES) for level in component_levels]
-    if not successor_sets:
-        return _ALL_TYPES
-    intersection = set(successor_sets[0])
-    for successors in successor_sets[1:]:
-        intersection &= set(successors)
-    return frozenset(intersection)
-
-
-def _component_can_follow(
-    prev_type: AddressComponentType,
-    prev_levels: tuple[AddressComponentType, ...],
-    next_type: AddressComponentType,
-    next_levels: tuple[AddressComponentType, ...],
-    *,
-    valid_successors: _SuccessorMap = _VALID_SUCCESSORS,
-) -> bool:
-    next_component_levels = _component_levels(next_type, next_levels)
-    if next_component_levels:
-        valid = _effective_successors(prev_type, prev_levels, valid_successors=valid_successors)
-        return any(level in valid for level in next_component_levels)
-    return next_type in _effective_successors(prev_type, prev_levels, valid_successors=valid_successors)
-
-
-def _admin_relation_prefers_ascending(raw_text: str, left_end: int, right_start: int) -> bool:
-    return any(char in ",，" for char in raw_text[left_end:right_start])
-
-
-def _resolve_admin_chain_assignment(
-    candidate_levels: list[tuple[AddressComponentType, ...]],
-    ascending_relations: list[bool],
-) -> tuple[AddressComponentType, ...] | None:
-    if not candidate_levels:
-        return None
-    ordered_candidates = [
-        tuple(sorted(levels, key=lambda level: _ADMIN_RANK.get(level, 0), reverse=True))
-        for levels in candidate_levels
-    ]
-    assignment: list[AddressComponentType] = []
-    used: set[AddressComponentType] = set()
-
-    def backtrack(index: int) -> bool:
-        if index >= len(ordered_candidates):
-            return True
-        for level in ordered_candidates[index]:
-            if level in used:
-                continue
-            if index > 0:
-                prev = assignment[-1]
-                if ascending_relations[index - 1]:
-                    if _ADMIN_RANK[prev] >= _ADMIN_RANK[level]:
-                        continue
-                elif _ADMIN_RANK[prev] <= _ADMIN_RANK[level]:
-                    continue
-            assignment.append(level)
-            used.add(level)
-            if backtrack(index + 1):
-                return True
-            used.remove(level)
-            assignment.pop()
-        return False
-
-    if not backtrack(0):
-        return None
-    return tuple(assignment)
-
-
-def _combine_claim_strengths(strengths: Iterable[ClaimStrength]) -> ClaimStrength:
-    ordered = list(strengths)
-    if not ordered:
-        return ClaimStrength.WEAK
-    hard_count = sum(1 for strength in ordered if strength == ClaimStrength.HARD)
-    soft_count = sum(1 for strength in ordered if strength == ClaimStrength.SOFT)
-    weak_count = sum(1 for strength in ordered if strength == ClaimStrength.WEAK)
-    if hard_count >= 1:
-        return ClaimStrength.HARD
-    if soft_count >= 2:
-        return ClaimStrength.HARD
-    if soft_count == 1:
-        return ClaimStrength.SOFT
-    if weak_count >= 2:
-        return ClaimStrength.SOFT
-    return ClaimStrength.WEAK
-
-
-def _component_claim_strength(component: "_DraftComponent") -> ClaimStrength:
-    value_strengths = [
-        clue.strength
-        for clue in component.raw_chain
-        if clue.role == ClueRole.VALUE
-    ]
-    key_strength = next(
-        (
-            clue.strength
-            for clue in reversed(component.raw_chain)
-            if clue.role == ClueRole.KEY
-        ),
-        None,
-    )
-    strengths: list[ClaimStrength] = []
-    if value_strengths:
-        if any(strength == ClaimStrength.HARD for strength in value_strengths):
-            strengths.append(ClaimStrength.HARD)
-        elif any(strength == ClaimStrength.SOFT for strength in value_strengths):
-            strengths.append(ClaimStrength.SOFT)
-        else:
-            strengths.append(ClaimStrength.WEAK)
-    if key_strength is not None:
-        strengths.append(key_strength)
-    return _combine_claim_strengths(strengths)
-
-
-def _address_claim_strength(components: list["_DraftComponent"]) -> ClaimStrength:
-    ordered_components = sorted(
-        enumerate(components),
-        key=lambda item: (-_admin_rank_of(item[1].component_type, item[1].levels), item[0]),
-    )
-    return _combine_claim_strengths(
-        _component_claim_strength(component)
-        for _, component in ordered_components
-    )
-
-
-def _has_admin_anchor_before_chain(state: "_ParseState") -> bool:
-    return any(_component_levels(component.component_type, component.levels) for component in state.components)
-
-
-def _should_eager_split_duplicate_dual_admins(
-    candidate_levels: list[tuple[AddressComponentType, ...]],
-    state: "_ParseState",
-) -> bool:
-    if len(candidate_levels) != 2:
-        return True
-    first, second = candidate_levels
-    if len(first) != 2 or tuple(first) != tuple(second):
-        return True
-    return _has_admin_anchor_before_chain(state)
+    入口契约（不变式）：
+    - 至少一元素；`_DraftComponent.__post_init__` / `_SuspectEntry.__post_init__` 负责非空校验。
+    - 去重：同层只保留一次（以首次出现为准）。
+    """
+    seen: set[AddressComponentType] = set()
+    deduped: list[AddressComponentType] = []
+    for lvl in level:
+        if lvl in seen:
+            continue
+        seen.add(lvl)
+        deduped.append(lvl)
+    if len(deduped) <= 1:
+        return tuple(deduped)
+    # 稳定排序：rank 高者在前；rank 相同或缺失者按原始相对顺序保留。
+    indexed = list(enumerate(deduped))
+    indexed.sort(key=lambda pair: (-_ADMIN_RANK.get(pair[1], 0), pair[0]))
+    return tuple(lvl for _, lvl in indexed)
 
 
 @dataclass(slots=True)
 class _DraftComponent:
-    """主循环产出的草稿 component。"""
+    """主循环产出的草稿 component。
+
+    `level` 元组是 component 的真实层级载体；`component_type` 是它的 derived 视图：
+    - `len(level) == 1` → `component_type = level[0]`
+    - `len(level) >= 2` → `component_type = MULTI_ADMIN`
+    单层 component 构造时可省略 `level`，`__post_init__` 自动从 `component_type` 反填为 `(component_type,)`。
+    """
 
     component_type: AddressComponentType
     start: int
     end: int
     value: str | list[str]
     key: str | list[str]
-    levels: tuple[AddressComponentType, ...] = ()
     is_detail: bool = False
     raw_chain: list[Clue] = field(default_factory=list)
     suspected: list["_SuspectEntry"] = field(default_factory=list)
     clue_ids: set[str] = field(default_factory=set)
     clue_indices: set[int] = field(default_factory=set)
     suspect_demoted: bool = False
+    level: tuple[AddressComponentType, ...] = ()
+    strength_floor: ClaimStrength | None = None
+    strength_cap: ClaimStrength | None = None
 
     def __post_init__(self) -> None:
-        self.levels = _ordered_component_levels(self.levels)
-        is_multi = self.component_type == AddressComponentType.MULTI_ADMIN
-        if is_multi != (len(self.levels) >= 2):
-            raise AssertionError("MULTI_ADMIN 与 levels 长度不一致")
+        if not self.level:
+            # 单层构造路径：component_type 必须是具体 admin 枚举（不是 MULTI_ADMIN）。
+            assert self.component_type is not None
+            assert self.component_type != AddressComponentType.MULTI_ADMIN, (
+                "MULTI_ADMIN 只能通过显式 level 元组构造，不能依赖 component_type 反填"
+            )
+            self.level = (self.component_type,)
+        else:
+            self.level = _ordered_component_level(self.level)
+        self._sync_component_type()
+
+    def _sync_component_type(self) -> None:
+        if len(self.level) == 1:
+            self.component_type = self.level[0]
+        else:
+            assert len(self.level) >= 2
+            self.component_type = AddressComponentType.MULTI_ADMIN
+
+
+def _set_component_level(
+    component: _DraftComponent,
+    new_level: tuple[AddressComponentType, ...],
+) -> None:
+    """统一更新 component.level 并同步 component_type，保持 derived 视图一致。"""
+    component.level = _ordered_component_level(new_level)
+    component._sync_component_type()
+
+
+def _is_admin_component(component: _DraftComponent) -> bool:
+    """是否承担任一行政层级（PROVINCE / CITY / DISTRICT / DISTRICT_CITY / SUBDISTRICT）。"""
+    return any(lvl in _ADMIN_TYPES for lvl in component.level)
+
+
+def _admin_rank_max(component: _DraftComponent) -> int:
+    """返回 component 覆盖的最高 admin rank；无 admin 层返回 0。"""
+    return max((_ADMIN_RANK.get(lvl, 0) for lvl in component.level), default=0)
+
+
+def _admin_levels_of(component: _DraftComponent) -> tuple[AddressComponentType, ...]:
+    """返回 component.level 中属于 _ADMIN_TYPES 的子集（顺序保留）。"""
+    return tuple(lvl for lvl in component.level if lvl in _ADMIN_TYPES)
+
+
+def _clue_admin_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
+    """读取 clue 的行政层级，兼容 MULTI_ADMIN derived 视图。"""
+    if clue.component_levels:
+        return tuple(level for level in clue.component_levels if level in _ADMIN_TYPES)
+    if clue.component_type in _ADMIN_TYPES:
+        return (clue.component_type,)
+    return ()
+
+
+def _effective_successors(
+    prev: _DraftComponent | None,
+    *,
+    valid_successors: _SuccessorMap = _VALID_SUCCESSORS,
+) -> frozenset[AddressComponentType]:
+    """返回 `prev` 可接的后继集合。
+
+    - `prev is None`：无约束，允许所有类型。
+    - prev 为 MULTI_ADMIN：后继为 `level` 中**各层后继的交集**（严格语义：前一段 MULTI_ADMIN
+      要求同时满足所有可能解释下的接续合法性）。
+    - 其他：直接查 `valid_successors[prev.component_type]`。
+    """
+    if prev is None:
+        return _ALL_TYPES
+    if prev.component_type == AddressComponentType.MULTI_ADMIN:
+        sets = [
+            frozenset(valid_successors.get(lvl, _ALL_TYPES))
+            for lvl in prev.level
+        ]
+        if not sets:
+            return _ALL_TYPES
+        return frozenset.intersection(*sets)
+    return frozenset(valid_successors.get(prev.component_type, _ALL_TYPES))
+
+
+def _component_can_follow(
+    prev: _DraftComponent | None,
+    next_level: tuple[AddressComponentType, ...],
+    *,
+    valid_successors: _SuccessorMap = _VALID_SUCCESSORS,
+) -> bool:
+    """后一段（可能是 MULTI_ADMIN）相对前一段是否合法：next_level 任一层落在有效后继集即可。"""
+    valid = _effective_successors(prev, valid_successors=valid_successors)
+    return any(lvl in valid for lvl in next_level)
+
+
+def _occupies_level(state: "_ParseState", level: AddressComponentType) -> bool:
+    """level 是否已在 SINGLE_OCCUPY 语义下被占用（DISTRICT / DISTRICT_CITY 互斥也在此生效）。"""
+    if level not in SINGLE_OCCUPY:
+        return False
+    return level in state.occupancy
+
+
+def _segment_occupancy_conflict(
+    state: "_ParseState",
+    level_tuple: tuple[AddressComponentType, ...],
+) -> bool:
+    """level 元组中任一层已被占用即冲突。"""
+    return any(_occupies_level(state, lvl) for lvl in level_tuple)
 
 
 @dataclass(slots=True)
 class _SuspectEntry:
-    """主循环冻结的疑似行政子组件。"""
+    """主循环冻结的疑似行政子组件。
 
-    level: str
+    `level` 元组表示同一 value 可能承担的多个候选行政层级（例："北京" → (P, C)）。
+    元组非空且按 `_ADMIN_RANK` 降序排列；同值多层 suspect 使用单条 entry 表达。
+    """
+
+    level: tuple[AddressComponentType, ...]
     value: str
     key: str
     origin: str
     start: int
     end: int
+
+    def __post_init__(self) -> None:
+        assert self.level, "_SuspectEntry.level 必须非空"
+        self.level = _ordered_component_level(self.level)
 
 
 @dataclass(slots=True)
@@ -391,17 +386,13 @@ class _CommaSegmentState:
 
     direction: str | None = None
     group_first_type: AddressComponentType | None = None
-    group_first_levels: tuple[AddressComponentType, ...] = ()
     group_last_type: AddressComponentType | None = None
-    group_last_levels: tuple[AddressComponentType, ...] = ()
     comma_tail_active: bool = False
 
     def reset(self) -> None:
         self.direction = None
         self.group_first_type = None
-        self.group_first_levels = ()
         self.group_last_type = None
-        self.group_last_levels = ()
         self.comma_tail_active = False
 
 
@@ -418,11 +409,9 @@ class _CommaTailCheckpoint:
     last_end: int
     committed_clue_ids: set[str]
     consumed_clue_indices: set[int]
-    last_consumed_clue_index: int
     pending_community_poi_index: int | None
     evidence_count: int
     suppress_challenger_clue_ids: set[str]
-    extra_consumed_clue_ids: set[str]
     absorbed_digit_unit_end: int
     ignored_address_key_indices: set[int]
     pending_suspects: list[_SuspectEntry]
@@ -451,10 +440,9 @@ class _ParseState:
     split_at: int | None = None
     absorbed_digit_unit_end: int = 0
     last_component_type: AddressComponentType | None = None
+    seed_floor: int | None = None
     committed_clue_ids: set[str] = field(default_factory=set)
-    extra_consumed_clue_ids: set[str] = field(default_factory=set)
     consumed_clue_indices: set[int] = field(default_factory=set)
-    last_consumed_clue_index: int = -1
     suppress_challenger_clue_ids: set[str] = field(default_factory=set)
     value_char_end_override: dict[str, int] = field(default_factory=dict)
     pending_comma_value_right_scan: bool = False
@@ -464,12 +452,24 @@ class _ParseState:
     comma_tail_checkpoint: _CommaTailCheckpoint | None = None
     ignored_address_key_indices: set[int] = field(default_factory=set)
     last_piece_end: int | None = None
-    max_clue_strength: ClaimStrength = ClaimStrength.WEAK
+    pending_label_first_component_hard: bool = False
+    label_expected_component_levels: tuple[AddressComponentType, ...] = ()
+    pending_prefix_value: _IndexedClue | None = None
 
 
+# §3.4 resolver 返回视图；此处不显式 import 以避免与 policy 的循环依赖，
+# 运行时 duck-type 访问 `available_levels` / `all_levels` / `text` 三个字段。
+# 契约见 `privacyguard.infrastructure.pii.detector.stacks.address_policy_zh._AdminSpanView`。
 _StandaloneAdminResolver = Callable[
     [_ParseState, tuple[_IndexedClue, ...]],
-    tuple[AddressComponentType, tuple[AddressComponentType, ...]] | None,
+    "object | None",
+]
+
+# §3.5：KEY-driven admin chain 的层级解析回调。给定 last KEY 之前的 VALUE 条目 +
+# last KEY clue，返回可落 admin 组件的层级元组（见 policy_zh._resolve_admin_key_chain_levels）。
+_AdminKeyChainResolver = Callable[
+    [_ParseState, tuple[_IndexedClue, ...], Clue],
+    tuple[AddressComponentType, ...] | None,
 ]
 
 
@@ -484,12 +484,13 @@ def _clone_component_key(key: str | list[str]) -> str | list[str]:
 def _clone_draft_component(component: _DraftComponent) -> _DraftComponent:
     """复制组件，避免回滚快照与实时状态共享可变容器。"""
     return _DraftComponent(
-        component_type=component.component_type,
+        component_type=AddressComponentType.MULTI_ADMIN
+        if len(component.level) >= 2
+        else component.component_type,
         start=component.start,
         end=component.end,
         value=_clone_component_value(component.value),
         key=_clone_component_key(component.key),
-        levels=tuple(component.levels),
         is_detail=component.is_detail,
         raw_chain=list(component.raw_chain),
         suspected=[
@@ -506,6 +507,11 @@ def _clone_draft_component(component: _DraftComponent) -> _DraftComponent:
         clue_ids=set(component.clue_ids),
         clue_indices=set(component.clue_indices),
         suspect_demoted=component.suspect_demoted,
+        # 显式传递 level，避免 __post_init__ 走 component_type 反填；MULTI_ADMIN 组件
+        # 必须依赖 level 元组恢复形态。
+        level=tuple(component.level),
+        strength_floor=component.strength_floor,
+        strength_cap=component.strength_cap,
     )
 
 
@@ -516,50 +522,34 @@ def _suspect_surface_text(entry: _SuspectEntry) -> str:
     return entry.value.strip()
 
 
-def _suspect_group_key(entry: _SuspectEntry) -> tuple[int, int, str, str, str]:
-    """按同一 value 歧义组聚合 suspect。"""
-    return (entry.start, entry.end, entry.value, entry.key, entry.origin)
-
-
 def _suspect_sort_key(entry: _SuspectEntry) -> tuple[int, int, int, str]:
-    """同组内按行政层级从高到低稳定排序。"""
-    level = _pending_suspect_level(entry)
-    rank = _ADMIN_RANK.get(level, 0) if level is not None else 0
-    return (entry.start, entry.end, -rank, entry.level)
+    """同组内按行政层级从高到低稳定排序。
 
-
-def _group_suspected_entries(entries: list[_SuspectEntry]) -> list[list[_SuspectEntry]]:
-    """把同一 value、同一来源的多层级 suspect 聚合成组。"""
-    grouped: dict[tuple[int, int, str, str, str], list[_SuspectEntry]] = {}
-    ordered_keys: list[tuple[int, int, str, str, str]] = []
-    for entry in entries:
-        group_key = _suspect_group_key(entry)
-        if group_key not in grouped:
-            grouped[group_key] = []
-            ordered_keys.append(group_key)
-        group = grouped[group_key]
-        if any(existing.level == entry.level for existing in group):
-            continue
-        group.append(entry)
-    return [
-        sorted(grouped[group_key], key=_suspect_sort_key)
-        for group_key in ordered_keys
-    ]
+    以 `entry.level[0]` 为主排序层（已由 `_ordered_component_level` 确保是最高 rank）；
+    次键用 level 元组的 value 字符串表示形式作稳定 tiebreaker。
+    """
+    primary = entry.level[0] if entry.level else None
+    rank = _ADMIN_RANK.get(primary, 0) if primary is not None else 0
+    level_key = "|".join(lvl.value for lvl in entry.level)
+    return (entry.start, entry.end, -rank, level_key)
 
 
 def _serialize_suspected_entries(entries: list[_SuspectEntry]) -> str:
-    """把一个组件上的 suspect 列表序列化到 metadata。"""
+    """把一个组件上的 suspect 列表序列化到 metadata。
+
+    输出形如 `[{"levels":["province","city"],"value":"北京","key":"","origin":"key"}]`；
+    `levels` 直接来自 `entry.level` 元组的 `.value` 投影。
+    """
     if not entries:
         return ""
     payload = [
         {
-            "levels": [group_entry.level for group_entry in group],
-            "value": group[0].value,
-            "key": group[0].key,
-            "origin": group[0].origin,
+            "levels": [lvl.value for lvl in entry.level],
+            "value": entry.value,
+            "key": entry.key,
+            "origin": entry.origin,
         }
-        for group in _group_suspected_entries(entries)
-        if group
+        for entry in sorted(entries, key=_suspect_sort_key)
     ]
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -575,23 +565,34 @@ def _recompute_last_piece_end(state: _ParseState) -> None:
     state.last_piece_end = None
 
 
-def _pending_suspect_level(entry: _SuspectEntry) -> AddressComponentType | None:
-    try:
-        return AddressComponentType(entry.level)
-    except ValueError:
-        return None
-
-
 def _remove_pending_suspect_by_level(
     state: _ParseState,
     level: AddressComponentType,
 ) -> _SuspectEntry | None:
-    """移除当前链上最近一个同层级 suspect。"""
+    """从当前链 pending suspects 中扣除指定 level。
+
+    语义（与 tuple 化 level 配套）：
+    - 若 `level in entry.level`，把该层从元组中移除；元组为空则整条 entry 删除。
+    - 每次调用最多只处理一条 entry（"最近一个同层级 suspect"），与改造前保持一致。
+    - 返回被移除或缩短的原 entry（供上游需要引用原层级信息时使用）；无命中返回 None。
+    """
     removed: _SuspectEntry | None = None
     kept: list[_SuspectEntry] = []
     for entry in state.pending_suspects:
-        if _pending_suspect_level(entry) == level:
+        if removed is None and level in entry.level:
             removed = entry
+            shrunk = tuple(lvl for lvl in entry.level if lvl != level)
+            if shrunk:
+                # 保留 entry，仅缩短 level；其余字段不变。
+                kept.append(_SuspectEntry(
+                    level=shrunk,
+                    value=entry.value,
+                    key=entry.key,
+                    origin=entry.origin,
+                    start=entry.start,
+                    end=entry.end,
+                ))
+            # shrunk 空 → 整条删除（即不 append）
             continue
         kept.append(entry)
     state.pending_suspects = kept
@@ -619,10 +620,6 @@ def _remove_pending_suspect_group_by_span(
     return removed
 
 
-def _has_pending_suspect_level(entries: list[_SuspectEntry], level: AddressComponentType) -> bool:
-    return any(_pending_suspect_level(entry) == level for entry in entries)
-
-
 def _trim_once(text: str, token: str) -> str:
     """按从左到右顺序删除首个完整匹配片段。"""
     if not token:
@@ -645,11 +642,9 @@ def _make_comma_tail_checkpoint(state: _ParseState, comma_pos: int) -> _CommaTai
         last_end=state.last_end,
         committed_clue_ids=set(state.committed_clue_ids),
         consumed_clue_indices=set(state.consumed_clue_indices),
-        last_consumed_clue_index=state.last_consumed_clue_index,
         pending_community_poi_index=state.pending_community_poi_index,
         evidence_count=state.evidence_count,
         suppress_challenger_clue_ids=set(state.suppress_challenger_clue_ids),
-        extra_consumed_clue_ids=set(state.extra_consumed_clue_ids),
         absorbed_digit_unit_end=state.absorbed_digit_unit_end,
         ignored_address_key_indices=set(state.ignored_address_key_indices),
         pending_suspects=[
@@ -693,9 +688,7 @@ def _restore_comma_tail_checkpoint(
     state.last_component_type = checkpoint.last_component_type
     state.last_end = checkpoint.last_end
     state.committed_clue_ids = set(checkpoint.committed_clue_ids)
-    state.extra_consumed_clue_ids = set(checkpoint.extra_consumed_clue_ids)
     state.consumed_clue_indices = set(checkpoint.consumed_clue_indices)
-    state.last_consumed_clue_index = checkpoint.last_consumed_clue_index
     state.suppress_challenger_clue_ids = set(checkpoint.suppress_challenger_clue_ids)
     state.value_char_end_override.clear()
     state.pending_comma_value_right_scan = False
@@ -714,7 +707,6 @@ def _mark_consumed_indices(state: _ParseState, clue_indices: Iterable[int]) -> N
     if not indices:
         return
     state.consumed_clue_indices |= indices
-    state.last_consumed_clue_index = max(state.last_consumed_clue_index, max(indices))
 
 
 def _append_deferred(
@@ -730,10 +722,6 @@ def _append_deferred(
     state.deferred_chain.append((clue_index, clue))
     if state.chain_left_anchor is None:
         state.chain_left_anchor = clue.start if anchor_start is None else anchor_start
-
-
-def _recompute_last_consumed_index(state: _ParseState) -> None:
-    state.last_consumed_clue_index = max(state.consumed_clue_indices) if state.consumed_clue_indices else -1
 
 
 def _increment_component_count(state: _ParseState, component_type: AddressComponentType) -> None:
@@ -784,7 +772,8 @@ def _reroute_pending_community_poi_to_subdistrict(state: _ParseState) -> None:
     if component.component_type != AddressComponentType.POI:
         _clear_pending_community_poi(state)
         return
-    component.component_type = AddressComponentType.SUBDISTRICT
+    # 通过 _set_component_level 同步更新 level 元组与 component_type，保持 derived 视图一致。
+    _set_component_level(component, (AddressComponentType.SUBDISTRICT,))
     component.is_detail = False
     _decrement_component_count(state, AddressComponentType.POI)
     _increment_component_count(state, AddressComponentType.SUBDISTRICT)
@@ -793,19 +782,75 @@ def _reroute_pending_community_poi_to_subdistrict(state: _ParseState) -> None:
         state.last_component_type = AddressComponentType.SUBDISTRICT
     if state.segment_state.group_last_type == AddressComponentType.POI:
         state.segment_state.group_last_type = AddressComponentType.SUBDISTRICT
-        state.segment_state.group_last_levels = ()
     if state.segment_state.group_first_type == AddressComponentType.POI and len(state.components) == 1:
         state.segment_state.group_first_type = AddressComponentType.SUBDISTRICT
-        state.segment_state.group_first_levels = ()
     _clear_pending_community_poi(state)
 
 
+def _comma_tail_admin_levels(
+    levels: Iterable[AddressComponentType],
+) -> tuple[AddressComponentType, ...]:
+    """过滤出逗号尾准入允许比较的 concrete admin levels。
+
+    保持入参顺序，仅保留 `_COMMA_TAIL_ADMIN_TYPES` 内的层级（去重）。
+    """
+    seen: set[AddressComponentType] = set()
+    out: list[AddressComponentType] = []
+    for lvl in levels:
+        if lvl in _COMMA_TAIL_ADMIN_TYPES and lvl not in seen:
+            seen.add(lvl)
+            out.append(lvl)
+    return tuple(out)
+
+
+def _prior_max_admin_from_components(components: list[_DraftComponent]) -> int | None:
+    """已提交 admin component 的 floor 上界。
+
+    每个 component 取其行政层级元组中 rank 最低的一层（即真实"楼层"），
+    再在所有 component 间取最大值，作为后续 incoming 必须严格高于的下界。
+    """
+    floors: list[int] = []
+    for component in components:
+        component_levels = _comma_tail_admin_levels(component.level)
+        if not component_levels:
+            continue
+        floors.append(min(_ADMIN_RANK[level] for level in component_levels))
+    if not floors:
+        return None
+    return max(floors)
+
+
+def _comma_tail_first_admits(
+    prior_floor: int | None,
+    component_levels: tuple[AddressComponentType, ...],
+) -> bool:
+    """逗号尾首段准入：必须是行政层且 ceiling 严格高于 prior_floor。"""
+    allowed_levels = _comma_tail_admin_levels(component_levels)
+    if not allowed_levels:
+        return False
+    if prior_floor is None:
+        return True
+    current_ceiling = max(_ADMIN_RANK[level] for level in allowed_levels)
+    return current_ceiling > prior_floor
+
+
 def _rollback_invalid_comma_tail_component(state: _ParseState, component: _DraftComponent) -> bool:
-    """逗号尾一旦落到区以下层级，就回滚到最近逗号左侧并停止。"""
+    """逗号尾内 component 不满足准入时，回滚到最近逗号左侧并停止。
+
+    分两类判定：
+    - 首段（`pending_comma_first_component=True`）：行政层 ceiling 必须严格高于 prior_floor。
+    - 后续段：保持粗护栏，至少含一层 `_COMMA_TAIL_ADMIN_TYPES` 即放过；
+      段内"应递增"由 `_segment_admit` + `direction` 维护。
+    """
     if not state.segment_state.comma_tail_active:
         return False
-    if component.component_type in _COMMA_TAIL_ADMIN_TYPES:
-        return False
+    if state.pending_comma_first_component:
+        prior_floor = _prior_max_admin_from_components(state.components)
+        if _comma_tail_first_admits(prior_floor, component.level):
+            return False
+    else:
+        if any(level in _COMMA_TAIL_ADMIN_TYPES for level in component.level):
+            return False
     checkpoint = state.comma_tail_checkpoint
     if checkpoint is None:
         state.deferred_chain.clear()
@@ -833,81 +878,35 @@ def _apply_comma_tail_segment_after_commit(
     """逗号尾内：方向在第二个 component 上锁定；非逗号尾只维护 group_last_type。"""
     seg = state.segment_state
     component_type = committed.component_type
-    component_levels = committed.levels
     if not seg.comma_tail_active:
         seg.group_last_type = component_type
-        seg.group_last_levels = component_levels
         return
     if seg.group_first_type is None:
         seg.group_first_type = component_type
-        seg.group_first_levels = component_levels
         seg.group_last_type = component_type
-        seg.group_last_levels = component_levels
         return
     if seg.direction is None:
         first = seg.group_first_type
-        first_levels = seg.group_first_levels
         if component_type == first:
             seg.group_last_type = component_type
-            seg.group_last_levels = component_levels
             return
-        if _component_can_follow(
-            first,
-            first_levels,
-            component_type,
-            component_levels,
-            valid_successors=valid_successors,
-        ):
+        if component_type in valid_successors.get(first, _ALL_TYPES):
             seg.direction = "forward"
-        elif _component_can_follow(
-            component_type,
-            component_levels,
-            first,
-            first_levels,
-            valid_successors=valid_successors,
-        ):
+        elif first in valid_successors.get(component_type, _ALL_TYPES):
             seg.direction = "reverse"
         seg.group_last_type = component_type
-        seg.group_last_levels = component_levels
         return
     seg.group_last_type = component_type
-    seg.group_last_levels = component_levels
-
-
-def _occupies_level(state: _ParseState, level: AddressComponentType) -> bool:
-    if level in state.occupancy:
-        return True
-    if level == AddressComponentType.DISTRICT_CITY:
-        return AddressComponentType.DISTRICT in state.occupancy
-    if level == AddressComponentType.DISTRICT:
-        return AddressComponentType.DISTRICT_CITY in state.occupancy
-    return False
-
-
-def _segment_occupancy_conflict(
-    state: _ParseState,
-    comp_type: AddressComponentType,
-    levels: tuple[AddressComponentType, ...],
-) -> bool:
-    if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
-        return True
-    component_levels = _component_levels(comp_type, levels)
-    if comp_type == AddressComponentType.MULTI_ADMIN:
-        if AddressComponentType.MULTI_ADMIN in state.occupancy:
-            return True
-        return any(_occupies_level(state, level) for level in component_levels)
-    return any(_occupies_level(state, level) for level in component_levels)
 
 
 def _segment_admit(
     state: _ParseState,
     comp_type: AddressComponentType,
     *,
-    levels: tuple[AddressComponentType, ...] = (),
     valid_successors: _SuccessorMap = _VALID_SUCCESSORS,
 ) -> bool:
     """按最终 component 类型判断占位与直接后继合法性。"""
-    if _segment_occupancy_conflict(state, comp_type, levels):
+    if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
         return False
 
     segment = state.segment_state
@@ -916,53 +915,21 @@ def _segment_admit(
             return True
         if segment.direction is None:
             first_type = segment.group_first_type
-            first_levels = segment.group_first_levels
             if comp_type == first_type:
                 return True
-            ok_fwd = _component_can_follow(
-                first_type,
-                first_levels,
-                comp_type,
-                levels,
-                valid_successors=valid_successors,
-            )
-            ok_rev = _component_can_follow(
-                comp_type,
-                levels,
-                first_type,
-                first_levels,
-                valid_successors=valid_successors,
-            )
+            ok_fwd = comp_type in valid_successors.get(first_type, _ALL_TYPES)
+            ok_rev = first_type in valid_successors.get(comp_type, _ALL_TYPES)
             return ok_fwd or ok_rev
         last_type = segment.group_last_type
         if last_type is None:
             return True
-        last_levels = segment.group_last_levels
         if segment.direction == "forward":
-            return _component_can_follow(
-                last_type,
-                last_levels,
-                comp_type,
-                levels,
-                valid_successors=valid_successors,
-            )
-        return _component_can_follow(
-            comp_type,
-            levels,
-            last_type,
-            last_levels,
-            valid_successors=valid_successors,
-        )
+            return comp_type in valid_successors.get(last_type, _ALL_TYPES)
+        return last_type in valid_successors.get(comp_type, _ALL_TYPES)
 
     if segment.group_last_type is None:
         return True
-    return _component_can_follow(
-        segment.group_last_type,
-        segment.group_last_levels,
-        comp_type,
-        levels,
-        valid_successors=valid_successors,
-    )
+    return comp_type in valid_successors.get(segment.group_last_type, _ALL_TYPES)
 
 
 def _commit_poi(state: _ParseState, component: _DraftComponent) -> _DraftComponent:
@@ -994,19 +961,121 @@ def _commit_poi(state: _ParseState, component: _DraftComponent) -> _DraftCompone
 
 
 def _prune_prior_component_suspects(state: _ParseState, new_component: _DraftComponent) -> None:
-    """后续真实组件一旦落地，只删除旧组件里同层级的 suspect。"""
-    new_levels = _component_levels(new_component.component_type, new_component.levels)
-    if not new_levels:
+    """后续真实组件一旦落地，移除旧 suspect 中同级或更高的行政层。"""
+    new_admin_levels = _admin_levels_of(new_component)
+    if not new_admin_levels:
+        return
+    cutoff_rank = min((_ADMIN_RANK.get(level, 0) for level in new_admin_levels), default=0)
+    if cutoff_rank <= 0:
         return
     for prior in state.components[:-1]:
-        kept = [
-            entry
-            for entry in prior.suspected
-            if _pending_suspect_level(entry) not in new_levels
-        ]
-        if len(kept) != len(prior.suspected):
+        changed = False
+        kept: list[_SuspectEntry] = []
+        for entry in prior.suspected:
+            remaining_levels = tuple(
+                lvl
+                for lvl in entry.level
+                if _ADMIN_RANK.get(lvl, 0) < cutoff_rank
+            )
+            if len(remaining_levels) == len(entry.level):
+                kept.append(entry)
+                continue
+            changed = True
+            if not remaining_levels:
+                continue
+            kept.append(_SuspectEntry(
+                level=remaining_levels,
+                value=entry.value,
+                key=entry.key,
+                origin=entry.origin,
+                start=entry.start,
+                end=entry.end,
+            ))
+        if changed:
             prior.suspected = kept
             prior.suspect_demoted = True
+
+
+def _resolve_multi_admin_collision(
+    state: _ParseState,
+    raw_text: str,
+    incoming_start: int,
+    incoming_value: str,
+    incoming_levels: tuple[AddressComponentType, ...],
+    *,
+    admin_rank: Mapping[AddressComponentType, int] = None,  # type: ignore[assignment]
+) -> tuple[AddressComponentType, ...] | None:
+    """§5.1 MULTI_ADMIN 同值降解。
+
+    仅供 admin commit 路径调用（`_flush_chain_as_standalone` / KEY-driven admin flush /
+    进入 `_segment_admit` 前）。若 incoming_value 与某已提交的 MULTI_ADMIN 同值且
+    level 有交集，按 pair 之间的逗号方向把 existing MULTI_ADMIN 原地降解，
+    返回 incoming 应取的 level 子集；无碰撞 / 无交集返回 None。
+
+    方向规则：
+    - 无逗号（顺向）：existing 保留最高层（"北京市" = P），incoming 取最低层（= C）
+    - 有逗号（逆向）：existing 保留最低层（= C），incoming 取最高层（= P）
+
+    suspect 是旁注元数据、不占 occupancy，`_freeze_*` 路径**不**触发 collision。
+    """
+    rank = admin_rank if admin_rank is not None else _ADMIN_RANK
+    target_idx: int | None = None
+    for lvl in incoming_levels:
+        idx = state.occupancy.get(lvl)
+        if idx is None:
+            continue
+        comp = state.components[idx]
+        if (
+            comp.component_type == AddressComponentType.MULTI_ADMIN
+            and not isinstance(comp.value, list)
+            and comp.value == incoming_value
+        ):
+            target_idx = idx
+            break
+    if target_idx is None:
+        return None
+
+    existing = state.components[target_idx]
+    overlap = [lvl for lvl in existing.level if lvl in incoming_levels]
+    if not overlap:
+        return None
+
+    has_comma = any(char in ",，" for char in raw_text[existing.end:incoming_start])
+    if has_comma:
+        incoming_take = max(overlap, key=lambda item: rank.get(item, 0))
+    else:
+        incoming_take = min(overlap, key=lambda item: rank.get(item, 0))
+
+    # 原地降解 existing：把 incoming_take 这一层从 existing.level 中移除。
+    state.occupancy.pop(incoming_take, None)
+    new_level = tuple(lvl for lvl in existing.level if lvl != incoming_take)
+    if not new_level:
+        # 理论上 overlap 不会覆盖 existing.level 全部（否则 incoming 等价于 existing），
+        # 留一个防御性退路：无法降解就不动，返回 None。
+        return None
+    prev_type = existing.component_type
+    _set_component_level(existing, new_level)
+    new_type = existing.component_type
+
+    if prev_type != new_type:
+        # existing 从 MULTI_ADMIN 退回具体 admin 层：修正 component_counts 与 segment 视图。
+        if prev_type == AddressComponentType.MULTI_ADMIN:
+            count = state.component_counts.get(AddressComponentType.MULTI_ADMIN, 0)
+            if count <= 1:
+                state.component_counts.pop(AddressComponentType.MULTI_ADMIN, None)
+            else:
+                state.component_counts[AddressComponentType.MULTI_ADMIN] = count - 1
+            _increment_component_count(state, new_type)
+        if state.last_component_type == prev_type:
+            state.last_component_type = new_type
+        if state.segment_state.group_last_type == prev_type:
+            state.segment_state.group_last_type = new_type
+        if state.segment_state.group_first_type == prev_type:
+            state.segment_state.group_first_type = new_type
+        # 原地降解改变了段序推导基础，方向需要重新评估。
+        state.segment_state.direction = None
+
+    return (incoming_take,)
 
 
 def _commit(
@@ -1019,12 +1088,9 @@ def _commit(
     # 只有 key 没有 value 的组件不允许提交。
     if component.key and not component.value:
         return False
-    if not _segment_admit(
-        state,
-        component.component_type,
-        levels=component.levels,
-        valid_successors=valid_successors,
-    ):
+    if state.pending_label_first_component_hard:
+        component.strength_floor = ClaimStrength.HARD
+    if not _segment_admit(state, component.component_type, valid_successors=valid_successors):
         state.split_at = component.start
         return False
     if _rollback_invalid_comma_tail_component(state, component):
@@ -1040,10 +1106,11 @@ def _commit(
     if is_fresh_component:
         _increment_component_count(state, comp_type)
     index = len(state.components) - 1
-    if comp_type in SINGLE_OCCUPY:
-        state.occupancy[comp_type] = index
-    for level in _component_levels(comp_type, committed.levels):
-        state.occupancy[level] = index
+    # 按 component.level 元组逐层写 occupancy：MULTI_ADMIN(P,C) 会同时占住 P 和 C 槽位，
+    # 指向同一 index；不为 MULTI_ADMIN 本身设单独槽位。
+    for lvl in committed.level:
+        if lvl in SINGLE_OCCUPY:
+            state.occupancy[lvl] = index
     if is_fresh_component:
         _apply_comma_tail_segment_after_commit(
             state,
@@ -1052,121 +1119,20 @@ def _commit(
         )
     else:
         state.segment_state.group_last_type = committed.component_type
-        state.segment_state.group_last_levels = committed.levels
     if state.segment_state.comma_tail_active and state.pending_comma_first_component:
         state.pending_comma_first_component = False
     state.last_component_type = committed.component_type
     state.last_end = max(state.last_end, committed.end)
     state.last_piece_end = committed.end
     state.evidence_count += 1
-    for clue in committed.raw_chain:
-        if not strength_ge(state.max_clue_strength, clue.strength):
-            state.max_clue_strength = clue.strength
     state.committed_clue_ids |= committed.clue_ids
     _mark_consumed_indices(state, committed.clue_indices)
     _prune_prior_component_suspects(state, committed)
     if is_fresh_component:
         _mark_pending_community_poi(state, committed)
-    return True
-
-
-def _admin_key_candidate_levels(clue: Clue) -> tuple[AddressComponentType, ...]:
-    comp_type = clue.component_type
-    if comp_type == AddressComponentType.MULTI_ADMIN:
-        return _ordered_component_levels(clue.levels)
-    if comp_type in _ADMIN_RANK:
-        return (comp_type,)
-    return ()
-
-
-def _flush_admin_key_chain(
-    state: _ParseState,
-    used_entries: list[_IndexedClue],
-    raw_text: str,
-    *,
-    normalize_value,
-    commit: _CommitFn,
-) -> bool:
-    segments: list[
-        tuple[
-            tuple[_IndexedClue, ...],
-            int,
-            str,
-            tuple[AddressComponentType, ...],
-            str,
-        ]
-    ] = []
-    segment_start = 0
-    for index, (_, clue) in enumerate(used_entries):
-        if clue.role != ClueRole.KEY:
-            continue
-        candidate_levels = _admin_key_candidate_levels(clue)
-        if not candidate_levels:
-            return False
-        segment_entries = tuple(used_entries[segment_start:index + 1])
-        if not segment_entries:
-            return False
-        component_start = (
-            state.chain_left_anchor
-            if segment_start == 0 and state.chain_left_anchor is not None
-            else segment_entries[0][1].start
-        )
-        value = normalize_value(candidate_levels[0], raw_text[component_start:clue.start])
-        if not value:
-            return False
-        segments.append((segment_entries, component_start, clue.text, candidate_levels, value))
-        segment_start = index + 1
-    if not segments or segment_start != len(used_entries):
-        return False
-
-    resolved: list[tuple[AddressComponentType, tuple[AddressComponentType, ...]]] = []
-    cursor = 0
-    while cursor < len(segments):
-        segment_entries, _, _, candidate_levels, segment_value = segments[cursor]
-        available_levels = tuple(level for level in candidate_levels if not _occupies_level(state, level))
-        if not available_levels:
-            return False
-        if (
-            cursor + 1 < len(segments)
-            and len(available_levels) == 2
-            and segments[cursor + 1][4] == segment_value
-            and tuple(segments[cursor + 1][3]) == tuple(candidate_levels)
-            and (
-                len(segments) > 2
-                or _has_admin_anchor_before_chain(state)
-            )
-        ):
-            next_entries = segments[cursor + 1][0]
-            has_comma = any(char in ",，" for char in raw_text[segment_entries[-1][1].end:next_entries[0][1].start])
-            high_level, low_level = available_levels[0], available_levels[1]
-            resolved.append((low_level if has_comma else high_level, ()))
-            resolved.append((high_level if has_comma else low_level, ()))
-            cursor += 2
-            continue
-        if len(available_levels) == 1:
-            resolved.append((available_levels[0], ()))
-        else:
-            resolved.append((AddressComponentType.MULTI_ADMIN, available_levels))
-        cursor += 1
-
-    for (segment_entries, component_start, key_text, candidate_levels, segment_value), (component_type, levels) in zip(segments, resolved):
-        primary_type = levels[0] if component_type == AddressComponentType.MULTI_ADMIN else component_type
-        value = normalize_value(primary_type, raw_text[component_start:segment_entries[-1][1].start]) or segment_value
-        component = _DraftComponent(
-            component_type=component_type,
-            start=component_start,
-            end=segment_entries[-1][1].end,
-            value=value,
-            key=key_text,
-            levels=levels,
-            is_detail=primary_type in _DETAIL_COMPONENTS,
-            raw_chain=[entry_clue for _, entry_clue in segment_entries],
-            suspected=[],
-            clue_ids={entry_clue.clue_id for _, entry_clue in segment_entries},
-            clue_indices={entry_index for entry_index, _ in segment_entries},
-        )
-        if not commit(component):
-            return False
+    if state.pending_label_first_component_hard:
+        state.pending_label_first_component_hard = False
+        state.label_expected_component_levels = ()
     return True
 
 
@@ -1177,6 +1143,8 @@ def _flush_chain(
     normalize_value,
     commit_component: _CommitFn | None = None,
     resolve_standalone_admin_group: _StandaloneAdminResolver | None = None,
+    resolve_admin_key_chain_levels: _AdminKeyChainResolver | None = None,
+    validate_key_component: _ValidateKeyComponentFn | None = None,
 ) -> None:
     """冲洗 deferred_chain。若链中含 KEY，用最后一个 KEY 消费；否则逐个 standalone。"""
     if not state.deferred_chain:
@@ -1191,69 +1159,90 @@ def _flush_chain(
             break
 
     if last_key_idx is not None:
-        used_entries = state.deferred_chain[: last_key_idx + 1]
-        if _flush_admin_key_chain(
-            state,
-            used_entries,
-            raw_text,
-            normalize_value=normalize_value,
-            commit=commit,
-        ):
-            state.deferred_chain = state.deferred_chain[last_key_idx + 1:]
-            if state.deferred_chain:
-                _recompute_last_piece_end(state)
-            else:
-                state.chain_left_anchor = None
-                state.value_char_end_override.clear()
-            if not state.deferred_chain:
-                state.suspect_chain.clear()
-                state.pending_suspects.clear()
-            if len(state.components) == before_component_count and state.components:
-                state.last_end = max(component.end for component in state.components)
-            return
+        used_entries = tuple(state.deferred_chain[: last_key_idx + 1])
         key_clue = used_entries[-1][1]
         comp_type = key_clue.component_type or AddressComponentType.POI
-        resolved_levels = key_clue.levels
-        if comp_type == AddressComponentType.MULTI_ADMIN:
-            resolved_levels = tuple(
-                level for level in key_clue.levels
-                if not _occupies_level(state, level)
-            )
-            if not resolved_levels:
-                state.split_at = key_clue.start
-                return
-            if len(resolved_levels) == 1:
-                comp_type = resolved_levels[0]
-                resolved_levels = ()
         if comp_type == AddressComponentType.NUMBER and state.last_component_type in _DETAIL_COMPONENTS:
             comp_type = AddressComponentType.DETAIL
         component_start = state.chain_left_anchor if state.chain_left_anchor is not None else key_clue.start
-        value = normalize_value(comp_type, raw_text[component_start:key_clue.start])
-        if value:
-            component = _DraftComponent(
-                component_type=comp_type,
-                start=component_start,
-                end=key_clue.end,
-                value=value,
-                key=key_clue.text,
-                levels=resolved_levels if comp_type == AddressComponentType.MULTI_ADMIN else (),
-                is_detail=comp_type in _DETAIL_COMPONENTS,
-                raw_chain=[clue for _, clue in used_entries],
-                suspected=[
-                    _SuspectEntry(
-                        level=entry.level,
-                        value=entry.value,
-                        key=entry.key,
-                        origin=entry.origin,
-                        start=entry.start,
-                        end=entry.end,
+
+        # §3.5：MULTI_ADMIN routed KEY 必须通过 admin-key-chain 解析器拿到 level 元组才能构造组件。
+        if comp_type == AddressComponentType.MULTI_ADMIN:
+            value_entries = tuple(used_entries[:-1])
+            resolution = None
+            if resolve_admin_key_chain_levels is not None:
+                resolution = resolve_admin_key_chain_levels(state, value_entries, key_clue)
+            if resolution is None:
+                # 非 admin 链或无法 build span：MULTI_ADMIN 类型无法构造，split。
+                state.split_at = component_start
+            else:
+                resolved_levels: tuple[AddressComponentType, ...] = resolution.available_levels
+                if not resolved_levels:
+                    # §5.2.3 collision 触发点：available 为空时，先尝试同值 MULTI_ADMIN 降解。
+                    forced = _resolve_multi_admin_collision(
+                        state,
+                        raw_text,
+                        component_start,
+                        resolution.text,
+                        resolution.all_levels,
                     )
-                    for entry in state.pending_suspects
-                ],
-                clue_ids={clue.clue_id for _, clue in used_entries},
-                clue_indices={index for index, _ in used_entries},
-            )
-            commit(component)
+                    if forced is None:
+                        state.split_at = component_start
+                    else:
+                        resolved_levels = forced
+                if resolved_levels:
+                    primary_level = resolved_levels[0]
+                    value = normalize_value(primary_level, raw_text[component_start:key_clue.start])
+                    if value:
+                        component = _DraftComponent(
+                            component_type=AddressComponentType.MULTI_ADMIN
+                            if len(resolved_levels) >= 2
+                            else primary_level,
+                            start=component_start,
+                            end=key_clue.end,
+                            value=value,
+                            key=key_clue.text,
+                            is_detail=primary_level in _DETAIL_COMPONENTS,
+                            raw_chain=[clue for _, clue in used_entries],
+                            suspected=[],
+                            level=tuple(resolved_levels),
+                            clue_ids={clue.clue_id for _, clue in used_entries},
+                            clue_indices={index for index, _ in used_entries},
+                        )
+                        commit(component)
+        else:
+            if (
+                validate_key_component is not None
+                and not validate_key_component(state, used_entries, key_clue, component_start, comp_type)
+            ):
+                if state.components:
+                    state.split_at = component_start
+            else:
+                value = normalize_value(comp_type, raw_text[component_start:key_clue.start])
+                if value:
+                    component = _DraftComponent(
+                        component_type=comp_type,
+                        start=component_start,
+                        end=key_clue.end,
+                        value=value,
+                        key=key_clue.text,
+                        is_detail=comp_type in _DETAIL_COMPONENTS,
+                        raw_chain=[clue for _, clue in used_entries],
+                        suspected=[
+                            _SuspectEntry(
+                                level=entry.level,
+                                value=entry.value,
+                                key=entry.key,
+                                origin=entry.origin,
+                                start=entry.start,
+                                end=entry.end,
+                            )
+                            for entry in state.pending_suspects
+                        ],
+                        clue_ids={clue.clue_id for _, clue in used_entries},
+                        clue_indices={index for index, _ in used_entries},
+                    )
+                    commit(component)
     else:
         _flush_chain_as_standalone(
             state,
@@ -1269,6 +1258,7 @@ def _flush_chain(
     state.chain_left_anchor = None
     state.value_char_end_override.clear()
     _recompute_last_piece_end(state)
+    state.pending_prefix_value = None
     # 若本轮冲洗没有产出新组件，回退 last_end 到已提交组件末端，避免失败链污染后续 search_start。
     if len(state.components) == before_component_count and state.components:
         state.last_end = max(component.end for component in state.components)
@@ -1295,122 +1285,85 @@ def _flush_chain_as_standalone(
             resolve_standalone_admin_group is not None
             and clue.role == ClueRole.VALUE
             and clue.attr_type == PIIAttributeType.ADDRESS
-            and comp_type in _ADMIN_TYPES
+            and _clue_admin_levels(clue)
         ):
-            admin_groups: list[tuple[tuple[_IndexedClue, ...], AddressComponentType, tuple[AddressComponentType, ...], int]] = []
-            scan_cursor = cursor
-            while scan_cursor < len(state.deferred_chain):
-                group_clue = state.deferred_chain[scan_cursor][1]
-                if not (
-                    group_clue.role == ClueRole.VALUE
-                    and group_clue.attr_type == PIIAttributeType.ADDRESS
-                    and group_clue.component_type in _ADMIN_TYPES
-                ):
-                    break
-                group_end = scan_cursor + 1
-                while (
-                    group_end < len(state.deferred_chain)
-                    and state.deferred_chain[group_end][1].role == ClueRole.VALUE
-                    and state.deferred_chain[group_end][1].attr_type == PIIAttributeType.ADDRESS
-                    and state.deferred_chain[group_end][1].component_type in _ADMIN_TYPES
-                    and state.deferred_chain[group_end][1].start == group_clue.start
-                    and state.deferred_chain[group_end][1].end == group_clue.end
-                ):
-                    group_end += 1
-                group_entries = tuple(state.deferred_chain[scan_cursor:group_end])
-                available_levels = _ordered_component_levels(
-                    entry_clue.component_type
-                    for _, entry_clue in group_entries
-                    if entry_clue.component_type in _ADMIN_RANK
-                    and not _occupies_level(state, entry_clue.component_type)
-                )
-                if not available_levels:
-                    break
-                value_end = max(
-                    state.value_char_end_override.get(entry_clue.clue_id, entry_clue.end)
-                    for _, entry_clue in group_entries
-                )
-                admin_groups.append((group_entries, available_levels[0], available_levels, value_end))
-                scan_cursor = group_end
-            if not admin_groups:
-                state.split_at = clue.start
-                break
-            if len(admin_groups) >= 2:
-                candidate_levels = [
-                    levels if levels else (primary_type,)
-                    for _, primary_type, levels, _ in admin_groups
-                ]
-                ascending_relations = [
-                    _admin_relation_prefers_ascending(
-                        raw_text,
-                        admin_groups[index][3],
-                        admin_groups[index + 1][0][0][1].start,
-                    )
-                    for index in range(len(admin_groups) - 1)
-                ]
-                assigned_levels = (
-                    _resolve_admin_chain_assignment(candidate_levels, ascending_relations)
-                    if _should_eager_split_duplicate_dual_admins(candidate_levels, state)
-                    else None
-                )
-                if assigned_levels is not None:
-                    committed_all = True
-                    for (group_entries, _, _, value_end), assigned_level in zip(admin_groups, assigned_levels):
-                        entry_clue = group_entries[0][1]
-                        value = normalize_value(assigned_level, raw_text[entry_clue.start:value_end])
-                        if not value:
-                            continue
-                        component = _DraftComponent(
-                            component_type=assigned_level,
-                            start=entry_clue.start,
-                            end=value_end,
-                            value=value,
-                            key="",
-                            is_detail=assigned_level in _DETAIL_COMPONENTS,
-                            raw_chain=[chain_clue for _, chain_clue in group_entries],
-                            suspected=[],
-                            clue_ids={chain_clue.clue_id for _, chain_clue in group_entries},
-                            clue_indices={chain_index for chain_index, _ in group_entries},
-                        )
-                        if not commit(component):
-                            committed_all = False
-                            break
-                    if not committed_all:
-                        break
-                    cursor = scan_cursor
-                    continue
-
-            group_entries, primary_type, available_levels, value_end = admin_groups[0]
-            component_type = (
-                AddressComponentType.MULTI_ADMIN if len(available_levels) >= 2 else primary_type
-            )
-            if _segment_occupancy_conflict(
-                state,
-                component_type,
-                available_levels if component_type == AddressComponentType.MULTI_ADMIN else (),
+            group_end = cursor + 1
+            while (
+                group_end < len(state.deferred_chain)
+                and state.deferred_chain[group_end][1].role == ClueRole.VALUE
+                and state.deferred_chain[group_end][1].attr_type == PIIAttributeType.ADDRESS
+                and _clue_admin_levels(state.deferred_chain[group_end][1])
+                and state.deferred_chain[group_end][1].start == clue.start
+                and state.deferred_chain[group_end][1].end == clue.end
             ):
+                group_end += 1
+            group_entries = tuple(state.deferred_chain[cursor:group_end])
+            resolution = resolve_standalone_admin_group(state, group_entries)
+            if resolution is None:
                 state.split_at = clue.start
                 break
-            value = normalize_value(primary_type, raw_text[clue.start:value_end])
+            # 契约：`resolution` 是 policy 侧 `_AdminSpanView`（duck-typed 访问字段）。
+            resolved_levels: tuple[AddressComponentType, ...] = resolution.available_levels
+            raw_levels: tuple[AddressComponentType, ...] = resolution.all_levels
+            span_text: str = resolution.text
+            value_end = max(
+                state.value_char_end_override.get(entry_clue.clue_id, entry_clue.end)
+                for _, entry_clue in group_entries
+            )
+            if not resolved_levels:
+                # §5.2.2 collision 触发点：available 为空时，若存在同值 MULTI_ADMIN 则原地降解，
+                # 让 incoming 取互补层继续落库；否则 split。
+                forced = _resolve_multi_admin_collision(
+                    state,
+                    raw_text,
+                    clue.start,
+                    span_text,
+                    raw_levels,
+                )
+                if forced is None:
+                    state.split_at = clue.start
+                    break
+                resolved_levels = forced
+            # §3.4：len>=2 直接构造 MULTI_ADMIN 组件；len==1 退回单层 admin 组件。
+            # SINGLE_OCCUPY 占位冲突检查改为逐层：任一层被占用即视为冲突。
+            occupancy_conflict = any(
+                lvl in SINGLE_OCCUPY and lvl in state.occupancy
+                for lvl in resolved_levels
+            )
+            if occupancy_conflict:
+                state.split_at = clue.start
+                break
+            # normalize_value 仍按最高 rank 的 admin 类型做归一化（与历史行为对齐）。
+            primary_level = resolved_levels[0]
+            value = normalize_value(primary_level, raw_text[clue.start:value_end])
             if value:
+                # MULTI_ADMIN 直接承载全部 resolved_levels；不再保留未消化 suspect 候选。
+                _remove_pending_suspect_group_by_span(
+                    state,
+                    clue.start,
+                    clue.end,
+                    origin="value",
+                )
                 component = _DraftComponent(
-                    component_type=component_type,
+                    component_type=AddressComponentType.MULTI_ADMIN
+                    if len(resolved_levels) >= 2
+                    else primary_level,
                     start=clue.start,
                     end=value_end,
                     value=value,
                     key="",
-                    levels=available_levels if component_type == AddressComponentType.MULTI_ADMIN else (),
-                    is_detail=primary_type in _DETAIL_COMPONENTS,
+                    is_detail=primary_level in _DETAIL_COMPONENTS,
                     raw_chain=[entry_clue for _, entry_clue in group_entries],
                     suspected=[],
+                    level=tuple(resolved_levels),
                     clue_ids={entry_clue.clue_id for _, entry_clue in group_entries},
                     clue_indices={entry_index for entry_index, _ in group_entries},
                 )
                 if not commit(component):
                     break
-            cursor = len(group_entries) + cursor
+            cursor = group_end
             continue
-        if _segment_occupancy_conflict(state, comp_type, ()):
+        if comp_type in SINGLE_OCCUPY and comp_type in state.occupancy:
             state.split_at = clue.start
             break
         value_end = state.value_char_end_override.get(clue.clue_id, clue.end)
@@ -1445,7 +1398,7 @@ def _fixup_suspected_info(state: _ParseState) -> None:
         seen: set[str] = set()
         for entry in component.suspected:
             surface = _suspect_surface_text(entry)
-            dedupe_key = f"{entry.level}|{entry.origin}|{surface}"
+            dedupe_key = f"{'|'.join(lvl.value for lvl in entry.level)}|{entry.origin}|{surface}"
             if not surface or dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
@@ -1455,14 +1408,19 @@ def _fixup_suspected_info(state: _ParseState) -> None:
 
 
 def _recompute_text(component: _DraftComponent) -> str | list[str]:
-    """从 component.value 中按顺序删除 suspect 表面文本。"""
+    """从 component.value 中按顺序删除 suspect 表面文本。
+
+    tuple 化 level 后，同一 span 的候选层级合并到单条 entry；此处按 suspect entry
+    自然顺序依次剥离表面文本即可，不再需要按 group_key 合桶。
+    """
     if isinstance(component.value, list):
         return component.value
     value = component.value
-    for group in _group_suspected_entries(component.suspected):
-        if not group:
+    for entry in component.suspected:
+        surface = _suspect_surface_text(entry)
+        if not surface:
             continue
-        value = _trim_once(value, _suspect_surface_text(group[0]))
+        value = _trim_once(value, surface)
     return value.strip() or component.value
 
 
@@ -1471,41 +1429,182 @@ def _meets_commit_threshold(
     components: list[_DraftComponent],
     locale: str,
     protection_level: ProtectionLevel = ProtectionLevel.STRONG,
-    max_clue_strength: ClaimStrength = ClaimStrength.SOFT,
+    claim_strength: ClaimStrength = ClaimStrength.SOFT,
 ) -> bool:
-    """按 component strength 聚合后的地址 strength 判定提交阈值。"""
-    del locale
-    del evidence_count
-    del max_clue_strength
-    if not components:
-        return False
-    address_strength = _address_claim_strength(components)
+    """地址提交阈值只看 `claim_strength`。"""
+    del evidence_count, components, locale
     if protection_level == ProtectionLevel.STRONG:
-        return strength_ge(address_strength, ClaimStrength.SOFT)
-    if protection_level == ProtectionLevel.BALANCED:
-        return strength_ge(address_strength, ClaimStrength.SOFT)
-    # ProtectionLevel.WEAK
-    return address_strength == ClaimStrength.HARD
+        return strength_ge(claim_strength, ClaimStrength.SOFT)
+    return claim_strength == ClaimStrength.HARD
+
+
+def _sum_strength(parts: Iterable[ClaimStrength]) -> ClaimStrength:
+    """按统一升级规则聚合强度。"""
+    soft_count = 0
+    weak_count = 0
+    for strength in parts:
+        if strength == ClaimStrength.HARD:
+            return ClaimStrength.HARD
+        if strength == ClaimStrength.SOFT:
+            soft_count += 1
+            continue
+        if strength == ClaimStrength.WEAK:
+            weak_count += 1
+    if soft_count >= 2:
+        return ClaimStrength.HARD
+    if soft_count == 1:
+        return ClaimStrength.SOFT
+    if weak_count >= 2:
+        return ClaimStrength.SOFT
+    return ClaimStrength.WEAK
+
+
+def _raise_strength_floor(
+    strength: ClaimStrength,
+    floor: ClaimStrength | None,
+) -> ClaimStrength:
+    if floor is None:
+        return strength
+    return floor if strength_ge(floor, strength) else strength
+
+
+def _apply_strength_cap(
+    strength: ClaimStrength,
+    cap: ClaimStrength | None,
+) -> ClaimStrength:
+    if cap is None:
+        return strength
+    return strength if strength_ge(cap, strength) else cap
+
+
+def _component_key_clue(component: _DraftComponent) -> Clue | None:
+    """返回 component 最右侧的 key clue。"""
+    for clue in reversed(component.raw_chain):
+        if clue.role == ClueRole.KEY:
+            return clue
+    return None
+
+
+def _is_room_level_detail_component(component: _DraftComponent) -> bool:
+    """房/室/户这类 room 粒度 detail 不参与“号”提强上下文。"""
+    if component.component_type == AddressComponentType.BUILDING:
+        return False
+    if component.component_type == AddressComponentType.ROOM:
+        return True
+    key_clue = _component_key_clue(component)
+    return key_clue is not None and key_clue.text in _ROOM_LEVEL_DETAIL_KEYS
+
+
+def _has_hao_hard_context(previous_components: Sequence[_DraftComponent]) -> bool:
+    """判断“号”左侧是否已形成可把整段地址抬到 HARD 的上下文。"""
+    for component in previous_components:
+        if component.component_type == AddressComponentType.ROAD:
+            return True
+        if component.component_type == AddressComponentType.BUILDING:
+            return True
+        if component.component_type in {
+            AddressComponentType.UNIT,
+            AddressComponentType.SUITE,
+        }:
+            return True
+        if component.component_type == AddressComponentType.DETAIL and not _is_room_level_detail_component(component):
+            return True
+    return False
+
+
+def _should_promote_hao_key_to_hard(
+    component: _DraftComponent,
+    *,
+    previous_components: Sequence[_DraftComponent],
+    stream: StreamInput | None,
+) -> bool:
+    """仅在 road / 非 room detail 上下文里，把门牌“号”视为 HARD 证据。"""
+    if stream is None:
+        return False
+    key_clue = _component_key_clue(component)
+    if key_clue is None or key_clue.text != "号":
+        return False
+    if valid_left_numeral_for_zh_address_key(stream, key_clue.start, key_clue.text).kind == "none":
+        return False
+    return _has_hao_hard_context(previous_components)
+
+
+def _component_strength(
+    component: _DraftComponent,
+    *,
+    previous_components: Sequence[_DraftComponent] = (),
+    stream: StreamInput | None = None,
+) -> ClaimStrength:
+    """按 VALUE / KEY 两侧证据聚合单个 component 的强度。"""
+    parts: list[ClaimStrength] = []
+    value_strength: ClaimStrength | None = None
+    for clue in component.raw_chain:
+        if clue.role != ClueRole.VALUE:
+            continue
+        if value_strength is None or not strength_ge(value_strength, clue.strength):
+            value_strength = clue.strength
+    if value_strength is not None:
+        parts.append(value_strength)
+    key_clue = _component_key_clue(component)
+    if key_clue is not None:
+        key_strength = key_clue.strength
+        if _should_promote_hao_key_to_hard(
+            component,
+            previous_components=previous_components,
+            stream=stream,
+        ):
+            key_strength = ClaimStrength.HARD
+        parts.append(key_strength)
+    strength = _sum_strength(parts)
+    strength = _raise_strength_floor(strength, component.strength_floor)
+    strength = _apply_strength_cap(strength, component.strength_cap)
+    return strength
+
+
+def _address_strength(
+    components: list[_DraftComponent],
+    *,
+    stream: StreamInput | None = None,
+) -> ClaimStrength:
+    """按 component 聚合整段地址的 claim_strength。"""
+    return _sum_strength(
+        _component_strength(
+            component,
+            previous_components=components[:index],
+            stream=stream,
+        )
+        for index, component in enumerate(components)
+    )
 
 
 def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> dict[str, list[str]]:
     component_types: list[str] = []
+    component_levels: list[str] = []
     component_trace: list[str] = []
     component_key_trace: list[str] = []
-    component_levels: list[str] = []
     detail_types: list[str] = []
     detail_values: list[str] = []
     component_suspected_trace: list[str] = []
 
     for component in components:
         component_type = component.component_type.value
-        serialized_levels = "|".join(level.value for level in component.levels)
+        level_tuple = component.level if component.level else (component.component_type,)
+        # 多层级（MULTI_ADMIN）按 _ADMIN_RANK 降序 `|` 分隔；单层级直接取该层 value。
+        if len(level_tuple) >= 2:
+            sorted_levels = sorted(
+                level_tuple,
+                key=lambda ct: _ADMIN_RANK.get(ct, 0),
+                reverse=True,
+            )
+            level_str = "|".join(ct.value for ct in sorted_levels)
+        else:
+            level_str = level_tuple[0].value
         values = component.value if isinstance(component.value, list) else [component.value]
         keys = component.key if isinstance(component.key, list) else [component.key]
         for value in values:
             component_types.append(component_type)
+            component_levels.append(level_str)
             component_trace.append(f"{component_type}:{value}")
-            component_levels.append(serialized_levels)
         for key in keys:
             if key:
                 component_key_trace.append(f"{component_type}:{key}")
@@ -1522,9 +1621,9 @@ def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> d
             origin_clue.text if origin_clue.role == ClueRole.LABEL else origin_clue.source_kind
         ],
         "address_component_type": component_types,
+        "address_component_level": component_levels,
         "address_component_trace": component_trace,
         "address_component_key_trace": component_key_trace,
-        "address_component_levels": component_levels,
         "address_details_type": detail_types,
         "address_details_text": detail_values,
         "address_component_suspected": component_suspected_trace,
@@ -1557,7 +1656,7 @@ def _rightmost_component_key_overlaps_negative(
     for _, clue in reversed(clue_entries):
         if clue.role != ClueRole.KEY:
             continue
-        return has_negative_cover(clue.unit_start, clue.unit_end)
+        return has_negative_cover(clue.unit_start, clue.unit_last)
     return False
 
 
@@ -1583,7 +1682,6 @@ def _rebuild_component_derived_state(
     state.last_component_type = None
     state.committed_clue_ids = set()
     state.consumed_clue_indices = set()
-    state.last_consumed_clue_index = -1
     state.value_char_end_override.clear()
     state.pending_comma_value_right_scan = False
     state.pending_comma_first_component = False
@@ -1591,15 +1689,15 @@ def _rebuild_component_derived_state(
     state.pending_community_poi_index = None
     state.comma_tail_checkpoint = None
     state.last_piece_end = None
-    state.max_clue_strength = ClaimStrength.WEAK
+    state.pending_prefix_value = None
 
     for index, component in enumerate(state.components):
         component_type = component.component_type
         _increment_component_count(state, component_type)
-        if component_type in SINGLE_OCCUPY:
-            state.occupancy[component_type] = index
-        for level in _component_levels(component_type, component.levels):
-            state.occupancy[level] = index
+        # 与 `_commit` 一致：按 level 元组逐层写 occupancy，兼容 MULTI_ADMIN。
+        for lvl in component.level:
+            if lvl in SINGLE_OCCUPY:
+                state.occupancy[lvl] = index
         if (
             component_type == AddressComponentType.POI
             and not isinstance(component.key, list)
@@ -1613,10 +1711,9 @@ def _rebuild_component_derived_state(
         state.last_end = max(state.last_end, component.end)
         state.last_piece_end = component.end
         state.segment_state.group_last_type = component_type
-        for clue in component.raw_chain:
-            if not strength_ge(state.max_clue_strength, clue.strength):
-                state.max_clue_strength = clue.strength
 
-    _recompute_last_consumed_index(state)
-    if 0 <= state.last_consumed_clue_index < len(clues):
-        state.last_consumed = clues[state.last_consumed_clue_index]
+    if state.consumed_clue_indices:
+        last_index = max(state.consumed_clue_indices)
+        if 0 <= last_index < len(clues):
+            state.last_consumed = clues[last_index]
+
