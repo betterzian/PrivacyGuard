@@ -8,21 +8,20 @@
     "pte",
     "inc",
     "corp",
-    "ltd"
+    "ltd",
+    "hotel",
+    "hospital",
+    "clinic"
   ],
   "soft": [
     "company",
     "limited",
     "co",
-    "hotel",
-    "hospital",
-    "clinic",
-    "bank"
-  ],
-  "weak": [
+    "bank",
     "university",
     "college",
     "lab",
     "labs"
-  ]
+  ],
+  "weak": []
 }
