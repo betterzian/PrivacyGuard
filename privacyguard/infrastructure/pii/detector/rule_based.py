@@ -22,6 +22,11 @@ from privacyguard.utils.normalized_pii import normalize_pii, normalized_primary_
 from privacyguard.utils.text import is_cjk_text
 
 _ADDRESS_LEVEL_VALUES: frozenset[str] = frozenset(level.value for level in AddressLevel)
+_GENERIC_FRAGMENT_MIN_LENGTH = 5
+_NON_PII_STRUCTURED_ATTR_TYPES = frozenset({
+    PIIAttributeType.TIME,
+    PIIAttributeType.AMOUNT,
+})
 
 
 class RuleBasedPIIDetector:
@@ -389,6 +394,8 @@ class RuleBasedPIIDetector:
     def _to_pii_candidates(self, drafts: list[CandidateDraft]) -> list[PIICandidate]:
         output: list[PIICandidate] = []
         for draft in drafts:
+            if not self._should_emit_candidate_draft(draft):
+                continue
             normalized = normalize_pii(
                 draft.attr_type,
                 draft.text,
@@ -422,6 +429,19 @@ class RuleBasedPIIDetector:
                 )
             )
         return output
+
+    def _should_emit_candidate_draft(self, draft: CandidateDraft) -> bool:
+        """过滤不应进入最终 PII 实体的结构化片段。"""
+        if draft.attr_type in _NON_PII_STRUCTURED_ATTR_TYPES:
+            return False
+        if draft.attr_type not in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
+            return True
+        return self._generic_fragment_length(draft.text) >= _GENERIC_FRAGMENT_MIN_LENGTH
+
+    def _generic_fragment_length(self, text: str) -> int:
+        """按隐私判定口径计算 NUM / ALNUM 的有效长度。"""
+        compact = re.sub(r"[^0-9A-Za-z]", "", str(text or ""))
+        return len(compact)
 
     def _name_entry(self, *, component: str, value: str, persona_id: str) -> DictionaryEntry:
         normalized = normalize_pii(

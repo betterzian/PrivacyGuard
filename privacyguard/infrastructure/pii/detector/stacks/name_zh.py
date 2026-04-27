@@ -29,7 +29,6 @@ from privacyguard.infrastructure.pii.detector.zh_name_rules import (
     collect_blocking_overlaps,
     compact_zh_name_text,
     dominant_negative_overlap_kind,
-    upgrade_claim_strength,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_name_joiner
 
@@ -240,7 +239,7 @@ class ZhNameStack(BaseNameStack):
                 candidate_end=final_end,
             )
         ):
-            final_strength = upgrade_claim_strength(final_strength)
+            final_strength = _upgrade_standalone_boundary_strength(final_strength)
 
         if self.clue.role in {ClueRole.LABEL, ClueRole.START}:
             final_strength = ClaimStrength.HARD
@@ -712,6 +711,13 @@ def _claim_strength_rank(strength: ClaimStrength) -> int:
         ClaimStrength.SOFT: 1,
         ClaimStrength.HARD: 2,
     }[strength]
+
+
+def _upgrade_standalone_boundary_strength(strength: ClaimStrength) -> ClaimStrength:
+    """standalone 边界只把 SOFT 姓名候选提升到 HARD，WEAK 保持不变。"""
+    if strength == ClaimStrength.SOFT:
+        return ClaimStrength.HARD
+    return strength
 
 
 def _unit_flag(unit) -> str | None:

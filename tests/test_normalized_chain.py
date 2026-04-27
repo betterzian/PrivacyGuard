@@ -180,3 +180,28 @@ def test_placeholder_allocator_reuses_address_placeholder_by_same_entity():
     # 同实体复用 #1，本次 PII 自身组件投射出 CITY-DIST-DTL（无 ROAD）。
     assert assigned.actions[0].replacement_text == "[[ADDR#1.CITY-DIST-DTL]]"
     assert assigned.actions[0].entity_id == 1
+
+
+def test_placeholder_allocator_renders_fallback_address_without_spec():
+    store = InMemoryMappingStore()
+    plan = DecisionPlan(
+        session_id="session-1",
+        turn_id=1,
+        actions=[
+            DecisionAction(
+                candidate_id="candidate-1",
+                action_type=ActionType.GENERICIZE,
+                attr_type=PIIAttributeType.ADDRESS,
+                source_text="百亿补贴",
+            )
+        ],
+    )
+
+    assigned = SessionPlaceholderAllocator(store).assign(plan)
+    action = assigned.actions[0]
+
+    assert action.entity_id == 1
+    assert action.replacement_text == "[[ADDR#1]]"
+    assert action.normalized_source is not None
+    assert action.normalized_source.canonical == "百亿补贴"
+    assert action.normalized_source.ordered_components == ()

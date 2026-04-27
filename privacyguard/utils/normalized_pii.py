@@ -23,6 +23,10 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_zh_address_suffix_strippers,
     load_zh_control_values,
 )
+from privacyguard.infrastructure.pii.rule_based_detector_shared import (
+    OCR_BREAK,
+    _OCR_INLINE_GAP_TOKEN,
+)
 from privacyguard.utils.pii_value import parse_name_components
 
 _NAME_COMPONENT_KEYS = ("full", "family", "given", "alias", "middle")
@@ -273,6 +277,8 @@ def _normalize_address(
     components: Mapping[str, str | None] | None,
 ) -> NormalizedPII:
     raw_components = _address_components(raw_text=raw_text, metadata=metadata, components=components)
+    if not raw_components:
+        return _fallback_address_normalized(raw_text)
     ordered_components = _address_ordered_components(metadata=metadata, components=components)
     component_precision_mode = _address_prefers_component_precision_raw(raw_text, raw_components, ordered_components)
     normalized_components = {
@@ -332,6 +338,32 @@ def _normalize_address(
         ordered_components=ordered_components,
         has_admin_static=has_admin_static,
     )
+
+
+def _fallback_address_normalized(raw_text: str) -> NormalizedPII:
+    """地址没有任何结构化组件时，退化为 cleantext canonical。"""
+    canonical = _address_fallback_cleantext(raw_text)
+    match_terms = (canonical,) if canonical else ()
+    identity = {"canonical": canonical} if canonical else {}
+    return NormalizedPII(
+        attr_type=PIIAttributeType.ADDRESS,
+        raw_text=raw_text,
+        canonical=canonical,
+        components={},
+        match_terms=match_terms,
+        identity=identity,
+        ordered_components=(),
+    )
+
+
+def _address_fallback_cleantext(raw_text: str) -> str:
+    """复用 detector 候选文本清洗语义，但不做地址正则兜底解析。"""
+    cleaned = str(raw_text or "")
+    cleaned = cleaned.replace(_OCR_INLINE_GAP_TOKEN, " ")
+    cleaned = cleaned.replace(OCR_BREAK, " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n:：-—|,，;；/\\")
+    cleaned = re.sub(r"[。！!？?]+$", "", cleaned).strip()
+    return cleaned
 
 
 def _address_match_term(component_key: str, component_value: str) -> str:
@@ -481,6 +513,11 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
     5. numbers、subdistrict（component_type 视角）、poi list。
     6. substantive_hits / denom > 0.3。
     """
+    left_fallback = _is_fallback_address(left)
+    right_fallback = _is_fallback_address(right)
+    if left_fallback or right_fallback:
+        return left_fallback and right_fallback and _same_fallback_address(left, right)
+
     if not left.identity.get("address_part") or not right.identity.get("address_part"):
         return False
 
@@ -554,6 +591,27 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
     if denom <= 0:
         return False
     return (substantive_hits / denom) > 0.3
+
+
+def _is_fallback_address(normalized: NormalizedPII) -> bool:
+    """判断地址是否为无组件 fallback 归一结果。"""
+    return (
+        normalized.attr_type == PIIAttributeType.ADDRESS
+        and not normalized.components
+        and not normalized.ordered_components
+    )
+
+
+def _same_fallback_address(left: NormalizedPII, right: NormalizedPII) -> bool:
+    """无组件地址按 canonical 等值或高覆盖子串判同实体。"""
+    left_value = str(left.canonical or "").strip()
+    right_value = str(right.canonical or "").strip()
+    if not left_value or not right_value:
+        return False
+    if left_value == right_value:
+        return True
+    shorter, longer = sorted((left_value, right_value), key=len)
+    return shorter in longer and (len(shorter) / len(longer)) > 0.5
 
 
 def _identity_field_match_if_both_present(
@@ -1604,10 +1662,7 @@ def _address_components(
     traced = _components_from_address_metadata(metadata)
     if traced:
         return traced
-    raise ValueError(
-        "normalize_pii(ADDRESS) 不再支持从 raw_text 进行内部正则兜底抽取；"
-        "请提供结构化 components，或提供来自 detector/addressstack 的 metadata（含 address_component_trace）。"
-    )
+    return {}
 
 
 def _components_from_address_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]:

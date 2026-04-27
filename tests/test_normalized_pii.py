@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 
 from privacyguard.domain.enums import PIIAttributeType
-from privacyguard.utils.normalized_pii import _numbers_match, normalize_pii, same_entity
+from privacyguard.utils.normalized_pii import (
+    _numbers_match,
+    address_display_spec,
+    normalize_pii,
+    same_entity,
+)
 from privacyguard.utils.pii_value import classify_content_shape_attr
 
 
@@ -105,6 +110,49 @@ def test_address_normalization_prefers_metadata_components():
         ("building", "10", "", ()),
         ("detail", "102", "", ()),
     ]
+
+
+def test_address_without_components_falls_back_to_cleantext_canonical():
+    normalized = normalize_pii(PIIAttributeType.ADDRESS, " ：百亿补贴！ ")
+
+    assert normalized.canonical == "百亿补贴"
+    assert normalized.components == {}
+    assert normalized.ordered_components == ()
+    assert normalized.match_terms == ("百亿补贴",)
+    assert normalized.identity == {"canonical": "百亿补贴"}
+    assert address_display_spec(normalized) == ""
+
+
+def test_address_fallback_same_entity_accepts_high_coverage_substring():
+    left = normalize_pii(PIIAttributeType.ADDRESS, "上海浦东新区")
+    right = normalize_pii(PIIAttributeType.ADDRESS, "浦东新区")
+
+    assert same_entity(left, right) is True
+
+
+def test_address_fallback_same_entity_rejects_half_coverage_substring():
+    left = normalize_pii(PIIAttributeType.ADDRESS, "上海浦东")
+    right = normalize_pii(PIIAttributeType.ADDRESS, "浦东")
+
+    assert same_entity(left, right) is False
+
+
+def test_address_fallback_same_entity_rejects_non_substring():
+    left = normalize_pii(PIIAttributeType.ADDRESS, "上海浦东新区")
+    right = normalize_pii(PIIAttributeType.ADDRESS, "北京朝阳区")
+
+    assert same_entity(left, right) is False
+
+
+def test_address_fallback_does_not_merge_with_structured_address():
+    fallback = normalize_pii(PIIAttributeType.ADDRESS, "上海浦东新区")
+    structured = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "",
+        components={"city": "上海", "district": "浦东新区"},
+    )
+
+    assert same_entity(fallback, structured) is False
 
 
 def test_address_ordered_components_from_components_follow_fixed_order():

@@ -833,6 +833,30 @@ def test_single_boundary_standalone_upgrades_claim_strength():
     assert run.candidate.claim_strength == ClaimStrength.SOFT
 
 
+def test_standalone_boundary_only_upgrades_soft_to_hard():
+    text = "张三,"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "张", source_kind="family_name", strength=ClaimStrength.SOFT),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.BALANCED).run()
+
+    assert run is not None
+    assert run.candidate.text == "张三"
+    assert run.candidate.claim_strength == ClaimStrength.HARD
+
+
+def test_standalone_boundary_does_not_upgrade_weak_to_soft():
+    text = "张三,"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 1, "张", source_kind="family_name", strength=ClaimStrength.WEAK),
+    )
+
+    run = _run_name_stack(text, 0, clues, protection_level=ProtectionLevel.STRONG).run()
+
+    assert run is None
+
+
 def test_boundary_upgrade_uses_adjacent_units_instead_of_skipping_to_outer_punct():
     text = "；运单号："
     clues = (
