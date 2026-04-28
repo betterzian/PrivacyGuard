@@ -111,6 +111,14 @@ class BaseNameStack(BaseStack):
         name_clues = self._name_clues_in_span(start, end)
         has_negative_overlap = self._has_name_negative_cover(unit_start, unit_last)
         candidate.claim_strength = self._resolve_claim_strength(name_clues=name_clues)
+        canonical_text = self._canonical_text_from_name_clues(
+            start=start,
+            end=end,
+            candidate_text=candidate.text,
+            name_clues=name_clues,
+        )
+        if canonical_text is not None:
+            candidate.canonical_text = canonical_text
 
         if not self._should_skip_commit_gate() and not self._should_commit_candidate(
             start=start,
@@ -131,6 +139,33 @@ class BaseNameStack(BaseStack):
             frontier_last_unit=candidate.unit_last,
         )
         return run
+
+    def _canonical_text_from_name_clues(
+        self,
+        *,
+        start: int,
+        end: int,
+        candidate_text: str,
+        name_clues: list[tuple[int, Clue]],
+    ) -> str | None:
+        """用字典命中的 canonical 修复 OCR 中 i/l 互换后的姓名文本。"""
+        raw_text = self.context.stream.text[start:end]
+        if raw_text != candidate_text:
+            return None
+        chars = list(candidate_text)
+        changed = False
+        for _index, clue in name_clues:
+            if not clue.source_metadata.get("ocr_matched_text"):
+                continue
+            rel_start = clue.start - start
+            rel_end = clue.end - start
+            if rel_start < 0 or rel_end > len(chars):
+                continue
+            if rel_end - rel_start != len(clue.text):
+                continue
+            chars[rel_start:rel_end] = list(clue.text)
+            changed = True
+        return "".join(chars) if changed else None
 
     def _should_skip_commit_gate(self) -> bool:
         """默认 whole-name / alias 走直接提交；英文路径可覆写收紧。"""

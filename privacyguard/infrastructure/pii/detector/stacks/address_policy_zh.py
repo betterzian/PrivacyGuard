@@ -49,6 +49,7 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     _unit_index_at_or_after,
     _unit_index_left_of,
     examine_left_numeral,
+    expand_left_to_near_ocr_boundary,
     is_ascii_alnum_like_unit,
     is_control_number_value_clue,
     is_negative_clue,
@@ -818,13 +819,16 @@ def _left_expand_zh(pos: int, floor: int, stream: StreamInput) -> int:
     """中文左扩：数字前缀走精确路径，非数字 CJK 走宽松吸收。"""
     prefix = examine_left_numeral(stream, pos)
     if prefix.kind == "ascii_alnum":
-        return _left_expand_adjacent_alnum_for_zh(pos, floor, stream)
+        start = _left_expand_adjacent_alnum_for_zh(pos, floor, stream)
+        return expand_left_to_near_ocr_boundary(stream, start, floor, max_non_empty_units=6)
     if prefix.kind != "none":
         # 中文数字 / 天干地支 → 直接用前缀起点。
-        return max(prefix.char_start, floor)
+        start = max(prefix.char_start, floor)
+        return expand_left_to_near_ocr_boundary(stream, start, floor, max_non_empty_units=6)
     # 非数字 CJK（地名等）→ 仍用宽松的 max_chars 吸收。
     cursor, _ = _skip_inline_gap_left(stream, pos, floor)
-    return _left_expand_zh_chars(cursor, floor, stream=stream, max_chars=2)
+    start = _left_expand_zh_chars(cursor, floor, stream=stream, max_chars=2)
+    return expand_left_to_near_ocr_boundary(stream, start, floor, max_non_empty_units=6)
 
 
 def _routing_context_type(context: _RoutingContext) -> AddressComponentType | None:

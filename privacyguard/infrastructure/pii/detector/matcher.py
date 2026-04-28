@@ -18,6 +18,17 @@ def _ascii_boundary_ok(text: str, start: int, end: int) -> bool:
     return True
 
 
+def fold_ascii_dictionary_text(text: str) -> str:
+    """ASCII 字典匹配用折叠文本；OCR 常见的 i/l 互换在这里统一处理。"""
+    folded: list[str] = []
+    for char in str(text or "").lower():
+        if char in {"i", "l"}:
+            folded.append("i")
+        else:
+            folded.append(char)
+    return "".join(folded)
+
+
 @dataclass(frozen=True, slots=True)
 class AhoPattern:
     text: str
@@ -81,7 +92,7 @@ class AhoMatcher:
     def _build_automaton(patterns: tuple[AhoPattern, ...], *, normalize: bool) -> tuple[_Node, ...]:
         nodes: list[_Node] = [_Node()]
         for pattern in patterns:
-            token = pattern.text.lower() if normalize else pattern.text
+            token = fold_ascii_dictionary_text(pattern.text) if normalize else pattern.text
             state = 0
             for char in token:
                 next_state = nodes[state].transitions.get(char)
@@ -121,7 +132,7 @@ class AhoMatcher:
         if self._has_exact:
             matches.extend(self._scan(self._exact_nodes, text, text))
         if self._has_ascii:
-            folded = folded_text if folded_text is not None else text.lower()
+            folded = fold_ascii_dictionary_text(folded_text if folded_text is not None else text)
             matches.extend(self._scan(self._ascii_nodes, folded, text))
         matches.sort(key=lambda item: (item.start, item.end, -(item.end - item.start)))
         return matches
@@ -158,4 +169,4 @@ class AhoMatcher:
         return matches
 
 
-__all__ = ["AhoMatch", "AhoMatcher", "AhoPattern"]
+__all__ = ["AhoMatch", "AhoMatcher", "AhoPattern", "fold_ascii_dictionary_text"]

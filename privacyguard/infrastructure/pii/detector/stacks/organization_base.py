@@ -24,6 +24,7 @@ from privacyguard.infrastructure.pii.detector.stacks.common import (
     _unit_char_start,
     _unit_index_at_or_after,
     _unit_index_left_of,
+    expand_left_to_near_ocr_boundary,
     is_control_clue,
 )
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_any_break, is_hard_break
@@ -176,11 +177,17 @@ class BaseOrganizationStack(BaseStack):
     def _resolve_suffix_start(self, *, locale: str) -> int:
         floor = _left_expand_text_boundary(self.context, self.clue.start, should_break=self.should_break_clue)
         floor = max(floor, self._value_floor_char())
-        return _extend_organization_left_with_limit(
+        start = _extend_organization_left_with_limit(
             self.context.stream,
             floor=floor,
             start=self.clue.start,
             locale=locale,
+        )
+        return expand_left_to_near_ocr_boundary(
+            self.context.stream,
+            start,
+            floor,
+            max_non_empty_units=6,
         )
 
     def _resolve_label_upper_boundary(self, start: int) -> int:

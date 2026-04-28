@@ -27,7 +27,7 @@ from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _VALID_SUCCESSORS,
     _segment_admit,
 )
-from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_left_of
+from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_left_of, expand_left_to_near_ocr_boundary
 
 EN_VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] = {
     AddressComponentType.COUNTRY: frozenset(),
@@ -281,7 +281,7 @@ def _left_expand_en_phrase(pos: int, floor: int, stream: StreamInput) -> int:
             left_ui -= 1
             continue
         break
-    return cursor
+    return expand_left_to_near_ocr_boundary(stream, cursor, floor, max_non_empty_units=6)
 
 
 def _routing_left_value_start_en(context: _RoutingContext, clue: Clue) -> int:

@@ -74,6 +74,24 @@ def test_name_alias_is_independent_component_and_not_part_of_identity():
     assert normalized.identity == {"family": "张", "given": "三"}
 
 
+def test_english_name_canonical_folds_i_and_l_to_l():
+    left = normalize_pii(
+        PIIAttributeType.NAME,
+        "keVIN dANiEl",
+        components={"full": "keVIN dANiEl", "given": "keVIN", "family": "dANiEl"},
+    )
+    right = normalize_pii(
+        PIIAttributeType.NAME,
+        "keVIN dANiEI",
+        components={"full": "keVIN dANiEI", "given": "keVIN", "family": "dANiEI"},
+    )
+
+    assert left.canonical == "kevln danlel"
+    assert right.canonical == "kevln danlel"
+    assert left.identity == {"family": "danlel", "given": "kevln"}
+    assert same_entity(left, right) is True
+
+
 def test_address_normalization_prefers_metadata_components():
     normalized = normalize_pii(
         PIIAttributeType.ADDRESS,

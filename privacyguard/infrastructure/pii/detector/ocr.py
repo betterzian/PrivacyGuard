@@ -21,6 +21,7 @@ from privacyguard.infrastructure.pii.detector.metadata import (
     GENERIC_CONTEXT_GATE_METADATA,
     merge_metadata,
 )
+from privacyguard.infrastructure.pii.detector.label_layout import LabelBindingInfo, LabelLayoutManager
 from privacyguard.infrastructure.pii.detector.models import (
     CandidateDraft,
     Clue,
@@ -38,6 +39,7 @@ class OCROwnershipProposal:
     event: Clue
     label_block: OCRSceneBlock
     candidate_blocks: tuple[OCRSceneBlock, ...]
+    layout_fallback: bool = False
 
 
 _GATED_LABEL_ATTRS = frozenset({
@@ -74,11 +76,13 @@ _BLOCK_CLUE_ROLES_BY_ATTR = {
         ClueRole.KEY,
     }),
 }
-_ROW_ALIGNMENT_RATIO = 0.10
+_ROW_ALIGNMENT_RATIO = 0.15
 _RIGHT_MAX_GAP_HEIGHTS = 8.0
 _X_OVERLAP_RATIO = 0.50
-_BELOW_LEFT_EDGE_HEIGHTS = 1.0
+_BELOW_LEFT_EDGE_LABEL_WIDTH_RATIO = 0.50
 _BLOCKER_HEIGHT_RATIO = 0.80
+_ROW_HEIGHT_RATIO_MIN = 0.60
+_ROW_HEIGHT_RATIO_MAX = 1.80
 
 
 class LabelBlockClueGate:
@@ -122,22 +126,39 @@ def apply_ocr_geometry(
     median_h = _scene_median_height(scene)
     remapped = [_remap_candidate(candidate, prepared) for candidate in parsed.candidates]
     clue_gate = LabelBlockClueGate(scene=scene, clues=tuple(bundle.all_clues))
+    label_events = tuple(bundle.label_clues)
+    label_blocks = {
+        event.clue_id: block
+        for event in label_events
+        for block in [_event_scene_block(stream, scene, event)]
+        if block is not None
+    }
     label_block_ids = {
         block_id
-        for event in bundle.label_clues
+        for event in label_events
         for block_id in [_event_block_id(stream, event)]
         if block_id
     }
-    proposals: list[OCROwnershipProposal] = []
-    for event in bundle.label_clues:
+    binding_infos: list[LabelBindingInfo] = _parsed_label_bindings(
+        label_events=label_events,
+        label_blocks=label_blocks,
+        candidates=remapped,
+        scene=scene,
+        median_h=median_h,
+    )
+    used_label_ids = set(parsed.handled_label_clue_ids)
+    stage1_proposals: list[OCROwnershipProposal] = []
+    for event in label_events:
         if event.clue_id in parsed.handled_label_clue_ids:
             continue
-        label_block = _event_scene_block(stream, scene, event)
+        label_block = label_blocks.get(event.clue_id)
         if label_block is None:
             continue
         bound = _find_existing_bound_candidate(event, label_block, remapped, scene, median_h=median_h)
         if bound is not None:
             _bind_label_to_candidate(bound, event)
+            used_label_ids.add(event.clue_id)
+            binding_infos.append(_binding_info(event, label_block, bound, scene=scene, median_h=median_h))
             continue
         candidate_blocks = _find_candidate_blocks(
             event,
@@ -146,10 +167,11 @@ def apply_ocr_geometry(
             label_block_ids,
             median_h=median_h,
             clue_gate=clue_gate,
+            require_clue_gate=True,
         )
         if not candidate_blocks:
             continue
-        proposals.append(
+        stage1_proposals.append(
             OCROwnershipProposal(
                 event=event,
                 label_block=label_block,
@@ -157,10 +179,65 @@ def apply_ocr_geometry(
             )
         )
     extras: list[CandidateDraft] = []
-    for proposal in _resolve_ownership_proposals(proposals):
+    for proposal in _resolve_ownership_proposals(stage1_proposals):
         generated = _build_candidate_from_blocks(proposal.event, proposal.candidate_blocks)
         if generated is None:
             continue
+        extras.append(_remap_candidate(generated, prepared))
+        used_label_ids.add(proposal.event.clue_id)
+        binding_infos.append(_proposal_binding_info(proposal, scene=scene, median_h=median_h))
+
+    layout_manager = LabelLayoutManager(
+        scene=scene,
+        label_clues=label_events,
+        label_blocks=label_blocks,
+        bindings=tuple(binding_infos),
+    )
+    layout_decisions = layout_manager.evaluate()
+    trusted_label_ids = {
+        clue_id
+        for clue_id, decision in layout_decisions.items()
+        if decision.trusted
+    }
+    fallback_proposals: list[OCROwnershipProposal] = []
+    for event in label_events:
+        if event.clue_id in used_label_ids or event.clue_id not in trusted_label_ids:
+            continue
+        label_block = label_blocks.get(event.clue_id)
+        if label_block is None:
+            continue
+        candidate_blocks = _find_candidate_blocks(
+            event,
+            label_block,
+            scene,
+            label_block_ids,
+            median_h=median_h,
+            clue_gate=clue_gate,
+            require_clue_gate=False,
+        )
+        if not candidate_blocks:
+            continue
+        fallback_proposals.append(
+            OCROwnershipProposal(
+                event=event,
+                label_block=label_block,
+                candidate_blocks=candidate_blocks,
+                layout_fallback=True,
+            )
+        )
+    for proposal in _resolve_ownership_proposals(fallback_proposals):
+        generated = _build_candidate_from_blocks(proposal.event, proposal.candidate_blocks)
+        if generated is None:
+            continue
+        decision = layout_decisions.get(proposal.event.clue_id)
+        if decision is not None:
+            generated.metadata = merge_metadata(
+                generated.metadata,
+                {
+                    "ocr_label_layout_score": [f"{decision.layout_score:.3f}"],
+                    "ocr_label_layout_fallback": ["1"],
+                },
+            )
         extras.append(_remap_candidate(generated, prepared))
     return _merge_ocr_candidates([*remapped, *extras])
 
@@ -213,6 +290,65 @@ def _build_candidate_from_blocks(event: Clue, blocks: tuple[OCRSceneBlock, ...])
     return None
 
 
+def _parsed_label_bindings(
+    *,
+    label_events: tuple[Clue, ...],
+    label_blocks: dict[str, OCRSceneBlock],
+    candidates: list[CandidateDraft],
+    scene: OCRScene,
+    median_h: float,
+) -> list[LabelBindingInfo]:
+    """把 parser 已经处理过的 label-candidate 关系投影成布局证据。"""
+    event_by_id = {event.clue_id: event for event in label_events}
+    bindings: list[LabelBindingInfo] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        for label_id in candidate.label_clue_ids:
+            if label_id in seen:
+                continue
+            event = event_by_id.get(label_id)
+            label_block = label_blocks.get(label_id)
+            if event is None or label_block is None:
+                continue
+            bindings.append(_binding_info(event, label_block, candidate, scene=scene, median_h=median_h))
+            seen.add(label_id)
+    return bindings
+
+
+def _binding_info(
+    event: Clue,
+    label_block: OCRSceneBlock,
+    candidate: CandidateDraft,
+    *,
+    scene: OCRScene,
+    median_h: float,
+) -> LabelBindingInfo:
+    anchor_block = _candidate_anchor_block(candidate, scene)
+    relation = None
+    if anchor_block is not None:
+        relation = _layout_relation(label_block, anchor_block, scene_blocks=scene.blocks, median_h=median_h)
+    return LabelBindingInfo(label_id=event.clue_id, attr_type=event.attr_type, relation=relation)
+
+
+def _proposal_binding_info(
+    proposal: OCROwnershipProposal,
+    *,
+    scene: OCRScene,
+    median_h: float,
+) -> LabelBindingInfo:
+    relation = _layout_relation(
+        proposal.label_block,
+        proposal.candidate_blocks[0],
+        scene_blocks=scene.blocks,
+        median_h=median_h,
+    )
+    return LabelBindingInfo(
+        label_id=proposal.event.clue_id,
+        attr_type=proposal.event.attr_type,
+        relation=relation,
+    )
+
+
 def _resolve_ownership_proposals(proposals: list[OCROwnershipProposal]) -> list[OCROwnershipProposal]:
     grouped: dict[tuple[str, ...], list[OCROwnershipProposal]] = {}
     for proposal in proposals:
@@ -235,6 +371,8 @@ def _resolve_ownership_proposals(proposals: list[OCROwnershipProposal]) -> list[
 def _proposal_score(proposal: OCROwnershipProposal) -> tuple[float, float, float]:
     text = " ".join(block.clean_text.strip() for block in proposal.candidate_blocks if block.clean_text.strip())
     attr_score = _attribute_segment_score(proposal.event, text)
+    if proposal.layout_fallback and attr_score <= 0:
+        attr_score = 0.1
     geometry_score = _geometry_score(proposal.label_block, proposal.candidate_blocks)
     distance_score = _distance_fallback_score(proposal.label_block, proposal.candidate_blocks)
     return (attr_score, geometry_score, distance_score)
@@ -371,6 +509,7 @@ def _find_candidate_blocks(
     *,
     median_h: float,
     clue_gate: LabelBlockClueGate,
+    require_clue_gate: bool,
 ) -> tuple[OCRSceneBlock, ...]:
     """宽松空间搜索：不依赖预计算 chain，直接在 scene 中按几何邻近度查找值 block。"""
     lb = label_block.block.bbox
@@ -383,24 +522,61 @@ def _find_candidate_blocks(
         bb = block.block.bbox
         if bb is None or not block.clean_text.strip():
             continue
-        if not clue_gate.allows_block(event, block):
+        if require_clue_gate and not clue_gate.allows_block(event, block):
+            continue
+        if not require_clue_gate and not _fallback_block_shape_allowed(event, block, clue_gate):
             continue
         relation = _layout_relation(label_block, block, scene_blocks=scene.blocks, median_h=median_h)
         if relation == "right":
+            if not _height_ratio_allowed(label_block, block):
+                continue
             h_gap = float(bb.x) - float(lb.x + lb.width)
-            score = 2.0 - h_gap / (_RIGHT_MAX_GAP_HEIGHTS * median_h)
+            attr_score = _attribute_segment_score(event, block.clean_text)
+            if not require_clue_gate and attr_score <= 0:
+                attr_score = 0.1
+            score = attr_score + 2.0 - h_gap / (_RIGHT_MAX_GAP_HEIGHTS * median_h)
             scored.append((score, block))
             continue
         if relation == "below":
+            if not _height_ratio_allowed(label_block, block):
+                continue
             v_gap = float(bb.y) - float(lb.y + lb.height)
             x_offset = abs(float(bb.x) - float(lb.x))
-            score = 1.0 - v_gap / max(median_h, 1.0) - x_offset / max(_RIGHT_MAX_GAP_HEIGHTS * median_h, 1.0) * 0.3
+            attr_score = _attribute_segment_score(event, block.clean_text)
+            if not require_clue_gate and attr_score <= 0:
+                attr_score = 0.1
+            score = attr_score + 1.0 - v_gap / max(median_h, 1.0) - x_offset / max(_RIGHT_MAX_GAP_HEIGHTS * median_h, 1.0) * 0.3
             scored.append((score, block))
 
     if not scored:
         return ()
     scored.sort(key=lambda t: t[0], reverse=True)
     return (scored[0][1],)
+
+
+def _fallback_block_shape_allowed(event: Clue, block: OCRSceneBlock, clue_gate: LabelBlockClueGate) -> bool:
+    """高可信 label 的 fallback 只做形状筛选，类型最终仍由候选构造校验。"""
+    text = block.clean_text.strip()
+    if not text:
+        return False
+    if clue_gate.allows_block(event, block):
+        return True
+    if event.attr_type == PIIAttributeType.NAME:
+        return looks_like_name_value(text)
+    if event.attr_type == PIIAttributeType.ORGANIZATION:
+        return looks_like_organization_value(text, label_driven=True)
+    if event.attr_type == PIIAttributeType.ADDRESS:
+        return has_address_signal(text) or len(text) >= 4
+    return False
+
+
+def _height_ratio_allowed(label_block: OCRSceneBlock, value_block: OCRSceneBlock) -> bool:
+    lb = label_block.block.bbox
+    vb = value_block.block.bbox
+    if lb is None or vb is None:
+        return False
+    ratio = float(vb.height) / max(float(lb.height), 1.0)
+    return _ROW_HEIGHT_RATIO_MIN <= ratio <= _ROW_HEIGHT_RATIO_MAX
 
 
 def _remap_candidate(candidate: CandidateDraft, prepared: PreparedOCRContext) -> CandidateDraft:
@@ -534,14 +710,14 @@ def _is_directly_below(label_block: OCRSceneBlock, value_block: OCRSceneBlock, *
     if lb is None or vb is None:
         return False
     vertical_gap = float(vb.y) - float(lb.y + lb.height)
-    max_gap = max(float(lb.height), float(vb.height), float(median_h), 1.0)
+    max_gap = max(float(lb.height), float(vb.height), float(median_h) * 1.2, 1.0)
     if vertical_gap < 0 or vertical_gap > max_gap:
         return False
     min_width = max(min(float(lb.width), float(vb.width)), 1.0)
     overlap = _x_overlap(lb, vb)
     if overlap >= _X_OVERLAP_RATIO * min_width:
         return True
-    return abs(float(lb.x) - float(vb.x)) <= _BELOW_LEFT_EDGE_HEIGHTS * max(float(median_h), 1.0)
+    return abs(float(lb.x) - float(vb.x)) <= _BELOW_LEFT_EDGE_LABEL_WIDTH_RATIO * max(float(lb.width), 1.0)
 
 
 def _has_blocking_between(

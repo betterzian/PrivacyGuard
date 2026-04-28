@@ -241,6 +241,36 @@ def _unit_index_left_of(stream: StreamInput, char_index: int) -> int:
     return ui
 
 
+def expand_left_to_near_ocr_boundary(
+    stream: StreamInput,
+    start: int,
+    floor: int,
+    *,
+    max_non_empty_units: int,
+) -> int:
+    """若左侧到 OCR 边界很短，则把候选起点扩到该边界之后。"""
+    if start <= floor or not stream.units:
+        return start
+    ui = _unit_index_left_of(stream, start)
+    count = 0
+    while ui >= 0:
+        unit = stream.units[ui]
+        if unit.char_end <= floor:
+            return start
+        if unit.kind in {"inline_gap", "ocr_break"}:
+            return max(floor, unit.char_end) if count < max_non_empty_units else start
+        if unit.kind == "space":
+            ui -= 1
+            continue
+        if unit.kind == "punct":
+            return start
+        count += 1
+        if count >= max_non_empty_units:
+            return start
+        ui -= 1
+    return start
+
+
 def _count_non_space_units(units, start_ui: int, end_ui: int) -> int:
     count = 0
     for ui in range(max(0, start_ui), min(len(units), end_ui)):

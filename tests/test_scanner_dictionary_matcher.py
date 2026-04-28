@@ -10,8 +10,10 @@ from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, ClueRole, DictionaryEntry
+from privacyguard.infrastructure.pii.detector.label_layout import LabelBindingInfo, LabelLayoutManager
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
+from privacyguard.infrastructure.pii.detector.rule_based import RuleBasedPIIDetector
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
 
@@ -168,6 +170,81 @@ def test_ocr_cross_line_merge_still_allows_cjk_both_sides():
     )
 
     assert prepared.stream.text == f"我的地址是{_OCR_INLINE_GAP_TOKEN}北京市昌平区"
+
+
+def test_ocr_high_confidence_label_layout_fallback_binds_name_value_block():
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect(
+        "",
+        [
+            _ocr_block("Name", block_id="label", line_id=0, x=20, y=0),
+            _ocr_block("QaROIIne mCinTyRe", block_id="value", line_id=1, x=20, y=26),
+        ],
+    )
+
+    assert any(
+        candidate.attr_type == PIIAttributeType.NAME and candidate.text == "QaROIIne mCinTyRe"
+        for candidate in candidates
+    )
+
+
+def test_ocr_high_confidence_zh_name_label_fallback_binds_english_value_block():
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(
+        "",
+        [
+            _ocr_block("住客姓名", block_id="label", line_id=0, x=20, y=0),
+            _ocr_block("STEvEngoodwIN", block_id="value", line_id=1, x=20, y=26),
+        ],
+    )
+
+    assert any(
+        candidate.attr_type == PIIAttributeType.NAME and candidate.text == "STEvEngoodwIN"
+        for candidate in candidates
+    )
+
+
+def test_label_layout_manager_keeps_bound_label_and_drops_x_outlier():
+    prepared = build_ocr_stream(
+        [
+            _ocr_block("Name:", block_id="name", line_id=0, x=20, y=0),
+            _ocr_block("Email:", block_id="email", line_id=1, x=22, y=30),
+            _ocr_block("Name:", block_id="outlier", line_id=2, x=420, y=300),
+        ]
+    )
+    bundle = build_clue_bundle(
+        prepared.stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+    label_blocks = {
+        clue.clue_id: block
+        for clue in bundle.label_clues
+        for block in prepared.scene.blocks
+        if clue.start < block.clean_end and block.clean_start < clue.end
+    }
+    first_label = bundle.label_clues[0]
+    manager = LabelLayoutManager(
+        scene=prepared.scene,
+        label_clues=bundle.label_clues,
+        label_blocks=label_blocks,
+        bindings=(
+            LabelBindingInfo(
+                label_id=first_label.clue_id,
+                attr_type=first_label.attr_type,
+                relation="below",
+            ),
+        ),
+    )
+
+    decisions = manager.evaluate()
+
+    assert decisions[first_label.clue_id].trusted
+    assert any(decision.drop_reason == "outside_main_x_window" for decision in decisions.values())
 
 
 def test_parser_merges_adjacent_num_candidates_across_plain_spaces_only():

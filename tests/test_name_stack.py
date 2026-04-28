@@ -26,7 +26,7 @@ from privacyguard.infrastructure.pii.detector.zh_name_rules import (
     NegativeOverlapKind,
     apply_negative_overlap_strength,
 )
-from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK
+from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
 from tests._detector_negative_index import build_test_bundle_with_inspire, split_negative_clues
 
 
@@ -1310,6 +1310,14 @@ def test_detector_merges_adjacent_english_name_clues_even_with_weird_ocr_casing(
     assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["keVIN dANiEl"]
 
 
+def test_detector_matches_english_name_dictionary_with_i_l_ocr_confusion():
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+
+    candidates = detector.detect("keVIN dANiEI", [])
+
+    assert [candidate.text for candidate in candidates if candidate.attr_type == PIIAttributeType.NAME] == ["keVIN dANiEI"]
+
+
 def test_en_label_seed_keeps_joiner_name_parts():
     """英文 label seed 右扩时应保留连字符姓名片段。"""
     text = "Name: Mary-Jane Watson"
@@ -1504,6 +1512,26 @@ def test_en_left_expansion_ignores_generic_alnum_blocker():
 
     assert run is not None
     assert run.candidate.text == "M.O'Connor"
+
+
+def test_en_name_crosses_inline_gap_only_when_next_block_has_name_clue():
+    text = f"Connor{_OCR_INLINE_GAP_TOKEN}Smythe"
+    smythe_start = text.index("Smythe")
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 6, "Connor", source_kind="en_surname", strength=ClaimStrength.SOFT),
+        _clue("family-2", ClueRole.FAMILY_NAME, smythe_start, len(text), "Smythe", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+
+    assert _name_texts(text, clues, protection_level=ProtectionLevel.STRONG, locale_profile="en_us") == ["Connor Smythe"]
+
+
+def test_en_name_does_not_cross_inline_gap_for_plain_capitalized_block():
+    text = f"Connor{_OCR_INLINE_GAP_TOKEN}Profile"
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, 0, 6, "Connor", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+
+    assert _name_texts(text, clues, protection_level=ProtectionLevel.STRONG, locale_profile="en_us") == ["Connor"]
 
 
 def test_en_label_seed_single_capitalized_token_without_name_clue_is_rejected():

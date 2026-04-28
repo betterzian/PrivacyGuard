@@ -1757,8 +1757,13 @@ def _name_canonical(value: str) -> str:
     if not text:
         return ""
     if _NAME_COMPONENT_RE.fullmatch(text):
-        return re.sub(r"\s+", " ", text).strip().lower()
+        return _fold_english_name_il(re.sub(r"\s+", " ", text).strip().lower())
     return "".join(char for char in re.sub(r"\s+", "", text) if char not in "·•・")
+
+
+def _fold_english_name_il(value: str) -> str:
+    """英文姓名 canonical 中将 i/l 统一折叠，降低 OCR 竖线类误差影响。"""
+    return value.translate(str.maketrans({"i": "l", "l": "l"}))
 
 
 def _address_detail_tokens(components: Mapping[str, str]) -> list[str]:

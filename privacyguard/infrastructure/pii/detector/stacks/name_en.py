@@ -215,6 +215,12 @@ class EnNameStack(BaseNameStack):
                     ui += 1
                     continue
                 break
+            if unit.kind == "inline_gap":
+                if self._inline_gap_allows_next_name_block(ui, upper):
+                    cursor_end = unit.char_end
+                    ui += 1
+                    continue
+                break
             if unit.kind == "punct":
                 left_char = raw_text[unit.char_start - 1] if unit.char_start > 0 else None
                 right_char = _peek_unit_first_char(units, ui + 1)
@@ -276,6 +282,11 @@ class EnNameStack(BaseNameStack):
             if ui < 0:
                 return None
             unit = units[ui]
+            if unit.kind == "inline_gap":
+                if not self._inline_gap_allows_previous_name_block(ui):
+                    return None
+                ui -= 1
+                continue
             if unit.kind != "punct":
                 break
             left_char = self.context.stream.text[unit.char_start - 1] if unit.char_start > 0 else None
@@ -292,6 +303,10 @@ class EnNameStack(BaseNameStack):
                 break
             if gap_unit.kind == "space":
                 continue
+            if gap_unit.kind == "inline_gap":
+                if self._inline_gap_allows_next_name_block(gap_index, start):
+                    continue
+                return None
             if gap_unit.kind == "punct":
                 left_char = self.context.stream.text[gap_unit.char_start - 1] if gap_unit.char_start > 0 else None
                 right_char = _peek_unit_first_char(units, gap_index + 1)
@@ -309,6 +324,58 @@ class EnNameStack(BaseNameStack):
         if not self._is_capitalized_ascii_name_unit(unit):
             return None
         return (unit.char_start, unit.char_end, "unit")
+
+    def _inline_gap_allows_next_name_block(self, gap_unit_index: int, upper: int) -> bool:
+        """跨 inline_gap 时，右侧 block 必须已经有英文 NAME clue。"""
+        span = self._right_block_span_after_inline_gap(gap_unit_index, upper)
+        return span is not None and self._span_contains_en_name_component_clue(*span)
+
+    def _inline_gap_allows_previous_name_block(self, gap_unit_index: int) -> bool:
+        """向左跨 inline_gap 时，左侧 block 必须已经有英文 NAME clue。"""
+        span = self._left_block_span_before_inline_gap(gap_unit_index)
+        return span is not None and self._span_contains_en_name_component_clue(*span)
+
+    def _right_block_span_after_inline_gap(self, gap_unit_index: int, upper: int) -> tuple[int, int] | None:
+        units = self.context.stream.units
+        scan = gap_unit_index + 1
+        while scan < len(units) and units[scan].kind == "space":
+            scan += 1
+        if scan >= len(units) or units[scan].char_start > upper:
+            return None
+        start = units[scan].char_start
+        end = units[scan].char_end
+        while scan < len(units):
+            unit = units[scan]
+            if unit.char_start > upper or unit.kind in {"inline_gap", "ocr_break"}:
+                break
+            if unit.kind != "space":
+                end = unit.char_end
+            scan += 1
+        return (start, end) if end > start else None
+
+    def _left_block_span_before_inline_gap(self, gap_unit_index: int) -> tuple[int, int] | None:
+        units = self.context.stream.units
+        scan = gap_unit_index - 1
+        while scan >= 0 and units[scan].kind == "space":
+            scan -= 1
+        if scan < 0:
+            return None
+        end = units[scan].char_end
+        start = units[scan].char_start
+        while scan >= 0:
+            unit = units[scan]
+            if unit.kind in {"inline_gap", "ocr_break"}:
+                break
+            if unit.kind != "space":
+                start = unit.char_start
+            scan -= 1
+        return (start, end) if end > start else None
+
+    def _span_contains_en_name_component_clue(self, start: int, end: int) -> bool:
+        return any(
+            clue.end > start and clue.start < end and self._is_en_name_component_clue(clue)
+            for clue in self.context.clues
+        )
 
     def _find_name_piece_clue_covering(self, start: int, end: int) -> Clue | None:
         clues = self.context.clues

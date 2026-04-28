@@ -33,7 +33,7 @@ from privacyguard.infrastructure.pii.detector.lexicon_loader import (
     load_zh_license_plate_values,
     load_zh_single_surname_claim_strengths,
 )
-from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern
+from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern, fold_ascii_dictionary_text
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
     BreakType,
@@ -1401,6 +1401,7 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         raw_start, raw_end, matched_text = normalized
         entry = match.payload
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+        metadata = {"ocr_matched_text": [matched_text]} if matched_text != entry.text else {}
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -1410,10 +1411,11 @@ def _scan_en_surname_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 strength=entry.strength,
                 start=raw_start,
                 end=raw_end,
-                text=matched_text,
+                text=entry.text,
                 unit_start=_us,
                 unit_last=_ue,
                 source_kind="en_surname",
+                source_metadata=metadata,
             )
         )
     return _dedupe_clues(clues)
@@ -1429,6 +1431,7 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
         raw_start, raw_end, matched_text = normalized
         entry = match.payload
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
+        metadata = {"ocr_matched_text": [matched_text]} if matched_text != entry.text else {}
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -1438,10 +1441,11 @@ def _scan_en_given_name_clues(ctx: DetectContext, segment: _ScanSegment) -> list
                 strength=entry.strength,
                 start=raw_start,
                 end=raw_end,
-                text=matched_text,
+                text=entry.text,
                 unit_start=_us,
                 unit_last=_ue,
                 source_kind="en_given_name",
+                source_metadata=metadata,
             )
         )
     return _dedupe_clues(clues)
@@ -2766,8 +2770,8 @@ def _normalize_ascii_match(
 
 
 def _ascii_unit_text_matches(unit_text: str, pattern_text: str) -> bool:
-    folded_unit = unit_text.lower()
-    folded_pattern = pattern_text.lower()
+    folded_unit = fold_ascii_dictionary_text(unit_text)
+    folded_pattern = fold_ascii_dictionary_text(pattern_text)
     return folded_unit in {
         folded_pattern,
         f"{folded_pattern}s",
