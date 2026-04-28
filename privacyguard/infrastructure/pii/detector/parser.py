@@ -1239,7 +1239,7 @@ class StreamParser:
             context.raise_stack_value_floor(inspire.family, inspire.unit_last)
 
     def _advance_inspire_anchor_at_unit(self, context: StackContext, unit_index: int) -> None:
-        """流式维护最近的非结构化 inspire 锚点。"""
+        """流式维护最近的 inspire 锚点。"""
         if unit_index < 0 or unit_index >= len(context.unit_index):
             return
         bucket = context.unit_index[unit_index]

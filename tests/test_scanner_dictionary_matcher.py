@@ -686,7 +686,7 @@ def test_non_structured_label_with_right_ocr_break_stays_direct_seed():
     assert bundle.inspire_entries == ()
 
 
-def test_non_boundary_structured_label_is_dropped_instead_of_becoming_hint():
+def test_non_boundary_structured_label_becomes_inspire():
     ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
     stream = build_prompt_stream("这里的手机1234")
     bundle = build_clue_bundle(
@@ -699,6 +699,10 @@ def test_non_boundary_structured_label_is_dropped_instead_of_becoming_hint():
     parsed = StreamParser(locale_profile="mixed", ctx=ctx).parse(stream, bundle)
 
     assert not any(clue.role == ClueRole.LABEL and clue.text == "手机" for clue in bundle.all_clues)
+    assert len(bundle.inspire_entries) == 1
+    inspire = bundle.inspire_entries[0]
+    assert inspire.attr_type == PIIAttributeType.PHONE
+    assert inspire.family == scanner_module._attr_to_family(PIIAttributeType.PHONE)
     assert len(parsed.candidates) == 1
     assert parsed.candidates[0].attr_type == PIIAttributeType.NUM
     assert "label_hint_attr" not in parsed.candidates[0].metadata

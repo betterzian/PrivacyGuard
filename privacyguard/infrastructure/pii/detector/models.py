@@ -311,7 +311,7 @@ class StructuredAnchor:
 
 @dataclass(frozen=True, slots=True)
 class InspireEntry:
-    """非 STRUCTURED label 降级后的近距离增强锚点。"""
+    """label 降级后的近距离增强锚点。"""
 
     attr_type: PIIAttributeType
     family: ClueFamily

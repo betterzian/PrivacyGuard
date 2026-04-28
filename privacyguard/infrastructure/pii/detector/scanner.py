@@ -2500,8 +2500,8 @@ def _has_label_direct_seed_break_after(
 
 
 def _build_inspire_entry(clue: Clue) -> InspireEntry | None:
-    """将降级的非结构化 label 转成 inspire side channel。"""
-    if clue.attr_type is None or clue.family in {ClueFamily.STRUCTURED, ClueFamily.CONTROL}:
+    """将降级的 label 转成 inspire side channel。"""
+    if clue.attr_type is None or clue.family == ClueFamily.CONTROL:
         return None
     return InspireEntry(
         attr_type=clue.attr_type,
@@ -3281,7 +3281,7 @@ def _sweep_pass1(
     STRUCTURED 和 BREAK 无条件保留并形成活跃区间；
     其他 soft clue 落在活跃区间内则过滤。
     LABEL 先尝试拼接"是"/"is"转 START。
-    - STRUCTURED label 继续沿用旧边界过滤。
+    - STRUCTURED label 满足边界时保留为 direct LABEL，否则降级为 inspire。
     - 非 STRUCTURED label 若右侧满足 direct seed break，则保留为 direct LABEL。
     - 否则降级为 inspire side channel，不进入 parser seed 流程。
     """
@@ -3333,6 +3333,9 @@ def _sweep_pass1(
                     role = ClueRole.START
                 elif clue.family == ClueFamily.STRUCTURED:
                     if not _has_label_boundary(stream, clue.start, clue.end):
+                        inspire = _build_inspire_entry(clue)
+                        if inspire is not None:
+                            inspire_entries.append(inspire)
                         continue
                 elif not _has_label_direct_seed_break_after(
                     stream,
