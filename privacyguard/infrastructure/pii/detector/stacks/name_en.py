@@ -22,6 +22,16 @@ from privacyguard.infrastructure.pii.detector.zh_name_rules import (
 from privacyguard.infrastructure.pii.rule_based_detector_shared import is_name_joiner
 
 
+def _is_generic_alnum_clue(clue: Clue) -> bool:
+    """英文姓名扩张只忽略 scanner 产生的通用 ALNUM 片段。"""
+    return (
+        clue.family == ClueFamily.STRUCTURED
+        and clue.attr_type == PIIAttributeType.ALNUM
+        and clue.source_kind == "extract_alnum_fragment"
+        and clue.role == ClueRole.VALUE
+    )
+
+
 class EnNameStack(BaseNameStack):
     """英文姓名 stack。"""
 
@@ -218,6 +228,8 @@ class EnNameStack(BaseNameStack):
     def _is_name_blocker(self, clue: Clue, *, ignore_negative: bool = False) -> bool:
         if self._is_en_name_control_clue(clue):
             return True
+        if _is_generic_alnum_clue(clue):
+            return False
         return super()._is_name_blocker(clue, ignore_negative=ignore_negative)
 
     def _gap_allows_name_piece_en(self, start: int, end: int) -> bool:
@@ -290,7 +302,8 @@ class EnNameStack(BaseNameStack):
         if overlapping_clue is not None:
             if self._is_en_name_component_clue(overlapping_clue):
                 return (unit.char_start, unit.char_end, "clue")
-            return None
+            if not _is_generic_alnum_clue(overlapping_clue):
+                return None
         if unit.kind != "ascii_word":
             return None
         if not self._is_capitalized_ascii_name_unit(unit):

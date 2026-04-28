@@ -516,13 +516,17 @@ def _build_hard_scan_segments(
     *,
     ignored_spans: tuple[tuple[int, int], ...],
 ) -> tuple[_ScanSegment, ...]:
-    """构建 hard scan 视图：OCR_BREAK 分段，段内去除 inline_gap。"""
-    break_spans = tuple(sorted(set((*_find_ocr_break_only_spans(stream), *ignored_spans))))
+    """构建 hard scan 视图：OCR_BREAK 与 inline_gap 都作为硬边界。"""
+    break_spans = tuple(sorted(set((
+        *_find_ocr_break_only_spans(stream),
+        *_find_inline_gap_spans(stream),
+        *ignored_spans,
+    ))))
     return _build_soft_scan_segments(
         stream,
         (),
         ocr_break_spans=break_spans,
-        inline_gap_spans=_find_inline_gap_spans(stream),
+        inline_gap_spans=(),
     )
 
 

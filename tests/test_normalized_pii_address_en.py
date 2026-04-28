@@ -40,6 +40,7 @@ def test_english_address_normalization_uses_number_and_precise_components():
     assert normalized.identity["number"] == "1200"
     assert normalized.identity["unit"] == "7b"
     assert normalized.identity["detail"] == "12"
+    assert normalized.numbers == ()
     assert "details_part" not in normalized.identity
 
 
@@ -136,6 +137,22 @@ def test_english_address_same_entity_respects_precise_component_slots(left_extra
     right = normalize_pii(PIIAttributeType.ADDRESS, "", components={**base, **right_extra})
 
     assert same_entity(left, right) is expected_same
+
+
+def test_english_precise_components_do_not_fall_back_to_fuzzy_numbers():
+    base = {
+        "province": "WA",
+        "city": "Bellevue",
+        "road": "Main Street",
+        "number": "5176",
+        "postal_code": "59060",
+    }
+    suite_300 = normalize_pii(PIIAttributeType.ADDRESS, "", components={**base, "suite": "Suite 300"})
+    suite_320 = normalize_pii(PIIAttributeType.ADDRESS, "", components={**base, "suite": "Suite 320"})
+
+    assert suite_300.numbers == ()
+    assert suite_320.numbers == ()
+    assert same_entity(suite_300, suite_320) is False
 
 
 def test_ocr_address_component_trace_maps_alias_fields_to_precise_components():

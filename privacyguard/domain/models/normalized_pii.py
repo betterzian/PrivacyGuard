@@ -51,12 +51,9 @@ class NormalizedPII(BaseModel):
     components: dict[str, str] = Field(default_factory=dict)
     match_terms: tuple[str, ...] = ()
     identity: dict[str, str] = Field(default_factory=dict)
-    # 地址专属：从左到右提取的数字/字母序列（号/栋/单元/楼/室等 detail 层级）。
-    # 用于同一地址判定时的逆序对齐匹配。
+    # 地址专属：非精细地址的附属数字/字母序列（栋/单元/楼/室等 detail 层级）。
+    # 主门牌号由 identity["number"] 独立比较，英文精细地址由组件级比较处理。
     numbers: tuple[str, ...] = ()
-    # 地址专属：有明确 key 的数字，如 {"building": "10", "floor": "3", "room": "201"}。
-    # 用于 keyed 比对路径——双方共有的 key 值必须相等，缺失的 key 忽略。
-    keyed_numbers: dict[str, str] = Field(default_factory=dict)
     # 地址专属：按 detector/结构化输入顺序保存的组件级结果。
     ordered_components: tuple[NormalizedAddressComponent, ...] = Field(default_factory=tuple)
     # 地址专属：预计算标志——是否存在可判定"行政层级"的组件

@@ -466,6 +466,88 @@ def test_address_same_entity_keeps_number_match_when_building_prefix_is_missing(
     assert same_entity(left, right) is False
 
 
+def test_address_main_number_is_not_fuzzy_number_and_missing_side_is_skipped():
+    left = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "北京市昌平区百善镇下东廓村2号",
+        metadata={
+            "address_component_trace": [
+                "city:北京",
+                "district:昌平",
+                "subdistrict:百善",
+                "poi:东廓村",
+                "number:2",
+            ],
+            "address_component_key_trace": ["city:市", "district:区", "subdistrict:镇", "number:号"],
+        },
+    )
+    right = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "北京北京市昌平区百善镇",
+        metadata={
+            "address_component_trace": [
+                "province:北京",
+                "city:北京",
+                "district:昌平",
+                "subdistrict:百善",
+            ],
+            "address_component_key_trace": ["city:市", "district:区", "subdistrict:镇"],
+        },
+    )
+    different_number = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "北京市昌平区百善镇下东廓村3号",
+        metadata={
+            "address_component_trace": [
+                "city:北京",
+                "district:昌平",
+                "subdistrict:百善",
+                "poi:东廓村",
+                "number:3",
+            ],
+            "address_component_key_trace": ["city:市", "district:区", "subdistrict:镇", "number:号"],
+        },
+    )
+
+    assert left.identity["number"] == "2"
+    assert left.numbers == ()
+    assert right.numbers == ()
+    assert same_entity(left, right) is True
+    assert same_entity(left, different_number) is False
+
+
+def test_address_fuzzy_numbers_compare_only_when_both_sides_have_values():
+    with_detail = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "中山路101室",
+        metadata={
+            "address_component_trace": ["road:中山", "detail:101"],
+            "address_component_key_trace": ["road:路", "detail:室"],
+        },
+    )
+    no_detail = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "中山路",
+        metadata={
+            "address_component_trace": ["road:中山"],
+            "address_component_key_trace": ["road:路"],
+        },
+    )
+    different_detail = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "中山路201室",
+        metadata={
+            "address_component_trace": ["road:中山", "detail:201"],
+            "address_component_key_trace": ["road:路", "detail:室"],
+        },
+    )
+
+    assert with_detail.numbers == ("101",)
+    assert no_detail.numbers == ()
+    assert same_entity(with_detail, no_detail) is True
+    assert same_entity(with_detail, different_detail) is False
+
+
 def test_address_numbers_normalize_control_value_and_ascii_mix():
     normalized = normalize_pii(
         PIIAttributeType.ADDRESS,

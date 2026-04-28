@@ -133,6 +133,7 @@ _PHONE_US_TRUNK_AREA_PREFIX_RE = re.compile(r"^\s*1[ \-]*\([2-9]\d{2}\)")
 _PHONE_CN_MOBILE_RE = re.compile(r"1[3-9]\d{9}")
 _PHONE_US_TEN_DIGIT_RE = re.compile(r"[2-9]\d{9}")
 _PRECISE_ADDRESS_COMPONENT_KEYS = frozenset({"building", "unit", "room", "suite"})
+_EXACT_ADDRESS_COMPONENT_COMPARE_KEYS = _PRECISE_ADDRESS_COMPONENT_KEYS | {"detail"}
 _EN_ADDRESS_COMPONENT_PREFIX_PATTERNS: dict[str, re.Pattern[str]] = {
     "unit": re.compile(r"^(?:apartment|apt|unit)\b[\s\-:.,#]*", re.IGNORECASE),
     "room": re.compile(r"^(?:room|rm)\b[\s\-:.,#]*", re.IGNORECASE),
@@ -303,8 +304,10 @@ def _normalize_address(
         identity[key] = normalized_value
         if key in _ADDRESS_MATCH_KEYS:
             address_part_values.append(normalized_value)
-    numbers = _address_numbers(raw_text=raw_text, metadata=metadata, normalized_components=normalized_components)
-    keyed_numbers = _extract_keyed_numbers(metadata)
+    numbers = [] if component_precision_mode else _address_numbers(
+        metadata=metadata,
+        normalized_components=normalized_components,
+    )
     details_tokens = _address_detail_tokens(normalized_components)
     if address_part_values:
         identity["address_part"] = "|".join(address_part_values)
@@ -334,7 +337,6 @@ def _normalize_address(
         match_terms=_dedupe_terms(match_terms),
         identity=identity,
         numbers=tuple(numbers),
-        keyed_numbers={} if component_precision_mode else keyed_numbers,
         ordered_components=ordered_components,
         has_admin_static=has_admin_static,
     )
@@ -543,7 +545,7 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
             left,
             right,
             key,
-            exact_compare=component_precision_mode and key in _PRECISE_ADDRESS_COMPONENT_KEYS,
+            exact_compare=component_precision_mode and key in _EXACT_ADDRESS_COMPONENT_COMPARE_KEYS,
         )
         if not ok:
             return False
@@ -563,12 +565,9 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
             return False
 
     if not component_precision_mode:
-        if not _numbers_match(
-            left.numbers, right.numbers,
-            left_keyed=left.keyed_numbers, right_keyed=right.keyed_numbers,
-        ):
+        if left.numbers and right.numbers and not _numbers_match(left.numbers, right.numbers):
             return False
-        if _numbers_substantive_pair(left, right):
+        if left.numbers and right.numbers:
             substantive_hits += 1
 
     # subdistrict：走非 admin peer 路径；不累计 has_admin（SUBDISTRICT ∉ _HAS_ADMIN_LEVEL_KEYS）
@@ -624,13 +623,6 @@ def _identity_field_match_if_both_present(
     if not left_value or not right_value:
         return True
     return left_value == right_value
-
-
-def _numbers_substantive_pair(left: NormalizedPII, right: NormalizedPII) -> bool:
-    """双方是否都带有可比的号码序列。"""
-    left_has = bool(left.numbers)
-    right_has = bool(right.numbers)
-    return bool(left_has and right_has)
 
 
 def _has_precise_component_cross_key_conflict(left: NormalizedPII, right: NormalizedPII) -> bool:
@@ -1143,12 +1135,7 @@ def _poi_subset_either(a: str, b: str) -> bool:
     return shorter in longer
 
 
-def _numbers_match(
-    left: tuple[str, ...],
-    right: tuple[str, ...],
-    left_keyed: dict[str, str] | None = None,
-    right_keyed: dict[str, str] | None = None,
-) -> bool:
+def _numbers_match(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
     """号码判定。
 
     规则：
@@ -1156,7 +1143,6 @@ def _numbers_match(
     2. 命中数相对最长一方的覆盖率必须严格大于 40%。
     3. 当最短一方长度小于等于 2 时，要求最短一方全部命中。
     """
-    del left_keyed, right_keyed
     return _numbers_sequence_match(left, right)
 
 
@@ -1185,9 +1171,6 @@ def _numbers_sequence_match(left: tuple[str, ...], right: tuple[str, ...]) -> bo
     if len(shorter) <= 2 and matched != len(shorter):
         return False
     return True
-
-
-_KEYED_NUMBER_TYPES = {"building", "detail", "number"}
 
 
 def _parse_one_component_suspected(segment: str) -> tuple[NormalizedAddressSuspectEntry, ...]:
@@ -1468,39 +1451,12 @@ def _parse_address_trace_entries_with_levels(
     return entries
 
 
-def _extract_keyed_numbers(metadata: Mapping[str, object] | None) -> dict[str, str]:
-    """从 address_component_trace + address_component_key_trace 提取有明确 key 的数字。"""
-    if not metadata:
-        return {}
-    trace = metadata.get("address_component_trace")
-    key_trace = metadata.get("address_component_key_trace")
-    if not isinstance(trace, list) or not isinstance(key_trace, list):
-        return {}
-    # 收集 key_trace 中出现过的 component_type（有 key 意味着有明确关键字标记）。
-    key_set: set[str] = set()
-    for entry in key_trace:
-        if isinstance(entry, str) and ":" in entry:
-            ct, _ = entry.split(":", 1)
-            key_set.add(ct.strip())
-    keyed: dict[str, str] = {}
-    for entry in trace:
-        if not isinstance(entry, str) or ":" not in entry:
-            continue
-        ct, val = entry.split(":", 1)
-        ct = ct.strip()
-        if ct in _KEYED_NUMBER_TYPES and ct in key_set:
-            keyed[ct] = val.strip()
-    return keyed
-
-
 def _address_numbers(
     *,
-    raw_text: str,
     metadata: Mapping[str, object] | None,
     normalized_components: Mapping[str, str],
 ) -> list[str]:
-    """按地址从左到右出现顺序提取号码序列。"""
-    del raw_text
+    """按地址从左到右提取非精细地址的附属数字序列。"""
     tokens: list[str] = []
     # 优先使用 addressstack 的 trace（天然保持组件生成顺序）。
     if metadata:
@@ -1512,7 +1468,7 @@ def _address_numbers(
                 comp_type, value = item.split(":", 1)
                 comp_type = comp_type.strip()
                 value = value.strip()
-                if comp_type in {"building", "unit", "room", "suite", "detail", "number"}:
+                if comp_type in _ADDRESS_DETAIL_KEYS:
                     tokens.extend(_extract_number_tokens(value))
             return [t for t in tokens if t]
     # fallback：无 trace 时按 detail keys 顺序提取（仅用于 components 直传场景）。

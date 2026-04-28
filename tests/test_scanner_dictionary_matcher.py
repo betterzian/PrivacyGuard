@@ -9,8 +9,8 @@ from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueRole, DictionaryEntry
-from privacyguard.infrastructure.pii.detector.parser import StreamParser
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueRole, DictionaryEntry
+from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
@@ -146,6 +146,53 @@ def test_prompt_stream_normalizes_fullwidth_parentheses_only():
     stream = build_prompt_stream("备注【测试】（+86）13812345678")
 
     assert stream.text == "备注【测试】(+86)13812345678"
+
+
+def test_ocr_cross_line_merge_requires_compatible_character_types():
+    prepared = build_ocr_stream(
+        [
+            _ocr_block("0396 127 8788", block_id="phone", line_id=0, x=0, y=0),
+            _ocr_block("Message yourself", block_id="message", line_id=1, x=0, y=25),
+        ]
+    )
+
+    assert prepared.stream.text == f"0396 127 8788{OCR_BREAK}Message yourself"
+
+
+def test_ocr_cross_line_merge_still_allows_cjk_both_sides():
+    prepared = build_ocr_stream(
+        [
+            _ocr_block("我的地址是", block_id="top", line_id=0, x=0, y=0),
+            _ocr_block("北京市昌平区", block_id="bottom", line_id=1, x=0, y=25),
+        ]
+    )
+
+    assert prepared.stream.text == f"我的地址是{_OCR_INLINE_GAP_TOKEN}北京市昌平区"
+
+
+def test_parser_merges_adjacent_generic_candidates_across_plain_spaces_only():
+    stream = build_prompt_stream(f"abc def{_OCR_INLINE_GAP_TOKEN}ghi")
+    parser = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG))
+    context = StackContext(stream=stream, locale_profile="mixed", protection_level=ProtectionLevel.STRONG)
+
+    def candidate(start: int, end: int) -> CandidateDraft:
+        return CandidateDraft(
+            attr_type=PIIAttributeType.ALNUM,
+            start=start,
+            end=end,
+            text=stream.text[start:end],
+            source=stream.source,
+            source_kind="extract_alnum_fragment",
+            unit_start=stream.char_to_unit[start],
+            unit_last=stream.char_to_unit[end - 1],
+            metadata={"fragment_type": ["ALNUM"]},
+        )
+
+    parser._commit_candidate(context, candidate(0, 3))
+    parser._commit_candidate(context, candidate(4, 7))
+    parser._commit_candidate(context, candidate(stream.text.index("ghi"), len(stream.text)))
+
+    assert [item.text for item in context.candidates] == ["abc def", "ghi"]
 
 
 def test_hard_pattern_scan_prefers_alnum_fragment_over_nested_digit_fragment():
@@ -1186,19 +1233,49 @@ def test_hard_pattern_scan_keeps_phone_structure_as_single_fragment(
     assert clue.source_metadata["phone_pattern"] == [expected_pattern]
 
 
-def test_hard_pattern_scan_removes_inline_gap_before_structured_scan():
+def test_hard_pattern_scan_does_not_cross_inline_gap():
     stream = build_prompt_stream(f"+86123{_OCR_INLINE_GAP_TOKEN}43221234")
     clues = scanner_module._scan_hard_patterns(
         DetectContext(protection_level=ProtectionLevel.STRONG),
         stream,
     )
 
-    assert len(clues) == 1
-    assert clues[0].attr_type == PIIAttributeType.NUM
-    assert clues[0].text == "+8612343221234"
-    assert clues[0].source_metadata["pure_digits"] == ["8612343221234"]
-    assert clues[0].start == 0
-    assert clues[0].end == len(stream.text)
+    assert all(
+        clue.source_metadata.get("pure_digits") != ["8612343221234"]
+        for clue in clues
+    )
+    assert [
+        clue.source_metadata["pure_digits"][0]
+        for clue in clues
+        if clue.attr_type == PIIAttributeType.NUM
+    ] == ["86123", "43221234"]
+
+
+def test_hard_pattern_scan_email_does_not_cross_inline_gap():
+    stream = build_prompt_stream(f"New Message{_OCR_INLINE_GAP_TOKEN}ramesh_petrov@msn.net")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert [clue.text for clue in clues if clue.attr_type == PIIAttributeType.EMAIL] == [
+        "ramesh_petrov@msn.net",
+    ]
+
+
+def test_hard_pattern_scan_does_not_glue_number_tail_to_text_across_inline_gap():
+    stream = build_prompt_stream(f"0396 127 8788{_OCR_INLINE_GAP_TOKEN}Message yourself")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert all("8788Message" not in clue.text for clue in clues)
+    assert [
+        clue.source_metadata["pure_digits"][0]
+        for clue in clues
+        if clue.attr_type == PIIAttributeType.NUM
+    ] == ["03961278788"]
 
 
 def test_hard_pattern_scan_does_not_merge_across_ocr_break():

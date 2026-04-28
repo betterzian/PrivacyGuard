@@ -225,6 +225,11 @@ def _is_punct_or_space_only(text: str) -> bool:
     return True
 
 
+def _is_plain_space_only(text: str) -> bool:
+    """通用结构化片段合并只承认真实空白，不跨 OCR gap 或标点。"""
+    return bool(text) and all(char.isspace() for char in text)
+
+
 def _address_components_subset(shorter_primary: Mapping[str, object], longer_primary: Mapping[str, object]) -> bool:
     """同地址前缀吸收时，短地址已有组件必须都能在长地址对应组件中命中。"""
     comparable = {
@@ -1384,6 +1389,8 @@ class StreamParser:
             return
         if self._try_absorb_adjacent_address_candidate(context, candidate):
             return
+        if self._try_absorb_adjacent_generic_candidate(context, candidate):
+            return
         # detector 主路径（非 persona 出口）仅允许产出 ALLOWED_DETECTOR_OUTPUT_ATTRS 内的类型。
         if candidate.source_kind not in _PERSONA_SOURCE_KINDS:
             assert candidate.attr_type in ALLOWED_DETECTOR_OUTPUT_ATTRS, (
@@ -1545,6 +1552,59 @@ class StreamParser:
 
         claim = context.claims[-1]
         claim.start = previous.start
+        claim.end = previous.end
+        claim.strength = previous.claim_strength
+        claim.owner_stack_id = f"{previous.attr_type.value}:{previous.start}:{previous.end}"
+        context.candidate_identity_index.pop(previous_key, None)
+        context.candidate_identity_index[_candidate_identity_key(previous)] = previous
+        context.handled_label_clue_ids |= candidate.label_clue_ids
+        context.commit_frontier_last_unit = max(context.commit_frontier_last_unit, previous.unit_last)
+        context.raise_all_value_floor(context.commit_frontier_last_unit)
+        return True
+
+    def _try_absorb_adjacent_generic_candidate(
+        self,
+        context: StackContext,
+        candidate: CandidateDraft,
+    ) -> bool:
+        """普通空格相邻的同类 NUM/ALNUM 片段合并为一个候选。"""
+        if candidate.attr_type not in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
+            return False
+        if not context.candidates:
+            return False
+        previous = context.candidates[-1]
+        if previous.attr_type != candidate.attr_type:
+            return False
+        if previous.source != candidate.source:
+            return False
+        if candidate.start < previous.end:
+            return False
+        if not _is_plain_space_only(context.stream.text[previous.end:candidate.start]):
+            return False
+
+        previous_key = _candidate_identity_key(previous)
+        previous.end = candidate.end
+        previous.unit_last = candidate.unit_last
+        previous.text = context.stream.text[previous.start:previous.end]
+        previous.canonical_text = None
+        previous.claim_strength = max(
+            previous.claim_strength,
+            candidate.claim_strength,
+            key=_claim_strength_rank,
+        )
+        previous.metadata = merge_metadata(previous.metadata, candidate.metadata)
+        previous.label_clue_ids |= candidate.label_clue_ids
+        previous.label_driven = previous.label_driven or candidate.label_driven
+        previous.block_ids = tuple(dict.fromkeys((*previous.block_ids, *candidate.block_ids)))
+        previous.block_id = previous.block_id or candidate.block_id
+        previous.bbox = previous.bbox or candidate.bbox
+        if previous.span_start is None:
+            previous.span_start = candidate.span_start
+        if candidate.span_end is not None:
+            previous.span_end = candidate.span_end
+        previous.attr_locked = previous.attr_locked and candidate.attr_locked
+
+        claim = context.claims[-1]
         claim.end = previous.end
         claim.strength = previous.claim_strength
         claim.owner_stack_id = f"{previous.attr_type.value}:{previous.start}:{previous.end}"

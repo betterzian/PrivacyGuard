@@ -466,6 +466,8 @@ def _can_merge_across_lines(upper: list[OCRTextBlock], lower: list[OCRTextBlock]
     """跨行拼接条件：垂距、行高一致度、两行行首 x 差（段包络仅用于构造链 B，不参与此处）。"""
     if not upper or not lower:
         return False
+    if not _cross_line_char_types_compatible(upper, lower):
+        return False
     h_up = _max_block_height(upper)
     h_lo = _max_block_height(lower)
     h_max = max(h_up, h_lo)
@@ -486,6 +488,30 @@ def _can_merge_across_lines(upper: list[OCRTextBlock], lower: list[OCRTextBlock]
     if abs(_line_left_x(upper) - _line_left_x(lower)) > h_max:
         return False
     return True
+
+
+def _cross_line_char_types_compatible(upper: list[OCRTextBlock], lower: list[OCRTextBlock]) -> bool:
+    """跨行拼接前做轻量文本类型约束，避免数字行与英文 UI 文案串接。"""
+    upper_types = _ocr_line_char_types(upper)
+    lower_types = _ocr_line_char_types(lower)
+    if not upper_types:
+        return True
+    if "cjk" in upper_types:
+        return "cjk" in lower_types
+    return upper_types <= lower_types
+
+
+def _ocr_line_char_types(blocks: list[OCRTextBlock]) -> set[str]:
+    types: set[str] = set()
+    for block in blocks:
+        for char in unicodedata.normalize("NFKC", block.text or ""):
+            if "\u4e00" <= char <= "\u9fff":
+                types.add("cjk")
+            elif ("A" <= char <= "Z") or ("a" <= char <= "z"):
+                types.add("latin")
+            elif char.isdigit():
+                types.add("digit")
+    return types
 
 
 def _build_stream_from_chunks(

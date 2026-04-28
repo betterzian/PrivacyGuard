@@ -1467,6 +1467,45 @@ def test_en_left_expansion_crosses_hyphen_name_joiner():
     assert run.candidate.text == "Jean-Luc"
 
 
+def test_en_left_expansion_ignores_generic_alnum_blocker():
+    text = "M.O'Connor"
+    connor_start = text.index("Connor")
+    clues = (
+        _clue(
+            "alnum-1",
+            ClueRole.VALUE,
+            0,
+            text.index("'"),
+            "M.O",
+            source_kind="extract_alnum_fragment",
+            attr_type=PIIAttributeType.ALNUM,
+            strength=ClaimStrength.HARD,
+            family=ClueFamily.STRUCTURED,
+            source_metadata={"fragment_type": ["ALNUM"]},
+        ),
+        _clue(
+            "family-1",
+            ClueRole.FAMILY_NAME,
+            connor_start,
+            len(text),
+            "Connor",
+            source_kind="en_surname",
+            strength=ClaimStrength.SOFT,
+        ),
+    )
+
+    run = _run_name_stack(
+        text,
+        1,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    ).run()
+
+    assert run is not None
+    assert run.candidate.text == "M.O'Connor"
+
+
 def test_en_label_seed_single_capitalized_token_without_name_clue_is_rejected():
     text = "Name: Avery"
     clues = (
