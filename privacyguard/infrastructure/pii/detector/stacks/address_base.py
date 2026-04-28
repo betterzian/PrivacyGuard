@@ -593,6 +593,7 @@ class BaseAddressStack(BaseStack):
             self.context.stream.text,
             normalize_value=_normalize_address_value,
             commit_component=lambda component: self._commit_component(state, component),
+            valid_successors=self.valid_successors,
         )
 
     def _materialize_digit_tail_before_comma(

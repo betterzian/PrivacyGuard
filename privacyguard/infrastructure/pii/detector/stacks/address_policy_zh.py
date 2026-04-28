@@ -291,45 +291,72 @@ def _resolve_admin_key_chain_levels(
     *,
     valid_successors: dict[AddressComponentType, frozenset[AddressComponentType]] = _VALID_SUCCESSORS,
 ) -> _AdminSpanView | None:
-    """§3.5 KEY-driven admin 链层级解析。
-
-    输入：last KEY 之前的 VALUE 条目（需全部在同 admin VALUE span），以及 last KEY clue。
-    流程：span.levels ∩ key_levels(key_clue) → 再按 state 做 occupancy + segment_admit 过滤。
-
-    返回值语义（与 standalone 统一为 `_AdminSpanView`）：
-    - `None`：非 admin 链或 value_entries 构不成 span；上游走非 admin KEY 路径或 split。
-    - `_AdminSpanView` with empty `available_levels`：交集存在但全部被 occupancy/admit 拦下；
-       上游应尝试 §5.1 collision 以重用 `all_levels` / `text`。
-    - `available_levels` 长度 >= 1：可直接落库（len==1 单层；len>=2 MULTI_ADMIN）。
-    """
+    """把 admin KEY 左侧窗口转换为待提交 component 的层级视图。"""
+    del state, valid_successors
     if not value_entries:
         return None
-    span = _build_admin_value_span(tuple(clue for _, clue in value_entries))
-    if span is None:
-        return None
-    candidate = _ordered_component_types(
-        lvl for lvl in span.levels if lvl in set(key_levels(key_clue))
-    )
-    if not candidate:
-        # 无交集：视为 `_AdminSpanView(available_levels=(), all_levels=span.levels, text=...)`
-        # 让上游尝试 collision（例如同值 MULTI_ADMIN 降解）。
-        return _AdminSpanView(
-            available_levels=(),
-            all_levels=tuple(span.levels),
-            text=span.text,
+    value_clues = tuple(clue for _, clue in value_entries)
+    span = _collect_chain_edge_admin_value_span(value_clues, edge="right")
+    if span is not None:
+        full_start = value_entries[span.first_index - 1][1].end if span.first_index > 0 else span.start
+        candidate = _ordered_component_types(
+            lvl for lvl in span.levels if lvl in set(key_levels(key_clue))
         )
-    available: list[AddressComponentType] = []
-    for lvl in candidate:
-        if lvl in state.occupancy:
-            continue
-        if not _segment_admit(state, lvl, valid_successors=valid_successors):
-            continue
-        available.append(lvl)
+        if not candidate:
+            return _AdminSpanView(
+                available_levels=(),
+                all_levels=(),
+                text=span.text,
+                value_start=span.start,
+                value_end=span.end,
+                full_start=full_start,
+                first_index=span.first_index,
+                last_index=span.last_index,
+            )
+        return _AdminSpanView(
+            available_levels=tuple(candidate),
+            all_levels=tuple(candidate),
+            text=span.text,
+            value_start=span.start,
+            value_end=span.end,
+            full_start=full_start,
+            first_index=span.first_index,
+            last_index=span.last_index,
+        )
+
+    candidate = _admin_key_component_levels_without_tail(key_clue)
+    if not candidate:
+        return None
+    first_index = _admin_key_component_first_index(value_entries)
+    full_start = value_entries[first_index - 1][1].end if first_index > 0 else value_entries[0][1].start
     return _AdminSpanView(
-        available_levels=tuple(available),
+        available_levels=tuple(candidate),
         all_levels=tuple(candidate),
-        text=span.text,
+        text=key_clue.text,
+        value_start=full_start,
+        value_end=key_clue.start,
+        full_start=full_start,
+        first_index=first_index,
+        last_index=len(value_entries) - 1,
     )
+
+
+def _admin_key_component_levels_without_tail(key_clue: Clue) -> tuple[AddressComponentType, ...]:
+    """无 tail admin VALUE 时，component 层级由 KEY 自身决定。"""
+    if key_clue.component_levels:
+        return _ordered_component_types(level for level in key_clue.component_levels if level in _ADMIN_TYPES)
+    if key_clue.component_type in _ADMIN_TYPES:
+        return (key_clue.component_type,)
+    return ()
+
+
+def _admin_key_component_first_index(value_entries: tuple[tuple[int, Clue], ...]) -> int:
+    """返回当前 KEY 左值窗口在 deferred_chain 中的起点。"""
+    for index in range(len(value_entries) - 1, -1, -1):
+        clue = value_entries[index][1]
+        if clue.role == ClueRole.KEY and clue.component_type in _ADMIN_TYPES:
+            return index + 1
+    return 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,6 +371,11 @@ class _AdminSpanView:
     available_levels: tuple[AddressComponentType, ...]
     all_levels: tuple[AddressComponentType, ...]
     text: str
+    value_start: int = -1
+    value_end: int = -1
+    full_start: int = -1
+    first_index: int = -1
+    last_index: int = -1
 
 
 def _resolve_standalone_admin_value_group(
@@ -836,11 +868,11 @@ def _left_value_text_for_routing(context: _RoutingContext, clue: Clue, left_star
     return raw_left_value_text, raw_left_value_text
 
 
-def _adjacent_value_span(
+def _tail_admin_value_span_for_key(
     context: _RoutingContext,
     clue: Clue,
 ) -> _AdminValueSpan | None:
-    """返回 key 左侧紧邻且纯 value 的行政 span。"""
+    """返回 KEY 左值窗口尾部紧邻 KEY 的行政 VALUE span。"""
     if clue.component_type not in {
         AddressComponentType.PROVINCE,
         AddressComponentType.CITY,
@@ -853,7 +885,6 @@ def _adjacent_value_span(
         anchor=clue,
         stream=context.stream,
         max_gap_units=0,
-        require_entire_chain_same_span=True,
     )
 
 
@@ -984,17 +1015,12 @@ def _has_following_detail_key(
 def _routed_key_clue(context: _RoutingContext, clue_index: int, clue: Clue) -> Clue | None:
     """把当前 KEY clue 重映射为真正参与中文状态机的类型。
 
-    §4.2 KEY 多层级 intersection 路由：
-    - adjacent VALUE span 存在：与 `key_levels(clue)` 求有序交集。
-        空→ None；单层→ 该 level；≥2 层→ MULTI_ADMIN（交集信息后续在 flush 路径重算）。
-    - 无 adjacent：按非纯 value 降级规则处理——
-        "省" PROVINCE → None（裸"省"字无法独立成值）；
-        "市" CITY → DISTRICT_CITY（县级市是"市" KEY 唯一可独立存在的语义落点）；
-        其他保持不变。
+    admin KEY 先看完整左值窗口尾部是否有紧邻行政 VALUE；只有找不到时，
+    才把裸 "市" 降级为县级市语义。
     """
     if clue.role != ClueRole.KEY or clue.component_type is None:
         return clue
-    adjacent_span = _adjacent_value_span(context, clue)
+    adjacent_span = _tail_admin_value_span_for_key(context, clue)
     if adjacent_span is not None:
         intersection = _ordered_component_types(
             level for level in adjacent_span.levels if level in set(key_levels(clue))

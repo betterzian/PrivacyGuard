@@ -1429,6 +1429,44 @@ def test_en_family_path_absorbs_left_capitalized_token_symmetrically():
     assert run.candidate.text == "Harper Collins"
 
 
+def test_en_left_expansion_crosses_apostrophe_name_joiner():
+    text = "O'Connor"
+    connor_start = text.index("Connor")
+    clues = (
+        _clue("family-1", ClueRole.FAMILY_NAME, connor_start, len(text), "Connor", source_kind="en_surname", strength=ClaimStrength.SOFT),
+    )
+
+    run = _run_name_stack(
+        text,
+        0,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    ).run()
+
+    assert run is not None
+    assert run.candidate.text == "O'Connor"
+
+
+def test_en_left_expansion_crosses_hyphen_name_joiner():
+    text = "Jean-Luc"
+    luc_start = text.index("Luc")
+    clues = (
+        _clue("given-1", ClueRole.GIVEN_NAME, luc_start, len(text), "Luc", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+    )
+
+    run = _run_name_stack(
+        text,
+        0,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    ).run()
+
+    assert run is not None
+    assert run.candidate.text == "Jean-Luc"
+
+
 def test_en_label_seed_single_capitalized_token_without_name_clue_is_rejected():
     text = "Name: Avery"
     clues = (

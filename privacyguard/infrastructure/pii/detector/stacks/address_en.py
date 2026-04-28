@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 
 from privacyguard.infrastructure.pii.detector.models import (
@@ -42,13 +42,16 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     collect_admin_value_span,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
+    _ComponentPathSpan,
     _ADMIN_TYPES,
     _DraftComponent,
     _ParseState,
+    _apply_component_level_path_resolution,
     _append_deferred,
     _clone_draft_component,
+    _deferred_admin_path_can_accept,
     _flush_chain,
-    _resolve_multi_admin_collision,
+    _resolve_component_level_path,
     _segment_admit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.base import PendingChallenge, StackRun
@@ -269,6 +272,7 @@ class EnAddressStack(BaseAddressStack):
             resolve_admin_key_chain_levels=lambda s, value_entries, key_clue: _resolve_admin_key_chain_levels(
                 s, value_entries, key_clue, valid_successors=en_valid,
             ),
+            valid_successors=self.valid_successors,
         )
 
     def _prehandle_clue(
@@ -378,34 +382,31 @@ class EnAddressStack(BaseAddressStack):
         # §6.2：EN 同 span 多层 admin VALUE 组 —— dual-emit 后按相同 start/end 聚成一个 admin span，
         # 用于 resolver / collision 决策；非 admin 类型继续走单层路径。
         admin_span = collect_admin_value_span(clues, clue_index) if admin_levels else None
-        trailing_deferred = state.deferred_chain[-1][1] if state.deferred_chain else None
-        same_trailing_admin_span = (
-            admin_span is not None
-            and trailing_deferred is not None
-            and trailing_deferred.role == ClueRole.VALUE
-            and trailing_deferred.attr_type == clue.attr_type
-            and bool(_clue_admin_levels(trailing_deferred))
-            and trailing_deferred.start == admin_span.start
-            and trailing_deferred.end == admin_span.end
+
+        incoming_admin_path = None
+        if admin_span is not None:
+            incoming_admin_path = _ComponentPathSpan(
+                start=clue.start,
+                end=state.value_char_end_override.get(clue.clue_id, admin_span.end),
+                text=admin_span.text,
+                levels=admin_span.levels,
+            )
+        admin_path_can_accept = (
+            incoming_admin_path is not None
+            and _deferred_admin_path_can_accept(
+                state,
+                raw_text,
+                incoming_admin_path,
+                valid_successors=self.valid_successors,
+            )
         )
-
         if state.deferred_chain and not _chain_can_accept([c for _, c in state.deferred_chain], clue, stream):
-            self._flush_chain(state, clue_index=clue_index)
-            if state.split_at is not None:
-                return _SENTINEL_STOP
-        # 新的 admin VALUE 组进入时若链尾是另一个 admin 组，先冲洗（触发 §5.1 collision 的前置条件）。
-        if (
-            admin_span is not None
-            and trailing_deferred is not None
-            and trailing_deferred.role == ClueRole.VALUE
-            and trailing_deferred.attr_type == clue.attr_type
-            and bool(_clue_admin_levels(trailing_deferred))
-            and not same_trailing_admin_span
-        ):
-            self._flush_chain(state, clue_index=clue_index)
-            if state.split_at is not None:
-                return _SENTINEL_STOP
+            if not admin_path_can_accept:
+                self._flush_chain(state, clue_index=clue_index)
+                if state.split_at is not None:
+                    return _SENTINEL_STOP
 
+        resolved_path_levels: tuple[AddressComponentType, ...] | None = None
         if state.components or state.deferred_chain:
             # MULTI_ADMIN 探针：admin_span 存在时逐层用 _segment_admit 试探，任一层通过即可挂。
             probe_levels: tuple[AddressComponentType, ...] = admin_levels or (comp_type,)
@@ -425,22 +426,27 @@ class EnAddressStack(BaseAddressStack):
                 _segment_admit(state, lvl, valid_successors=self.valid_successors)
                 for lvl in probe_levels
             )
-            # §5.2.1：admin_span + 无 deferred_chain + 探针全失败时，尝试同值 MULTI_ADMIN 原地降解。
             if (
                 probe_failed
                 and admin_span is not None
                 and resolved_group is not None
                 and not state.deferred_chain
             ):
-                forced = _resolve_multi_admin_collision(
+                path_resolution = _resolve_component_level_path(
                     state,
                     raw_text,
-                    clue.start,
-                    resolved_group.text,
-                    resolved_group.all_levels,
+                    (_ComponentPathSpan(
+                        start=clue.start,
+                        end=clue.end,
+                        text=resolved_group.text,
+                        levels=resolved_group.all_levels,
+                    ),),
+                    valid_successors=self.valid_successors,
                 )
-                if forced is not None:
-                    probe_levels = forced
+                if path_resolution is not None and path_resolution.span_levels:
+                    _apply_component_level_path_resolution(state, path_resolution)
+                    resolved_path_levels = path_resolution.span_levels[0]
+                    probe_levels = resolved_path_levels
                     probe_failed = not any(
                         _segment_admit(state, lvl, valid_successors=self.valid_successors)
                         for lvl in probe_levels
@@ -456,6 +462,15 @@ class EnAddressStack(BaseAddressStack):
                 ):
                     state.split_at = clue.start
                     return _SENTINEL_STOP
+        if resolved_path_levels is not None:
+            primary = resolved_path_levels[0]
+            clue = replace(
+                clue,
+                component_type=AddressComponentType.MULTI_ADMIN
+                if len(resolved_path_levels) >= 2
+                else primary,
+                component_levels=resolved_path_levels,
+            )
 
         _append_deferred(state, clue_index, clue, record_suspect=False)
         state.last_value = clue

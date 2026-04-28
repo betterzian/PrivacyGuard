@@ -33,14 +33,10 @@
     "component_type": "subdistrict",
     "keywords": [
       {"text": "街道办", "strength": "hard"},
-      {"text": "居委会", "strength": "hard"},
-      {"text": "村委会", "strength": "hard"},
       {"text": "街道", "strength": "soft"},
       {"text": "社区", "strength": "soft"},
       {"text": "镇", "strength": "soft"},
-      {"text": "乡", "strength": "soft"},
-      {"text": "村", "strength": "soft"},
-      {"text": "屯", "strength": "soft"}
+      {"text": "乡", "strength": "soft"}
     ]
   },
   {
@@ -101,6 +97,10 @@
       {"text": "名邸", "strength": "soft"},
       {"text": "华庭", "strength": "soft"},
       {"text": "御园", "strength": "soft"},
+      {"text": "居委会", "strength": "hard"},
+      {"text": "村委会", "strength": "hard"},
+      {"text": "村", "strength": "soft"},
+      {"text": "屯", "strength": "soft"},
       {"text": "苑", "strength": "weak"},
       {"text": "庭", "strength": "weak"},
       {"text": "府", "strength": "weak"},

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from privacyguard.infrastructure.pii.detector.models import (
     AddressComponentType,
@@ -40,15 +40,16 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import (
     _suspect_eligible_after_last_piece,
 )
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
-    _ADMIN_TYPES,
+    _ComponentPathSpan,
     _ParseState,
     _VALID_SUCCESSORS,
+    _apply_component_level_path_resolution,
     _append_deferred,
     _clear_pending_community_poi,
     _flush_chain,
     _pending_community_blocks_road,
     _reroute_pending_community_poi_to_subdistrict,
-    _resolve_multi_admin_collision,
+    _resolve_component_level_path,
     _segment_admit,
 )
 
@@ -94,6 +95,8 @@ class ZhAddressStack(BaseAddressStack):
             resolve_standalone_admin_group=_resolve_standalone_admin_value_group,
             resolve_admin_key_chain_levels=_resolve_admin_key_chain_levels,
             validate_key_component=self._validate_key_component_before_commit,
+            valid_successors=self.valid_successors,
+            comma_reverses_admin_order=True,
         )
 
     def _validate_key_component_before_commit(
@@ -193,6 +196,7 @@ class ZhAddressStack(BaseAddressStack):
             if state.split_at is not None:
                 return _SENTINEL_STOP
 
+        resolved_path_levels: tuple[AddressComponentType, ...] | None = None
         if state.components or state.deferred_chain:
             admin_levels = admin_span.levels if admin_span is not None else (comp_type,)
             # MULTI_ADMIN 探针：resolve 返回的每一层都要做 _segment_admit 探测，
@@ -214,24 +218,28 @@ class ZhAddressStack(BaseAddressStack):
                     for lvl in probe_levels
                 )
             )
-            # §5.2.1 collision 触发点：admin_span 存在、无 deferred_chain、probe 全失败时，
-            # 尝试同值 MULTI_ADMIN 原地降解以让 incoming 取互补层继续 admit。降解后占位被释放，
-            # 再重跑一次探针；若任一层能 admit 则跳过 split。
             if (
                 probe_failed
                 and admin_span is not None
                 and resolved_group is not None
                 and not state.deferred_chain
             ):
-                forced = _resolve_multi_admin_collision(
+                path_resolution = _resolve_component_level_path(
                     state,
                     raw_text,
-                    clue.start,
-                    resolved_group.text,
-                    resolved_group.all_levels,
+                    (_ComponentPathSpan(
+                        start=clue.start,
+                        end=clue.end,
+                        text=resolved_group.text,
+                        levels=resolved_group.all_levels,
+                    ),),
+                    valid_successors=self.valid_successors,
+                    comma_reverses_admin_order=True,
                 )
-                if forced is not None:
-                    probe_levels = forced
+                if path_resolution is not None and path_resolution.span_levels:
+                    _apply_component_level_path_resolution(state, path_resolution)
+                    resolved_path_levels = path_resolution.span_levels[0]
+                    probe_levels = resolved_path_levels
                     probe_failed = not any(
                         _segment_admit(state, lvl, valid_successors=self.valid_successors)
                         for lvl in probe_levels
@@ -256,6 +264,15 @@ class ZhAddressStack(BaseAddressStack):
                 self._flush_chain(state, clue_index=clue_index)
                 state.split_at = clue.start
                 return _SENTINEL_STOP
+        if resolved_path_levels is not None:
+            primary = resolved_path_levels[0]
+            clue = replace(
+                clue,
+                component_type=AddressComponentType.MULTI_ADMIN
+                if len(resolved_path_levels) >= 2
+                else primary,
+                component_levels=resolved_path_levels,
+            )
 
         anchor_start: int | None = None
         if (

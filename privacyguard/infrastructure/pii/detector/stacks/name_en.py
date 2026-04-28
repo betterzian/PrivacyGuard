@@ -258,16 +258,22 @@ class EnNameStack(BaseNameStack):
             return None
         units = self.context.stream.units
         ui = _unit_index_left_of(self.context.stream, start)
-        while ui >= 0 and units[ui].kind == "space":
+        while ui >= 0:
+            while ui >= 0 and units[ui].kind == "space":
+                ui -= 1
+            if ui < 0:
+                return None
+            unit = units[ui]
+            if unit.kind != "punct":
+                break
+            left_char = self.context.stream.text[unit.char_start - 1] if unit.char_start > 0 else None
+            right_char = _peek_unit_first_char(units, ui + 1)
+            if not is_name_joiner(unit.text, left_char, right_char):
+                return None
             ui -= 1
         if ui < 0:
             return None
         unit = units[ui]
-        if unit.kind == "punct":
-            left_char = self.context.stream.text[unit.char_start - 1] if unit.char_start > 0 else None
-            right_char = _peek_unit_first_char(units, ui + 1)
-            if is_name_joiner(unit.text, left_char, right_char):
-                return None
         for gap_index in range(ui + 1, len(units)):
             gap_unit = units[gap_index]
             if gap_unit.char_start >= start:

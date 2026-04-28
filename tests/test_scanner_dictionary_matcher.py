@@ -1186,6 +1186,34 @@ def test_hard_pattern_scan_keeps_phone_structure_as_single_fragment(
     assert clue.source_metadata["phone_pattern"] == [expected_pattern]
 
 
+def test_hard_pattern_scan_removes_inline_gap_before_structured_scan():
+    stream = build_prompt_stream(f"+86123{_OCR_INLINE_GAP_TOKEN}43221234")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert len(clues) == 1
+    assert clues[0].attr_type == PIIAttributeType.NUM
+    assert clues[0].text == "+8612343221234"
+    assert clues[0].source_metadata["pure_digits"] == ["8612343221234"]
+    assert clues[0].start == 0
+    assert clues[0].end == len(stream.text)
+
+
+def test_hard_pattern_scan_does_not_merge_across_ocr_break():
+    stream = build_prompt_stream(f"+86123{OCR_BREAK}43221234")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert all(
+        clue.source_metadata.get("pure_digits") != ["8612343221234"]
+        for clue in clues
+    )
+
+
 def test_hard_pattern_scan_matches_alnum_with_underscore_and_hyphen():
     stream = build_prompt_stream("abc_123 A1-B2 abc-def 123_456")
     clues = scanner_module._scan_hard_patterns(

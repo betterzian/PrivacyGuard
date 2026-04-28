@@ -426,7 +426,6 @@ def build_clue_bundle(
     Pass 2 — segment-major 词典/soft clue 扫描，事件扫描线裁决。
     """
     scan_unit_spans = _collect_scan_unit_spans(stream)
-    all_ocr_spans = scan_unit_spans.all_ocr_spans
     ocr_break_only_spans = scan_unit_spans.ocr_break_only_spans
     session_name_entries = tuple(entry for entry in session_entries if entry.attr_type == PIIAttributeType.NAME)
     local_name_entries = tuple(entry for entry in local_entries if entry.attr_type == PIIAttributeType.NAME)
@@ -443,7 +442,7 @@ def build_clue_bundle(
 
     # ── Pass 1: STRUCTURED clue 扫描与裁决 ──
     structured_clues = _resolve_structured_conflicts(
-        _scan_hard_patterns(ctx, stream, ignored_spans=all_ocr_spans)
+        _scan_hard_patterns(ctx, stream, ignored_spans=ocr_break_only_spans)
     )
 
     # ── Pass 2: segment-major clue 扫描 ──
@@ -505,18 +504,49 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
 
     scanner 只负责提取，不做 phone/id/bank 等规则验证；验证与词典反查由 stack 完成。
     """
-    text = stream.text
     clues: list[Clue] = []
     excluded_spans: list[tuple[int, int]] = list(ignored_spans)
+    for segment in _build_hard_scan_segments(stream, ignored_spans=ignored_spans):
+        clues.extend(_scan_hard_patterns_segment(ctx, segment, excluded_spans=excluded_spans))
+    return clues
+
+
+def _build_hard_scan_segments(
+    stream: StreamInput,
+    *,
+    ignored_spans: tuple[tuple[int, int], ...],
+) -> tuple[_ScanSegment, ...]:
+    """构建 hard scan 视图：OCR_BREAK 分段，段内去除 inline_gap。"""
+    break_spans = tuple(sorted(set((*_find_ocr_break_only_spans(stream), *ignored_spans))))
+    return _build_soft_scan_segments(
+        stream,
+        (),
+        ocr_break_spans=break_spans,
+        inline_gap_spans=_find_inline_gap_spans(stream),
+    )
+
+
+def _scan_hard_patterns_segment(
+    ctx: DetectContext,
+    segment: _ScanSegment,
+    *,
+    excluded_spans: list[tuple[int, int]],
+) -> list[Clue]:
+    text = segment.text
+    stream = segment.stream
+    clues: list[Clue] = []
+
+    def _raw_match_span(match: re.Match[str]) -> tuple[int, int]:
+        return _segment_span_to_raw(segment, match.start(), match.end())
 
     # ── 2a: 先行匹配 email ──
     for match in _EMAIL_PATTERN.finditer(text):
-        raw_start = match.start()
-        raw_end = match.end()
+        raw_start, raw_end = _raw_match_span(match)
+        cleaned_end = match.end()
         value = match.group(0).strip()
         if not value:
             continue
-        if not _email_match_right_boundary_ok(text, raw_end):
+        if not _email_match_right_boundary_ok(text, cleaned_end):
             continue
         if _overlaps_any(raw_start, raw_end, excluded_spans):
             continue
@@ -542,9 +572,8 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
     # ── 2a: 先行匹配 time/date ──
     for source_kind, pattern in _TIME_PATTERNS:
         for match in pattern.finditer(text):
-            raw_start = match.start()
-            raw_end = match.end()
-            if source_kind in _TIME_KINDS_WITH_TOKEN_BOUNDARY and not _time_match_adjacent_ok(text, raw_start, raw_end):
+            raw_start, raw_end = _raw_match_span(match)
+            if source_kind in _TIME_KINDS_WITH_TOKEN_BOUNDARY and not _time_match_adjacent_ok(text, match.start(), match.end()):
                 continue
             value = match.group(0).strip()
             if not value:
@@ -573,12 +602,12 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
     # ── 2b: 先行匹配金额，避免金额小数被拆成通用片段。 ──
     for source_kind, pattern in _AMOUNT_PATTERNS:
         for match in pattern.finditer(text):
-            raw_start = match.start()
-            raw_end = match.end()
+            raw_start, raw_end = _raw_match_span(match)
+            cleaned_end = match.end()
             value = match.group(0).strip()
             if not value:
                 continue
-            if not _match_right_boundary_allows_trailing_punct(text, raw_end):
+            if not _match_right_boundary_allows_trailing_punct(text, cleaned_end):
                 continue
             if _overlaps_any(raw_start, raw_end, excluded_spans):
                 continue
@@ -604,13 +633,14 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
     # ── 2c: 先提取含 ASCII 字母的结构化片段，避免其内部数字被提前拆走。 ──
     for match in _ALNUM_FRAGMENT_PATTERN.finditer(text):
         value = match.group(0)
-        if _overlaps_any(match.start(), match.end(), excluded_spans):
+        raw_start, raw_end = _raw_match_span(match)
+        if _overlaps_any(raw_start, raw_end, excluded_spans):
             continue
         fragment_shape = _alnum_fragment_shape(value)
         if not fragment_shape:
             continue
         digits = re.sub(r"[^0-9]", "", value)
-        _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+        _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
         source_metadata = {
             "hard_source": ["regex"],
             "placeholder": ["<alnum>"],
@@ -626,8 +656,8 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.ALNUM,
                 strength=ClaimStrength.HARD,
-                start=match.start(),
-                end=match.end(),
+                start=raw_start,
+                end=raw_end,
                 text=value,
                 unit_start=_us,
                 unit_last=_ue,
@@ -635,18 +665,19 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 source_metadata=source_metadata,
             )
         )
-        excluded_spans.append((match.start(), match.end()))
+        excluded_spans.append((raw_start, raw_end))
 
     # ── 2d: 先提取带国家码 / 括号结构的 phone-like 数字段，避免被通用数字片段拆碎。 ──
     for phone_pattern, phone_region, phone_country_code, pattern in _PHONE_PATTERNS:
         for match in pattern.finditer(text):
             value = match.group(0)
-            if _overlaps_any(match.start(), match.end(), excluded_spans):
+            raw_start, raw_end = _raw_match_span(match)
+            if _overlaps_any(raw_start, raw_end, excluded_spans):
                 continue
             digits = re.sub(r"\D", "", value)
             if len(digits) < 10:
                 continue
-            _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+            _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
             clues.append(
                 Clue(
                     clue_id=ctx.next_clue_id(),
@@ -654,8 +685,8 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     role=ClueRole.VALUE,
                     attr_type=PIIAttributeType.NUM,
                     strength=ClaimStrength.HARD,
-                    start=match.start(),
-                    end=match.end(),
+                    start=raw_start,
+                    end=raw_end,
                     text=value,
                     unit_start=_us,
                     unit_last=_ue,
@@ -672,12 +703,13 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                     },
                 )
             )
-            excluded_spans.append((match.start(), match.end()))
+            excluded_spans.append((raw_start, raw_end))
 
     # ── 2e: 提取纯数字片段 ──
     for match in _DIGIT_FRAGMENT_PATTERN.finditer(text):
         value = match.group(0)
-        if _overlaps_any(match.start(), match.end(), excluded_spans):
+        raw_start, raw_end = _raw_match_span(match)
+        if _overlaps_any(raw_start, raw_end, excluded_spans):
             continue
         digits = re.sub(r"\D", "", value)
         if len(digits) < 2:
@@ -685,7 +717,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
         # 跳过被 _NEGATIVE_NUMERIC_PATTERNS 命中的片段。
         if _is_negative_numeric(text, match.start(), match.end()):
             continue
-        _us, _ue = _char_span_to_unit_span(stream, match.start(), match.end())
+        _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
         clues.append(
             Clue(
                 clue_id=ctx.next_clue_id(),
@@ -693,8 +725,8 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 role=ClueRole.VALUE,
                 attr_type=PIIAttributeType.NUM,
                 strength=ClaimStrength.HARD,
-                start=match.start(),
-                end=match.end(),
+                start=raw_start,
+                end=raw_end,
                 text=value,
                 unit_start=_us,
                 unit_last=_ue,
@@ -708,7 +740,7 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
                 },
             )
         )
-        excluded_spans.append((match.start(), match.end()))
+        excluded_spans.append((raw_start, raw_end))
 
     return clues
 
