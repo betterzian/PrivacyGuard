@@ -1567,8 +1567,8 @@ class StreamParser:
         context: StackContext,
         candidate: CandidateDraft,
     ) -> bool:
-        """普通空格相邻的同类 NUM/ALNUM 片段合并为一个候选。"""
-        if candidate.attr_type not in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
+        """普通空格相邻的 NUM 片段合并为一个候选。"""
+        if candidate.attr_type != PIIAttributeType.NUM:
             return False
         if not context.candidates:
             return False

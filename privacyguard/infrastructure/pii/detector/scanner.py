@@ -51,6 +51,10 @@ from privacyguard.infrastructure.pii.detector.models import (
 from privacyguard.infrastructure.pii.detector.preprocess import build_prompt_stream
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_common import _normalize_address_value
 from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_at_or_after, valid_left_numeral_for_zh_address_key
+from privacyguard.infrastructure.pii.detector.structured_validators import (
+    normalize_structured_digits_for_phone,
+    route_structured_validators,
+)
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN, is_any_break
 from privacyguard.infrastructure.pii.detector.zh_name_rules import compact_zh_name_text
 
@@ -272,6 +276,11 @@ _PHONE_PATTERNS: tuple[tuple[str, str, str, re.Pattern[str]], ...] = (
         re.compile(rf"(?<![A-Za-z0-9])1[ \-]*\([2-9]\d{{2}}\){_PHONE_JOINER_PATTERN}{_US_PHONE_AFTER_AREA_PATTERN}(?![A-Za-z0-9])"),
     ),
 )
+_NUM_INLINE_GAP_BRIDGE_ATTRS = frozenset({
+    PIIAttributeType.PHONE,
+    PIIAttributeType.ID_NUMBER,
+    PIIAttributeType.BANK_NUMBER,
+})
 
 # 含 ASCII 字母的结构化片段：字母数字混合，或纯英文带 `_` / `-` / `.` / `+` / `/`。
 _ALNUM_FRAGMENT_PATTERN = re.compile(
@@ -506,8 +515,13 @@ def _scan_hard_patterns(ctx: DetectContext, stream: StreamInput, *, ignored_span
     """
     clues: list[Clue] = []
     excluded_spans: list[tuple[int, int]] = list(ignored_spans)
-    for segment in _build_hard_scan_segments(stream, ignored_spans=ignored_spans):
-        clues.extend(_scan_hard_patterns_segment(ctx, segment, excluded_spans=excluded_spans))
+    hard_segments = _build_hard_scan_segments(stream, ignored_spans=ignored_spans)
+    for segment in hard_segments:
+        clues.extend(_scan_hard_non_numeric_patterns_segment(ctx, segment, excluded_spans=excluded_spans))
+    for segment in _build_hard_num_bridge_scan_segments(stream, ignored_spans=ignored_spans):
+        clues.extend(_scan_hard_num_inline_gap_bridge_segment(ctx, segment, excluded_spans=excluded_spans))
+    for segment in hard_segments:
+        clues.extend(_scan_hard_numeric_patterns_segment(ctx, segment, excluded_spans=excluded_spans))
     return clues
 
 
@@ -530,7 +544,38 @@ def _build_hard_scan_segments(
     )
 
 
+def _build_hard_num_bridge_scan_segments(
+    stream: StreamInput,
+    *,
+    ignored_spans: tuple[tuple[int, int], ...],
+) -> tuple[_ScanSegment, ...]:
+    """构建 NUM bridge 视图：只阻断 OCR_BREAK，段内临时去除 inline_gap。"""
+    break_spans = tuple(sorted(set((
+        *_find_ocr_break_only_spans(stream),
+        *ignored_spans,
+    ))))
+    return _build_soft_scan_segments(
+        stream,
+        (),
+        ocr_break_spans=break_spans,
+        inline_gap_spans=_find_inline_gap_spans(stream),
+    )
+
+
 def _scan_hard_patterns_segment(
+    ctx: DetectContext,
+    segment: _ScanSegment,
+    *,
+    excluded_spans: list[tuple[int, int]],
+) -> list[Clue]:
+    """兼容入口：按原顺序扫描单个 hard segment。"""
+    clues: list[Clue] = []
+    clues.extend(_scan_hard_non_numeric_patterns_segment(ctx, segment, excluded_spans=excluded_spans))
+    clues.extend(_scan_hard_numeric_patterns_segment(ctx, segment, excluded_spans=excluded_spans))
+    return clues
+
+
+def _scan_hard_non_numeric_patterns_segment(
     ctx: DetectContext,
     segment: _ScanSegment,
     *,
@@ -671,6 +716,21 @@ def _scan_hard_patterns_segment(
         )
         excluded_spans.append((raw_start, raw_end))
 
+    return clues
+
+
+def _scan_hard_numeric_patterns_segment(
+    ctx: DetectContext,
+    segment: _ScanSegment,
+    *,
+    excluded_spans: list[tuple[int, int]],
+) -> list[Clue]:
+    text = segment.text
+    clues: list[Clue] = []
+
+    def _raw_match_span(match: re.Match[str]) -> tuple[int, int]:
+        return _segment_span_to_raw(segment, match.start(), match.end())
+
     # ── 2d: 先提取带国家码 / 括号结构的 phone-like 数字段，避免被通用数字片段拆碎。 ──
     for phone_pattern, phone_region, phone_country_code, pattern in _PHONE_PATTERNS:
         for match in pattern.finditer(text):
@@ -681,26 +741,15 @@ def _scan_hard_patterns_segment(
             digits = re.sub(r"\D", "", value)
             if len(digits) < 10:
                 continue
-            _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
             clues.append(
-                Clue(
-                    clue_id=ctx.next_clue_id(),
-                    family=ClueFamily.STRUCTURED,
-                    role=ClueRole.VALUE,
-                    attr_type=PIIAttributeType.NUM,
-                    strength=ClaimStrength.HARD,
-                    start=raw_start,
-                    end=raw_end,
-                    text=value,
-                    unit_start=_us,
-                    unit_last=_ue,
-                    source_kind="extract_digit_fragment",
-                    source_metadata={
-                        "hard_source": ["regex"],
-                        "placeholder": ["<num>"],
-                        "fragment_type": ["NUM"],
-                        "fragment_shape": [_numeric_fragment_shape(value)],
-                        "pure_digits": [digits],
+                _build_num_fragment_clue(
+                    ctx,
+                    segment.stream,
+                    raw_start,
+                    raw_end,
+                    value,
+                    digits,
+                    extra_metadata={
                         "phone_region": [phone_region],
                         "phone_pattern": [phone_pattern],
                         "phone_country_code": [phone_country_code],
@@ -721,32 +770,140 @@ def _scan_hard_patterns_segment(
         # 跳过被 _NEGATIVE_NUMERIC_PATTERNS 命中的片段。
         if _is_negative_numeric(text, match.start(), match.end()):
             continue
-        _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
-        clues.append(
-            Clue(
-                clue_id=ctx.next_clue_id(),
-                family=ClueFamily.STRUCTURED,
-                role=ClueRole.VALUE,
-                attr_type=PIIAttributeType.NUM,
-                strength=ClaimStrength.HARD,
-                start=raw_start,
-                end=raw_end,
-                text=value,
-                unit_start=_us,
-                unit_last=_ue,
-                source_kind="extract_digit_fragment",
-                source_metadata={
-                    "hard_source": ["regex"],
-                    "placeholder": ["<num>"],
-                    "fragment_type": ["NUM"],
-                    "fragment_shape": [_numeric_fragment_shape(value)],
-                    "pure_digits": [digits],
-                },
-            )
-        )
+        clues.append(_build_num_fragment_clue(ctx, segment.stream, raw_start, raw_end, value, digits))
         excluded_spans.append((raw_start, raw_end))
 
     return clues
+
+
+def _scan_hard_num_inline_gap_bridge_segment(
+    ctx: DetectContext,
+    segment: _ScanSegment,
+    *,
+    excluded_spans: list[tuple[int, int]],
+) -> list[Clue]:
+    """只接收跨 inline_gap 且能被结构化 validator 升级的 NUM。"""
+    if not segment.gap_positions:
+        return []
+
+    text = segment.text
+    clues: list[Clue] = []
+
+    def _raw_match_span(match: re.Match[str]) -> tuple[int, int]:
+        return _segment_span_to_raw(segment, match.start(), match.end())
+
+    for phone_pattern, phone_region, phone_country_code, pattern in _PHONE_PATTERNS:
+        for match in pattern.finditer(text):
+            if not _match_crosses_inline_gap(segment, match.start(), match.end()):
+                continue
+            value = match.group(0)
+            raw_start, raw_end = _raw_match_span(match)
+            if _overlaps_any(raw_start, raw_end, excluded_spans):
+                continue
+            digits = re.sub(r"\D", "", value)
+            if len(digits) < 10:
+                continue
+            metadata = _num_fragment_metadata(
+                value,
+                digits,
+                extra_metadata={
+                    "phone_region": [phone_region],
+                    "phone_pattern": [phone_pattern],
+                    "phone_country_code": [phone_country_code],
+                    "inline_gap_bridge": ["validator"],
+                },
+            )
+            if not _num_inline_gap_bridge_is_valid(value, digits, metadata):
+                continue
+            clues.append(_build_num_fragment_clue(ctx, segment.stream, raw_start, raw_end, value, digits, source_metadata=metadata))
+            excluded_spans.append((raw_start, raw_end))
+
+    for match in _DIGIT_FRAGMENT_PATTERN.finditer(text):
+        if not _match_crosses_inline_gap(segment, match.start(), match.end()):
+            continue
+        value = match.group(0)
+        raw_start, raw_end = _raw_match_span(match)
+        if _overlaps_any(raw_start, raw_end, excluded_spans):
+            continue
+        digits = re.sub(r"\D", "", value)
+        if len(digits) < 2:
+            continue
+        if _is_negative_numeric(text, match.start(), match.end()):
+            continue
+        metadata = _num_fragment_metadata(value, digits, extra_metadata={"inline_gap_bridge": ["validator"]})
+        if not _num_inline_gap_bridge_is_valid(value, digits, metadata):
+            continue
+        clues.append(_build_num_fragment_clue(ctx, segment.stream, raw_start, raw_end, value, digits, source_metadata=metadata))
+        excluded_spans.append((raw_start, raw_end))
+
+    return clues
+
+
+def _match_crosses_inline_gap(segment: _ScanSegment, start: int, end: int) -> bool:
+    return any(start < gap_pos < end for gap_pos in segment.gap_positions)
+
+
+def _num_inline_gap_bridge_is_valid(
+    text: str,
+    digits: str,
+    metadata: dict[str, list[str]],
+) -> bool:
+    normalized_digits = normalize_structured_digits_for_phone(digits, metadata=metadata)
+    phone_region = str((metadata.get("phone_region") or [""])[0]).strip().lower() or None
+    result = route_structured_validators(
+        digits=normalized_digits,
+        text=text,
+        fragment_type="NUM",
+        phone_region=phone_region,
+    )
+    return result is not None and result[0] in _NUM_INLINE_GAP_BRIDGE_ATTRS
+
+
+def _num_fragment_metadata(
+    value: str,
+    digits: str,
+    *,
+    extra_metadata: dict[str, list[str]] | None = None,
+) -> dict[str, list[str]]:
+    metadata = {
+        "hard_source": ["regex"],
+        "placeholder": ["<num>"],
+        "fragment_type": ["NUM"],
+        "fragment_shape": [_numeric_fragment_shape(value)],
+        "pure_digits": [digits],
+    }
+    if extra_metadata:
+        metadata.update({key: list(values) for key, values in extra_metadata.items()})
+    return metadata
+
+
+def _build_num_fragment_clue(
+    ctx: DetectContext,
+    stream: StreamInput,
+    raw_start: int,
+    raw_end: int,
+    value: str,
+    digits: str,
+    *,
+    source_metadata: dict[str, list[str]] | None = None,
+    extra_metadata: dict[str, list[str]] | None = None,
+) -> Clue:
+    _us, _ue = _char_span_to_unit_span(stream, raw_start, raw_end)
+    metadata = source_metadata or _num_fragment_metadata(value, digits, extra_metadata=extra_metadata)
+    return Clue(
+        clue_id=ctx.next_clue_id(),
+        family=ClueFamily.STRUCTURED,
+        role=ClueRole.VALUE,
+        attr_type=PIIAttributeType.NUM,
+        strength=ClaimStrength.HARD,
+        start=raw_start,
+        end=raw_end,
+        text=value,
+        unit_start=_us,
+        unit_last=_ue,
+        source_kind="extract_digit_fragment",
+        source_metadata=metadata,
+    )
 
 
 def _is_negative_numeric(text: str, start: int, end: int) -> bool:

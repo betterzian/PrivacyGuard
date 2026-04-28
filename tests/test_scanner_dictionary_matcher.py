@@ -9,7 +9,7 @@ from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueRole, DictionaryEntry
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, ClueRole, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
@@ -170,8 +170,43 @@ def test_ocr_cross_line_merge_still_allows_cjk_both_sides():
     assert prepared.stream.text == f"我的地址是{_OCR_INLINE_GAP_TOKEN}北京市昌平区"
 
 
-def test_parser_merges_adjacent_generic_candidates_across_plain_spaces_only():
-    stream = build_prompt_stream(f"abc def{_OCR_INLINE_GAP_TOKEN}ghi")
+def test_parser_merges_adjacent_num_candidates_across_plain_spaces_only():
+    stream = build_prompt_stream(f"123 456{_OCR_INLINE_GAP_TOKEN}789")
+    parser = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG))
+    context = StackContext(stream=stream, locale_profile="mixed", protection_level=ProtectionLevel.STRONG)
+
+    def candidate(start: int, end: int) -> CandidateDraft:
+        return CandidateDraft(
+            attr_type=PIIAttributeType.NUM,
+            start=start,
+            end=end,
+            text=stream.text[start:end],
+            source=stream.source,
+            source_kind="extract_digit_fragment",
+            unit_start=stream.char_to_unit[start],
+            unit_last=stream.char_to_unit[end - 1],
+            metadata={"fragment_type": ["NUM"]},
+        )
+
+    previous = candidate(0, 3)
+    context.candidates.append(previous)
+    context.claims.append(
+        Claim(
+            start=previous.start,
+            end=previous.end,
+            attr_type=previous.attr_type,
+            strength=previous.claim_strength,
+            owner_stack_id="num:0:3",
+        )
+    )
+
+    assert parser._try_absorb_adjacent_generic_candidate(context, candidate(4, 7)) is True
+    assert [item.text for item in context.candidates] == ["123 456"]
+    assert parser._try_absorb_adjacent_generic_candidate(context, candidate(stream.text.index("789"), len(stream.text))) is False
+
+
+def test_parser_does_not_merge_adjacent_alnum_candidates_across_plain_spaces():
+    stream = build_prompt_stream("abc def")
     parser = StreamParser(locale_profile="mixed", ctx=DetectContext(protection_level=ProtectionLevel.STRONG))
     context = StackContext(stream=stream, locale_profile="mixed", protection_level=ProtectionLevel.STRONG)
 
@@ -190,9 +225,8 @@ def test_parser_merges_adjacent_generic_candidates_across_plain_spaces_only():
 
     parser._commit_candidate(context, candidate(0, 3))
     parser._commit_candidate(context, candidate(4, 7))
-    parser._commit_candidate(context, candidate(stream.text.index("ghi"), len(stream.text)))
 
-    assert [item.text for item in context.candidates] == ["abc def", "ghi"]
+    assert [item.text for item in context.candidates] == ["abc", "def"]
 
 
 def test_hard_pattern_scan_prefers_alnum_fragment_over_nested_digit_fragment():
@@ -1233,7 +1267,38 @@ def test_hard_pattern_scan_keeps_phone_structure_as_single_fragment(
     assert clue.source_metadata["phone_pattern"] == [expected_pattern]
 
 
-def test_hard_pattern_scan_does_not_cross_inline_gap():
+def test_hard_pattern_scan_bridges_inline_gap_when_phone_validator_accepts():
+    stream = build_prompt_stream(f"+86138{_OCR_INLINE_GAP_TOKEN}12345678")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+    num_clues = [clue for clue in clues if clue.attr_type == PIIAttributeType.NUM]
+
+    assert len(num_clues) == 1
+    clue = num_clues[0]
+    assert clue.text == "+8613812345678"
+    assert clue.source_metadata["pure_digits"] == ["8613812345678"]
+    assert clue.source_metadata["phone_region"] == ["cn"]
+    assert clue.source_metadata["inline_gap_bridge"] == ["validator"]
+
+
+def test_hard_pattern_scan_bridges_multiple_inline_gaps_when_bank_validator_accepts():
+    stream = build_prompt_stream(
+        f"4111{_OCR_INLINE_GAP_TOKEN}1111{_OCR_INLINE_GAP_TOKEN}1111{_OCR_INLINE_GAP_TOKEN}1111"
+    )
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+    num_clues = [clue for clue in clues if clue.attr_type == PIIAttributeType.NUM]
+
+    assert len(num_clues) == 1
+    assert num_clues[0].source_metadata["pure_digits"] == ["4111111111111111"]
+    assert num_clues[0].source_metadata["inline_gap_bridge"] == ["validator"]
+
+
+def test_hard_pattern_scan_keeps_invalid_inline_gap_number_split():
     stream = build_prompt_stream(f"+86123{_OCR_INLINE_GAP_TOKEN}43221234")
     clues = scanner_module._scan_hard_patterns(
         DetectContext(protection_level=ProtectionLevel.STRONG),
@@ -1249,6 +1314,24 @@ def test_hard_pattern_scan_does_not_cross_inline_gap():
         for clue in clues
         if clue.attr_type == PIIAttributeType.NUM
     ] == ["86123", "43221234"]
+
+
+def test_hard_pattern_scan_rejects_unvalidated_inline_gap_digits():
+    stream = build_prompt_stream(f"12345{_OCR_INLINE_GAP_TOKEN}67890")
+    clues = scanner_module._scan_hard_patterns(
+        DetectContext(protection_level=ProtectionLevel.STRONG),
+        stream,
+    )
+
+    assert all(
+        clue.source_metadata.get("pure_digits") != ["1234567890"]
+        for clue in clues
+    )
+    assert [
+        clue.source_metadata["pure_digits"][0]
+        for clue in clues
+        if clue.attr_type == PIIAttributeType.NUM
+    ] == ["12345", "67890"]
 
 
 def test_hard_pattern_scan_email_does_not_cross_inline_gap():
