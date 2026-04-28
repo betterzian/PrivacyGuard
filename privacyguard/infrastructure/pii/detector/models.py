@@ -327,7 +327,6 @@ class OCRSceneBlock:
     block: OCRTextBlock
     block_id: str
     order_index: int
-    line_index: int
     raw_start: int
     raw_end: int
     clean_start: int
@@ -339,7 +338,6 @@ class OCRSceneBlock:
 class OCRScene:
     blocks: tuple[OCRSceneBlock, ...]
     id_to_block: dict[str, OCRSceneBlock]
-    line_to_blocks: dict[int, tuple[OCRSceneBlock, ...]]
 
 
 @dataclass(slots=True)

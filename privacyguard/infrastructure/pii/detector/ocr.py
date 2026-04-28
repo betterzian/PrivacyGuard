@@ -16,7 +16,11 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import (
     looks_like_name_value,
     looks_like_organization_value,
 )
-from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
+from privacyguard.infrastructure.pii.detector.metadata import (
+    GENERIC_CONTEXT_GATE_GEOMETRY,
+    GENERIC_CONTEXT_GATE_METADATA,
+    merge_metadata,
+)
 from privacyguard.infrastructure.pii.detector.models import (
     CandidateDraft,
     Clue,
@@ -70,6 +74,11 @@ _BLOCK_CLUE_ROLES_BY_ATTR = {
         ClueRole.KEY,
     }),
 }
+_ROW_ALIGNMENT_RATIO = 0.10
+_RIGHT_MAX_GAP_HEIGHTS = 8.0
+_X_OVERLAP_RATIO = 0.50
+_BELOW_LEFT_EDGE_HEIGHTS = 1.0
+_BLOCKER_HEIGHT_RATIO = 0.80
 
 
 class LabelBlockClueGate:
@@ -271,11 +280,14 @@ def _attribute_segment_score(event: Clue, text: str) -> float:
 
 
 def _geometry_score(label_block: OCRSceneBlock, blocks: tuple[OCRSceneBlock, ...]) -> float:
-    """几何评分：同行右侧优于下方行。距离越远得分越低。"""
+    """几何评分：同行右侧优于下方，距离越远得分越低。"""
     first = blocks[0]
-    if first.line_index == label_block.line_index and first.order_index > label_block.order_index:
+    relation = _layout_relation(label_block, first, scene_blocks=(), median_h=_block_height(label_block))
+    if relation == "right":
         return 2.0 - (_horizontal_gap(label_block, first) / 500.0)
-    return 1.0 - (_vertical_score(label_block, first) / 500.0)
+    if relation == "below":
+        return 1.0 - (_vertical_score(label_block, first) / 500.0)
+    return -1.0
 
 
 def _distance_fallback_score(label_block: OCRSceneBlock, blocks: tuple[OCRSceneBlock, ...]) -> float:
@@ -293,12 +305,12 @@ def _find_existing_bound_candidate(
 ) -> CandidateDraft | None:
     ranked: list[tuple[float, CandidateDraft]] = []
     for candidate in candidates:
-        if candidate.attr_type != event.attr_type or not candidate.block_ids:
+        if not _candidate_can_bind_label(event, candidate) or not candidate.block_ids:
             continue
         anchor_block = _candidate_anchor_block(candidate, scene)
         if anchor_block is None:
             continue
-        score = _existing_binding_score(label_block, anchor_block, median_h=median_h)
+        score = _existing_binding_score(label_block, anchor_block, scene=scene, median_h=median_h)
         if score <= 0:
             continue
         ranked.append((score, candidate))
@@ -310,13 +322,14 @@ def _find_existing_bound_candidate(
 
 def _bind_label_to_candidate(candidate: CandidateDraft, event: Clue) -> None:
     candidate.label_clue_ids.add(event.clue_id)
-    metadata = dict(candidate.metadata)
-    metadata["bound_label_clue_ids"] = list(
-        dict.fromkeys([*metadata.get("bound_label_clue_ids", []), event.clue_id])
-    )
     _ocr_sk = (event.source_metadata.get("ocr_source_kind") or [event.source_kind])[0]
-    metadata["matched_by"] = list(dict.fromkeys([*metadata.get("matched_by", []), str(_ocr_sk)]))
-    candidate.metadata = metadata
+    metadata = {
+        "bound_label_clue_ids": [event.clue_id],
+        "matched_by": [str(_ocr_sk)],
+    }
+    if candidate.attr_type in _NUMBERISH_BLOCK_ATTRS:
+        metadata[GENERIC_CONTEXT_GATE_METADATA] = [GENERIC_CONTEXT_GATE_GEOMETRY]
+    candidate.metadata = merge_metadata(candidate.metadata, metadata)
 
 
 def _candidate_anchor_block(candidate: CandidateDraft, scene: OCRScene) -> OCRSceneBlock | None:
@@ -327,12 +340,25 @@ def _candidate_anchor_block(candidate: CandidateDraft, scene: OCRScene) -> OCRSc
     return None
 
 
-def _existing_binding_score(label_block: OCRSceneBlock, candidate_block: OCRSceneBlock, *, median_h: float) -> float:
+def _candidate_can_bind_label(event: Clue, candidate: CandidateDraft) -> bool:
+    if candidate.attr_type == event.attr_type:
+        return True
+    return event.attr_type in _NUMBERISH_LABEL_ATTRS and candidate.attr_type in _NUMBERISH_BLOCK_ATTRS
+
+
+def _existing_binding_score(
+    label_block: OCRSceneBlock,
+    candidate_block: OCRSceneBlock,
+    *,
+    scene: OCRScene,
+    median_h: float,
+) -> float:
     """已有 candidate 与 label 的绑定评分。阈值按 median_h 归一化。"""
     norm = max(median_h, 10.0)
-    if candidate_block.line_index == label_block.line_index and candidate_block.order_index > label_block.order_index:
+    relation = _layout_relation(label_block, candidate_block, scene_blocks=scene.blocks, median_h=median_h)
+    if relation == "right":
         return 3.0 - (_horizontal_gap(label_block, candidate_block) / (norm * 15.0))
-    if candidate_block.line_index in {label_block.line_index + 1, label_block.line_index + 2}:
+    if relation == "below":
         return 2.0 - (_vertical_score(label_block, candidate_block) / (norm * 15.0))
     return -1.0
 
@@ -350,15 +376,6 @@ def _find_candidate_blocks(
     lb = label_block.block.bbox
     if lb is None:
         return ()
-    label_right = float(lb.x + lb.width)
-    label_bottom = float(lb.y + lb.height)
-    label_cy = float(lb.y) + float(lb.height) / 2
-    label_x = float(lb.x)
-
-    # 搜索半径（以 median_h 为单位）。
-    _MAX_H_RIGHT = 8.0
-    _MAX_V_DOWN = 3.0
-
     scored: list[tuple[float, OCRSceneBlock]] = []
     for block in scene.blocks:
         if block.block_id in label_block_ids or block.block_id == label_block.block_id:
@@ -368,23 +385,17 @@ def _find_candidate_blocks(
             continue
         if not clue_gate.allows_block(event, block):
             continue
-        block_cy = float(bb.y) + float(bb.height) / 2
-
-        # 同行右侧：y 中心差 < median_h 且 x 在 label 右边界右侧。
-        if abs(block_cy - label_cy) < median_h and float(bb.x) >= label_right:
-            h_gap = float(bb.x) - label_right
-            if h_gap <= _MAX_H_RIGHT * median_h:
-                score = 2.0 - h_gap / (_MAX_H_RIGHT * median_h)
-                scored.append((score, block))
-                continue
-
-        # 下方：y 起始在 label 底边附近或以下。
-        if float(bb.y) >= label_bottom - 0.3 * median_h:
-            v_gap = float(bb.y) - label_bottom
-            if 0 <= v_gap <= _MAX_V_DOWN * median_h:
-                x_offset = abs(float(bb.x) - label_x)
-                score = 1.0 - v_gap / (_MAX_V_DOWN * median_h) - x_offset / (_MAX_H_RIGHT * median_h) * 0.3
-                scored.append((score, block))
+        relation = _layout_relation(label_block, block, scene_blocks=scene.blocks, median_h=median_h)
+        if relation == "right":
+            h_gap = float(bb.x) - float(lb.x + lb.width)
+            score = 2.0 - h_gap / (_RIGHT_MAX_GAP_HEIGHTS * median_h)
+            scored.append((score, block))
+            continue
+        if relation == "below":
+            v_gap = float(bb.y) - float(lb.y + lb.height)
+            x_offset = abs(float(bb.x) - float(lb.x))
+            score = 1.0 - v_gap / max(median_h, 1.0) - x_offset / max(_RIGHT_MAX_GAP_HEIGHTS * median_h, 1.0) * 0.3
+            scored.append((score, block))
 
     if not scored:
         return ()
@@ -472,6 +483,147 @@ def _event_scene_block(stream: StreamInput, scene: OCRScene, event: Clue) -> OCR
 
 def _spans_overlap(left_start: int, left_end: int, right_start: int, right_end: int) -> bool:
     return left_start < right_end and right_start < left_end
+
+
+def _layout_relation(
+    label_block: OCRSceneBlock,
+    value_block: OCRSceneBlock,
+    *,
+    scene_blocks: tuple[OCRSceneBlock, ...],
+    median_h: float,
+) -> str | None:
+    """用 bbox 判断 label 与 value 的相对位置，不依赖预计算行号。"""
+    if _is_same_row_right(label_block, value_block, median_h=median_h) and not _has_blocking_between(
+        label_block,
+        value_block,
+        scene_blocks=scene_blocks,
+        mode="right",
+    ):
+        return "right"
+    if _is_directly_below(label_block, value_block, median_h=median_h) and not _has_blocking_between(
+        label_block,
+        value_block,
+        scene_blocks=scene_blocks,
+        mode="below",
+    ):
+        return "below"
+    return None
+
+
+def _is_same_row_right(label_block: OCRSceneBlock, value_block: OCRSceneBlock, *, median_h: float) -> bool:
+    lb = label_block.block.bbox
+    vb = value_block.block.bbox
+    if lb is None or vb is None:
+        return False
+    if float(vb.x) < float(lb.x + lb.width):
+        return False
+    max_gap = _RIGHT_MAX_GAP_HEIGHTS * max(float(median_h), 1.0)
+    if float(vb.x) - float(lb.x + lb.width) > max_gap:
+        return False
+    tolerance = _alignment_tolerance(lb.height, vb.height, median_h)
+    label_cy = float(lb.y) + float(lb.height) / 2
+    value_cy = float(vb.y) + float(vb.height) / 2
+    label_bottom = float(lb.y + lb.height)
+    value_bottom = float(vb.y + vb.height)
+    return abs(label_cy - value_cy) <= tolerance or abs(label_bottom - value_bottom) <= tolerance
+
+
+def _is_directly_below(label_block: OCRSceneBlock, value_block: OCRSceneBlock, *, median_h: float) -> bool:
+    lb = label_block.block.bbox
+    vb = value_block.block.bbox
+    if lb is None or vb is None:
+        return False
+    vertical_gap = float(vb.y) - float(lb.y + lb.height)
+    max_gap = max(float(lb.height), float(vb.height), float(median_h), 1.0)
+    if vertical_gap < 0 or vertical_gap > max_gap:
+        return False
+    min_width = max(min(float(lb.width), float(vb.width)), 1.0)
+    overlap = _x_overlap(lb, vb)
+    if overlap >= _X_OVERLAP_RATIO * min_width:
+        return True
+    return abs(float(lb.x) - float(vb.x)) <= _BELOW_LEFT_EDGE_HEIGHTS * max(float(median_h), 1.0)
+
+
+def _has_blocking_between(
+    label_block: OCRSceneBlock,
+    value_block: OCRSceneBlock,
+    *,
+    scene_blocks: tuple[OCRSceneBlock, ...],
+    mode: str,
+) -> bool:
+    lb = label_block.block.bbox
+    vb = value_block.block.bbox
+    if lb is None or vb is None:
+        return False
+    for block in scene_blocks:
+        if block.block_id in {label_block.block_id, value_block.block_id}:
+            continue
+        bb = block.block.bbox
+        if bb is None or not block.clean_text.strip():
+            continue
+        if mode == "right" and _blocks_right_corridor(lb, vb, bb):
+            if not _is_ignorable_right_blocker(lb, vb, bb):
+                return True
+        elif mode == "below" and _blocks_below_corridor(lb, vb, bb):
+            if not _is_ignorable_below_blocker(lb, vb, bb):
+                return True
+    return False
+
+
+def _blocks_right_corridor(label_box, value_box, other_box) -> bool:
+    left = float(label_box.x + label_box.width)
+    right = float(value_box.x)
+    if right <= left:
+        return False
+    other_left = float(other_box.x)
+    other_right = float(other_box.x + other_box.width)
+    if other_right <= left or other_left >= right:
+        return False
+    top = min(float(label_box.y), float(value_box.y))
+    bottom = max(float(label_box.y + label_box.height), float(value_box.y + value_box.height))
+    return _interval_overlap(float(other_box.y), float(other_box.y + other_box.height), top, bottom) > 0
+
+
+def _blocks_below_corridor(label_box, value_box, other_box) -> bool:
+    top = float(label_box.y + label_box.height)
+    bottom = float(value_box.y)
+    if bottom <= top:
+        return False
+    other_top = float(other_box.y)
+    other_bottom = float(other_box.y + other_box.height)
+    if other_bottom <= top or other_top >= bottom:
+        return False
+    left = min(float(label_box.x), float(value_box.x))
+    right = max(float(label_box.x + label_box.width), float(value_box.x + value_box.width))
+    return _interval_overlap(float(other_box.x), float(other_box.x + other_box.width), left, right) > 0
+
+
+def _is_ignorable_right_blocker(label_box, value_box, blocker_box) -> bool:
+    min_height = min(float(label_box.height), float(value_box.height))
+    min_width = min(float(label_box.width), float(value_box.width))
+    return float(blocker_box.height) < _BLOCKER_HEIGHT_RATIO * min_height and float(blocker_box.width) < min_width
+
+
+def _is_ignorable_below_blocker(label_box, value_box, blocker_box) -> bool:
+    min_height = min(float(label_box.height), float(value_box.height))
+    return float(blocker_box.height) < _BLOCKER_HEIGHT_RATIO * min_height
+
+
+def _alignment_tolerance(label_height: int, value_height: int, median_h: float) -> float:
+    return max(2.0, _ROW_ALIGNMENT_RATIO * max(float(label_height), float(value_height), float(median_h)))
+
+
+def _x_overlap(left_box, right_box) -> float:
+    return _interval_overlap(
+        float(left_box.x),
+        float(left_box.x + left_box.width),
+        float(right_box.x),
+        float(right_box.x + right_box.width),
+    )
+
+
+def _interval_overlap(left_start: float, left_end: float, right_start: float, right_end: float) -> float:
+    return max(0.0, min(left_end, right_end) - max(left_start, right_start))
 
 
 def _horizontal_gap(left: OCRSceneBlock, right: OCRSceneBlock) -> int:

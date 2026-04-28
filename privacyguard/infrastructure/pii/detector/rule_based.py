@@ -11,7 +11,21 @@ from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.models.ocr import OCRTextBlock
 from privacyguard.domain.models.pii import PIICandidate
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, DictionaryEntry, StructuredLookupIndex
+from privacyguard.infrastructure.pii.detector.metadata import (
+    GENERIC_CONTEXT_GATE_FAILED_METADATA,
+    GENERIC_CONTEXT_GATE_METADATA,
+    GENERIC_CONTEXT_GATE_NO_CONTEXT,
+    GENERIC_CONTEXT_GATE_TEXT,
+    merge_metadata,
+)
+from privacyguard.infrastructure.pii.detector.models import (
+    CandidateDraft,
+    ClueBundle,
+    ClueRole,
+    DictionaryEntry,
+    StreamInput,
+    StructuredLookupIndex,
+)
 from privacyguard.infrastructure.pii.detector.ocr import apply_ocr_geometry
 from privacyguard.infrastructure.pii.detector.parser import StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
@@ -23,9 +37,15 @@ from privacyguard.utils.text import is_cjk_text
 
 _ADDRESS_LEVEL_VALUES: frozenset[str] = frozenset(level.value for level in AddressLevel)
 _GENERIC_FRAGMENT_MIN_LENGTH = 5
+_GENERIC_CONTEXT_MAX_UNIT_DISTANCE = 20
+_GENERIC_CONTEXT_ANCHOR_ROLES = frozenset({ClueRole.LABEL, ClueRole.START})
 _NON_PII_STRUCTURED_ATTR_TYPES = frozenset({
     PIIAttributeType.TIME,
     PIIAttributeType.AMOUNT,
+})
+_GENERIC_STRUCTURED_ATTR_TYPES = frozenset({
+    PIIAttributeType.NUM,
+    PIIAttributeType.ALNUM,
 })
 
 
@@ -77,7 +97,12 @@ class RuleBasedPIIDetector:
             locale_profile=self.locale_profile,
         )
         prompt_result = parser.parse(prompt_stream, prompt_bundle, structured_lookup_index=structured_lookup_index)
-        candidates.extend(self._to_pii_candidates(prompt_result.candidates))
+        prompt_drafts = self._apply_generic_text_context_gate(
+            prompt_result.candidates,
+            bundle=prompt_bundle,
+            stream=prompt_stream,
+        )
+        candidates.extend(self._to_pii_candidates(prompt_drafts))
 
         prepared_ocr = build_ocr_stream(ocr_blocks)
         ocr_stream = prepared_ocr.stream
@@ -93,6 +118,11 @@ class RuleBasedPIIDetector:
             prepared=prepared_ocr,
             bundle=ocr_bundle,
             parsed=ocr_result,
+        )
+        ocr_drafts = self._apply_generic_text_context_gate(
+            ocr_drafts,
+            bundle=ocr_bundle,
+            stream=ocr_stream,
         )
         candidates.extend(self._to_pii_candidates(ocr_drafts))
         return self.resolver.resolve_candidates(candidates)
@@ -434,14 +464,90 @@ class RuleBasedPIIDetector:
         """过滤不应进入最终 PII 实体的结构化片段。"""
         if draft.attr_type in _NON_PII_STRUCTURED_ATTR_TYPES:
             return False
-        if draft.attr_type not in {PIIAttributeType.NUM, PIIAttributeType.ALNUM}:
+        if draft.attr_type not in _GENERIC_STRUCTURED_ATTR_TYPES:
             return True
-        return self._generic_fragment_length(draft.text) >= _GENERIC_FRAGMENT_MIN_LENGTH
+        if draft.attr_type == PIIAttributeType.ALNUM:
+            return self._generic_fragment_length(draft.text) >= _GENERIC_FRAGMENT_MIN_LENGTH and self._has_generic_context_gate(draft)
+        if self._is_direct_pass_generic_num(draft):
+            return True
+        return self._has_generic_context_gate(draft)
+
+    def _apply_generic_text_context_gate(
+        self,
+        drafts: list[CandidateDraft],
+        *,
+        bundle: ClueBundle,
+        stream: StreamInput,
+    ) -> list[CandidateDraft]:
+        """为通用 NUM / ALNUM 标注文本上下文证据。"""
+        anchors = tuple(self._generic_text_anchor_unit_lasts(bundle))
+        for draft in drafts:
+            if draft.attr_type not in _GENERIC_STRUCTURED_ATTR_TYPES:
+                continue
+            if self._is_direct_pass_generic_num(draft):
+                continue
+            if draft.source == PIISourceType.OCR and draft.bbox is not None:
+                if not self._has_generic_context_gate(draft):
+                    draft.metadata = merge_metadata(
+                        draft.metadata,
+                        {GENERIC_CONTEXT_GATE_FAILED_METADATA: [GENERIC_CONTEXT_GATE_NO_CONTEXT]},
+                    )
+                continue
+            if self._generic_text_context_passes(draft, stream=stream, anchor_unit_lasts=anchors):
+                draft.metadata = merge_metadata(
+                    draft.metadata,
+                    {GENERIC_CONTEXT_GATE_METADATA: [GENERIC_CONTEXT_GATE_TEXT]},
+                )
+            elif not self._has_generic_context_gate(draft):
+                draft.metadata = merge_metadata(
+                    draft.metadata,
+                    {GENERIC_CONTEXT_GATE_FAILED_METADATA: [GENERIC_CONTEXT_GATE_NO_CONTEXT]},
+                )
+        return drafts
+
+    def _generic_text_anchor_unit_lasts(self, bundle: ClueBundle):
+        for clue in bundle.all_clues:
+            if clue.attr_type is not None and clue.role in _GENERIC_CONTEXT_ANCHOR_ROLES:
+                yield clue.unit_last
+        for inspire in bundle.inspire_entries:
+            yield inspire.unit_last
+
+    def _generic_text_context_passes(
+        self,
+        draft: CandidateDraft,
+        *,
+        stream: StreamInput,
+        anchor_unit_lasts: tuple[int, ...],
+    ) -> bool:
+        if draft.unit_start < 0 or draft.unit_start >= len(stream.units):
+            return False
+        for anchor_unit_last in anchor_unit_lasts:
+            distance = draft.unit_start - anchor_unit_last
+            if distance <= 0 or distance > _GENERIC_CONTEXT_MAX_UNIT_DISTANCE:
+                continue
+            if not self._has_ocr_break_between(stream, anchor_unit_last + 1, draft.unit_start):
+                return True
+        return False
+
+    def _has_ocr_break_between(self, stream: StreamInput, start_unit: int, end_unit: int) -> bool:
+        start = max(0, start_unit)
+        end = min(max(start, end_unit), len(stream.units))
+        return any(unit.kind == "ocr_break" for unit in stream.units[start:end])
+
+    def _has_generic_context_gate(self, draft: CandidateDraft) -> bool:
+        return bool(draft.metadata.get(GENERIC_CONTEXT_GATE_METADATA))
+
+    def _is_direct_pass_generic_num(self, draft: CandidateDraft) -> bool:
+        return draft.attr_type == PIIAttributeType.NUM and self._generic_digit_length(draft.text) > _GENERIC_FRAGMENT_MIN_LENGTH
 
     def _generic_fragment_length(self, text: str) -> int:
         """按隐私判定口径计算 NUM / ALNUM 的有效长度。"""
         compact = re.sub(r"[^0-9A-Za-z]", "", str(text or ""))
         return len(compact)
+
+    def _generic_digit_length(self, text: str) -> int:
+        """计算通用数字片段中的数字长度。"""
+        return len(re.sub(r"\D", "", str(text or "")))
 
     def _name_entry(self, *, component: str, value: str, persona_id: str) -> DictionaryEntry:
         normalized = normalize_pii(

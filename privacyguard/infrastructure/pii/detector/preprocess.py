@@ -564,7 +564,6 @@ def _build_stream_from_chunks(
                     block=block.model_copy(deep=True),
                     block_id=block_id,
                     order_index=order_index,
-                    line_index=0,
                     raw_start=raw_start,
                     raw_end=raw_end,
                     clean_start=clean_start,
@@ -943,12 +942,7 @@ def _is_punctuation(char: str) -> bool:
 
 def _build_scene(scene_blocks: list[OCRSceneBlock]) -> OCRScene:
     id_to_block = {item.block_id: item for item in scene_blocks}
-    line_to_blocks: dict[int, tuple[OCRSceneBlock, ...]] = {}
-    for item in scene_blocks:
-        line_to_blocks.setdefault(item.line_index, ())
-        line_to_blocks[item.line_index] = tuple([*line_to_blocks[item.line_index], item])
     return OCRScene(
         blocks=tuple(scene_blocks),
         id_to_block=id_to_block,
-        line_to_blocks=line_to_blocks,
     )
