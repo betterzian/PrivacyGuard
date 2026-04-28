@@ -38,6 +38,8 @@ from privacyguard.utils.text import is_cjk_text
 _ADDRESS_LEVEL_VALUES: frozenset[str] = frozenset(level.value for level in AddressLevel)
 _GENERIC_FRAGMENT_MIN_LENGTH = 5
 _GENERIC_CONTEXT_MAX_UNIT_DISTANCE = 20
+_ALNUM_STANDALONE_SYMBOLS = "-_"
+_ALNUM_STANDALONE_TRANSITION_MIN = 3
 _GENERIC_CONTEXT_ANCHOR_ROLES = frozenset({ClueRole.LABEL, ClueRole.START})
 _NON_PII_STRUCTURED_ATTR_TYPES = frozenset({
     PIIAttributeType.TIME,
@@ -47,6 +49,37 @@ _GENERIC_STRUCTURED_ATTR_TYPES = frozenset({
     PIIAttributeType.NUM,
     PIIAttributeType.ALNUM,
 })
+
+
+def _is_standalone_alnum_privacy_like(text: str) -> bool:
+    """判断无上下文 ALNUM 是否具备账号 ID 式字符形态。"""
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if not all(ch.isascii() and (ch.isalnum() or ch in _ALNUM_STANDALONE_SYMBOLS) for ch in value):
+        return False
+    if not any(ch.isalpha() for ch in value):
+        return False
+    if any(ch in _ALNUM_STANDALONE_SYMBOLS for ch in value):
+        return True
+    return _alpha_digit_group_transitions(value) >= _ALNUM_STANDALONE_TRANSITION_MIN
+
+
+def _alpha_digit_group_transitions(text: str) -> int:
+    """统计 ASCII 字母组与数字组之间的切换次数。"""
+    transitions = 0
+    previous_kind: str | None = None
+    for ch in str(text or ""):
+        if ch.isascii() and ch.isalpha():
+            kind = "alpha"
+        elif ch.isascii() and ch.isdigit():
+            kind = "digit"
+        else:
+            continue
+        if previous_kind is not None and kind != previous_kind:
+            transitions += 1
+        previous_kind = kind
+    return transitions
 
 
 class RuleBasedPIIDetector:
@@ -467,7 +500,11 @@ class RuleBasedPIIDetector:
         if draft.attr_type not in _GENERIC_STRUCTURED_ATTR_TYPES:
             return True
         if draft.attr_type == PIIAttributeType.ALNUM:
-            return self._generic_fragment_length(draft.text) >= _GENERIC_FRAGMENT_MIN_LENGTH and self._has_generic_context_gate(draft)
+            if self._generic_fragment_length(draft.text) < _GENERIC_FRAGMENT_MIN_LENGTH:
+                return False
+            if self._has_generic_context_gate(draft):
+                return True
+            return _is_standalone_alnum_privacy_like(draft.text)
         if self._is_direct_pass_generic_num(draft):
             return True
         return self._has_generic_context_gate(draft)
