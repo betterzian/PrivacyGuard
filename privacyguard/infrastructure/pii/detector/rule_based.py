@@ -41,6 +41,11 @@ _GENERIC_CONTEXT_MAX_UNIT_DISTANCE = 20
 _ALNUM_STANDALONE_SYMBOLS = "-_"
 _ALNUM_STANDALONE_TRANSITION_MIN = 3
 _GENERIC_CONTEXT_ANCHOR_ROLES = frozenset({ClueRole.LABEL, ClueRole.START})
+_GENERIC_CONTEXT_EXCLUDED_LABEL_ATTR_TYPES = frozenset({
+    PIIAttributeType.NAME,
+    PIIAttributeType.ORGANIZATION,
+    PIIAttributeType.ADDRESS,
+})
 _NON_PII_STRUCTURED_ATTR_TYPES = frozenset({
     PIIAttributeType.TIME,
     PIIAttributeType.AMOUNT,
@@ -592,10 +597,15 @@ class RuleBasedPIIDetector:
 
     def _generic_text_anchor_unit_lasts(self, bundle: ClueBundle):
         for clue in bundle.all_clues:
-            if clue.attr_type is not None and clue.role in _GENERIC_CONTEXT_ANCHOR_ROLES:
+            if (
+                clue.attr_type is not None
+                and clue.role in _GENERIC_CONTEXT_ANCHOR_ROLES
+                and clue.attr_type not in _GENERIC_CONTEXT_EXCLUDED_LABEL_ATTR_TYPES
+            ):
                 yield clue.unit_last
         for inspire in bundle.inspire_entries:
-            yield inspire.unit_last
+            if inspire.attr_type not in _GENERIC_CONTEXT_EXCLUDED_LABEL_ATTR_TYPES:
+                yield inspire.unit_last
 
     def _generic_text_context_passes(
         self,

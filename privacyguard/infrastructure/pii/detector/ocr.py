@@ -78,6 +78,7 @@ _BLOCK_CLUE_ROLES_BY_ATTR = {
 }
 _ROW_ALIGNMENT_RATIO = 0.15
 _RIGHT_MAX_GAP_HEIGHTS = 8.0
+_BELOW_MAX_GAP_HEIGHT_RATIO = 1.8
 _X_OVERLAP_RATIO = 0.50
 _BELOW_LEFT_EDGE_LABEL_WIDTH_RATIO = 0.50
 _BLOCKER_HEIGHT_RATIO = 0.80
@@ -710,7 +711,8 @@ def _is_directly_below(label_block: OCRSceneBlock, value_block: OCRSceneBlock, *
     if lb is None or vb is None:
         return False
     vertical_gap = float(vb.y) - float(lb.y + lb.height)
-    max_gap = max(float(lb.height), float(vb.height), float(median_h) * 1.2, 1.0)
+    base_height = max(float(lb.height), float(vb.height), float(median_h), 1.0)
+    max_gap = base_height * _BELOW_MAX_GAP_HEIGHT_RATIO
     if vertical_gap < 0 or vertical_gap > max_gap:
         return False
     min_width = max(min(float(lb.width), float(vb.width)), 1.0)

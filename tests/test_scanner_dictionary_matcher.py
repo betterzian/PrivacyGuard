@@ -512,7 +512,45 @@ def test_label_layout_manager_keeps_booking_style_label_column():
         if decisions.get(clue.clue_id) and decisions[clue.clue_id].trusted
     }
 
-    assert {"name", "email address", "mobile"}.issubset(trusted_texts)
+    assert {"name", "email address", "mobile", "country/region"}.issubset(trusted_texts)
+
+
+def test_booking_country_region_label_survives_alnum_and_binds_below_value_in_weak():
+    blocks = [
+        _ocr_block("Email Address", block_id="email-label", line_id=0, x=47, y=618, width=290, height=42),
+        _ocr_block(
+            "elena_kaiser@gmail.gov",
+            block_id="email-value",
+            line_id=1,
+            x=77,
+            y=735,
+            width=488,
+            height=47,
+        ),
+        _ocr_block("Country/region", block_id="country-label", line_id=2, x=43, y=1144, width=307, height=53),
+        _ocr_block("Belgium", block_id="country-value", line_id=3, x=78, y=1260, width=172, height=53),
+    ]
+    prepared = build_ocr_stream(blocks)
+    bundle = build_clue_bundle(
+        prepared.stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.WEAK),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="en_us",
+    )
+
+    assert any(
+        clue.text.lower() == "country/region" and clue.attr_type == PIIAttributeType.ADDRESS
+        for clue in bundle.label_clues
+    )
+
+    detector = RuleBasedPIIDetector(locale_profile="en_us")
+    candidates = detector.detect("", blocks, protection_level=ProtectionLevel.WEAK)
+    by_text = {candidate.text: candidate for candidate in candidates}
+
+    assert by_text["Belgium"].attr_type == PIIAttributeType.ADDRESS
+    assert "ocr_label_address_field" in by_text["Belgium"].metadata.get("matched_by", [])
+    assert "ocr_label_email_field" in by_text["elena_kaiser@gmail.gov"].metadata.get("matched_by", [])
 
 
 def test_parser_merges_adjacent_num_candidates_across_plain_spaces_only():

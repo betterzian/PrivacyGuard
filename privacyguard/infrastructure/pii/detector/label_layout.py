@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import floor
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.models import Clue, OCRScene, OCRSceneBlock
 
 
 _LABEL_SEPARATOR_CHARS = frozenset({":", "：", "-", "—", "–", "|"})
-_HEIGHT_BUCKET_WIDTH = 4.0
-_HEIGHT_WINDOW_SIZE = 3
-_X_BUCKET_COUNT = 20
-_X_WINDOW_SIZE = 2
-_DY_BUCKET_WIDTH = 4.0
-_DY_WINDOW_SIZE = 2
+_HEIGHT_WINDOW_SPAN = 12.0
+_X_WINDOW_SPAN = 64.0
+_DY_WINDOW_SPAN = 12.0
 _MIN_LAYOUT_SUPPORT = 3
 _INSUFFICIENT_LAYOUT_SUPPORT = "insufficient_layout_support"
 
@@ -44,7 +40,7 @@ class _LabelEntry:
     clue: Clue
     block: OCRSceneBlock
     layout_score: float
-    x_bucket: int
+    x: float
     y_center: float
     height: float
     has_separator: bool
@@ -143,7 +139,6 @@ class LabelLayoutManager:
         }
 
     def _build_entries(self) -> tuple[_LabelEntry, ...]:
-        scene_min_x, scene_width = self._scene_x_range()
         entries: list[_LabelEntry] = []
         for clue in self._label_clues:
             block = self._label_blocks.get(clue.clue_id)
@@ -169,7 +164,7 @@ class LabelLayoutManager:
                     clue=clue,
                     block=block,
                     layout_score=layout_score,
-                    x_bucket=_bucket_x(float(box.x), scene_min_x=scene_min_x, scene_width=scene_width),
+                    x=float(box.x),
                     y_center=float(box.y) + float(box.height) / 2.0,
                     height=float(box.height),
                     has_separator=has_separator,
@@ -178,51 +173,13 @@ class LabelLayoutManager:
             )
         return tuple(entries)
 
-    def _scene_x_range(self) -> tuple[float, float]:
-        boxes = [block.block.bbox for block in self._scene.blocks if block.block.bbox is not None]
-        if not boxes:
-            return (0.0, float(_X_BUCKET_COUNT))
-        min_x = min(float(box.x) for box in boxes)
-        max_x = max(float(box.x + box.width) for box in boxes)
-        return (min_x, max(max_x - min_x, float(_X_BUCKET_COUNT)))
-
     def _height_cluster_ids(self, entries: tuple[_LabelEntry, ...]) -> set[str]:
-        buckets: dict[int, list[_LabelEntry]] = {}
-        for entry in entries:
-            buckets.setdefault(_bucket_fixed(entry.height, _HEIGHT_BUCKET_WIDTH), []).append(entry)
-        best_window = self._best_fixed_bucket_window(
-            buckets=buckets,
-            window_size=_HEIGHT_WINDOW_SIZE,
-        )
-        return {
-            entry.clue.clue_id
-            for bucket in best_window
-            for entry in buckets.get(bucket, ())
-        }
+        selected = _best_entry_window(entries, value_getter=lambda entry: entry.height, span=_HEIGHT_WINDOW_SPAN)
+        return {entry.clue.clue_id for entry in selected}
 
     def _main_x_window_ids(self, entries: tuple[_LabelEntry, ...]) -> set[str]:
-        best_start = 0
-        best_score: tuple[float, float, float, float] | None = None
-        for start_bucket in range(0, _X_BUCKET_COUNT - _X_WINDOW_SIZE + 1):
-            window = set(range(start_bucket, start_bucket + _X_WINDOW_SIZE))
-            labels = [entry for entry in entries if entry.x_bucket in window]
-            if not labels:
-                continue
-            x_values = [float(entry.block.block.bbox.x) for entry in labels if entry.block.block.bbox is not None]
-            score = (
-                float(len(labels)),
-                float(sum(1 for entry in labels if entry.already_bound)),
-                float(sum(1 for entry in labels if entry.has_separator)),
-                -_variance(x_values),
-            )
-            if best_score is None or score > best_score:
-                best_score = score
-                best_start = start_bucket
-        return {
-            entry.clue.clue_id
-            for entry in entries
-            if best_start <= entry.x_bucket < best_start + _X_WINDOW_SIZE
-        }
+        selected = _best_entry_window(entries, value_getter=lambda entry: entry.x, span=_X_WINDOW_SPAN)
+        return {entry.clue.clue_id for entry in selected}
 
     def _main_y_rhythm_ids(self, entries: tuple[_LabelEntry, ...]) -> set[str]:
         if len(entries) < _MIN_LAYOUT_SUPPORT:
@@ -232,27 +189,18 @@ class LabelLayoutManager:
             (ordered[index], ordered[index + 1], ordered[index + 1].y_center - ordered[index].y_center)
             for index in range(len(ordered) - 1)
         ]
-        dy_buckets: dict[int, list[tuple[_LabelEntry, _LabelEntry, float]]] = {}
-        for left, right, dy in dy_pairs:
-            dy_buckets.setdefault(_bucket_fixed(dy, _DY_BUCKET_WIDTH), []).append((left, right, dy))
-        best_window = self._best_fixed_bucket_window(
-            buckets=dy_buckets,
-            window_size=_DY_WINDOW_SIZE,
+        selected_range = _best_value_range(
+            tuple(dy for _left, _right, dy in dy_pairs),
+            span=_DY_WINDOW_SPAN,
         )
-        selected_dys = [
-            dy
-            for bucket in best_window
-            for _left, _right, dy in dy_buckets.get(bucket, ())
-        ]
-        if not selected_dys:
+        if selected_range is None:
             return set()
-        dy_mean = sum(selected_dys) / len(selected_dys)
-        tolerance = max(_DY_BUCKET_WIDTH, dy_mean * 0.25)
+        lower, upper = selected_range
 
         best_chain: list[_LabelEntry] = []
         current_chain: list[_LabelEntry] = [ordered[0]]
         for index, (_left, right, dy) in enumerate(dy_pairs):
-            if abs(dy - dy_mean) <= tolerance:
+            if lower <= dy <= upper:
                 current_chain.append(right)
             else:
                 best_chain = _better_chain(best_chain, current_chain)
@@ -260,54 +208,53 @@ class LabelLayoutManager:
         best_chain = _better_chain(best_chain, current_chain)
         return {entry.clue.clue_id for entry in best_chain}
 
-    def _best_fixed_bucket_window(
-        self,
-        *,
-        buckets: dict[int, list[object]],
-        window_size: int,
-    ) -> set[int]:
-        if not buckets:
-            return set()
-        bucket_ids = sorted(buckets)
-        best_window = {bucket_ids[0]}
-        best_score: tuple[float, float, float, float] | None = None
-        start_bucket = bucket_ids[0]
-        end_bucket = bucket_ids[-1]
-        for bucket_start in range(start_bucket, end_bucket - window_size + 2):
-            window = set(range(bucket_start, bucket_start + window_size))
-            items = [item for bucket in window for item in buckets.get(bucket, ())]
-            if not items:
-                continue
-            labels = [item for item in items if isinstance(item, _LabelEntry)]
-            if labels:
-                score = (
-                    float(len(labels)),
-                    float(sum(1 for entry in labels if entry.already_bound)),
-                    float(sum(1 for entry in labels if entry.has_separator)),
-                    -_variance([entry.height for entry in labels]),
-                )
-            else:
-                dy_values = [float(item[2]) for item in items]
-                score = (
-                    float(len(items)),
-                    0.0,
-                    0.0,
-                    -_variance(dy_values),
-                )
-            if best_score is None or score > best_score:
-                best_score = score
-                best_window = window
-        return best_window
+
+def _best_entry_window(
+    entries: tuple[_LabelEntry, ...],
+    *,
+    value_getter,
+    span: float,
+) -> tuple[_LabelEntry, ...]:
+    if not entries:
+        return ()
+    ordered = tuple(sorted(entries, key=value_getter))
+    best: tuple[_LabelEntry, ...] = ()
+    best_score: tuple[float, float, float, float] | None = None
+    right = 0
+    for left, entry in enumerate(ordered):
+        start = float(value_getter(entry))
+        while right < len(ordered) and float(value_getter(ordered[right])) <= start + span:
+            right += 1
+        window = ordered[left:right]
+        values = [float(value_getter(item)) for item in window]
+        score = (
+            float(len(window)),
+            float(sum(1 for item in window if item.already_bound)),
+            float(sum(1 for item in window if item.has_separator)),
+            -_variance(values),
+        )
+        if best_score is None or score > best_score:
+            best_score = score
+            best = window
+    return best
 
 
-def _bucket_x(x: float, *, scene_min_x: float, scene_width: float) -> int:
-    bucket_width = max(scene_width / _X_BUCKET_COUNT, 1.0)
-    bucket = int(floor((x - scene_min_x) / bucket_width))
-    return max(0, min(_X_BUCKET_COUNT - 1, bucket))
-
-
-def _bucket_fixed(value: float, width: float) -> int:
-    return int(floor(value / max(width, 1.0)))
+def _best_value_range(values: tuple[float, ...], *, span: float) -> tuple[float, float] | None:
+    if not values:
+        return None
+    ordered = tuple(sorted(float(value) for value in values))
+    best_range: tuple[float, float] | None = None
+    best_score: tuple[float, float] | None = None
+    right = 0
+    for left, start in enumerate(ordered):
+        while right < len(ordered) and ordered[right] <= start + span:
+            right += 1
+        window = ordered[left:right]
+        score = (float(len(window)), -_variance(list(window)))
+        if best_score is None or score > best_score:
+            best_score = score
+            best_range = (start, start + span)
+    return best_range
 
 
 def _variance(values: list[float]) -> float:

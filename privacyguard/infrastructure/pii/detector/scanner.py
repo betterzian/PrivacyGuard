@@ -2209,6 +2209,11 @@ def _resolve_structured_conflicts(clues: list[Clue]) -> tuple[Clue, ...]:
     return tuple(_resolve_same_attr_clues(ordered))
 
 
+def _structured_clue_blocks_soft_scan(clue: Clue) -> bool:
+    """ALNUM 是兜底结构化片段，不应阻断 label/词典的二次扫描。"""
+    return clue.attr_type != PIIAttributeType.ALNUM
+
+
 def _build_soft_scan_segments(
     stream: StreamInput,
     structured_clues: tuple[Clue, ...],
@@ -2223,7 +2228,12 @@ def _build_soft_scan_segments(
     """
     gap_spans = _find_inline_gap_spans(stream) if inline_gap_spans is None else inline_gap_spans
     blocked_spans = sorted(
-        [(clue.start, clue.end) for clue in structured_clues] + list(ocr_break_spans),
+        [
+            (clue.start, clue.end)
+            for clue in structured_clues
+            if _structured_clue_blocks_soft_scan(clue)
+        ]
+        + list(ocr_break_spans),
         key=lambda item: (item[0], item[1]),
     )
     segments: list[_ScanSegment] = []
@@ -3515,7 +3525,11 @@ def _sweep_pass1(
 
     for pos in range(unit_len + 1):
         for clue in end_events[pos]:
-            if clue.family == ClueFamily.STRUCTURED and clue.role not in _SEED_ROLES:
+            if (
+                clue.family == ClueFamily.STRUCTURED
+                and clue.role not in _SEED_ROLES
+                and _structured_clue_blocks_soft_scan(clue)
+            ):
                 active_structured -= 1
             elif clue.role == ClueRole.BREAK:
                 active_break -= 1
@@ -3529,7 +3543,8 @@ def _sweep_pass1(
             role = clue.role
 
             if clue.family == ClueFamily.STRUCTURED and role not in _SEED_ROLES:
-                active_structured += 1
+                if _structured_clue_blocks_soft_scan(clue):
+                    active_structured += 1
                 survivors.append(clue)
                 continue
             if role == ClueRole.BREAK:
