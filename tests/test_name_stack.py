@@ -1534,6 +1534,38 @@ def test_en_name_does_not_cross_inline_gap_for_plain_capitalized_block():
     assert _name_texts(text, clues, protection_level=ProtectionLevel.STRONG, locale_profile="en_us") == ["Connor"]
 
 
+def test_en_name_short_block_uses_whole_ocr_boundary_span():
+    text = "CaROIIne mCinTyRe"
+    clues = (
+        _clue("given-1", ClueRole.GIVEN_NAME, 0, len("CaROIIne"), "Caroline", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+    )
+
+    assert _name_texts(text, clues, protection_level=ProtectionLevel.STRONG, locale_profile="en_us") == ["CaROIIne mCinTyRe"]
+
+
+def test_en_name_short_block_handles_lowercase_family_like_second_token():
+    text = "bRENda fULIeR"
+    clues = (
+        _clue("given-1", ClueRole.GIVEN_NAME, 0, len("bRENda"), "Brenda", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+    )
+
+    assert _name_texts(text, clues, protection_level=ProtectionLevel.STRONG, locale_profile="en_us") == ["bRENda fULIeR"]
+
+
+def test_en_name_short_block_does_not_swallow_long_plain_sentence():
+    text = "Alice sees Bob now"
+    clues = (
+        _clue("given-1", ClueRole.GIVEN_NAME, 0, len("Alice"), "Alice", source_kind="en_given_name", strength=ClaimStrength.SOFT),
+    )
+
+    assert "Alice sees Bob now" not in _name_texts(
+        text,
+        clues,
+        protection_level=ProtectionLevel.STRONG,
+        locale_profile="en_us",
+    )
+
+
 def test_en_label_seed_single_capitalized_token_without_name_clue_is_rejected():
     text = "Name: Avery"
     clues = (

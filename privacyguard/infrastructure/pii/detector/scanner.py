@@ -311,6 +311,14 @@ _DETERMINER_PATTERN = re.compile(
 
 _LABEL_FIELD_SEPARATOR_CHARS = ":：-—–=|"
 _EN_LABEL_DIRECT_SEPARATOR_CHARS = frozenset(":：-—–")
+_EN_LABEL_DIRECT_TRAILING_WORDS_BY_ATTR: dict[PIIAttributeType, frozenset[str]] = {
+    PIIAttributeType.EMAIL: frozenset({"address"}),
+    PIIAttributeType.PHONE: frozenset({"number", "phone"}),
+    PIIAttributeType.ID_NUMBER: frozenset({"number", "id"}),
+    PIIAttributeType.PASSPORT_NUMBER: frozenset({"number", "id"}),
+    PIIAttributeType.DRIVER_LICENSE: frozenset({"number", "id", "license", "licence"}),
+    PIIAttributeType.BANK_NUMBER: frozenset({"number", "account", "card"}),
+}
 # 标签边界：匹配到的 label 前方或后方至少有一侧满足此集合中的 unit kind，
 # 或处于文本起止位置。防止自然语句中嵌入的关键词被误识别为标签。
 _LABEL_BOUNDARY_UNIT_KINDS = frozenset({"punct", "inline_gap", "ocr_break"})
@@ -2533,27 +2541,6 @@ def _char_span_to_unit_span(stream: StreamInput, start: int, end: int) -> tuple[
     return (stream.char_to_unit[start], stream.char_to_unit[end - 1])
 
 
-def _has_label_boundary(stream: StreamInput, raw_start: int, raw_end: int) -> bool:
-    """检查 label 匹配区间的前方或后方至少有一侧是标签边界。
-
-    边界条件（满足任一即可）：
-    - 处于流文本的起始 / 末尾位置。
-    - 相邻 unit 的 kind 属于 ``_LABEL_BOUNDARY_UNIT_KINDS``（punct / inline_gap / ocr_break）。
-    """
-    if not stream.char_to_unit:
-        return True
-    unit_start, unit_last = _char_span_to_unit_span(stream, raw_start, raw_end)
-    if unit_last < unit_start:
-        return True
-    # 左侧：起始位置或相邻 unit 为边界类型。
-    if unit_start == 0 or stream.units[unit_start - 1].kind in _LABEL_BOUNDARY_UNIT_KINDS:
-        return True
-    # 右侧：末尾位置或相邻 unit 为边界类型。
-    if unit_last + 1 >= len(stream.units) or stream.units[unit_last + 1].kind in _LABEL_BOUNDARY_UNIT_KINDS:
-        return True
-    return False
-
-
 def _has_cjk_char(text: str) -> bool:
     return any("\u4e00" <= char <= "\u9fff" for char in str(text or ""))
 
@@ -2606,8 +2593,10 @@ def _resolve_seed_locale(
 
 
 def _zh_label_has_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bool:
-    if not stream.units or clue.unit_last + 1 >= len(stream.units):
+    if not stream.units:
         return False
+    if clue.unit_last + 1 >= len(stream.units):
+        return True
     next_unit = stream.units[clue.unit_last + 1]
     if next_unit.kind in {"space", "inline_gap", "ocr_break"}:
         return True
@@ -2619,6 +2608,13 @@ def _en_label_has_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bo
     if not stream.units or clue.unit_last + 1 >= len(stream.units):
         return False
     next_units = stream.units[clue.unit_last + 1 : clue.unit_last + 3]
+    if (
+        len(next_units) >= 2
+        and next_units[0].kind == "space"
+        and next_units[1].kind == "ascii_word"
+        and next_units[1].text.strip().lower() in _EN_LABEL_DIRECT_TRAILING_WORDS_BY_ATTR.get(clue.attr_type, frozenset())
+    ):
+        return True
     if len(next_units) >= 2 and all(unit.kind == "space" for unit in next_units[:2]):
         return True
     for unit in next_units:
@@ -2630,14 +2626,6 @@ def _en_label_has_direct_seed_break_after(stream: StreamInput, clue: Clue) -> bo
 
 
 _ADDRESS_DERIVED_LABEL_GAP_KINDS = frozenset({"ocr_break", "inline_gap"})
-
-
-def _is_address_derived_label(clue: Clue) -> bool:
-    return (
-        clue.family == ClueFamily.ADDRESS
-        and clue.role == ClueRole.LABEL
-        and "derived_from_address_key" in clue.source_metadata
-    )
 
 
 def _has_address_derived_label_left_boundary(stream: StreamInput, clue: Clue) -> bool:
@@ -2678,11 +2666,7 @@ def _has_label_direct_seed_break_after(
     *,
     locale_profile: str,
 ) -> bool:
-    """判断非结构化 label 右侧是否满足 direct seed 条件。"""
-    if _is_address_derived_label(clue):
-        return True
-    if clue.family not in {ClueFamily.NAME, ClueFamily.ORGANIZATION}:
-        return _zh_label_has_direct_seed_break_after(stream, clue)
+    """判断 label 右侧是否满足 direct seed 条件。"""
     seed_locale = (clue.source_metadata.get("seed_locale") or [None])[0]
     if seed_locale not in {"zh", "en"}:
         seed_locale = _resolve_seed_locale(
@@ -3528,12 +3512,6 @@ def _sweep_pass1(
                 if converted is not None:
                     clue = converted
                     role = ClueRole.START
-                elif clue.family == ClueFamily.STRUCTURED:
-                    if not _has_label_boundary(stream, clue.start, clue.end):
-                        inspire = _build_inspire_entry(clue)
-                        if inspire is not None:
-                            inspire_entries.append(inspire)
-                        continue
                 elif not _has_label_direct_seed_break_after(
                     stream,
                     clue,

@@ -69,6 +69,11 @@ class EnNameStack(BaseNameStack):
             )
             return self._attach_name_address_pending_challenge(self._build_name_run(start=start, end=end))
         if self.clue.role in {ClueRole.GIVEN_NAME, ClueRole.FAMILY_NAME}:
+            short_block = self._short_block_span_for_name_clue(self.clue)
+            if short_block is not None:
+                return self._attach_name_address_pending_challenge(
+                    self._build_name_run(start=short_block[0], end=short_block[1])
+                )
             start = self._extend_name_left_en(self.clue.start)
             end = self._expand_name_chain_right(
                 start=start,
@@ -146,6 +151,85 @@ class EnNameStack(BaseNameStack):
             if clue.attr_type == PIIAttributeType.ADDRESS and clue.end > start:
                 return index
         return None
+
+    def _short_block_span_for_name_clue(self, clue: Clue) -> tuple[int, int] | None:
+        """英文 OCR 短 block：少量 unit 内含 NAME clue 时整块作为姓名。"""
+        if not self._is_en_name_component_clue(clue):
+            return None
+        span = self._ocr_boundary_span(clue.start, clue.end)
+        if span is None:
+            return None
+        start, end = span
+        if start < self._value_floor_char():
+            return None
+        substantive_count = self._short_block_substantive_unit_count(start, end)
+        if substantive_count < 2 or substantive_count > 3:
+            return None
+        if not self._span_contains_en_name_component_clue(start, end):
+            return None
+        if self._span_has_short_block_blocker(start, end):
+            return None
+        return (start, end)
+
+    def _ocr_boundary_span(self, start: int, end: int) -> tuple[int, int] | None:
+        units = self.context.stream.units
+        if not units or start >= end:
+            return None
+        left_index = _unit_index_at_or_after(self.context.stream, start)
+        right_index = _unit_index_left_of(self.context.stream, end)
+        if left_index < 0 or right_index < left_index:
+            return None
+        scan = left_index - 1
+        while scan >= 0 and units[scan].kind not in {"inline_gap", "ocr_break"}:
+            scan -= 1
+        span_start_index = scan + 1
+        scan = right_index + 1
+        while scan < len(units) and units[scan].kind not in {"inline_gap", "ocr_break"}:
+            scan += 1
+        span_end_index = scan - 1
+        while span_start_index <= span_end_index and units[span_start_index].kind == "space":
+            span_start_index += 1
+        while span_end_index >= span_start_index and units[span_end_index].kind == "space":
+            span_end_index -= 1
+        if span_start_index > span_end_index:
+            return None
+        return (units[span_start_index].char_start, units[span_end_index].char_end)
+
+    def _short_block_substantive_unit_count(self, start: int, end: int) -> int:
+        units = self.context.stream.units
+        ui = _unit_index_at_or_after(self.context.stream, start)
+        count = 0
+        while ui < len(units):
+            unit = units[ui]
+            if unit.char_start >= end:
+                break
+            if unit.kind in {"space", "inline_gap", "ocr_break"}:
+                ui += 1
+                continue
+            if unit.kind == "punct":
+                left_char = self.context.stream.text[unit.char_start - 1] if unit.char_start > 0 else None
+                right_char = _peek_unit_first_char(units, ui + 1)
+                if is_name_joiner(unit.text, left_char, right_char):
+                    ui += 1
+                    continue
+            count += 1
+            ui += 1
+        return count
+
+    def _span_has_short_block_blocker(self, start: int, end: int) -> bool:
+        text = self.context.stream.text[start:end]
+        if any(char.isdigit() for char in text):
+            return True
+        for clue in self.context.clues:
+            if clue.end <= start or clue.start >= end:
+                continue
+            if self._is_en_name_component_clue(clue):
+                continue
+            if _is_generic_alnum_clue(clue):
+                continue
+            if self._is_name_blocker(clue):
+                return True
+        return False
 
     def _extend_name_left_en(self, start: int) -> int:
         cursor = start

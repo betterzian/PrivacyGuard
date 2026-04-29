@@ -575,7 +575,7 @@ class RuleBasedPIIDetector:
         return bool(draft.metadata.get(GENERIC_CONTEXT_GATE_METADATA))
 
     def _is_direct_pass_generic_num(self, draft: CandidateDraft) -> bool:
-        return draft.attr_type == PIIAttributeType.NUM and self._generic_digit_length(draft.text) > _GENERIC_FRAGMENT_MIN_LENGTH
+        return draft.attr_type == PIIAttributeType.NUM and self._generic_digit_length(draft.text) >= _GENERIC_FRAGMENT_MIN_LENGTH
 
     def _generic_fragment_length(self, text: str) -> int:
         """按隐私判定口径计算 NUM / ALNUM 的有效长度。"""

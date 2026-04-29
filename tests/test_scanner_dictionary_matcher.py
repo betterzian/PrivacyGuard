@@ -9,7 +9,8 @@ from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
-from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, ClueRole, DictionaryEntry
+from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern, fold_ascii_dictionary_text
+from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, Clue, ClueFamily, ClueRole, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.label_layout import LabelBindingInfo, LabelLayoutManager
 from privacyguard.infrastructure.pii.detector.parser import StackContext, StreamParser
 from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream, build_prompt_stream
@@ -43,12 +44,21 @@ def _entry(
     )
 
 
-def _ocr_block(text: str, *, block_id: str, line_id: int, x: int = 0, y: int = 0) -> OCRTextBlock:
+def _ocr_block(
+    text: str,
+    *,
+    block_id: str,
+    line_id: int,
+    x: int = 0,
+    y: int = 0,
+    width: int | None = None,
+    height: int = 20,
+) -> OCRTextBlock:
     return OCRTextBlock(
         text=text,
         block_id=block_id,
         line_id=line_id,
-        bbox=BoundingBox(x=x, y=y, width=max(10, len(text) * 10), height=20),
+        bbox=BoundingBox(x=x, y=y, width=width or max(10, len(text) * 10), height=height),
     )
 
 
@@ -180,6 +190,8 @@ def test_ocr_high_confidence_label_layout_fallback_binds_name_value_block():
         [
             _ocr_block("Name", block_id="label", line_id=0, x=20, y=0),
             _ocr_block("QaROIIne mCinTyRe", block_id="value", line_id=1, x=20, y=26),
+            _ocr_block("Email Address", block_id="email", line_id=2, x=20, y=60),
+            _ocr_block("Mobile number", block_id="mobile", line_id=3, x=20, y=120),
         ],
     )
 
@@ -197,6 +209,8 @@ def test_ocr_high_confidence_zh_name_label_fallback_binds_english_value_block():
         [
             _ocr_block("住客姓名", block_id="label", line_id=0, x=20, y=0),
             _ocr_block("STEvEngoodwIN", block_id="value", line_id=1, x=20, y=26),
+            _ocr_block("Email Address", block_id="email", line_id=2, x=20, y=60),
+            _ocr_block("Mobile number", block_id="mobile", line_id=3, x=20, y=120),
         ],
     )
 
@@ -211,7 +225,8 @@ def test_label_layout_manager_keeps_bound_label_and_drops_x_outlier():
         [
             _ocr_block("Name:", block_id="name", line_id=0, x=20, y=0),
             _ocr_block("Email:", block_id="email", line_id=1, x=22, y=30),
-            _ocr_block("Name:", block_id="outlier", line_id=2, x=420, y=300),
+            _ocr_block("Phone:", block_id="phone", line_id=2, x=21, y=60),
+            _ocr_block("Name:", block_id="outlier", line_id=3, x=420, y=90),
         ]
     )
     bundle = build_clue_bundle(
@@ -245,6 +260,118 @@ def test_label_layout_manager_keeps_bound_label_and_drops_x_outlier():
 
     assert decisions[first_label.clue_id].trusted
     assert any(decision.drop_reason == "outside_main_x_window" for decision in decisions.values())
+
+
+def test_label_layout_manager_does_not_trust_two_unbound_labels():
+    prepared = build_ocr_stream(
+        [
+            _ocr_block("省", block_id="province-a", line_id=0, x=281, y=556, width=49, height=49),
+            _ocr_block("省", block_id="province-b", line_id=1, x=175, y=1570, width=38, height=30),
+        ]
+    )
+    label_clues = tuple(
+        Clue(
+            clue_id=f"clue-{index}",
+            family=ClueFamily.ADDRESS,
+            role=ClueRole.LABEL,
+            attr_type=PIIAttributeType.ADDRESS,
+            strength=ClaimStrength.SOFT,
+            start=block.clean_start,
+            end=block.clean_end,
+            text=block.clean_text,
+            source_kind="address_keyword_derived_label",
+            source_metadata={"derived_from_address_key": ["省"], "seed_kind": ["label"]},
+        )
+        for index, block in enumerate(prepared.scene.blocks)
+    )
+    label_blocks = {
+        clue.clue_id: block for clue, block in zip(label_clues, prepared.scene.blocks, strict=True)
+    }
+    manager = LabelLayoutManager(
+        scene=prepared.scene,
+        label_clues=label_clues,
+        label_blocks=label_blocks,
+        bindings=(),
+    )
+
+    decisions = manager.evaluate()
+
+    assert decisions
+    assert all(not decision.trusted for decision in decisions.values())
+    assert {decision.drop_reason for decision in decisions.values()} == {"insufficient_layout_support"}
+
+
+def test_label_layout_manager_keeps_single_bound_label():
+    prepared = build_ocr_stream([_ocr_block("手机号", block_id="phone", line_id=0, x=20, y=0)])
+    bundle = build_clue_bundle(
+        prepared.stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+    label_blocks = {
+        clue.clue_id: block
+        for clue in bundle.label_clues
+        for block in prepared.scene.blocks
+        if clue.start < block.clean_end and block.clean_start < clue.end
+    }
+    first_label = bundle.label_clues[0]
+    manager = LabelLayoutManager(
+        scene=prepared.scene,
+        label_clues=bundle.label_clues,
+        label_blocks=label_blocks,
+        bindings=(
+            LabelBindingInfo(
+                label_id=first_label.clue_id,
+                attr_type=first_label.attr_type,
+                relation="right",
+            ),
+        ),
+    )
+
+    decisions = manager.evaluate()
+
+    assert decisions[first_label.clue_id].trusted
+
+
+def test_label_layout_manager_keeps_booking_style_label_column():
+    prepared = build_ocr_stream(
+        [
+            _ocr_block("Name", block_id="name", line_id=0, x=41, y=350, width=132, height=53),
+            _ocr_block("Email Address", block_id="email", line_id=1, x=47, y=617, width=290, height=44),
+            _ocr_block("Mobile number", block_id="mobile", line_id=2, x=46, y=883, width=308, height=45),
+            _ocr_block("Country/region", block_id="country", line_id=3, x=43, y=1144, width=307, height=53),
+        ]
+    )
+    bundle = build_clue_bundle(
+        prepared.stream,
+        ctx=DetectContext(protection_level=ProtectionLevel.STRONG),
+        session_entries=(),
+        local_entries=(),
+        locale_profile="en_us",
+    )
+    label_blocks = {
+        clue.clue_id: block
+        for clue in bundle.label_clues
+        for block in prepared.scene.blocks
+        if clue.start < block.clean_end and block.clean_start < clue.end
+    }
+    manager = LabelLayoutManager(
+        scene=prepared.scene,
+        label_clues=bundle.label_clues,
+        label_blocks=label_blocks,
+        bindings=(),
+    )
+
+    decisions = manager.evaluate()
+    trusted_texts = {
+        clue.text.lower()
+        for clue in bundle.label_clues
+        if decisions.get(clue.clue_id) and decisions[clue.clue_id].trusted
+    }
+
+    assert {"name", "email address", "mobile"}.issubset(trusted_texts)
 
 
 def test_parser_merges_adjacent_num_candidates_across_plain_spaces_only():
@@ -499,6 +626,20 @@ def test_non_ascii_literal_still_matches_substring():
     assert clues[0].text == "张三"
     assert clues[0].start == 1
     assert clues[0].end == 3
+
+
+def test_ascii_dictionary_il_folding_requires_four_letter_run():
+    matcher = AhoMatcher.from_patterns(
+        (
+            AhoPattern(text="ln", payload="short", ascii_boundary=True),
+            AhoPattern(text="Daniel", payload="long", ascii_boundary=True),
+        )
+    )
+
+    matches = matcher.find_matches("in dANiEI")
+
+    assert fold_ascii_dictionary_text("in ln Bill") == "in ln biii"
+    assert [(match.pattern_text, match.matched_text) for match in matches] == [("Daniel", "dANiEI")]
 
 
 @pytest.mark.parametrize(
@@ -864,6 +1005,31 @@ def test_non_boundary_structured_label_becomes_inspire():
     assert len(parsed.candidates) == 1
     assert parsed.candidates[0].attr_type == PIIAttributeType.NUM
     assert "label_hint_attr" not in parsed.candidates[0].metadata
+
+
+@pytest.mark.parametrize("text", ["手机数码", "手机馆"])
+def test_cjk_structured_label_prefix_inside_long_ui_word_becomes_inspire(text: str):
+    ctx = DetectContext(protection_level=ProtectionLevel.STRONG)
+    stream = build_prompt_stream(text)
+    bundle = build_clue_bundle(
+        stream,
+        ctx=ctx,
+        session_entries=(),
+        local_entries=(),
+        locale_profile="mixed",
+    )
+
+    assert not any(
+        clue.role == ClueRole.LABEL
+        and clue.attr_type == PIIAttributeType.PHONE
+        and clue.text == "手机"
+        for clue in bundle.all_clues
+    )
+    assert any(
+        inspire.attr_type == PIIAttributeType.PHONE
+        and stream.text[inspire.start:inspire.end] == "手机"
+        for inspire in bundle.inspire_entries
+    )
 
 
 def test_start_seed_metadata_marks_start_kind():

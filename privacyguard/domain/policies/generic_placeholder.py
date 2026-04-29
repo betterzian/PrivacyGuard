@@ -55,6 +55,10 @@ GENERIC_PLACEHOLDER_LABELS_EN: dict[PIIAttributeType, str] = {
 
 # 兼容旧导入路径；默认暴露中文标签表。
 GENERIC_PLACEHOLDER_LABELS = GENERIC_PLACEHOLDER_LABELS_ZH
+GENERIC_FRAGMENT_PLACEHOLDER_ATTRS = frozenset({
+    PIIAttributeType.NUM,
+    PIIAttributeType.ALNUM,
+})
 
 
 def _contains_cjk(text: str | None) -> bool:
@@ -86,6 +90,8 @@ def render_placeholder(
     - 其它：``[[TYPE#N]]``。
     """
     if fragment_type is not None and fragment_length is not None:
+        if attr_type not in GENERIC_FRAGMENT_PLACEHOLDER_ATTRS:
+            raise ValueError(f"fragment placeholder 仅支持 NUM/ALNUM 属性，收到: {attr_type!r}")
         frag_type = str(fragment_type or "").strip().upper()
         if frag_type not in {"NUM", "ALNUM"}:
             raise ValueError(f"fragment_type 仅支持 NUM/ALNUM，收到: {fragment_type!r}")
@@ -107,6 +113,7 @@ __all__ = [
     "GENERIC_PLACEHOLDER_LABELS",
     "GENERIC_PLACEHOLDER_LABELS_EN",
     "GENERIC_PLACEHOLDER_LABELS_ZH",
+    "GENERIC_FRAGMENT_PLACEHOLDER_ATTRS",
     "generic_placeholder_label",
     "render_placeholder",
 ]

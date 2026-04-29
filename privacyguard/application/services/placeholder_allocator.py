@@ -18,7 +18,10 @@ from privacyguard.domain.interfaces.mapping_store import MappingStore
 from privacyguard.domain.models.decision import DecisionAction, DecisionPlan
 from privacyguard.domain.models.mapping import ReplacementRecord
 from privacyguard.domain.models.normalized_pii import NormalizedPII
-from privacyguard.domain.policies.generic_placeholder import render_placeholder
+from privacyguard.domain.policies.generic_placeholder import (
+    GENERIC_FRAGMENT_PLACEHOLDER_ATTRS,
+    render_placeholder,
+)
 from privacyguard.infrastructure.pii.json_privacy_repository import (
     IndexedRepoEntity,
     RepoEntityIndex,
@@ -279,7 +282,7 @@ class SessionPlaceholderAllocator:
             if (frag_type and action.source_text)
             else None
         )
-        if frag_type and frag_len:
+        if action.attr_type in GENERIC_FRAGMENT_PLACEHOLDER_ATTRS and frag_type and frag_len:
             return render_placeholder(
                 action.attr_type,
                 index=entity_id,

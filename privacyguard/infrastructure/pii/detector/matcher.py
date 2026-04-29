@@ -19,13 +19,24 @@ def _ascii_boundary_ok(text: str, start: int, end: int) -> bool:
 
 
 def fold_ascii_dictionary_text(text: str) -> str:
-    """ASCII 字典匹配用折叠文本；OCR 常见的 i/l 互换在这里统一处理。"""
+    """ASCII 字典匹配用折叠文本；短英文 key 不做 i/l 模糊。"""
+    lowered = str(text or "").lower()
     folded: list[str] = []
-    for char in str(text or "").lower():
-        if char in {"i", "l"}:
-            folded.append("i")
-        else:
+    index = 0
+    while index < len(lowered):
+        char = lowered[index]
+        if not ("a" <= char <= "z"):
             folded.append(char)
+            index += 1
+            continue
+        run_start = index
+        while index < len(lowered) and "a" <= lowered[index] <= "z":
+            index += 1
+        run = lowered[run_start:index]
+        if len(run) >= 4:
+            folded.append("".join("i" if ch in {"i", "l"} else ch for ch in run))
+        else:
+            folded.append(run)
     return "".join(folded)
 
 
