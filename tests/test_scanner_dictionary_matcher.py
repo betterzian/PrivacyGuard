@@ -122,17 +122,21 @@ def test_country_geo_alias_loader_rejects_conflicting_alias(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("text", "canonical"),
+    ("text", "canonical", "component_value"),
     [
-        ("Belgium", "Belgium"),
-        ("比利时", "Belgium"),
-        ("Denmark", "Denmark"),
-        ("丹麦", "Denmark"),
-        ("U.S.", "United States"),
-        ("中华人民共和国", "China"),
+        ("Belgium", "Belgium", "Belgium"),
+        ("比利时", "Belgium", "比利时"),
+        ("Denmark", "Denmark", "Denmark"),
+        ("丹麦", "Denmark", "丹麦"),
+        ("U.S.", "United States", "U.S."),
+        ("中华人民共和国", "China", "中华人民共和国"),
     ],
 )
-def test_country_aliases_emit_address_country_with_metadata_canonical(text: str, canonical: str):
+def test_country_aliases_emit_address_country_with_metadata_canonical(
+    text: str,
+    canonical: str,
+    component_value: str,
+):
     detector = RuleBasedPIIDetector(locale_profile="mixed")
 
     candidates = detector.detect(text, [])
@@ -141,21 +145,27 @@ def test_country_aliases_emit_address_country_with_metadata_canonical(text: str,
     assert address.text == text
     assert address.metadata["canonical"] == [canonical]
     assert address.metadata["address_component_type"] == ["country"]
-    assert address.metadata["address_component_trace"] == [f"country:{canonical}"]
+    assert address.metadata["address_component_trace"] == [f"country:{component_value}"]
     assert address.normalized_source is not None
+    assert address.normalized_source.components["country"] == component_value
+    assert address.normalized_source.identity["country"] == canonical
     assert address.normalized_source.canonical == f"country={canonical}"
     assert address_display_spec(address.normalized_source) == "COUNTRY"
     assert address.canonical_source_text == f"country={canonical}"
 
 
 @pytest.mark.parametrize(
-    ("text", "canonical"),
+    ("text", "canonical", "component_value"),
     [
-        ("Country: Jordan", "Jordan"),
-        ("国家/地区：约旦", "Jordan"),
+        ("Country: Jordan", "Jordan", "Jordan"),
+        ("国家/地区：约旦", "Jordan", "约旦"),
     ],
 )
-def test_country_alias_uses_address_label_path_without_country_special_case(text: str, canonical: str):
+def test_country_alias_uses_address_label_path_without_country_special_case(
+    text: str,
+    canonical: str,
+    component_value: str,
+):
     detector = RuleBasedPIIDetector(locale_profile="mixed")
 
     candidates = detector.detect(text, [])
@@ -164,7 +174,9 @@ def test_country_alias_uses_address_label_path_without_country_special_case(text
         candidate.attr_type == PIIAttributeType.ADDRESS
         and candidate.metadata.get("canonical") == [canonical]
         and candidate.metadata.get("address_component_type") == ["country"]
+        and candidate.metadata.get("address_component_trace") == [f"country:{component_value}"]
         and candidate.normalized_source is not None
+        and candidate.normalized_source.components.get("country") == component_value
         and address_display_spec(candidate.normalized_source) == "COUNTRY"
         for candidate in candidates
     )
@@ -193,8 +205,10 @@ def test_zh_comma_reverse_accepts_country_as_admin_tail(text: str):
 
     assert address.text == text
     assert address.metadata["canonical"] == ["China"]
-    assert "country:China" in address.metadata["address_component_trace"]
+    assert "country:中国" in address.metadata["address_component_trace"]
     assert address.normalized_source is not None
+    assert address.normalized_source.components["country"] == "中国"
+    assert address.normalized_source.identity["country"] == "China"
     assert address.normalized_source.canonical.startswith("country=China|")
     assert address_display_spec(address.normalized_source).startswith("COUNTRY-")
 

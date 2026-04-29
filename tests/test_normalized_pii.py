@@ -214,13 +214,22 @@ def test_address_country_display_spec_and_country_alias_canonical():
         "",
         components={"country": "United States"},
     )
+    china = normalize_pii(PIIAttributeType.ADDRESS, "", components={"country": "中国"})
+    china_alias = normalize_pii(PIIAttributeType.ADDRESS, "", components={"country": "中华人民共和国"})
 
     assert us.canonical == "country=United States"
     assert us_dot.canonical == "country=United States"
     assert united_states.canonical == "country=United States"
+    assert us.components["country"] == "US"
+    assert us_dot.components["country"] == "U.S."
+    assert united_states.components["country"] == "United States"
+    assert us.identity["country"] == "United States"
     assert address_display_spec(us) == "COUNTRY"
     assert same_entity(us, us_dot) is True
     assert same_entity(us, united_states) is True
+    assert china.components["country"] == "中国"
+    assert china.identity["country"] == "China"
+    assert same_entity(china, china_alias) is True
 
 
 def test_address_display_spec_orders_country_before_admin_levels():

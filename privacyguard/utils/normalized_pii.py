@@ -447,7 +447,7 @@ def _canonicalize_address_component_value(component_key: str, value: str) -> str
     if component_key == "province":
         return _canonicalize_us_state(text) or _compact_component_text(text)
     if component_key == "country":
-        return _canonicalize_en_country(text) or _compact_component_text(text)
+        return _country_variant_key(text)
     if component_key == "postal_code":
         return re.sub(r"[^0-9-]", "", unicodedata.normalize("NFKC", text))
     if component_key in {"house_number", "number"}:
@@ -479,6 +479,14 @@ def _canonicalize_en_country(value: str) -> str:
         if item_key == alias_key:
             return alias.canonical
     return ""
+
+
+def _country_variant_key(value: str) -> str:
+    """生成国家层级比较 key；只用于 identity / same_entity，不回写 component。"""
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    if not text:
+        return ""
+    return _canonicalize_en_country(text) or _compact_component_text(text)
 
 
 def _same_name(left: NormalizedPII, right: NormalizedPII) -> bool:

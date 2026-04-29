@@ -1991,7 +1991,7 @@ def _country_component_canonical(component: _DraftComponent) -> str:
         values = clue.source_metadata.get("canonical", [])
         if values:
             return str(values[0]).strip()
-    return _component_primary_value(component.value).strip()
+    return ""
 
 
 def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> dict[str, list[str]]:
@@ -2021,12 +2021,11 @@ def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> d
         keys = component.key if isinstance(component.key, list) else [component.key]
         country_value = _country_component_canonical(component)
         for value in values:
-            trace_value = country_value or value
             component_types.append(component_type)
             component_levels.append(level_str)
-            component_trace.append(f"{component_type}:{trace_value}")
-            if component.component_type == AddressComponentType.COUNTRY and trace_value not in country_canonical:
-                country_canonical.append(trace_value)
+            component_trace.append(f"{component_type}:{value}")
+            if country_value and country_value not in country_canonical:
+                country_canonical.append(country_value)
         for key in keys:
             if key:
                 component_key_trace.append(f"{component_type}:{key}")

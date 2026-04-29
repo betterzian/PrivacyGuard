@@ -1594,6 +1594,13 @@ def _country_source_metadata(payload: _AddressPatternPayload) -> dict[str, list[
     return {"canonical": [payload.canonical_text]}
 
 
+def _address_value_clue_text(payload: _AddressPatternPayload, matched_text: str) -> str:
+    """地址 VALUE clue 的 component 表面值；国家保留命中原文，canonical 只进 metadata。"""
+    if payload.component_type == AddressComponentType.COUNTRY:
+        return matched_text
+    return payload.canonical_text
+
+
 def _requires_exact_en_country_alias_surface(pattern_text: str) -> bool:
     """短大写国家缩写必须按原大小写命中，避免 `us` 代词误召回。"""
     letters = "".join(ch for ch in str(pattern_text or "") if ch.isascii() and ch.isalpha())
@@ -1708,7 +1715,7 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         normalized = _normalize_segment_ascii_match(segment, match.start, match.end, match.matched_text, match.pattern_text, match.ascii_boundary)
         if normalized is None:
             continue
-        raw_start, raw_end, _matched_text = normalized
+        raw_start, raw_end, matched_text = normalized
         _us, _ue = _char_span_to_unit_span(segment.stream, raw_start, raw_end)
         clues.append(
             Clue(
@@ -1719,7 +1726,7 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 strength=payload.strength,
                 start=raw_start,
                 end=raw_end,
-                text=payload.canonical_text,
+                text=_address_value_clue_text(payload, matched_text),
                 unit_start=_us,
                 unit_last=_ue,
                 source_kind="geo_db",
@@ -1787,7 +1794,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 strength=payload.strength,
                 start=raw_start,
                 end=raw_end,
-                text=payload.canonical_text,
+                text=_address_value_clue_text(payload, matched_text),
                 unit_start=_us,
                 unit_last=_ue,
                 source_kind="geo_db",

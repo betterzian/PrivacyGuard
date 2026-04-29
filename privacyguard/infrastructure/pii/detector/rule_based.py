@@ -693,6 +693,7 @@ class RuleBasedPIIDetector:
         return {
             key: getattr(slot, key).value
             for key in (
+                "country",
                 "province",
                 "city",
                 "district",
