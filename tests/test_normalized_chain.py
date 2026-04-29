@@ -57,10 +57,16 @@ def test_rule_based_local_dictionary_uses_address_part_terms_and_alias_component
                 "slots": {
                     "name": [
                         {
-                            "full": {"value": "张三", "aliases": []},
+                            "full": {"value": "张三", "aliases": ["张小三"]},
                             "family": {"value": "张", "aliases": []},
-                            "given": {"value": "三", "aliases": []},
-                            "alias": {"value": "阿三", "aliases": []},
+                            "given": {"value": "三", "aliases": ["小三"]},
+                            "alias": {"value": "阿三", "aliases": ["三哥"]},
+                        }
+                    ],
+                    "organization": [
+                        {
+                            "value": "想的美工作室",
+                            "aliases": ["想的美国际", "Think Beauty Studio"],
                         }
                     ],
                     "address": [
@@ -87,11 +93,54 @@ def test_rule_based_local_dictionary_uses_address_part_terms_and_alias_component
             for entry in detector.local_entries
             if entry.attr_type == PIIAttributeType.NAME and entry.metadata.get("name_component") == ["alias"]
         ]
+        full_entries = [
+            entry
+            for entry in detector.local_entries
+            if entry.attr_type == PIIAttributeType.NAME and entry.metadata.get("name_component") == ["full"]
+        ]
+        given_entries = [
+            entry
+            for entry in detector.local_entries
+            if entry.attr_type == PIIAttributeType.NAME and entry.metadata.get("name_component") == ["given"]
+        ]
+        organization_entries = [
+            entry
+            for entry in detector.local_entries
+            if entry.attr_type == PIIAttributeType.ORGANIZATION
+        ]
 
         assert len(address_entries) == 1
         assert address_entries[0].match_terms == ("上海", "浦东", "阳光国际")
-        assert len(alias_entries) == 1
-        assert alias_entries[0].match_terms == ("阿三",)
+        assert [entry.match_terms for entry in full_entries] == [("张三",), ("张小三",)]
+        assert all(entry.metadata["canonical"] == ["张三"] for entry in full_entries)
+        assert [entry.match_terms for entry in alias_entries] == [("阿三",), ("三哥",)]
+        assert all(entry.metadata["canonical"] == ["张三"] for entry in alias_entries)
+        assert [entry.match_terms for entry in given_entries] == [("三",), ("小三",)]
+        assert all(entry.metadata["canonical"] == ["张三"] for entry in given_entries)
+        assert {term for entry in organization_entries for term in entry.match_terms} == {
+            "想的美工作室",
+            "想的美",
+            "Think Beauty Studio",
+            "想的美国际",
+            "thinkbeautystudio",
+        }
+        assert all(entry.metadata["canonical"] == ["想的美"] for entry in organization_entries)
+
+        name_candidates = detector.detect("小三", [])
+        org_candidates = detector.detect("Think Beauty Studio", [])
+        name_alias = next(candidate for candidate in name_candidates if candidate.attr_type == PIIAttributeType.NAME)
+        org_alias = next(
+            candidate for candidate in org_candidates if candidate.attr_type == PIIAttributeType.ORGANIZATION
+        )
+
+        assert name_alias.metadata["canonical"] == ["张三"]
+        assert name_alias.normalized_source is not None
+        assert name_alias.normalized_source.canonical == "张三"
+        assert name_alias.canonical_source_text == "张三"
+        assert org_alias.metadata["canonical"] == ["想的美"]
+        assert org_alias.normalized_source is not None
+        assert org_alias.normalized_source.canonical == "想的美"
+        assert org_alias.canonical_source_text == "想的美"
     finally:
         if repo_path.exists():
             repo_path.unlink()
@@ -205,3 +254,28 @@ def test_placeholder_allocator_renders_fallback_address_without_spec():
     assert action.normalized_source is not None
     assert action.normalized_source.canonical == "百亿补贴"
     assert action.normalized_source.ordered_components == ()
+
+
+def test_placeholder_allocator_renders_country_only_address_spec():
+    store = InMemoryMappingStore()
+    plan = DecisionPlan(
+        session_id="session-1",
+        turn_id=1,
+        actions=[
+            DecisionAction(
+                candidate_id="candidate-1",
+                action_type=ActionType.GENERICIZE,
+                attr_type=PIIAttributeType.ADDRESS,
+                source_text="中国",
+                normalized_source=normalize_pii(
+                    PIIAttributeType.ADDRESS,
+                    "",
+                    components={"country": "中国"},
+                ),
+            )
+        ],
+    )
+
+    assigned = SessionPlaceholderAllocator(store).assign(plan)
+
+    assert assigned.actions[0].replacement_text == "[[ADDR#1.COUNTRY]]"

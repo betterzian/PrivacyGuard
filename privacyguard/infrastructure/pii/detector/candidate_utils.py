@@ -280,7 +280,8 @@ def _is_plausible_name(text: str, *, component_hint: NameComponentHint) -> bool:
 def _is_plausible_organization(text: str, *, label_driven: bool, value_driven: bool = False) -> bool:
     if not text or len(text) < 2 or len(text) > 120 or "@" in text:
         return False
-    if _ADDRESS_SIGNAL_RE.search(text) and not _build_org_suffix_re().search(text):
+    # 已知组织 value/alias 由词典提供，允许包含 St/Studio 等地址形态子串。
+    if _ADDRESS_SIGNAL_RE.search(text) and not value_driven and not _build_org_suffix_re().search(text):
         return False
     if label_driven or value_driven:
         return True

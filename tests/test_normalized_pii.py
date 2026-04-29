@@ -62,6 +62,18 @@ def test_organization_canonical_reuses_company_suffix_lexicon():
     assert normalized.canonical == "想的美"
 
 
+def test_organization_canonical_prefers_metadata_alias_canonical():
+    normalized = normalize_pii(
+        PIIAttributeType.ORGANIZATION,
+        "Think Beauty Studio",
+        metadata={"canonical": ["想的美"]},
+    )
+
+    assert normalized.raw_text == "Think Beauty Studio"
+    assert normalized.canonical == "想的美"
+    assert normalized.match_terms == ("想的美",)
+
+
 def test_name_alias_is_independent_component_and_not_part_of_identity():
     normalized = normalize_pii(
         PIIAttributeType.NAME,
@@ -72,6 +84,27 @@ def test_name_alias_is_independent_component_and_not_part_of_identity():
     assert normalized.components == {"full": "张三", "family": "张", "given": "三", "alias": "阿三"}
     assert normalized.match_terms == ("张三", "张", "三", "阿三")
     assert normalized.identity == {"family": "张", "given": "三"}
+
+
+def test_name_component_metadata_canonical_uses_full_name_for_given_and_alias():
+    given = normalize_pii(
+        PIIAttributeType.NAME,
+        "Adam",
+        metadata={"name_component": ["given"], "canonical": ["Adam Brown"]},
+    )
+    alias = normalize_pii(
+        PIIAttributeType.NAME,
+        "Addy",
+        metadata={"name_component": ["alias"], "canonical": ["Adam Brown"]},
+    )
+
+    assert given.canonical == "adam brown"
+    assert given.components["full"] == "Adam Brown"
+    assert given.components["given"] == "Adam"
+    assert given.components["family"] == "Brown"
+    assert alias.canonical == "adam brown"
+    assert alias.components["full"] == "Adam Brown"
+    assert alias.components["alias"] == "Addy"
 
 
 def test_english_name_canonical_folds_i_and_l_to_l():
@@ -171,6 +204,33 @@ def test_address_fallback_does_not_merge_with_structured_address():
     )
 
     assert same_entity(fallback, structured) is False
+
+
+def test_address_country_display_spec_and_country_alias_canonical():
+    us = normalize_pii(PIIAttributeType.ADDRESS, "", components={"country": "US"})
+    us_dot = normalize_pii(PIIAttributeType.ADDRESS, "", components={"country": "U.S."})
+    united_states = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "",
+        components={"country": "United States"},
+    )
+
+    assert us.canonical == "country=United States"
+    assert us_dot.canonical == "country=United States"
+    assert united_states.canonical == "country=United States"
+    assert address_display_spec(us) == "COUNTRY"
+    assert same_entity(us, us_dot) is True
+    assert same_entity(us, united_states) is True
+
+
+def test_address_display_spec_orders_country_before_admin_levels():
+    normalized = normalize_pii(
+        PIIAttributeType.ADDRESS,
+        "",
+        components={"country": "China", "province": "北京市", "city": "北京市"},
+    )
+
+    assert address_display_spec(normalized) == "COUNTRY-PROV-CITY"
 
 
 def test_address_ordered_components_from_components_follow_fixed_order():

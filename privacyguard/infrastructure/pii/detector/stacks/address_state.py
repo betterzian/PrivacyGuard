@@ -67,6 +67,7 @@ SINGLE_OCCUPY = frozenset({
 })
 
 _ADMIN_TYPES = frozenset({
+    AddressComponentType.COUNTRY,
     AddressComponentType.PROVINCE,
     AddressComponentType.CITY,
     AddressComponentType.DISTRICT,
@@ -75,6 +76,7 @@ _ADMIN_TYPES = frozenset({
 })
 
 _COMMA_TAIL_ADMIN_TYPES = frozenset({
+    AddressComponentType.COUNTRY,
     AddressComponentType.PROVINCE,
     AddressComponentType.CITY,
     AddressComponentType.DISTRICT,
@@ -82,6 +84,7 @@ _COMMA_TAIL_ADMIN_TYPES = frozenset({
 })
 
 _SUSPECT_KEY_TYPES = frozenset({
+    AddressComponentType.COUNTRY,
     AddressComponentType.PROVINCE,
     AddressComponentType.CITY,
     AddressComponentType.DISTRICT,
@@ -95,10 +98,20 @@ _ADMIN_RANK: dict[AddressComponentType, int] = {
     AddressComponentType.DISTRICT_CITY: 2,
     AddressComponentType.CITY: 3,
     AddressComponentType.PROVINCE: 4,
+    AddressComponentType.COUNTRY: 5,
 }
 
 
 _VALID_SUCCESSORS: dict[AddressComponentType, frozenset[AddressComponentType]] = {
+    AddressComponentType.COUNTRY: frozenset({
+        AddressComponentType.PROVINCE,
+        AddressComponentType.CITY,
+        AddressComponentType.DISTRICT,
+        AddressComponentType.DISTRICT_CITY,
+        AddressComponentType.SUBDISTRICT,
+        AddressComponentType.ROAD,
+        AddressComponentType.POI,
+    }),
     AddressComponentType.PROVINCE: frozenset({
         AddressComponentType.CITY,
         AddressComponentType.DISTRICT,
@@ -196,6 +209,7 @@ _DIGIT_TAIL_TRIGGER_TYPES = frozenset({
 })
 
 _SINGLE_EVIDENCE_ADMIN = frozenset({
+    AddressComponentType.COUNTRY,
     AddressComponentType.PROVINCE,
     AddressComponentType.CITY,
 })
@@ -1969,6 +1983,17 @@ def _address_strength(
     )
 
 
+def _country_component_canonical(component: _DraftComponent) -> str:
+    """从国家 VALUE clue 读取标准英文 canonical。"""
+    if component.component_type != AddressComponentType.COUNTRY:
+        return ""
+    for clue in component.raw_chain:
+        values = clue.source_metadata.get("canonical", [])
+        if values:
+            return str(values[0]).strip()
+    return _component_primary_value(component.value).strip()
+
+
 def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> dict[str, list[str]]:
     component_types: list[str] = []
     component_levels: list[str] = []
@@ -1977,6 +2002,7 @@ def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> d
     detail_types: list[str] = []
     detail_values: list[str] = []
     component_suspected_trace: list[str] = []
+    country_canonical: list[str] = []
 
     for component in components:
         component_type = component.component_type.value
@@ -1993,10 +2019,14 @@ def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> d
             level_str = level_tuple[0].value
         values = component.value if isinstance(component.value, list) else [component.value]
         keys = component.key if isinstance(component.key, list) else [component.key]
+        country_value = _country_component_canonical(component)
         for value in values:
+            trace_value = country_value or value
             component_types.append(component_type)
             component_levels.append(level_str)
-            component_trace.append(f"{component_type}:{value}")
+            component_trace.append(f"{component_type}:{trace_value}")
+            if component.component_type == AddressComponentType.COUNTRY and trace_value not in country_canonical:
+                country_canonical.append(trace_value)
         for key in keys:
             if key:
                 component_key_trace.append(f"{component_type}:{key}")
@@ -2006,7 +2036,7 @@ def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> d
                 detail_values.append(value)
         component_suspected_trace.append(_serialize_suspected_entries(component.suspected))
 
-    return {
+    metadata = {
         "matched_by": [origin_clue.source_kind],
         "address_kind": ["private_address"],
         "address_match_origin": [
@@ -2020,6 +2050,9 @@ def _address_metadata(origin_clue: Clue, components: list[_DraftComponent]) -> d
         "address_details_text": detail_values,
         "address_component_suspected": component_suspected_trace,
     }
+    if country_canonical:
+        metadata["canonical"] = country_canonical[:1]
+    return metadata
 
 
 def _ordered_component_clue_entries(

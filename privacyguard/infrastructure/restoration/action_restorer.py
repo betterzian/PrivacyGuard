@@ -3,7 +3,7 @@
 restore 与 sanitize 对称：
 
 - 含 ``entity_id`` 的 GENERICIZE 记录走"占位符正则 + entity 累积态投射"路径，
-  支持云端 LLM 改写 SPEC 精度（如 ``[[ADDR#1.CITY]]`` ↔ ``[[ADDR#1.PROV-CITY-DIST-ROAD-DTL]]``）；
+  支持云端 LLM 改写 SPEC 精度（如 ``[[ADDR#1.COUNTRY]]`` ↔ ``[[ADDR#1.COUNTRY-PROV-CITY-DIST-ROAD-DTL]]``）；
 - 无 ``entity_id`` 的记录（如 PERSONA_SLOT）按原字面匹配路径兜底；
 - 同实体多 POI 时按 ``select_priority_poi`` 择一（小区/社区 > 楼号 > 广场/停车场）。
 """
@@ -231,7 +231,7 @@ def _render_full_address(components: Mapping[str, str]) -> str:
 
 
 def _project_address_token(components: Mapping[str, str], token: str) -> str:
-    """单个 SPEC token（PROV / CITY / DIST / ROAD / DTL）投射。"""
+    """单个 SPEC token（COUNTRY / PROV / CITY / DIST / ROAD / DTL）投射。"""
     target = token.lower()
     if target == "dtl":
         poi = str(components.get("poi") or "").strip()

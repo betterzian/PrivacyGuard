@@ -1048,6 +1048,22 @@
     "ascii_boundary": false
   },
   {
+    "keyword": "国家/地区",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "国家",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "permanent address",
     "attr_type": "address",
     "source_kind": "context_address_field",
@@ -1105,6 +1121,30 @@
   },
   {
     "keyword": "address",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "country/region",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "country or region",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "country",
     "attr_type": "address",
     "source_kind": "context_address_field",
     "ocr_source_kind": "ocr_label_address_field",

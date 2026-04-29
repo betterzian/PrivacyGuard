@@ -37,6 +37,7 @@ class InvalidPrivacyRepositoryError(ValueError):
 
 
 _ADDRESS_LEVEL_KEYS = (
+    "country",
     "province",
     "city",
     "district",
@@ -335,19 +336,16 @@ def _merge_address_stats(left: AddressStats, right: AddressStats) -> AddressStat
     return AddressStats(
         total=_merge_exposure_info(left.total, right.total),
         levels=AddressLevelExposureStats(
+            country=_merge_exposure_info(left.levels.country, right.levels.country),
             province=_merge_exposure_info(left.levels.province, right.levels.province),
             city=_merge_exposure_info(left.levels.city, right.levels.city),
             district=_merge_exposure_info(left.levels.district, right.levels.district),
-            street_admin=_merge_exposure_info(left.levels.street_admin, right.levels.street_admin),
-            town=_merge_exposure_info(left.levels.town, right.levels.town),
-            village=_merge_exposure_info(left.levels.village, right.levels.village),
+            subdistrict=_merge_exposure_info(left.levels.subdistrict, right.levels.subdistrict),
             road=_merge_exposure_info(left.levels.road, right.levels.road),
-            compound=_merge_exposure_info(left.levels.compound, right.levels.compound),
+            number=_merge_exposure_info(left.levels.number, right.levels.number),
+            poi=_merge_exposure_info(left.levels.poi, right.levels.poi),
             building=_merge_exposure_info(left.levels.building, right.levels.building),
-            unit=_merge_exposure_info(left.levels.unit, right.levels.unit),
-            floor=_merge_exposure_info(left.levels.floor, right.levels.floor),
-            room=_merge_exposure_info(left.levels.room, right.levels.room),
-            postal_code=_merge_exposure_info(left.levels.postal_code, right.levels.postal_code),
+            detail=_merge_exposure_info(left.levels.detail, right.levels.detail),
         ),
     )
 
@@ -402,7 +400,7 @@ _REPO_PRECISE_KEYS: frozenset[str] = frozenset(
 )
 # 用于"≥2 行政级"判定的 admin key 集合（与 _HAS_ADMIN_LEVEL_KEYS 对齐，但取广义集合便于阈值计数）。
 _REPO_ADMIN_KEYS: frozenset[str] = frozenset(
-    {"province", "city", "district", "district_city"}
+    {"country", "province", "city", "district", "district_city"}
 )
 
 
@@ -422,7 +420,7 @@ class IndexedRepoEntity:
         """repo entity 是否达到参与命中判定的最小信息量阈值。
 
         - 含 road / poi / building / unit / room / suite / detail 任一；
-        - 或同时含 ≥2 个行政级（province / city / district / district_city）。
+        - 或同时含 ≥2 个行政级（country / province / city / district / district_city）。
         """
         if self.has_precise_component:
             return True
@@ -446,11 +444,12 @@ class RepoEntityIndex:
 def _slot_components_from_address_storage(slot: AddressSlotStorage) -> dict[str, str]:
     """把 AddressSlotStorage 折叠为 normalize_pii(components=...) 的 flat dict。
 
-    - 9 级主结构优先；扁平 components 列表的同名 level 仅在主结构缺失时填补。
+    - 10 级主结构优先；扁平 components 列表的同名 level 仅在主结构缺失时填补。
     - 非 ASCII 空白等清洗交给 normalize_pii 内部处理，本函数只做去空白与去空。
     """
     out: dict[str, str] = {}
     for field_name in (
+        "country",
         "province",
         "city",
         "district",

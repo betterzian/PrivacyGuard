@@ -12,6 +12,7 @@ from privacyguard.infrastructure.pii.detector.models import ClaimStrength
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 _ADDRESS_LEVEL_FIELDS = (
+    "country",
     "province",
     "city",
     "district",
@@ -34,6 +35,7 @@ class AliasRole(str, Enum):
 
 
 class AddressLevel(str, Enum):
+    COUNTRY = "country"
     PROVINCE = "province"
     CITY = "city"
     DISTRICT = "district"
@@ -53,6 +55,7 @@ class ExposureInfo(RepositoryBaseModel):
 
 
 class AddressLevelExposureStats(RepositoryBaseModel):
+    country: ExposureInfo = Field(default_factory=ExposureInfo)
     province: ExposureInfo = Field(default_factory=ExposureInfo)
     city: ExposureInfo = Field(default_factory=ExposureInfo)
     district: ExposureInfo = Field(default_factory=ExposureInfo)
@@ -126,6 +129,7 @@ class NameSlotStorage(RepositoryBaseModel):
 
 
 def _validate_address_levels(
+    country: SharedSlotStorage | SharedSlotRuntime | None,
     province: SharedSlotStorage | SharedSlotRuntime | None,
     city: SharedSlotStorage | SharedSlotRuntime | None,
     district: SharedSlotStorage | SharedSlotRuntime | None,
@@ -136,7 +140,7 @@ def _validate_address_levels(
     building: SharedSlotStorage | SharedSlotRuntime | None,
     detail: SharedSlotStorage | SharedSlotRuntime | None,
 ) -> None:
-    if not any((province, city, district, subdistrict, road, number, poi, building, detail)):
+    if not any((country, province, city, district, subdistrict, road, number, poi, building, detail)):
         raise ValueError("地址不能为空")
 
 
@@ -154,6 +158,7 @@ class AddressComponentSlot(RepositoryBaseModel):
 
 
 class AddressSlotStorage(RepositoryBaseModel):
+    country: SharedSlotStorage | None = None
     province: SharedSlotStorage | None = None
     city: SharedSlotStorage | None = None
     district: SharedSlotStorage | None = None
@@ -163,15 +168,16 @@ class AddressSlotStorage(RepositoryBaseModel):
     poi: SharedSlotStorage | None = None
     building: SharedSlotStorage | None = None
     detail: SharedSlotStorage | None = None
-    # 扁平组件袋：除 9 级主结构外，额外承载 MULTI_ADMIN 展开与 suspect 子组件，
+    # 扁平组件袋：除 10 级主结构外，额外承载 MULTI_ADMIN 展开与 suspect 子组件，
     # 作为 scanner 独立匹配源（与主结构 match_terms 并列，不替代）。
     components: list[AddressComponentSlot] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_address(self) -> "AddressSlotStorage":
-        # 允许 9 级主结构全为空但 components 非空的情形：扁平组件袋可独立承担地址语义。
+        # 允许 10 级主结构全为空但 components 非空的情形：扁平组件袋可独立承担地址语义。
         if not self.components:
             _validate_address_levels(
+                self.country,
                 self.province,
                 self.city,
                 self.district,
@@ -224,6 +230,7 @@ def _validate_address_slot_list(values: list[AddressSlotStorage] | list[AddressS
 
 
 class AddressSlotRuntime(RepositoryBaseModel):
+    country: SharedSlotRuntime | None = None
     province: SharedSlotRuntime | None = None
     city: SharedSlotRuntime | None = None
     district: SharedSlotRuntime | None = None
@@ -239,6 +246,7 @@ class AddressSlotRuntime(RepositoryBaseModel):
     def _validate_address(self) -> "AddressSlotRuntime":
         if not self.components:
             _validate_address_levels(
+                self.country,
                 self.province,
                 self.city,
                 self.district,

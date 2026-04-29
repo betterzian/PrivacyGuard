@@ -878,6 +878,7 @@ def _tail_admin_value_span_for_key(
 ) -> _AdminValueSpan | None:
     """返回 KEY 左值窗口尾部紧邻 KEY 的行政 VALUE span。"""
     if clue.component_type not in {
+        AddressComponentType.COUNTRY,
         AddressComponentType.PROVINCE,
         AddressComponentType.CITY,
         AddressComponentType.DISTRICT,

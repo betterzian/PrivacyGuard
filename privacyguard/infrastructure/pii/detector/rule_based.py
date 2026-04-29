@@ -181,24 +181,60 @@ class RuleBasedPIIDetector:
         for persona in document.true_personas:
             slots = persona.slots
             for slot in slots.name or []:
-                entries.append(self._name_entry(component="full", value=slot.full.value, persona_id=persona.persona_id))
+                name_canonical = slot.full.value
+                entries.extend(
+                    self._name_slot_entries(
+                        component="full",
+                        slot=slot.full,
+                        persona_id=persona.persona_id,
+                        canonical=name_canonical,
+                    )
+                )
                 # family / middle 只对非 CJK 文本发射 entry：中文 scanner 不消费这两类 component，
                 # 避免单字姓或单字中间名造成过度召回。保留原字段是为了英文匹配需要。
                 if slot.family and not is_cjk_text(slot.family.value):
-                    entries.append(self._name_entry(component="family", value=slot.family.value, persona_id=persona.persona_id))
+                    entries.extend(
+                        self._name_slot_entries(
+                            component="family",
+                            slot=slot.family,
+                            persona_id=persona.persona_id,
+                            canonical=name_canonical,
+                        )
+                    )
                 if slot.given:
-                    entries.append(self._name_entry(component="given", value=slot.given.value, persona_id=persona.persona_id))
+                    entries.extend(
+                        self._name_slot_entries(
+                            component="given",
+                            slot=slot.given,
+                            persona_id=persona.persona_id,
+                            canonical=name_canonical,
+                        )
+                    )
                 if slot.alias:
-                    entries.append(self._name_entry(component="alias", value=slot.alias.value, persona_id=persona.persona_id))
+                    entries.extend(
+                        self._name_slot_entries(
+                            component="alias",
+                            slot=slot.alias,
+                            persona_id=persona.persona_id,
+                            canonical=name_canonical,
+                        )
+                    )
                 if slot.middle and not is_cjk_text(slot.middle.value):
-                    entries.append(self._name_entry(component="middle", value=slot.middle.value, persona_id=persona.persona_id))
+                    entries.extend(
+                        self._name_slot_entries(
+                            component="middle",
+                            slot=slot.middle,
+                            persona_id=persona.persona_id,
+                            canonical=name_canonical,
+                        )
+                    )
             entries.extend(self._scalar_slot_entries(PIIAttributeType.PHONE, slots.phone, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.BANK_NUMBER, slots.bank_number, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.PASSPORT_NUMBER, slots.passport_number, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.DRIVER_LICENSE, slots.driver_license, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.EMAIL, slots.email, persona.persona_id))
             entries.extend(self._scalar_slot_entries(PIIAttributeType.ID_NUMBER, slots.id_number, persona.persona_id))
-            entries.extend(self._scalar_slot_entries(PIIAttributeType.ORGANIZATION, slots.organization, persona.persona_id))
+            entries.extend(self._organization_slot_entries(slots.organization, persona.persona_id))
             for slot in slots.address or []:
                 main_components = self._address_components_from_slot(slot)
                 if main_components:
@@ -263,6 +299,8 @@ class RuleBasedPIIDetector:
             if not source_text:
                 continue
             metadata = dict(base_metadata)
+            if record.attr_type == PIIAttributeType.ORGANIZATION and normalized.canonical:
+                metadata["canonical"] = [normalized.canonical]
             entries.append(
                 self._dictionary_entry(
                     attr_type=record.attr_type,
@@ -302,6 +340,7 @@ class RuleBasedPIIDetector:
                 return
             metadata = dict(base_metadata)
             metadata["name_component"] = [component]
+            metadata["canonical"] = [full_text]
             entries.append(
                 self._dictionary_entry(
                     attr_type=PIIAttributeType.NAME,
@@ -315,8 +354,11 @@ class RuleBasedPIIDetector:
             _emit("full", full_text)
             family = str(components.get("family") or "").strip()
             given = str(components.get("given") or "").strip()
+            alias = str(components.get("alias") or "").strip()
             if family and given:
                 _emit("given", given)
+            if alias:
+                _emit("alias", alias)
             return entries
 
         # EN / 非 CJK
@@ -325,6 +367,9 @@ class RuleBasedPIIDetector:
         if len(tokens) >= 2:
             _emit("family", tokens[-1])
             _emit("given", " ".join(tokens[:-1]))
+        alias = str(components.get("alias") or "").strip()
+        if alias:
+            _emit("alias", alias)
         return entries
 
     def _session_address_component_entries(
@@ -459,10 +504,13 @@ class RuleBasedPIIDetector:
         for draft in drafts:
             if not self._should_emit_candidate_draft(draft):
                 continue
+            metadata = {key: list(values) for key, values in draft.metadata.items()}
+            if draft.canonical_text and not metadata.get("canonical"):
+                metadata["canonical"] = [draft.canonical_text]
             normalized = normalize_pii(
                 draft.attr_type,
                 draft.text,
-                metadata=draft.metadata,
+                metadata=metadata,
             )
             canonical_source_text = normalized.canonical or None
             normalized_text = normalized_primary_text(normalized)
@@ -488,7 +536,7 @@ class RuleBasedPIIDetector:
                     block_id=draft.block_id,
                     span_start=draft.span_start if draft.source == PIISourceType.OCR else draft.start,
                     span_end=draft.span_end if draft.source == PIISourceType.OCR else draft.end,
-                    metadata={key: list(dict.fromkeys(values)) for key, values in draft.metadata.items()},
+                    metadata={key: list(dict.fromkeys(values)) for key, values in metadata.items()},
                 )
             )
         return output
@@ -586,19 +634,60 @@ class RuleBasedPIIDetector:
         """计算通用数字片段中的数字长度。"""
         return len(re.sub(r"\D", "", str(text or "")))
 
-    def _name_entry(self, *, component: str, value: str, persona_id: str) -> DictionaryEntry:
-        normalized = normalize_pii(
-            PIIAttributeType.NAME,
-            value,
-            components={component: value, "full": value},
-        )
-        match_term = normalized.components.get(component) or value
+    def _name_slot_entries(self, *, component: str, slot, persona_id: str, canonical: str) -> list[DictionaryEntry]:
+        """将姓名槽 value 与 aliases 展开为同一 full-name canonical 的词典项。"""
+        entries: list[DictionaryEntry] = []
+        for value in (slot.value, *slot.aliases):
+            entries.append(
+                self._name_entry(
+                    component=component,
+                    value=value,
+                    persona_id=persona_id,
+                    canonical=canonical,
+                )
+            )
+        return entries
+
+    def _name_entry(self, *, component: str, value: str, persona_id: str, canonical: str) -> DictionaryEntry:
+        match_term = str(value or "").strip()
         return self._dictionary_entry(
             attr_type=PIIAttributeType.NAME,
             match_terms=(match_term,),
             matched_by="dictionary_local",
-            metadata={"local_entity_ids": [persona_id], "name_component": [component]},
+            metadata={
+                "local_entity_ids": [persona_id],
+                "name_component": [component],
+                "canonical": [canonical],
+            },
         )
+
+    def _organization_slot_entries(self, slots, persona_id: str) -> list[DictionaryEntry]:
+        """将组织主值与 aliases 展开为同一 canonical 的词典项。"""
+        entries: list[DictionaryEntry] = []
+        for slot in slots or []:
+            canonical = normalize_pii(PIIAttributeType.ORGANIZATION, slot.value).canonical
+            for value in (slot.value, *slot.aliases):
+                normalized = normalize_pii(PIIAttributeType.ORGANIZATION, value)
+                entries.append(
+                    self._dictionary_entry(
+                        attr_type=PIIAttributeType.ORGANIZATION,
+                        match_terms=self._structured_match_terms(
+                            value,
+                            (value,)
+                            + (
+                                normalized.match_terms
+                                or (
+                                    (normalized_primary_text(normalized),)
+                                    if normalized_primary_text(normalized)
+                                    else ()
+                                )
+                            ),
+                        ),
+                        matched_by="persona",
+                        metadata={"local_entity_ids": [persona_id], "canonical": [canonical]},
+                    )
+                )
+        return entries
 
     def _address_components_from_slot(self, slot) -> dict[str, str]:
         return {

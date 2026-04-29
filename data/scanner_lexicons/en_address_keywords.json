@@ -1,5 +1,13 @@
 [
   {
+    "component_type": "country",
+    "keywords": [
+      {"text": "country/region", "strength": "hard"},
+      {"text": "country or region", "strength": "hard"},
+      {"text": "country", "strength": "soft"}
+    ]
+  },
+  {
     "component_type": "road",
     "keywords": [
       {"text": "boulevard", "strength": "hard"},

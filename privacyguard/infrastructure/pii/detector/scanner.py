@@ -13,11 +13,11 @@ from privacyguard.infrastructure.pii.address.geo_db import GeoEntry, load_en_geo
 from privacyguard.infrastructure.pii.detector.candidate_utils import clean_value
 from privacyguard.infrastructure.pii.detector.context import DetectContext
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
+    load_country_geo_aliases,
     load_en_company_suffixes,
     load_en_company_values,
     load_zh_company_suffixes,
     load_zh_company_values,
-    load_en_address_country_aliases,
     load_en_address_keyword_groups,
     load_en_given_names,
     load_en_surnames,
@@ -290,6 +290,20 @@ _ALNUM_FRAGMENT_PATTERN = re.compile(
     rf"(?=[A-Za-z0-9{_ALNUM_SYMBOL_JOINER_CLASS}]*[{_ALNUM_SYMBOL_JOINER_CLASS}])[A-Za-z0-9]+(?:[{_ALNUM_SYMBOL_JOINER_CLASS}][A-Za-z0-9]+)+"
     rf")"
 )
+
+
+@lru_cache(maxsize=1)
+def _en_country_alnum_aliases() -> frozenset[str]:
+    """返回会被 ALNUM 正则切走的英文国家缩写 alias。"""
+    return frozenset(
+        alias.text
+        for alias in load_country_geo_aliases()
+        if alias.locale == "en" and _alnum_fragment_shape(alias.text)
+    )
+
+
+def _is_en_country_alnum_alias(value: str) -> bool:
+    return str(value or "").strip() in _en_country_alnum_aliases()
 
 _BREAK_PATTERNS: tuple[tuple[BreakType, str, re.Pattern[str]], ...] = (
     (BreakType.PUNCT, "break_punct", re.compile(r"[;；。！？!?]")),
@@ -692,6 +706,8 @@ def _scan_hard_non_numeric_patterns_segment(
         value = match.group(0)
         raw_start, raw_end = _raw_match_span(match)
         if _overlaps_any(raw_start, raw_end, excluded_spans):
+            continue
+        if _is_en_country_alnum_alias(value):
             continue
         fragment_shape = _alnum_fragment_shape(value)
         if not fragment_shape:
@@ -1571,6 +1587,19 @@ def _scan_license_plate_value_clues(
     return _dedupe_clues(clues)
 
 
+def _country_source_metadata(payload: _AddressPatternPayload) -> dict[str, list[str]]:
+    """国家/地区命中写入标准英文 canonical。"""
+    if payload.component_type != AddressComponentType.COUNTRY:
+        return {}
+    return {"canonical": [payload.canonical_text]}
+
+
+def _requires_exact_en_country_alias_surface(pattern_text: str) -> bool:
+    """短大写国家缩写必须按原大小写命中，避免 `us` 代词误召回。"""
+    letters = "".join(ch for ch in str(pattern_text or "") if ch.isascii() and ch.isalpha())
+    return 2 <= len(letters) <= 4 and letters.isupper()
+
+
 def _scan_control_value_clues(ctx: DetectContext, segment: _ScanSegment, *, locale_profile: str) -> list[Clue]:
     clues: list[Clue] = []
     if locale_profile in {"zh_cn", "mixed"}:
@@ -1694,6 +1723,7 @@ def _scan_zh_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 unit_start=_us,
                 unit_last=_ue,
                 source_kind="geo_db",
+                source_metadata=_country_source_metadata(payload),
                 component_type=payload.component_type,
             )
         )
@@ -1733,6 +1763,12 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
         if normalized is None:
             continue
         raw_start, raw_end, matched_text = normalized
+        if (
+            payload.component_type == AddressComponentType.COUNTRY
+            and _requires_exact_en_country_alias_surface(match.pattern_text)
+            and matched_text != match.pattern_text
+        ):
+            continue
         if not _should_emit_en_address_value_match(
             segment.stream,
             raw_start,
@@ -1755,6 +1791,7 @@ def _scan_en_address_clues(ctx: DetectContext, segment: _ScanSegment) -> list[Cl
                 unit_start=_us,
                 unit_last=_ue,
                 source_kind="geo_db",
+                source_metadata=_country_source_metadata(payload),
                 component_type=payload.component_type,
             )
         )
@@ -3037,6 +3074,22 @@ def _zh_address_value_matcher() -> AhoMatcher:
                     ascii_boundary=_needs_ascii_keyword_boundary(entry.text),
                 )
             )
+    for alias in (item for item in load_country_geo_aliases() if item.locale == "zh"):
+        dedupe_key = (AddressComponentType.COUNTRY, alias.text)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        patterns.append(
+            AhoPattern(
+                text=alias.text,
+                payload=_AddressPatternPayload(
+                    component_type=AddressComponentType.COUNTRY,
+                    canonical_text=alias.canonical,
+                    strength=alias.strength,
+                ),
+                ascii_boundary=False,
+            )
+        )
     return AhoMatcher.from_patterns(tuple(patterns))
 
 
@@ -3110,21 +3163,12 @@ def _zh_address_key_matcher() -> AhoMatcher:
 @lru_cache(maxsize=1)
 def _en_address_value_matcher() -> AhoMatcher:
     lexicon = load_en_geo_lexicon()
-    country_aliases = load_en_address_country_aliases()
     geo_entry_specs: tuple[tuple[AddressComponentType, tuple[GeoEntry, ...]], ...] = (
         (AddressComponentType.PROVINCE, tuple([*lexicon.state_names, *lexicon.state_codes])),
         (AddressComponentType.CITY, lexicon.cities),
         # Borough/行政区登记为 DISTRICT，与 city 解耦；同一文本若兼具多层级由下游按
         # (component_type, text) 去重后组合为 MULTI_ADMIN（参见 §6.1）。
         (AddressComponentType.DISTRICT, lexicon.districts),
-    )
-    # 国家别名去重后以 SOFT 补入。
-    country_names = tuple(
-        sorted(
-            {canonical.strip() for canonical in country_aliases.values() if canonical.strip()},
-            key=len,
-            reverse=True,
-        )
     )
     patterns: list[AhoPattern] = []
     # §6.1：按 (component_type, text) 去重，使同一串 (如 "New York") 可同时登记为 state+city，
@@ -3147,35 +3191,20 @@ def _en_address_value_matcher() -> AhoMatcher:
                     ascii_boundary=_needs_ascii_keyword_boundary(entry.text),
                 )
             )
-    for name in country_names:
-        dedupe_key = (AddressComponentType.COUNTRY, name.lower())
+    for alias in (item for item in load_country_geo_aliases() if item.locale == "en"):
+        dedupe_key = (AddressComponentType.COUNTRY, alias.text.lower())
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
         patterns.append(
             AhoPattern(
-                text=name,
+                text=alias.text,
                 payload=_AddressPatternPayload(
                     component_type=AddressComponentType.COUNTRY,
-                    canonical_text=name,
-                    strength=ClaimStrength.SOFT,
+                    canonical_text=alias.canonical,
+                    strength=alias.strength,
                 ),
-                ascii_boundary=_needs_ascii_keyword_boundary(name),
-            )
-        )
-    for alias, canonical in sorted(country_aliases.items(), key=lambda item: len(item[0]), reverse=True):
-        alias_text = alias.strip()
-        canonical_text = canonical.strip()
-        if not alias_text or not canonical_text:
-            continue
-        patterns.append(
-            AhoPattern(
-                text=alias_text,
-                payload=_AddressPatternPayload(
-                    component_type=AddressComponentType.COUNTRY,
-                    canonical_text=canonical_text,
-                ),
-                ascii_boundary=_needs_ascii_keyword_boundary(alias_text),
+                ascii_boundary=_needs_ascii_keyword_boundary(alias.text),
             )
         )
     return AhoMatcher.from_patterns(tuple(patterns))

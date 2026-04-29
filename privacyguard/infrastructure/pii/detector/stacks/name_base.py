@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from privacyguard.domain.enums import PIIAttributeType
 from privacyguard.infrastructure.pii.detector.candidate_utils import NameComponentHint, build_name_candidate_from_value
+from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput, StreamUnit, strength_ge
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
@@ -109,6 +110,8 @@ class BaseNameStack(BaseStack):
             return None
 
         name_clues = self._name_clues_in_span(start, end)
+        for _index, clue in name_clues:
+            candidate.metadata = merge_metadata(candidate.metadata, clue.source_metadata)
         has_negative_overlap = self._has_name_negative_cover(unit_start, unit_last)
         candidate.claim_strength = self._resolve_claim_strength(name_clues=name_clues)
         canonical_text = self._canonical_text_from_name_clues(

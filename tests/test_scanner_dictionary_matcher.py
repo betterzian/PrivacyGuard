@@ -8,7 +8,9 @@ from scripts.eval_detector_en_addresses import trace_component_key
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.ocr import BoundingBox, OCRTextBlock
 from privacyguard.infrastructure.pii.detector import scanner as scanner_module
+from privacyguard.infrastructure.pii.detector import lexicon_loader as lexicon_loader_module
 from privacyguard.infrastructure.pii.detector.context import DetectContext
+from privacyguard.infrastructure.pii.detector.lexicon_loader import load_country_geo_aliases
 from privacyguard.infrastructure.pii.detector.matcher import AhoMatcher, AhoPattern, fold_ascii_dictionary_text
 from privacyguard.infrastructure.pii.detector.models import CandidateDraft, Claim, ClaimStrength, Clue, ClueFamily, ClueRole, DictionaryEntry
 from privacyguard.infrastructure.pii.detector.label_layout import LabelBindingInfo, LabelLayoutManager
@@ -17,6 +19,7 @@ from privacyguard.infrastructure.pii.detector.preprocess import build_ocr_stream
 from privacyguard.infrastructure.pii.detector.rule_based import RuleBasedPIIDetector
 from privacyguard.infrastructure.pii.detector.scanner import build_clue_bundle
 from privacyguard.infrastructure.pii.rule_based_detector_shared import OCR_BREAK, _OCR_INLINE_GAP_TOKEN
+from privacyguard.utils.normalized_pii import address_display_spec
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +73,130 @@ def _first_segment(text: str):
         inline_gap_spans=scanner_module._find_inline_gap_spans(stream),
     )
     return stream, segments[0]
+
+
+def test_country_geo_alias_loader_exposes_unique_zh_en_canonical_aliases():
+    aliases = load_country_geo_aliases()
+    alias_map: dict[str, str] = {}
+    strengths: dict[str, ClaimStrength] = {}
+
+    for alias in aliases:
+        key = alias.text.casefold() if alias.text.isascii() else alias.text
+        assert alias_map.get(key, alias.canonical) == alias.canonical
+        alias_map[key] = alias.canonical
+        strengths[key] = alias.strength
+
+    assert alias_map["belgium"] == "Belgium"
+    assert alias_map["比利时"] == "Belgium"
+    assert alias_map["denmark"] == "Denmark"
+    assert alias_map["丹麦"] == "Denmark"
+    assert alias_map["u.s."] == "United States"
+    assert alias_map["中华人民共和国"] == "China"
+    assert strengths["jordan"] == ClaimStrength.WEAK
+
+
+def test_country_geo_alias_loader_rejects_conflicting_alias(monkeypatch):
+    lexicon_loader_module.load_country_geo_aliases.cache_clear()
+
+    def _fake_read_json(filename: str):
+        assert filename == "country_geo_aliases.json"
+        return {
+            "countries": [
+                {
+                    "canonical": "Belgium",
+                    "aliases": [{"text": "DemoLand", "locale": "en", "strength": "soft"}],
+                },
+                {
+                    "canonical": "Denmark",
+                    "aliases": [{"text": "demoland", "locale": "en", "strength": "soft"}],
+                },
+            ]
+        }
+
+    monkeypatch.setattr(lexicon_loader_module, "_read_json", _fake_read_json)
+    try:
+        with pytest.raises(ValueError, match="国家 alias 冲突"):
+            lexicon_loader_module.load_country_geo_aliases()
+    finally:
+        lexicon_loader_module.load_country_geo_aliases.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("text", "canonical"),
+    [
+        ("Belgium", "Belgium"),
+        ("比利时", "Belgium"),
+        ("Denmark", "Denmark"),
+        ("丹麦", "Denmark"),
+        ("U.S.", "United States"),
+        ("中华人民共和国", "China"),
+    ],
+)
+def test_country_aliases_emit_address_country_with_metadata_canonical(text: str, canonical: str):
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(text, [])
+    address = next(candidate for candidate in candidates if candidate.attr_type == PIIAttributeType.ADDRESS)
+
+    assert address.text == text
+    assert address.metadata["canonical"] == [canonical]
+    assert address.metadata["address_component_type"] == ["country"]
+    assert address.metadata["address_component_trace"] == [f"country:{canonical}"]
+    assert address.normalized_source is not None
+    assert address.normalized_source.canonical == f"country={canonical}"
+    assert address_display_spec(address.normalized_source) == "COUNTRY"
+    assert address.canonical_source_text == f"country={canonical}"
+
+
+@pytest.mark.parametrize(
+    ("text", "canonical"),
+    [
+        ("Country: Jordan", "Jordan"),
+        ("国家/地区：约旦", "Jordan"),
+    ],
+)
+def test_country_alias_uses_address_label_path_without_country_special_case(text: str, canonical: str):
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    candidates = detector.detect(text, [])
+
+    assert any(
+        candidate.attr_type == PIIAttributeType.ADDRESS
+        and candidate.metadata.get("canonical") == [canonical]
+        and candidate.metadata.get("address_component_type") == ["country"]
+        and candidate.normalized_source is not None
+        and address_display_spec(candidate.normalized_source) == "COUNTRY"
+        for candidate in candidates
+    )
+
+
+def test_ambiguous_country_alias_plain_name_is_not_address():
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    plain_name = detector.detect("Jordan Demo", [])
+
+    assert not any(
+        candidate.attr_type == PIIAttributeType.ADDRESS
+        and candidate.metadata.get("canonical") == ["Jordan"]
+        for candidate in plain_name
+    )
+
+
+@pytest.mark.parametrize("text", ["北京市朝阳区，中国", "朝阳区，北京市，中国"])
+def test_zh_comma_reverse_accepts_country_as_admin_tail(text: str):
+    detector = RuleBasedPIIDetector(locale_profile="mixed")
+
+    address = next(
+        candidate for candidate in detector.detect(text, [])
+        if candidate.attr_type == PIIAttributeType.ADDRESS
+    )
+
+    assert address.text == text
+    assert address.metadata["canonical"] == ["China"]
+    assert "country:China" in address.metadata["address_component_trace"]
+    assert address.normalized_source is not None
+    assert address.normalized_source.canonical.startswith("country=China|")
+    assert address_display_spec(address.normalized_source).startswith("COUNTRY-")
 
 
 def test_local_dictionary_hard_clue_fields_match_legacy_contract():

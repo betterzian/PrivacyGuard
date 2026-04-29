@@ -33,7 +33,7 @@ class NormalizedAddressComponent(BaseModel):
     key: str | tuple[str, ...] = ""
     levels: tuple[str, ...] = Field(default_factory=tuple)
     suspected: tuple[NormalizedAddressSuspectEntry, ...] = Field(default_factory=tuple)
-    # 占位符 display 用短码，取值之一："prov" / "city" / "dist" / "road" / "dtl" / ""。
+    # 占位符 display 用短码，取值之一："country" / "prov" / "city" / "dist" / "road" / "dtl" / ""。
     # - 由 canonical 侧 component_type + level 推导，仅影响 SPEC 生成，不参与 same_address 判定。
     # - POSTAL_CODE 等不展示的层级保持空串。
     # - MULTI_ADMIN 取 level 元组中 rank 最低的层级映射（典型"北京" → "city"）。
@@ -57,7 +57,7 @@ class NormalizedPII(BaseModel):
     # 地址专属：按 detector/结构化输入顺序保存的组件级结果。
     ordered_components: tuple[NormalizedAddressComponent, ...] = Field(default_factory=tuple)
     # 地址专属：预计算标志——是否存在可判定"行政层级"的组件
-    # （province / city / district / district_city；subdistrict 偏 detail 不计入）。
+    # （country / province / city / district / district_city；subdistrict 偏 detail 不计入）。
     # 在 _normalize_address 构造时基于 ordered_components 的 level 计算。
     has_admin_static: bool = False
 

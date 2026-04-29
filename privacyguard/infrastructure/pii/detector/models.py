@@ -96,7 +96,7 @@ class AddressComponentType(str, Enum):
     MULTI_ADMIN = "multi_admin"
 
     def display_level(self) -> str | None:
-        """返回占位符 SPEC 使用的 5 级短码（prov/city/dist/road/dtl）。
+        """返回占位符 SPEC 使用的 6 级短码（country/prov/city/dist/road/dtl）。
 
         MULTI_ADMIN 的默认映射为 "city"（典型"北京"情形）；实际应优先用
         `_DraftComponent.level` 元组最低 rank 的层级单独查询。POSTAL_CODE 不展示。
@@ -105,8 +105,8 @@ class AddressComponentType(str, Enum):
 
 
 _ADDRESS_DISPLAY_LEVEL_MAP: dict[AddressComponentType, str | None] = {
+    AddressComponentType.COUNTRY: "country",
     AddressComponentType.PROVINCE: "prov",
-    AddressComponentType.COUNTRY: "prov",
     AddressComponentType.CITY: "city",
     AddressComponentType.MULTI_ADMIN: "city",
     AddressComponentType.DISTRICT: "dist",

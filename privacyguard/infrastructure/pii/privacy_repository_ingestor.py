@@ -143,6 +143,7 @@ def _expand_ordered_components(
 
 
 _MAIN_LEVEL_FIELDS: tuple[str, ...] = (
+    "country",
     "province",
     "city",
     "district",
@@ -163,7 +164,7 @@ def ingest_address(
 ) -> AddressSlotStorage:
     """打包地址槽。
 
-    - 若传入 `components`，优先从结构化输入构造 9 级主结构；未传入时保持空结构，依赖扁平组件袋。
+    - 若传入 `components`，优先从结构化输入构造 10 级主结构；未传入时保持空结构，依赖扁平组件袋。
     - 扁平组件袋来自 `normalize_pii` 产出的 `ordered_components`（包括 suspect）。
     - `metadata` 可选：如果调用方已持有 detector 的 trace（如 `address_component_trace`），
       可以传入让 suspect 被正确还原——本入口对 metadata 透传，不自行解析。

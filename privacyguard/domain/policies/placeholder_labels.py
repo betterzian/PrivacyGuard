@@ -3,7 +3,7 @@
 占位符统一格式：
 
 - 通用：``[[TYPE#N]]``
-- 地址：``[[ADDR#N.SPEC]]``（SPEC 为去重后按 PROV/CITY/DIST/ROAD/DTL 顺序拼接）
+- 地址：``[[ADDR#N.SPEC]]``（SPEC 为去重后按 COUNTRY/PROV/CITY/DIST/ROAD/DTL 顺序拼接）
 - 数字/混合：``[[NUM#N.LEN=L]]`` / ``[[ALNUM#N.LEN=L]]``
 
 - 使用 ASCII ``[[`` / ``]]``，避免字体缺字与模板语法冲突。

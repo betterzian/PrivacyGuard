@@ -15,9 +15,9 @@ from privacyguard.domain.models.normalized_pii import (
     NormalizedPII,
 )
 from privacyguard.infrastructure.pii.detector.lexicon_loader import (
+    load_country_geo_aliases,
     load_en_company_suffixes,
     load_zh_company_suffixes,
-    load_en_address_country_aliases,
     load_en_address_suffix_strippers,
     load_en_us_states,
     load_zh_address_suffix_strippers,
@@ -50,6 +50,7 @@ _ADDRESS_COMPONENT_KEYS = (
     "postal_code",
 )
 _ADDRESS_MATCH_KEYS = (
+    "country",
     "multi_admin",
     "province",
     "city",
@@ -61,6 +62,7 @@ _ADDRESS_MATCH_KEYS = (
 )
 _ADDRESS_DETAIL_KEYS = ("building", "unit", "room", "suite", "detail")
 _ADDRESS_COMPONENT_COMPARE_KEYS = (
+    "country",
     "multi_admin",
     "province",
     "city",
@@ -89,15 +91,16 @@ _ORDERED_COMPONENT_KEYS = (
     "postal_code",
 )
 # 单一行政层级字符串。与 detector 侧 _ADMIN_RANK 对齐：DISTRICT_CITY 与 DISTRICT 同级。
-_ADMIN_LEVEL_KEYS = ("province", "city", "district", "district_city", "subdistrict")
+_ADMIN_LEVEL_KEYS = ("country", "province", "city", "district", "district_city", "subdistrict")
 # 表明"存在行政层级信息"的 key 集合（用于 has_admin_static 预判），subdistrict 语义上偏 detail 不计入。
-_HAS_ADMIN_LEVEL_KEYS = frozenset({"province", "city", "district", "district_city"})
+_HAS_ADMIN_LEVEL_KEYS = frozenset({"country", "province", "city", "district", "district_city"})
 _ADMIN_LEVEL_RANK: dict[str, int] = {
     "subdistrict": 1,
     "district": 2,
     "district_city": 2,
     "city": 3,
     "province": 4,
+    "country": 5,
 }
 # MULTI_ADMIN 解释枚举上限，避免病态 trace 爆炸。
 _MULTI_ADMIN_INTERP_CAP = 4
@@ -160,7 +163,8 @@ def normalize_pii(
         canonical = re.sub(r"\s+", "", normalized_raw).lower()
         return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
     if attr_type == PIIAttributeType.ORGANIZATION:
-        canonical = _organization_canonical(normalized_raw)
+        canonical_hint = _metadata_canonical_value(metadata)
+        canonical = _organization_canonical(canonical_hint or normalized_raw)
         return _scalar_normalized(attr_type=attr_type, raw_text=normalized_raw, canonical=canonical)
     if attr_type in {
         PIIAttributeType.PHONE,
@@ -469,14 +473,13 @@ def _canonicalize_en_country(value: str) -> str:
     text = unicodedata.normalize("NFKC", str(value or "")).strip()
     if not text:
         return ""
-    aliases = load_en_address_country_aliases()
-    canonical = aliases.get(text.lower())
-    if canonical and canonical.lower() == "united states":
-        return "US"
-    compact = _compact_component_text(text)
-    if compact in {"us", "usa", "unitedstates", "unitedstatesofamerica"}:
-        return "US"
+    alias_key = text.casefold() if text.isascii() else text
+    for alias in load_country_geo_aliases():
+        item_key = alias.text.casefold() if alias.text.isascii() else alias.text
+        if item_key == alias_key:
+            return alias.canonical
     return ""
+
 
 def _same_name(left: NormalizedPII, right: NormalizedPII) -> bool:
     left_given = left.identity.get("given", "")
@@ -507,7 +510,7 @@ def _same_address(left: NormalizedPII, right: NormalizedPII) -> bool:
     2. 顶层 identity（country / province / number / postal_code）：双侧俱存时必须相等。
     3. 非 admin 层（road / poi / building / unit / room / suite / detail）：按 component_type peer 比较，
        并顺带累计 has_admin Case 2（suspect step1 失败 + entry.level ⊂ admin 集合）。
-    4. admin 层（province / city / district / district_city / subdistrict）：
+    4. admin 层（country / province / city / district / district_city / subdistrict）：
        走多解释枚举，返回 match / inconclusive / mismatch。
        - match → 计入命中；
        - mismatch → 失败；
@@ -843,7 +846,7 @@ def _admin_value_match(a: str, b: str) -> bool:
 
 def _canonicalize_for_admin_compare(level: str, value: str) -> str:
     """admin 层级值比较前的 canonical 化：
-    - EN province（state 别名）/ country 统一到短码；
+    - EN province（state 别名）/ country 统一到标准名；
     - 其他层走 _canonicalize_address_component_value 的通用归一（例如 _compact_component_text）。
     """
     raw = (value or "").strip()
@@ -1223,8 +1226,8 @@ def _component_suspected_tuple_from_metadata(
 
 
 _DISPLAY_LEVEL_BY_COMPONENT_KEY: dict[str, str] = {
+    "country": "country",
     "province": "prov",
-    "country": "prov",
     "city": "city",
     "district": "dist",
     "district_city": "dist",
@@ -1240,8 +1243,8 @@ _DISPLAY_LEVEL_BY_COMPONENT_KEY: dict[str, str] = {
     "detail": "dtl",
     "postal_code": "",
 }
-# SPEC 拼接顺序：固定 PROV→CITY→DIST→ROAD→DTL。
-_DISPLAY_LEVEL_ORDER: tuple[str, ...] = ("prov", "city", "dist", "road", "dtl")
+# SPEC 拼接顺序：固定 COUNTRY→PROV→CITY→DIST→ROAD→DTL。
+_DISPLAY_LEVEL_ORDER: tuple[str, ...] = ("country", "prov", "city", "dist", "road", "dtl")
 
 
 def _derive_display_level(component_type: str, level_tuple: tuple[str, ...]) -> str:
@@ -1267,7 +1270,7 @@ def _derive_display_level(component_type: str, level_tuple: tuple[str, ...]) -> 
 
 
 def address_display_spec(normalized: NormalizedPII) -> str:
-    """按 PROV/CITY/DIST/ROAD/DTL 顺序生成地址占位符 SPEC 后缀。
+    """按 COUNTRY/PROV/CITY/DIST/ROAD/DTL 顺序生成地址占位符 SPEC 后缀。
 
     - 只扫描 `normalized.ordered_components` 里 display_level 非空的条目；
     - 去重后按固定顺序用 "-" 拼（同一 display level 多次仅保留一次）；
@@ -1584,7 +1587,8 @@ def _name_components(
             for key, value in components.items()
             if key in _NAME_COMPONENT_KEYS and str(value or "").strip()
         }
-    parsed = parse_name_components(raw_text)
+    canonical = _metadata_canonical_value(metadata)
+    parsed = parse_name_components(canonical or raw_text)
     resolved = {
         "full": parsed.full_text or parsed.original_text or raw_text,
         "family": parsed.family_text or "",
@@ -1592,8 +1596,16 @@ def _name_components(
         "middle": parsed.middle_text or "",
     }
     component_values = _metadata_values(metadata, "name_component")
+    matched_text = raw_text.strip()
+    if matched_text:
+        if "family" in component_values:
+            resolved["family"] = matched_text
+        if "given" in component_values:
+            resolved["given"] = matched_text
+        if "middle" in component_values:
+            resolved["middle"] = matched_text
     if "alias" in component_values:
-        resolved["alias"] = raw_text.strip()
+        resolved["alias"] = matched_text
     return {key: value for key, value in resolved.items() if value}
 
 
@@ -1700,6 +1712,11 @@ def _metadata_values(metadata: Mapping[str, object] | None, key: str) -> tuple[s
         return tuple(values)
     text = str(raw).strip()
     return (text,) if text else ()
+
+
+def _metadata_canonical_value(metadata: Mapping[str, object] | None) -> str:
+    values = _metadata_values(metadata, "canonical")
+    return values[0] if values else ""
 
 
 def _normalize_phone_digits(

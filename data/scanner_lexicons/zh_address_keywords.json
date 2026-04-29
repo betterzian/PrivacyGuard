@@ -1,5 +1,12 @@
 [
   {
+    "component_type": "country",
+    "keywords": [
+      {"text": "国家/地区", "strength": "hard"},
+      {"text": "国家", "strength": "soft"}
+    ]
+  },
+  {
     "component_type": "province",
     "keywords": [
       {"text": "特别行政区", "strength": "hard"},

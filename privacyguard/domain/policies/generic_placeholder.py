@@ -85,7 +85,7 @@ def render_placeholder(
 ) -> str:
     """按统一格式渲染 GENERICIZE 占位符字符串。
 
-    - ``attr_type = ADDRESS`` + ``address_spec`` → ``[[ADDR#N.CITY-DIST-ROAD]]``；spec 空时退化为 ``[[ADDR#N]]``。
+    - ``attr_type = ADDRESS`` + ``address_spec`` → ``[[ADDR#N.COUNTRY-CITY-DIST-ROAD]]``；spec 空时退化为 ``[[ADDR#N]]``。
     - ``fragment_type`` + ``fragment_length``（NUM / ALNUM）→ ``[[NUM#N.LEN=L]]``。
     - 其它：``[[TYPE#N]]``。
     """

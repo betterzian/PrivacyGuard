@@ -24,7 +24,6 @@ from privacyguard.infrastructure.pii.detector.stacks.address_policy_common impor
 from privacyguard.infrastructure.pii.detector.stacks.address_policy_zh import _build_admin_value_span
 from privacyguard.infrastructure.pii.detector.stacks.address_state import (
     _ParseState,
-    _VALID_SUCCESSORS,
     _segment_admit,
 )
 from privacyguard.infrastructure.pii.detector.stacks.common import _unit_index_left_of, expand_left_to_near_ocr_boundary
@@ -184,7 +183,7 @@ def resolve_standalone_admin_value_group_en(
     available = tuple(
         level
         for level in span.levels
-        if _segment_admit(state, level, valid_successors=_VALID_SUCCESSORS)
+        if _segment_admit(state, level, valid_successors=EN_VALID_SUCCESSORS)
     )
     if not available:
         return None

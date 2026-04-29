@@ -38,6 +38,15 @@ class ControlValueSpec:
     kind: str
 
 
+@dataclass(frozen=True, slots=True)
+class CountryAlias:
+    """国家/地区别名词条，canonical 使用英文标准名。"""
+    text: str
+    canonical: str
+    locale: str
+    strength: ClaimStrength
+
+
 def _read_json(filename: str) -> object:
     return read_scanner_lexicon_json(filename)
 
@@ -161,6 +170,52 @@ def _parse_tiered_entries(payload: object) -> tuple[TieredEntry, ...]:
     return tuple(sorted(entries, key=lambda e: len(e.text), reverse=True))
 
 
+def _alias_dedupe_key(text: str) -> str:
+    return text.casefold() if text.isascii() else text
+
+
+@lru_cache(maxsize=1)
+def load_country_geo_aliases() -> tuple[CountryAlias, ...]:
+    """加载统一国家/地区 alias 词表。"""
+    payload = _read_json("country_geo_aliases.json")
+    if not isinstance(payload, dict):
+        raise ValueError("country_geo_aliases.json 格式错误：根节点应为对象。")
+    raw_countries = payload.get("countries", [])
+    if not isinstance(raw_countries, list):
+        raise ValueError("country_geo_aliases.json 格式错误：countries 应为数组。")
+    aliases: list[CountryAlias] = []
+    seen: dict[str, str] = {}
+    for country in raw_countries:
+        if not isinstance(country, dict):
+            raise ValueError("country_geo_aliases.json 格式错误：国家条目应为对象。")
+        canonical = str(country.get("canonical", "")).strip()
+        raw_aliases = country.get("aliases", [])
+        if not canonical or not isinstance(raw_aliases, list):
+            continue
+        for alias in raw_aliases:
+            if not isinstance(alias, dict):
+                raise ValueError("country_geo_aliases.json 格式错误：alias 条目应为对象。")
+            text = str(alias.get("text", "")).strip()
+            if not text:
+                continue
+            key = _alias_dedupe_key(text)
+            previous = seen.get(key)
+            if previous is not None:
+                if previous != canonical:
+                    raise ValueError(f"国家 alias 冲突：{text} -> {previous}/{canonical}")
+                continue
+            seen[key] = canonical
+            aliases.append(
+                CountryAlias(
+                    text=text,
+                    canonical=canonical,
+                    locale=str(alias.get("locale", "")).strip().lower() or "mixed",
+                    strength=ClaimStrength(str(alias.get("strength", "soft")).strip().lower()),
+                )
+            )
+    return tuple(sorted(aliases, key=lambda item: len(item.text), reverse=True))
+
+
 @lru_cache(maxsize=1)
 def load_zh_company_suffixes() -> tuple[TieredEntry, ...]:
     """加载中文组织后缀词典（含 strength 分级）。"""
@@ -265,8 +320,11 @@ def load_en_address_suffix_strippers() -> dict[str, re.Pattern[str]]:
 @lru_cache(maxsize=1)
 def load_en_address_country_aliases() -> dict[str, str]:
     """加载英文地址国家别名表（小写 alias -> Canonical）。"""
-    payload = _clean_str_map(_read_json("en_address_country_aliases.json"))
-    return {k.lower(): v for k, v in payload.items()}
+    return {
+        item.text.lower(): item.canonical
+        for item in load_country_geo_aliases()
+        if item.locale == "en" and item.text
+    }
 
 
 @lru_cache(maxsize=1)
@@ -279,7 +337,11 @@ def load_en_us_states() -> dict[str, str]:
 @lru_cache(maxsize=1)
 def load_zh_country_prefix_aliases() -> dict[str, str]:
     """加载国家前缀别名表（用于剥离“中国/中国大陆/中华人民共和国”等前缀）。"""
-    return _clean_str_map(_read_json("zh_country_prefix_aliases.json"))
+    return {
+        item.text: item.canonical
+        for item in load_country_geo_aliases()
+        if item.locale == "zh" and item.text
+    }
 
 
 @lru_cache(maxsize=1)
@@ -382,8 +444,10 @@ __all__ = [
     "AddressKeyword",
     "AddressKeywordGroup",
     "ControlValueSpec",
+    "CountryAlias",
     "TieredEntry",
     "load_all_negative_words",
+    "load_country_geo_aliases",
     "load_en_company_suffixes",
     "load_en_company_values",
     "load_zh_company_suffixes",

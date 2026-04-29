@@ -12,6 +12,7 @@ from privacyguard.infrastructure.pii.detector.candidate_utils import (
     organization_suffix_start,
     trim_candidate,
 )
+from privacyguard.infrastructure.pii.detector.metadata import merge_metadata
 from privacyguard.infrastructure.pii.detector.models import ClaimStrength, ClueFamily, Clue, ClueRole, StreamInput
 from privacyguard.infrastructure.pii.detector.stacks.base import BaseStack, StackRun
 from privacyguard.infrastructure.pii.detector.stacks.common import (
@@ -273,6 +274,7 @@ class BaseOrganizationStack(BaseStack):
         )
         if candidate is None:
             return None
+        candidate.metadata = merge_metadata(candidate.metadata, self.clue.source_metadata)
         evidence = self._build_org_evidence(
             start=start,
             end=end,
