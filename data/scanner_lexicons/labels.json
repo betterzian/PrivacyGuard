@@ -32,6 +32,62 @@
     "ascii_boundary": false
   },
   {
+    "keyword": "联系邮箱",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "工作邮箱",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "个人邮箱",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "公司邮箱",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "邮箱账号",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "邮件账号",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "电邮地址",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "邮箱",
     "attr_type": "email",
     "source_kind": "context_email_field",
@@ -49,6 +105,46 @@
   },
   {
     "keyword": "email address",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "email account",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "personal email",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "contact email",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "work email",
+    "attr_type": "email",
+    "source_kind": "context_email_field",
+    "ocr_source_kind": "ocr_label_email_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "business email",
     "attr_type": "email",
     "source_kind": "context_email_field",
     "ocr_source_kind": "ocr_label_email_field",
@@ -121,6 +217,86 @@
   },
   {
     "keyword": "联系方式",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "紧急联系人电话",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "紧急联系电话",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "紧急联系方式",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "联系号码",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "客服电话",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "工作电话",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "办公电话",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "公司电话",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "家庭电话",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "电话号",
     "attr_type": "phone",
     "source_kind": "context_phone_field",
     "ocr_source_kind": "ocr_label_phone_field",
@@ -240,6 +416,86 @@
     "ascii_boundary": true
   },
   {
+    "keyword": "telephone number",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "emergency contact phone",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "emergency phone",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "work phone",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "office phone",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "home phone",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "phone no",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "mobile no",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "tel no",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "whatsapp",
+    "attr_type": "phone",
+    "source_kind": "context_phone_field",
+    "ocr_source_kind": "ocr_label_phone_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
     "keyword": "fax",
     "attr_type": "phone",
     "source_kind": "context_phone_field",
@@ -249,6 +505,102 @@
   },
   {
     "keyword": "公民身份号码",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "公民身份证号码",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "公民身份证号",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "居民身份证号码",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "居民身份证号",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "居民身份证",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "纳税人识别号",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "社会保障号码",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "社会保障号",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "社保号码",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "社保号",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "纳税号",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "身份号码",
     "attr_type": "id_number",
     "source_kind": "context_id_field",
     "ocr_source_kind": "ocr_label_id_field",
@@ -304,6 +656,94 @@
     "ascii_boundary": true
   },
   {
+    "keyword": "national identification number",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "tax identification number",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "identification number",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "identity number",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "id card number",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "id card",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "citizen id",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "personal id",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "tax id",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "taxpayer id",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "tin",
+    "attr_type": "id_number",
+    "source_kind": "context_id_field",
+    "ocr_source_kind": "ocr_label_id_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
     "keyword": "id number",
     "attr_type": "id_number",
     "source_kind": "context_id_field",
@@ -344,6 +784,14 @@
     "ascii_boundary": false
   },
   {
+    "keyword": "护照编号",
+    "attr_type": "passport_number",
+    "source_kind": "context_passport_field",
+    "ocr_source_kind": "ocr_label_passport_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "护照",
     "attr_type": "passport_number",
     "source_kind": "context_passport_field",
@@ -368,12 +816,60 @@
     "ascii_boundary": true
   },
   {
+    "keyword": "passport id",
+    "attr_type": "passport_number",
+    "source_kind": "context_passport_field",
+    "ocr_source_kind": "ocr_label_passport_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
     "keyword": "passport",
     "attr_type": "passport_number",
     "source_kind": "context_passport_field",
     "ocr_source_kind": "ocr_label_passport_field",
     "component_hint": null,
     "ascii_boundary": true
+  },
+  {
+    "keyword": "机动车驾驶证号码",
+    "attr_type": "driver_license",
+    "source_kind": "context_driver_license_field",
+    "ocr_source_kind": "ocr_label_driver_license_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "机动车驾驶证号",
+    "attr_type": "driver_license",
+    "source_kind": "context_driver_license_field",
+    "ocr_source_kind": "ocr_label_driver_license_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "机动车驾驶证",
+    "attr_type": "driver_license",
+    "source_kind": "context_driver_license_field",
+    "ocr_source_kind": "ocr_label_driver_license_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "驾驶证编号",
+    "attr_type": "driver_license",
+    "source_kind": "context_driver_license_field",
+    "ocr_source_kind": "ocr_label_driver_license_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "驾照编号",
+    "attr_type": "driver_license",
+    "source_kind": "context_driver_license_field",
+    "ocr_source_kind": "ocr_label_driver_license_field",
+    "component_hint": null,
+    "ascii_boundary": false
   },
   {
     "keyword": "驾驶证号码",
@@ -520,6 +1016,70 @@
     "ascii_boundary": false
   },
   {
+    "keyword": "机动车号牌号码",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "机动车号牌",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "机动车牌号",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "车辆号牌",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "车辆牌号",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "汽车牌号",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "号牌号码",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "号牌",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "车牌",
     "attr_type": "license_plate",
     "source_kind": "context_license_plate_field",
@@ -534,6 +1094,62 @@
     "ocr_source_kind": "ocr_label_license_plate_field",
     "component_hint": null,
     "ascii_boundary": false
+  },
+  {
+    "keyword": "vehicle registration",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "license plate",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "licence plate",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "vehicle plate",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "plate number",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "plate no",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "car plate",
+    "attr_type": "license_plate",
+    "source_kind": "context_license_plate_field",
+    "ocr_source_kind": "ocr_label_license_plate_field",
+    "component_hint": null,
+    "ascii_boundary": true
   },
   {
     "keyword": "银行卡号",
@@ -609,6 +1225,46 @@
   },
   {
     "keyword": "贷记卡",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "工资卡卡号",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "工资卡",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "存折账号",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "存折号",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "存折",
     "attr_type": "bank_number",
     "source_kind": "context_bank_number_field",
     "ocr_source_kind": "ocr_label_bank_number_field",
@@ -728,6 +1384,70 @@
     "ascii_boundary": false
   },
   {
+    "keyword": "结算账户",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "结算账号",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "工资账户",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "工资账号",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "支付账号",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "收款账户",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "付款账户",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "转账账号",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "账号",
     "attr_type": "bank_number",
     "source_kind": "context_bank_number_field",
@@ -753,6 +1473,54 @@
   },
   {
     "keyword": "routing number",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "bank account number",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "checking account",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "savings account",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "swift code",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "bic code",
+    "attr_type": "bank_number",
+    "source_kind": "context_bank_number_field",
+    "ocr_source_kind": "ocr_label_bank_number_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "sort code",
     "attr_type": "bank_number",
     "source_kind": "context_bank_number_field",
     "ocr_source_kind": "ocr_label_bank_number_field",
@@ -856,6 +1624,70 @@
     "ascii_boundary": true
   },
   {
+    "keyword": "school name",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "alma mater",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "institution",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "university",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "college",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "school",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "supplier",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "vendor",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
     "keyword": "organization",
     "attr_type": "organization",
     "source_kind": "context_organization_field",
@@ -952,6 +1784,166 @@
     "ascii_boundary": false
   },
   {
+    "keyword": "供应商名称",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "经销商名称",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "代理商名称",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "客户单位名称",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "施工单位",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "建设单位",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "主管单位",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "上级单位",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "隶属单位",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "毕业院校",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "就读院校",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "就读学校",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "毕业学校",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "院校名称",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "学校名称",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "供应商",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "经销商",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "代理商",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "院校",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "学校",
+    "attr_type": "organization",
+    "source_kind": "context_organization_field",
+    "ocr_source_kind": "ocr_label_organization_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "甲方",
     "attr_type": "organization",
     "source_kind": "context_organization_field",
@@ -1040,6 +2032,62 @@
     "ascii_boundary": false
   },
   {
+    "keyword": "户口所在地",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "户口地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "收件人地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "寄送地址",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "邮政信箱",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "门牌号码",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "门牌号",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "地址",
     "attr_type": "address",
     "source_kind": "context_address_field",
@@ -1057,6 +2105,22 @@
   },
   {
     "keyword": "国家",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "地区",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "所在区域",
     "attr_type": "address",
     "source_kind": "context_address_field",
     "ocr_source_kind": "ocr_label_address_field",
@@ -1112,7 +2176,95 @@
     "ascii_boundary": true
   },
   {
+    "keyword": "post office box",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "postal code",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "post code",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "postcode",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "zip code",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "po box",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "zip",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
     "keyword": "address line",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "apartment number",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "house number",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "street number",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "unit number",
     "attr_type": "address",
     "source_kind": "context_address_field",
     "ocr_source_kind": "ocr_label_address_field",
@@ -1145,6 +2297,14 @@
   },
   {
     "keyword": "country",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "region",
     "attr_type": "address",
     "source_kind": "context_address_field",
     "ocr_source_kind": "ocr_label_address_field",
@@ -1400,6 +2560,30 @@
     "ascii_boundary": false
   },
   {
+    "keyword": "邮政编码",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "邮政编号",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "邮编",
+    "attr_type": "address",
+    "source_kind": "context_address_field",
+    "ocr_source_kind": "ocr_label_address_field",
+    "component_hint": null,
+    "ascii_boundary": false
+  },
+  {
     "keyword": "住客姓名",
     "attr_type": "name",
     "source_kind": "context_name_field",
@@ -1441,6 +2625,174 @@
   },
   {
     "keyword": "持卡人姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "紧急联系人姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "本人姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "申请人姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "委托人姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "代理人姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "经办人姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "学生姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "教师姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "员工姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "司机姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "驾驶员姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "驾驶人姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "用户姓名",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "紧急联系人",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "申请人",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "委托人",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "代理人",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "经办人",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "驾驶人",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "签字人",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": false
+  },
+  {
+    "keyword": "落款人",
     "attr_type": "name",
     "source_kind": "context_name_field",
     "ocr_source_kind": "ocr_label_name_field",
@@ -1521,6 +2873,86 @@
   },
   {
     "keyword": "full name",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "applicant name",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "patient name",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "passenger name",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "guest name",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "cardholder name",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "account holder name",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "account holder",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "emergency contact name",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "driver name",
+    "attr_type": "name",
+    "source_kind": "context_name_field",
+    "ocr_source_kind": "ocr_label_name_field",
+    "component_hint": "full",
+    "ascii_boundary": true
+  },
+  {
+    "keyword": "applicant",
     "attr_type": "name",
     "source_kind": "context_name_field",
     "ocr_source_kind": "ocr_label_name_field",
