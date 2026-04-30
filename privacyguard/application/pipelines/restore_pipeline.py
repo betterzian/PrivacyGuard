@@ -4,7 +4,7 @@ restore 的边界保持收敛：
 
 - 仅基于当前 turn 的 `ReplacementRecord` 恢复文本
 - 不扩展为全会话 restore
-- 不承担 DSL restore 或对 `de_model` 决策的反向推理
+- 不承担 DSL restore 或对决策计划的反向推理
 
 与当前动作语义的兼容约定：
 

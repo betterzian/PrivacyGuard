@@ -8,7 +8,7 @@
 - 返回外部响应字典
 - `write_privacy_repository`：合并写入 `rule_based` 本地词库并刷新检测器（实现细节仍在 infrastructure）
 
-sanitize / restore 与 OCR、`de_model` runtime、restore 规则的具体策略仍由 pipeline 与下层模块承担；
+sanitize / restore 与 OCR、decision、restore 规则的具体策略仍由 pipeline 与下层模块承担；
 app facade 不展开 `protect_decision` / `rewrite_mode` 等内部字段。
 """
 
@@ -71,7 +71,7 @@ def _build_ocr_component_config(ocr_config: dict[str, Any] | None) -> dict[str, 
 class PrivacyGuard:
     """项目顶层 facade，负责依赖装配并暴露稳定的 app 层入口。
 
-    该类本身不直接执行 detector、OCR、de_model 决策或 restore 规则；这些职责都
+    该类本身不直接执行 detector、OCR、decision 或 restore 规则；这些职责都
     由下层 pipeline 与其依赖组件承担。app 层只负责接入外部请求并返回外部响应。
     """
 
@@ -138,7 +138,6 @@ class PrivacyGuard:
             "restoration mode",
         )
         # detector / decision_engine 在 app 层只以统一接口接入。
-        # de_model 若发生内部重构，也应被封装在 decision_engine 之后。
         self.detector = detector or build_detector(
             self.detector_mode,
             self.registry,
@@ -204,8 +203,7 @@ class PrivacyGuard:
     def sanitize(self, payload: dict[str, Any]) -> dict[str, Any]:
         """接收外部脱敏 payload，委托 sanitize pipeline，并返回外部响应字典。
 
-        该入口保持公开行为稳定，不暴露内部 `de_model` 的 context、分层决策字段或
-        其他 pipeline 内部状态。
+        该入口保持公开行为稳定，不暴露内部决策上下文或其他 pipeline 内部状态。
         """
         request = SanitizeRequestModel.from_payload(payload)
         response = self.sanitize_pipeline.run(request=request)

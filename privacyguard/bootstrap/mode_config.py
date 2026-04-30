@@ -12,9 +12,7 @@ DETECTOR_MODE_ALIASES = {
 }
 
 DECISION_MODE_ALIASES = {
-    "de_model": "de_model",
     "label_only": "label_only",
-    "label_persona_mixed": "label_persona_mixed",
 }
 
 DEFAULT_FILL_MODE = "mix"

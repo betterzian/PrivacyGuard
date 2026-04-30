@@ -8,13 +8,10 @@ from privacyguard.bootstrap.registry import ComponentRegistry, create_default_re
 from privacyguard.domain.enums import PIIAttributeType, ProtectionLevel
 from privacyguard.domain.models.action import RestoredSlot
 from privacyguard.domain.models.decision import DecisionPlan
-from privacyguard.domain.models.decision_context import DecisionContext
 from privacyguard.domain.models.mapping import ReplacementRecord, SessionBinding
 from privacyguard.domain.models.ocr import OCRTextBlock
 from privacyguard.domain.models.persona import PersonaProfile
-from privacyguard.infrastructure.decision.de_model_engine import DEModelEngine
 from privacyguard.infrastructure.decision.label_only_engine import LabelOnlyDecisionEngine
-from privacyguard.infrastructure.decision.label_persona_mixed_engine import LabelPersonaMixedDecisionEngine
 from privacyguard.infrastructure.mapping.in_memory_mapping_store import InMemoryMappingStore
 from privacyguard.infrastructure.mapping.json_mapping_store import JsonMappingStore
 from privacyguard.infrastructure.ocr.ppocr_adapter import PPOCREngineAdapter
@@ -121,14 +118,6 @@ class PlaceholderMappingStore:
         self._bindings[binding.session_id] = binding
 
 
-class PlaceholderDecisionEngine:
-    """Decision 引擎占位实现。"""
-
-    def plan(self, context: DecisionContext) -> DecisionPlan:
-        """占位生成决策计划。"""
-        raise NotImplementedError("第 1 轮不实现 Decision 业务逻辑。")
-
-
 class PlaceholderRenderingEngine:
     """渲染引擎占位实现。"""
 
@@ -155,10 +144,7 @@ def register_default_components(registry: ComponentRegistry) -> None:
     registry.register_ocr_provider("ppocr_v5", PPOCREngineAdapter)
     registry.register_detector_mode("placeholder", PlaceholderPIIDetector)
     registry.register_detector_mode("rule_based", RuleBasedPIIDetector)
-    registry.register_decision_mode("placeholder", PlaceholderDecisionEngine)
     registry.register_decision_mode("label_only", LabelOnlyDecisionEngine)
-    registry.register_decision_mode("label_persona_mixed", LabelPersonaMixedDecisionEngine)
-    registry.register_decision_mode("de_model", DEModelEngine)
     registry.register_mapping_store_type("placeholder", PlaceholderMappingStore)
     registry.register_mapping_store_type("in_memory", InMemoryMappingStore)
     registry.register_mapping_store_type("json", JsonMappingStore)

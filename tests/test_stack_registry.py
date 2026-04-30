@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
+from privacyguard.api.errors import InvalidConfigurationError
+from privacyguard.bootstrap.mode_config import DEFAULT_DECISION_MODE, normalize_decision_mode
+from privacyguard.bootstrap.registry import create_default_registry
+from privacyguard.infrastructure import decision
+from privacyguard.infrastructure.decision import LabelOnlyDecisionEngine
 from privacyguard.infrastructure.pii.detector.models import ClueFamily, ClueRole
 from privacyguard.infrastructure.pii.detector.stacks import (
     AddressStack,
@@ -53,3 +60,27 @@ def test_license_plate_start_roles():
 def test_control_family_returns_none():
     assert get_stack_spec(ClueFamily.CONTROL) is None
     assert get_stack_spec(None) is None
+
+
+def test_decision_mode_only_accepts_label_only():
+    """旧决策模式不再作为配置入口暴露。"""
+    assert DEFAULT_DECISION_MODE == "label_only"
+    assert normalize_decision_mode("label_only") == "label_only"
+
+    for legacy_mode in ("de_model", "label_persona_mixed", "placeholder"):
+        with pytest.raises(InvalidConfigurationError):
+            normalize_decision_mode(legacy_mode)
+
+
+def test_default_registry_only_registers_label_only_decision_mode():
+    """默认注册表的 decision mode 只保留 label_only。"""
+    registry = create_default_registry()
+    assert registry.decision_modes == {"label_only": LabelOnlyDecisionEngine}
+
+
+def test_decision_package_only_exports_label_only():
+    """decision 包不再导出已删除的模型或混合决策实现。"""
+    assert decision.__all__ == ["LabelOnlyDecisionEngine"]
+    assert not hasattr(decision, "DEModelEngine")
+    assert not hasattr(decision, "LabelPersonaMixedDecisionEngine")
+    assert not hasattr(decision, "DecisionFeatureExtractor")

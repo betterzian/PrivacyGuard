@@ -1,11 +1,10 @@
 """GENERICIZE 替换文案的统一渲染。
 
-与 `label_only` / `label_persona_mixed` / `de_model` 等决策模式解耦：各模式只对每个 PII
-候选产出 ``KEEP`` / ``GENERICIZE`` / ``PERSONA_SLOT``；凡 ``GENERICIZE`` 的展示用占位字符串
-均由本模块生成，避免在多处重复维护属性→标签映射。
+与决策模式解耦：决策引擎只对每个 PII 候选产出抽象动作；凡 ``GENERICIZE`` 的展示用
+占位字符串均由本模块生成，避免在多处重复维护属性→标签映射。
 
 新格式统一为 ``[[TYPE#N]]`` / ``[[TYPE#N.SPEC]]``（见 :mod:`placeholder_labels`）；
-中英标签表仅供 policy_context 等训练特征侧继续复用。
+中英标签表供内部占位符标签选择复用。
 """
 
 from __future__ import annotations
@@ -66,7 +65,7 @@ def _contains_cjk(text: str | None) -> bool:
 
 
 def generic_placeholder_label(attr_type: PIIAttributeType, *, source_text: str | None = None) -> str:
-    """返回用于 policy_context 训练特征的中/英文标签（不含括号）。
+    """返回用于内部标签展示的中/英文标签（不含括号）。
 
     与占位符渲染无关；渲染路径统一走 :func:`render_placeholder`。
     """

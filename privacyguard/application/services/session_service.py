@@ -6,7 +6,6 @@
 
 - session 层负责 persona 绑定、alias 生命周期与身份语义连续性
 - turn 层负责当前轮替换记录写入，以及 restore 时对当前 turn record 的消费
-- de_model 应消费 session 已准备好的 alias / binding 结果，而不是自己决定 alias
 - 本服务不承担 detector，也不扩展为复杂 linking 模型
 """
 

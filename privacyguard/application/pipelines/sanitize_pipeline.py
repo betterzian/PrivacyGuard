@@ -5,17 +5,15 @@
 OCR / prompt parse
 -> detector
 -> alias / session context preparation
--> local context / quality / persona state preparation
 -> DecisionContextBuilder
--> DecisionFeatureExtractor
--> DEModelEngine / runtime（抽象动作，无 replacement 文案）
+-> decision_engine.plan（抽象动作，无 replacement 文案）
 -> ConstraintResolver + ReplacementGenerationService（结构约束 + 拼字与会话占位）
 -> render
 -> mapping store
 
 说明：
 
-- 本文件只负责 application 层编排，不直接堆叠 de_model 内部细节
+- 本文件只负责 application 层编排，不直接堆叠具体决策模式内部细节
 - `decision_engine.plan` 仅产出抽象动作；`apply_post_decision_steps` 统一做约束解析与替换生成
 - 后续若抽出 `AliasLinker`、`LocalContextBuilder`、`QualityAggregator`、
   `PersonaStateBuilder`，应接入本文件预留的准备阶段，而不是继续把细节写进主函数
@@ -238,8 +236,7 @@ def run_sanitize_pipeline(
         persona_repository=persona_repository,
     )
 
-    # 4. local context / quality / persona state preparation
-    # 5. DecisionContextBuilder
+    # 4. DecisionContextBuilder
     decision_context = _build_decision_context(
         request=request,
         ocr_blocks=ocr_blocks,
@@ -249,9 +246,7 @@ def run_sanitize_pipeline(
         persona_repository=persona_repository,
     )
 
-    # 6. DecisionFeatureExtractor
-    # 7. DEModelEngine / runtime（抽象）
-    # 8–9. ConstraintResolver + ReplacementGenerationService
+    # 5. decision_engine.plan + ConstraintResolver + ReplacementGenerationService
     replacement_plan = _plan_replacements(
         decision_context=decision_context,
         decision_engine=decision_engine,
@@ -259,7 +254,7 @@ def run_sanitize_pipeline(
         persona_repository=persona_repository,
     )
 
-    # 10. render
+    # 6. render
     sanitized_prompt_text, sanitized_screenshot, applied_replacements = _render_sanitize_result(
         request=request,
         rendering_engine=rendering_engine,
@@ -267,7 +262,7 @@ def run_sanitize_pipeline(
         ocr_blocks=ocr_blocks,
     )
 
-    # 11. mapping store
+    # 7. mapping store
     _persist_sanitize_result(
         request=request,
         session_service=session_service,

@@ -18,12 +18,6 @@ dependencies = [
 dev = [
     "pytest>=8.0,<9.0",
 ]
-# PyTorch 由 conda 环境提供 GPU 运行时；这里只声明 Python 包版本，
-# 不在 pyproject 中绑定 CUDA / cuDNN 变体名。
-train = [
-    "torch==2.10.0+cu130",
-    "torchvision==0.25.0+cu130",
-]
 # Paddle 按平台分流：
 # - Windows: CPU 版 paddlepaddle
 # - Linux: GPU 版 paddlepaddle-gpu

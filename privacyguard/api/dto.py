@@ -3,9 +3,8 @@
 本文件定义 PrivacyGuard 对外暴露的稳定请求/响应边界：
 
 - `sanitize` / `restore` 的 DTO 形状属于外部稳定协议
-- `de_model` 的内部重构不应改变这里的字段名、字段形状与构造方式
 - `protect_decision`、`rewrite_mode`、`page_policy_state` 等内部策略字段
-  只能停留在内部 pipeline / runtime / training 层，不能泄漏到这些外部 DTO
+  只能停留在内部 pipeline 层，不能泄漏到这些外部 DTO
 """
 
 from typing import Any
@@ -22,8 +21,8 @@ ImageLike = Any
 class SanitizeRequest(BaseModel):
     """SANITIZE 入参：上传前脱敏请求。
 
-    这是 PrivacyGuard 对外稳定输入边界的一部分。即使 `de_model` 内部上下文、
-    特征协议或训练标签重构，本 DTO 的字段形状也保持不变。
+    这是 PrivacyGuard 对外稳定输入边界的一部分；内部 pipeline 调整不应改变
+    本 DTO 的字段形状。
     """
 
     session_id: str
@@ -33,7 +32,7 @@ class SanitizeRequest(BaseModel):
     protection_level: ProtectionLevel = ProtectionLevel.STRONG
     detector_overrides: dict[PIIAttributeType, float] = Field(
         default_factory=dict,
-        description="检测阶段的可选覆盖参数；属于外部请求输入，不承载 de_model 内部层级决策字段。",
+        description="检测阶段的可选覆盖参数；属于外部请求输入，不承载内部决策字段。",
     )
 
     @field_validator("protection_level", mode="before")
@@ -50,7 +49,7 @@ class SanitizeResponse(BaseModel):
     """SANITIZE 出参：脱敏结果。
 
     这是 PrivacyGuard 对外稳定输出边界的一部分。响应只暴露主链执行结果，
-    不直接暴露 `de_model` 内部的两级决策变量或 page/persona policy 状态。
+    不直接暴露内部策略状态。
     """
 
     sanitized_prompt_text: str
@@ -69,7 +68,7 @@ class SanitizeResponse(BaseModel):
 class RestoreRequest(BaseModel):
     """RESTORE 入参：云端返回后还原请求。
 
-    这是 PrivacyGuard 对外稳定输入边界的一部分；`de_model` 的内部重构不会改变
+    这是 PrivacyGuard 对外稳定输入边界的一部分；内部 pipeline 调整不应改变
     restore 的请求 DTO 形状。
     """
 
