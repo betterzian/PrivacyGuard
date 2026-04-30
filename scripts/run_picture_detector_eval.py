@@ -1,5 +1,3 @@
-"""图片集 detector 三档评测脚本。"""
-
 from __future__ import annotations
 
 import argparse
@@ -372,7 +370,7 @@ def _run(args: argparse.Namespace) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="图片集 detector 三档评测脚本。")
     parser.add_argument("--data-root", default="data/test/picture")
     parser.add_argument("--output-root", default="outputs")
     parser.add_argument("--run-name", default=None)

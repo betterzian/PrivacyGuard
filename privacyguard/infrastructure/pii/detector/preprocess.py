@@ -748,13 +748,6 @@ def _tokenize_intermediate(chars: list[str], raw_indices: list[int | None]) -> l
     return tokens
 
 
-# 旧版 ``_plan_gap_outputs``（CJK 五元组、标点两侧删格、宽间隙 ``_OCR_INLINE_GAP_TOKEN``）已弃用；
-# 空白改为在 ``_rewrite_whitespace`` 中统一「多空格 → 单空格」，块首尾空白在 ``_strip_edge_noise`` 清除。
-#
-# def _plan_gap_outputs(tokens: list[_BlockToken]) -> dict[int, str]:
-#     ...  # 见 git 历史
-
-
 def _strip_edge_noise(chars: list[str], raw_indices: list[int | None]) -> tuple[list[str], list[int | None]]:
     start = 0
     end = len(chars)

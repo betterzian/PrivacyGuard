@@ -31,8 +31,7 @@ class PlaceholderOCREngine:
     """OCR 占位实现。"""
 
     def extract(self, image: Any) -> list[OCRTextBlock]:
-        """占位提取函数。"""
-        raise NotImplementedError("第 1 轮不实现 OCR 业务逻辑。")
+        raise NotImplementedError("placeholder OCR 组件未实现 extract。")
 
 
 class PlaceholderPIIDetector:
@@ -48,7 +47,6 @@ class PlaceholderPIIDetector:
         protection_level: ProtectionLevel | str = ProtectionLevel.STRONG,
         detector_overrides: dict[PIIAttributeType | str, float] | None = None,
     ) -> list[Any]:
-        """占位检测函数。"""
         _ = (
             prompt_text,
             ocr_blocks,
@@ -57,22 +55,19 @@ class PlaceholderPIIDetector:
             protection_level,
             detector_overrides,
         )
-        raise NotImplementedError("第 1 轮不实现 PII 检测逻辑。")
+        raise NotImplementedError("placeholder PII 检测组件未实现 detect。")
 
 
 class PlaceholderPersonaRepository:
     """Persona 仓库占位实现。"""
 
     def get_persona(self, persona_id: str) -> PersonaProfile | None:
-        """占位读取 persona。"""
         return None
 
     def list_personas(self) -> list[PersonaProfile]:
-        """占位列出 persona。"""
         return []
 
     def get_slot_value(self, persona_id: str, attr_type: Any) -> str | None:
-        """占位读取槽位。"""
         return None
 
     def get_slot_replacement_text(
@@ -82,7 +77,6 @@ class PlaceholderPersonaRepository:
         source_text: str,
         metadata: dict[str, list[str]] | None = None,
     ) -> str | None:
-        """占位读取替换文本。"""
         _ = metadata
         return self.get_slot_value(persona_id, attr_type)
 
@@ -91,16 +85,13 @@ class PlaceholderMappingStore:
     """Mapping 存储占位实现。"""
 
     def __init__(self) -> None:
-        """初始化内存占位容器。"""
         self._records: dict[tuple[str, int], list[ReplacementRecord]] = {}
         self._bindings: dict[str, SessionBinding] = {}
 
     def save_replacements(self, session_id: str, turn_id: int, records: list[ReplacementRecord]) -> None:
-        """保存替换记录。"""
         self._records[(session_id, turn_id)] = records
 
     def get_replacements(self, session_id: str, turn_id: int | None = None) -> list[ReplacementRecord]:
-        """按会话或轮次读取替换记录。"""
         if turn_id is not None:
             return self._records.get((session_id, turn_id), [])
         collected: list[ReplacementRecord] = []
@@ -110,11 +101,9 @@ class PlaceholderMappingStore:
         return collected
 
     def get_session_binding(self, session_id: str) -> SessionBinding | None:
-        """读取会话绑定。"""
         return self._bindings.get(session_id)
 
     def set_session_binding(self, binding: SessionBinding) -> None:
-        """写入会话绑定。"""
         self._bindings[binding.session_id] = binding
 
 
@@ -122,20 +111,17 @@ class PlaceholderRenderingEngine:
     """渲染引擎占位实现。"""
 
     def render_text(self, prompt_text: str, plan: DecisionPlan) -> tuple[str, list[ReplacementRecord]]:
-        """占位渲染文本。"""
-        raise NotImplementedError("第 1 轮不实现文本渲染逻辑。")
+        raise NotImplementedError("placeholder 渲染组件未实现 render_text。")
 
     def render_image(self, image: Any, plan: DecisionPlan, ocr_blocks: list[OCRTextBlock] | None = None) -> Any:
-        """占位渲染图片。"""
-        raise NotImplementedError("第 1 轮不实现图像渲染逻辑。")
+        raise NotImplementedError("placeholder 渲染组件未实现 render_image。")
 
 
 class PlaceholderRestorationModule:
     """还原模块占位实现。"""
 
     def restore(self, cloud_text: str, records: list[ReplacementRecord]) -> tuple[str, list[RestoredSlot]]:
-        """占位恢复文本。"""
-        raise NotImplementedError("第 1 轮不实现还原业务逻辑。")
+        raise NotImplementedError("placeholder 还原组件未实现 restore。")
 
 
 def register_default_components(registry: ComponentRegistry) -> None:

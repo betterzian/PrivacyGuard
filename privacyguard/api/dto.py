@@ -80,7 +80,7 @@ class RestoreRequest(BaseModel):
 class RestoreResponse(BaseModel):
     """RESTORE 出参：还原结果。
 
-    对外仅返回 restore 主链结果与必要的辅助信息，不暴露内部策略层对象或训练标签。
+    对外仅返回 restore 主链结果与必要的辅助信息，不暴露内部策略状态。
     """
 
     restored_text: str
