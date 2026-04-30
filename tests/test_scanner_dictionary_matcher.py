@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from scripts.eval_detector_en_addresses import trace_component_key
@@ -309,7 +311,7 @@ def test_ocr_cross_line_merge_requires_compatible_character_types():
         ]
     )
 
-    assert prepared.stream.text == f"0396 127 8788{OCR_BREAK}Message yourself"
+    assert prepared.stream.text == f"{OCR_BREAK}0396 127 8788{OCR_BREAK}Message yourself{OCR_BREAK}"
 
 
 def test_ocr_cross_line_merge_still_allows_cjk_both_sides():
@@ -320,7 +322,7 @@ def test_ocr_cross_line_merge_still_allows_cjk_both_sides():
         ]
     )
 
-    assert prepared.stream.text == f"我的地址是{_OCR_INLINE_GAP_TOKEN}北京市昌平区"
+    assert prepared.stream.text == f"{OCR_BREAK}我的地址是{_OCR_INLINE_GAP_TOKEN}北京市昌平区{OCR_BREAK}"
 
 
 def test_ocr_high_confidence_label_layout_fallback_binds_name_value_block():
@@ -834,13 +836,13 @@ def test_ascii_dictionary_il_folding_requires_four_letter_run():
 def test_build_ocr_stream_rewrites_cjk_whitespace(raw_text: str, expected_text: str):
     prepared = build_ocr_stream([_ocr_block(raw_text, block_id="b1", line_id=0)])
 
-    assert prepared.stream.text == expected_text
+    assert prepared.stream.text == f"{OCR_BREAK}{expected_text}{OCR_BREAK}"
 
 
 def test_build_ocr_stream_normalizes_fullwidth_parentheses_only():
     prepared = build_ocr_stream([_ocr_block("备注【测试】（+86）13812345678", block_id="b1", line_id=0)])
 
-    assert prepared.stream.text == "备注【测试】(+86)13812345678"
+    assert prepared.stream.text == f"{OCR_BREAK}备注【测试】(+86)13812345678{OCR_BREAK}"
 
 
 def test_ignored_spans_still_filter_dictionary_matches():
@@ -893,11 +895,11 @@ def test_find_ocr_break_spans_reads_from_synthetic_units():
 
     spans = scanner_module._find_ocr_break_spans(prepared.stream)
 
-    assert [prepared.stream.text[start:end] for start, end in spans] == [OCR_BREAK]
+    assert [prepared.stream.text[start:end] for start, end in spans] == [OCR_BREAK, OCR_BREAK, OCR_BREAK]
     assert [
         prepared.stream.units[prepared.stream.char_to_unit[start]].kind
         for start, _end in spans
-    ] == ["ocr_break"]
+    ] == ["ocr_break", "ocr_break", "ocr_break"]
 
 
 def test_build_clue_bundle_still_resolves_multi_variant_overlap_to_longer_match():
@@ -1349,6 +1351,91 @@ def test_local_dictionary_matcher_cache_rebuilds_when_content_changes():
     assert matcher1 is not matcher2
     assert info.misses == 2
     assert info.hits == 0
+
+
+def test_seed_label_covers_same_span_regex_hard_value():
+    stream = build_prompt_stream("Country/region")
+    unit_start, unit_last = scanner_module._char_span_to_unit_span(stream, 0, len(stream.text))
+    label = Clue(
+        clue_id="label",
+        family=ClueFamily.ADDRESS,
+        role=ClueRole.LABEL,
+        attr_type=PIIAttributeType.ADDRESS,
+        strength=ClaimStrength.SOFT,
+        start=0,
+        end=len(stream.text),
+        text=stream.text,
+        unit_start=unit_start,
+        unit_last=unit_last,
+        source_kind="context_address_field",
+        source_metadata={"seed_locale": ["en"]},
+    )
+    alnum = Clue(
+        clue_id="alnum",
+        family=ClueFamily.STRUCTURED,
+        role=ClueRole.VALUE,
+        attr_type=PIIAttributeType.ALNUM,
+        strength=ClaimStrength.HARD,
+        start=0,
+        end=len(stream.text),
+        text=stream.text,
+        unit_start=unit_start,
+        unit_last=unit_last,
+        source_kind="extract_alnum_fragment",
+        source_metadata={"hard_source": ["regex"]},
+    )
+
+    resolved, inspire_entries = scanner_module._sweep_resolve(stream, [alnum, label], locale_profile="en_us")
+
+    assert not inspire_entries
+    assert [clue.clue_id for clue in resolved] == ["label"]
+
+
+def test_seed_label_does_not_cover_local_or_session_hard_value():
+    stream = build_prompt_stream("Jordan Demo")
+    unit_start, unit_last = scanner_module._char_span_to_unit_span(stream, 0, len(stream.text))
+    label = Clue(
+        clue_id="label",
+        family=ClueFamily.NAME,
+        role=ClueRole.LABEL,
+        attr_type=PIIAttributeType.NAME,
+        strength=ClaimStrength.SOFT,
+        start=0,
+        end=len(stream.text),
+        text=stream.text,
+        unit_start=unit_start,
+        unit_last=unit_last,
+        source_kind="context_name_field",
+        source_metadata={"seed_locale": ["en"]},
+    )
+    local_hard = Clue(
+        clue_id="local-hard",
+        family=ClueFamily.NAME,
+        role=ClueRole.VALUE,
+        attr_type=PIIAttributeType.NAME,
+        strength=ClaimStrength.HARD,
+        start=0,
+        end=len(stream.text),
+        text=stream.text,
+        unit_start=unit_start,
+        unit_last=unit_last,
+        source_kind="dictionary_local",
+        source_metadata={"hard_source": ["local"]},
+    )
+    session_hard = replace(
+        local_hard,
+        clue_id="session-hard",
+        source_kind="dictionary_session",
+        source_metadata={"hard_source": ["session"]},
+    )
+
+    resolved_local, local_inspire_entries = scanner_module._sweep_resolve(stream, [local_hard, label], locale_profile="en_us")
+    resolved_session, session_inspire_entries = scanner_module._sweep_resolve(stream, [session_hard, label], locale_profile="en_us")
+
+    assert [clue.clue_id for clue in resolved_local] == ["local-hard"]
+    assert [clue.clue_id for clue in resolved_session] == ["session-hard"]
+    assert [entry.clue_id for entry in local_inspire_entries] == ["label"]
+    assert [entry.clue_id for entry in session_inspire_entries] == ["label"]
 
 
 def test_session_name_dictionary_clues_stay_within_ocr_segment_bounds():

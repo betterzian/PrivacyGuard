@@ -64,7 +64,7 @@ def build_prompt_stream(text: str) -> StreamInput:
 
 
 def build_ocr_stream(blocks: list[OCRTextBlock]) -> PreparedOCRContext:
-    """构建 OCR 流：预计算链 A/B 一次后供合并图使用；段间 ``OCR_BREAK``。"""
+    """构建 OCR 流：预计算链 A/B，一次性生成带首尾边界的 OCR 流。"""
     materialized = [b for b in blocks if (b.text or "").strip() and b.bbox is not None]
     if not materialized:
         empty_stream = StreamInput(
@@ -517,7 +517,7 @@ def _ocr_line_char_types(blocks: list[OCRTextBlock]) -> set[str]:
 def _build_stream_from_chunks(
     chunks: list[list[OCRTextBlock]],
 ) -> PreparedOCRContext:
-    """链内用语义 ``inline_gap`` 拼接；链与链之间 ``OCR_BREAK``。"""
+    """链内用语义 ``inline_gap`` 拼接；OCR 流首尾与链间都放置 ``OCR_BREAK``。"""
     raw_chunks: list[str] = []
     clean_chunks: list[str] = []
     clean_char_refs: list[SourceRef | None] = []
@@ -526,6 +526,15 @@ def _build_stream_from_chunks(
     clean_cursor = 0
     order_index = 0
     previous_clean_text: str | None = None
+
+    raw_chunks.append(OCR_BREAK)
+    raw_cursor += len(OCR_BREAK)
+    _append_clean_token(
+        clean_chunks=clean_chunks,
+        clean_char_refs=clean_char_refs,
+        token=OCR_BREAK,
+    )
+    clean_cursor += len(OCR_BREAK)
 
     for ci, chunk in enumerate(chunks):
         if ci > 0 and raw_chunks:
@@ -598,6 +607,15 @@ def _build_stream_from_chunks(
                 )
             )
             order_index += 1
+
+    raw_chunks.append(OCR_BREAK)
+    raw_cursor += len(OCR_BREAK)
+    _append_clean_token(
+        clean_chunks=clean_chunks,
+        clean_char_refs=clean_char_refs,
+        token=OCR_BREAK,
+    )
+    clean_cursor += len(OCR_BREAK)
 
     stream_text = "".join(clean_chunks)
     units, char_to_unit = _build_stream_units(stream_text)

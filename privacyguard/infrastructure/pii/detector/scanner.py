@@ -3567,7 +3567,7 @@ def _sweep_pass1(
                     stream,
                     clue,
                     locale_profile=locale_profile,
-                ):
+                ) and not _seed_covers_any_clue(clue, clues):
                     inspire = _build_inspire_entry(clue)
                     if inspire is not None:
                         inspire_entries.append(inspire)
@@ -3607,17 +3607,54 @@ def _resolve_seed_group(group: list[Clue]) -> list[Clue]:
     return survivors
 
 
+def _seed_covers_clue(seed: Clue, clue: Clue) -> bool:
+    """判断 LABEL/START 是否覆盖另一个 clue。允许完全同 span。"""
+
+    return (
+        seed.role in _SEED_ROLES
+        and seed.clue_id != clue.clue_id
+        and seed.start <= clue.start
+        and clue.end <= seed.end
+    )
+
+
+def _is_local_or_session_hard_clue(clue: Clue) -> bool:
+    """本地隐私库和 session 的 HARD clue 不被 seed 覆盖。"""
+
+    if clue.strength != ClaimStrength.HARD:
+        return False
+    return any(
+        str(source).strip().lower() in {"local", "session"}
+        for source in clue.source_metadata.get("hard_source", ())
+    )
+
+
+def _seed_covers_any_clue(seed: Clue, clues: Sequence[Clue]) -> bool:
+    """判断 seed 是否覆盖任意可被删除的 clue，用于保留可压制片段的 label。"""
+
+    if seed.role not in _SEED_ROLES:
+        return False
+    return any(
+        clue.role not in _SEED_ROLES
+        and clue.role != ClueRole.BREAK
+        and not _is_local_or_session_hard_clue(clue)
+        and _seed_covers_clue(seed, clue)
+        for clue in clues
+    )
+
+
 def _apply_seed_containment_coverage(clues: list[Clue]) -> list[Clue]:
-    """seed 严格包含普通 clue 时，直接删除被包含的 clue。
+    """seed 覆盖 clue 时，删除被覆盖的 clue。
 
     这里只做单向裁决：LABEL/START 作为 seed 覆盖普通 clue；
     普通 clue 即使更长，也不会反向删除 seed。
+    本地隐私库和 session 的 HARD clue 不参与删除。
     """
     seed_clues = [c for c in clues if c.role in _SEED_ROLES]
     covered_candidates = [
         c
         for c in clues
-        if c.role not in _SEED_ROLES and c.role != ClueRole.BREAK and c.family != ClueFamily.CONTROL
+        if c.role not in _SEED_ROLES and c.role != ClueRole.BREAK
     ]
     if not seed_clues or not covered_candidates:
         return clues
@@ -3631,7 +3668,9 @@ def _apply_seed_containment_coverage(clues: list[Clue]) -> list[Clue]:
                 continue
             if not _clues_overlap(seed, clue):
                 continue
-            if seed.start <= clue.start and clue.end <= seed.end and (seed.start < clue.start or clue.end < seed.end):
+            if _is_local_or_session_hard_clue(clue):
+                continue
+            if _seed_covers_clue(seed, clue):
                 dropped_ids.add(clue.clue_id)
 
     return [c for c in clues if c.clue_id not in dropped_ids]
